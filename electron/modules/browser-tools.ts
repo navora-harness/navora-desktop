@@ -3347,7 +3347,7 @@ export async function executeAgentTool(
         return {
           ok: false,
           error: 'querySelectorDeep_unavailable',
-          hint: '需要 Electron 41.0.0-cloudbypass.3+；可退回 browser_evaluate(document.querySelector)。',
+          hint: '需要定制 Electron（含 querySelectorDeep）；可退回 browser_evaluate(document.querySelector)。',
         }
       }
       const info = await querySelectorDeep(wc, selector, { pierce, scrollIntoView })

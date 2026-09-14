@@ -9,7 +9,7 @@
 | **产品名称** | **Navora**（副标题：AI Agent Browser） |
 | **appId** | `com.navora.app` |
 | 产品定位 | 桌面端 AI Agent Harness + 可控浏览器会话（Chat 驱动自动化） |
-| 运行时 | **定制 Electron**（CloudBypass fork） |
+| 运行时 | **定制 Electron** |
 | 前端 | Vite + Vue 3 + Vuetify + TypeScript |
 | UA / Session | `UserAgentObject` + `setUserAgent`（定制 Electron） |
 | 默认 UA | **Edge 152** 预设（设置可改） |
@@ -243,7 +243,7 @@ Registry 订阅 `page-title-updated`、`did-navigate`、`did-start/stop-loading`
 
 | 层 | 选型 |
 |----|------|
-| 运行时 | 定制 Electron `41.0.0-cloudbypass.3` |
+| 运行时 | 定制 Electron 41 |
 | 前端 | Vite + Vue 3 + TS + Vuetify |
 | 配置 | YAML 热更新，落在 `dataRoot` |
 | AI | Provider 注册表；一期仅 OpenAI 兼容 |

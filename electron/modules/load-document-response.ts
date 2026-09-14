@@ -1,6 +1,6 @@
 /**
  * Navigate with a custom main-document body.
- * - native: CloudBypass loadURLWithResponse (per-WC; no protocol.handle)
+ * - native: custom Electron loadURLWithResponse (per-WC; no protocol.handle)
  * - protocol: one-shot session.protocol.handle + loadURL (empirically more reliable for Turnstile)
  */
 import { net, type Session, type WebContents } from 'electron'
