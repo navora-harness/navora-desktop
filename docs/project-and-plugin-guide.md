@@ -37,7 +37,7 @@ navora-harness/
 | 项 | 说明 |
 |----|------|
 | OS | 主要面向 **Windows x64**（portable / NSIS） |
-| 运行时 | **定制 Electron**（非原版 Electron） |
+| 运行时 | **unofficial Electron**（非官方 / 非原版 Electron） |
 | 前端 | Vite + Vue 3 + Vuetify + TypeScript |
 | LLM | **OpenAI 兼容** HTTP API（流式 + tool calling）；设置页多家预设 |
 | Node（插件 CLI） | ≥ 20（sdk）；协议库侧常用 ≥ 18 |
@@ -84,7 +84,7 @@ Renderer (Vue)
 
 ### 3.2 浏览器能力要点
 
-- UA：`UserAgentObject` + `setUserAgent`（定制 Electron）
+- UA：`UserAgentObject` + `setUserAgent`（unofficial Electron）
 - 代理 / Cookie / 网络拦截与修改
 - `browser_session_fetch`：走 Session 网络栈（共享 cookie/代理/UA）
 - `browser_load_url_with_response`：在目标 origin 下注入自定义主文档（Turnstile harness 等）
@@ -373,7 +373,7 @@ npm run plugin -- build <id>
 npm run plugin -- pack <id>
 ```
 
-定制 Electron 二进制常经本机 mirror（见 desktop README / `.npmrc.example`）。
+unofficial Electron 二进制常经本机 mirror（见 desktop README / `.npmrc.example`）。
 
 ---
 

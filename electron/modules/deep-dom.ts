@@ -1,5 +1,5 @@
 /**
- * Custom Electron DOM helpers (querySelectorDeep / pierce closed shadow roots).
+ * unofficial Electron DOM helpers (querySelectorDeep / pierce closed shadow roots).
  * Pierces closed author shadow roots without debugger.attach().
  */
 import type { WebContents } from 'electron'

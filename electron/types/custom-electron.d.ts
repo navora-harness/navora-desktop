@@ -1,5 +1,5 @@
 /**
- * Type augmentations for custom Electron APIs.
+ * Type augmentations for unofficial Electron APIs.
  */
 export {}
 

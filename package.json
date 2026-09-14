@@ -3,7 +3,7 @@
   "version": "0.3.20",
   "private": true,
   "author": "Navora",
-  "description": "AI Agent Browser - Chat-driven browser automation on custom Electron",
+  "description": "AI Agent Browser - Chat-driven browser automation on unofficial Electron",
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
