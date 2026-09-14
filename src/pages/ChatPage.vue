@@ -4460,9 +4460,16 @@ watch(draft, () => {
   scheduleDraftSave()
 })
 
-async function useSuggestion(s: FollowupSuggestion) {
+async function useSuggestion(s: string | FollowupSuggestion) {
   const chatId = activeId.value
   if (!chatId) return
+
+  if (typeof s === 'string') {
+    applyDraftLocally(clampDraftText(s), Date.now())
+    scheduleDraftSave()
+    focusComposer()
+    return
+  }
 
   if (s.action.type === 'store_install') {
     try {

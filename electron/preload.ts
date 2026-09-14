@@ -271,6 +271,12 @@ const api = {
       ipcRenderer.invoke('navora:downloads.clear', chatId),
     remove: (id: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke('navora:downloads.remove', id),
+    pause: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('navora:downloads.pause', id),
+    resume: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('navora:downloads.resume', id),
+    cancel: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('navora:downloads.cancel', id),
     reveal: (id: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
       ipcRenderer.invoke('navora:downloads.reveal', id),
     open: (id: string): Promise<{ ok: boolean; path?: string; error?: string }> =>

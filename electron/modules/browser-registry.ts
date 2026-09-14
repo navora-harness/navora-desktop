@@ -106,7 +106,7 @@ export type RegistryEvents = {
     chatId: string
     sessionId: string
     windowId?: string
-    state: 'intercepted' | 'started' | 'completed' | 'failed' | 'cancelled'
+    state: 'intercepted' | 'started' | 'paused' | 'completed' | 'failed' | 'cancelled'
     url: string
     filename: string
     savePath?: string
@@ -114,7 +114,9 @@ export type RegistryEvents = {
     receivedBytes?: number
     totalBytes?: number
     error?: string
-  }) => void
+  }) => { id: string } | void
+  /** Bind live DownloadItem for pause/resume/cancel from the downloads panel. */
+  bindBrowserDownloadItem?: (entryId: string, item: Electron.DownloadItem) => void
   /**
    * Ask user to confirm a blocked browser download.
    * Must resolve 'confirm' | 'reject'. Timeout / deny / 拒绝 → reject.
@@ -511,10 +513,11 @@ export class BrowserRegistry {
         totalBytes,
       }
 
-      this.events.onBrowserDownload?.({
+      const intercepted = this.events.onBrowserDownload?.({
         ...baseInfo,
         state: 'intercepted',
       })
+      if (intercepted?.id) this.events.bindBrowserDownloadItem?.(intercepted.id, item)
 
       const cap = 'file.download.passive' as const
       const detail = `被动下载 ${filename} → ${relPath}`
@@ -538,6 +541,7 @@ export class BrowserRegistry {
         return
       }
 
+      let accepted = false
       const attachDoneHandlers = () => {
         this.events.onBrowserDownload?.({
           ...baseInfo,
@@ -546,6 +550,19 @@ export class BrowserRegistry {
         let lastProgressAt = 0
         item.on('updated', (_e, state) => {
           if (state === 'interrupted') {
+            // User pause → keep paused; network blip → auto-resume after accept.
+            if (item.isPaused()) {
+              if (accepted) {
+                this.events.onBrowserDownload?.({
+                  ...baseInfo,
+                  state: 'paused',
+                  receivedBytes: item.getReceivedBytes(),
+                  totalBytes: item.getTotalBytes() || totalBytes,
+                })
+              }
+              return
+            }
+            if (!accepted) return
             try {
               item.resume()
             } catch {
@@ -554,12 +571,13 @@ export class BrowserRegistry {
             return
           }
           if (state !== 'progressing') return
+          if (!accepted) return
           const now = Date.now()
           if (now - lastProgressAt < 200) return
           lastProgressAt = now
           this.events.onBrowserDownload?.({
             ...baseInfo,
-            state: 'started',
+            state: item.isPaused() ? 'paused' : 'started',
             receivedBytes: item.getReceivedBytes(),
             totalBytes: item.getTotalBytes() || totalBytes,
           })
@@ -610,6 +628,13 @@ export class BrowserRegistry {
       }
 
       const acceptDownload = () => {
+        try {
+          const st = item.getState()
+          if (st === 'cancelled' || st === 'completed') return
+        } catch {
+          return
+        }
+        accepted = true
         attachDoneHandlers()
         try {
           item.resume()
