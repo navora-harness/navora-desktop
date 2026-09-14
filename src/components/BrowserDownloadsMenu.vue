@@ -28,11 +28,11 @@
         <button
           type="button"
           class="dl-clear"
-          :disabled="!items.length"
-          title="清空列表"
-          @click="clearAll"
+          :disabled="!finishedCount"
+          :title="finishedCount ? '清除已结束的下载' : '没有可清除的已结束项'"
+          @click="clearFinished"
         >
-          清空
+          清空已结束
         </button>
       </div>
       <div v-if="!items.length" class="dl-empty">暂无触发式下载</div>
@@ -45,9 +45,9 @@
               <span v-if="sizeText(item)" class="dl-size">{{ sizeText(item) }}</span>
             </div>
             <div v-if="item.relPath" class="dl-path" :title="item.relPath">{{ item.relPath }}</div>
-            <div v-if="item.error" class="dl-error">{{ item.error }}</div>
+            <div v-if="item.error && isTerminal(item.state)" class="dl-error">{{ item.error }}</div>
             <div
-              v-if="item.state === 'started' && progressPct(item) != null"
+              v-if="showProgress(item) && progressPct(item) != null"
               class="dl-bar"
               role="progressbar"
               :aria-valuenow="progressPct(item)!"
@@ -57,8 +57,9 @@
               <span class="dl-bar-fill" :style="{ width: `${progressPct(item)}%` }" />
             </div>
             <div
-              v-else-if="item.state === 'started'"
+              v-else-if="showProgress(item)"
               class="dl-bar indeterminate"
+              :class="{ paused: item.state === 'paused' }"
               role="progressbar"
               aria-valuemin="0"
               aria-valuemax="100"
@@ -67,6 +68,36 @@
             </div>
           </div>
           <div class="dl-item-actions">
+            <button
+              v-if="item.state === 'started'"
+              type="button"
+              class="dl-act"
+              :disabled="!item.canPause"
+              title="暂停下载"
+              @click="pauseItem(item.id)"
+            >
+              暂停
+            </button>
+            <button
+              v-if="item.state === 'paused'"
+              type="button"
+              class="dl-act"
+              :disabled="!item.canResume"
+              :title="item.canResume ? '继续下载' : '当前无法恢复'"
+              @click="resumeItem(item.id)"
+            >
+              继续
+            </button>
+            <button
+              v-if="item.state === 'intercepted' || item.state === 'started' || item.state === 'paused'"
+              type="button"
+              class="dl-act danger"
+              :disabled="item.canCancel === false"
+              :title="cancelTitle(item)"
+              @click="cancelItem(item.id)"
+            >
+              取消
+            </button>
             <button
               v-if="item.state === 'completed'"
               type="button"
@@ -102,9 +133,10 @@
                   type="button"
                   class="dl-more-item danger"
                   role="menuitem"
+                  :title="removeTitle(item)"
                   @click="removeItem(item.id)"
                 >
-                  从列表移除
+                  {{ removeLabel(item) }}
                 </button>
               </div>
             </v-menu>
@@ -140,8 +172,23 @@ const items = ref<BrowserDownloadEntry[]>([])
 let offChanged: (() => void) | null = null
 
 const activeCount = computed(
-  () => items.value.filter((d) => d.state === 'intercepted' || d.state === 'started').length,
+  () =>
+    items.value.filter(
+      (d) => d.state === 'intercepted' || d.state === 'started' || d.state === 'paused',
+    ).length,
 )
+
+const finishedCount = computed(
+  () => items.value.filter((d) => isTerminal(d.state)).length,
+)
+
+function isTerminal(state: BrowserDownloadState): boolean {
+  return state === 'completed' || state === 'failed' || state === 'cancelled'
+}
+
+function showProgress(item: BrowserDownloadEntry): boolean {
+  return item.state === 'started' || item.state === 'paused'
+}
 
 function stateLabel(state: BrowserDownloadState): string {
   switch (state) {
@@ -149,6 +196,8 @@ function stateLabel(state: BrowserDownloadState): string {
       return '待确认'
     case 'started':
       return '下载中'
+    case 'paused':
+      return '已暂停'
     case 'completed':
       return '已完成'
     case 'failed':
@@ -158,6 +207,26 @@ function stateLabel(state: BrowserDownloadState): string {
     default:
       return state
   }
+}
+
+function cancelTitle(item: BrowserDownloadEntry): string {
+  if (item.state === 'intercepted') return '拒绝并取消此次下载'
+  if (item.canCancel === false) return '当前无法取消'
+  return '取消下载'
+}
+
+function removeLabel(item: BrowserDownloadEntry): string {
+  if (item.state === 'intercepted' || item.state === 'started' || item.state === 'paused') {
+    return '取消并移除'
+  }
+  return '从列表移除'
+}
+
+function removeTitle(item: BrowserDownloadEntry): string {
+  if (item.state === 'intercepted' || item.state === 'started' || item.state === 'paused') {
+    return '取消下载并从列表移除'
+  }
+  return '仅从列表移除（不删除已保存文件）'
 }
 
 function formatBytes(n: number): string {
@@ -172,7 +241,11 @@ function sizeText(item: BrowserDownloadEntry): string {
   const recv = item.receivedBytes
   const total = item.totalBytes
   if (typeof total === 'number' && total > 0) {
-    if (typeof recv === 'number' && recv >= 0 && item.state === 'started') {
+    if (
+      typeof recv === 'number' &&
+      recv >= 0 &&
+      (item.state === 'started' || item.state === 'paused')
+    ) {
       return `${formatBytes(recv)} / ${formatBytes(total)}`
     }
     return formatBytes(total)
@@ -197,8 +270,8 @@ async function refresh() {
   items.value = await window.navora.downloads.list(chatId || undefined)
 }
 
-async function clearAll() {
-  if (!window.navora?.downloads?.clear) return
+async function clearFinished() {
+  if (!window.navora?.downloads?.clear || !finishedCount.value) return
   const chatId = props.onlyActiveChat ? props.chatId || undefined : undefined
   await window.navora.downloads.clear(chatId || undefined)
   await refresh()
@@ -206,6 +279,24 @@ async function clearAll() {
 
 async function removeItem(id: string) {
   await window.navora?.downloads?.remove(id)
+  await refresh()
+}
+
+async function pauseItem(id: string) {
+  const res = await window.navora?.downloads?.pause?.(id)
+  if (res && !res.ok) console.warn('[downloads] pause failed', res.error)
+  await refresh()
+}
+
+async function resumeItem(id: string) {
+  const res = await window.navora?.downloads?.resume?.(id)
+  if (res && !res.ok) console.warn('[downloads] resume failed', res.error)
+  await refresh()
+}
+
+async function cancelItem(id: string) {
+  const res = await window.navora?.downloads?.cancel?.(id)
+  if (res && !res.ok) console.warn('[downloads] cancel failed', res.error)
   await refresh()
 }
 
@@ -259,7 +350,7 @@ onUnmounted(() => {
   pointer-events: none;
 }
 .dl-panel {
-  width: min(360px, 92vw);
+  width: min(380px, 92vw);
   max-height: min(420px, 70vh);
   display: flex;
   flex-direction: column;
@@ -298,6 +389,7 @@ onUnmounted(() => {
   cursor: pointer;
   padding: 4px 6px;
   border-radius: 6px;
+  white-space: nowrap;
 }
 .dl-clear:hover:not(:disabled) {
   background: #f0f3f6;
@@ -356,6 +448,9 @@ onUnmounted(() => {
 .dl-state[data-state='started'] {
   color: #1b4f72;
 }
+.dl-state[data-state='paused'] {
+  color: #b9770e;
+}
 .dl-state[data-state='completed'] {
   color: #1e8449;
 }
@@ -393,6 +488,10 @@ onUnmounted(() => {
   width: 36%;
   animation: dl-indeterminate 1.1s ease-in-out infinite;
 }
+.dl-bar.indeterminate.paused .dl-bar-fill {
+  animation-play-state: paused;
+  background: #b9770e;
+}
 .dl-item-actions {
   display: flex;
   flex-direction: row;
@@ -410,8 +509,18 @@ onUnmounted(() => {
   cursor: pointer;
   white-space: nowrap;
 }
-.dl-act:hover {
+.dl-act:hover:not(:disabled) {
   background: #e8eef3;
+}
+.dl-act:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.dl-act.danger {
+  color: #c0392b;
+}
+.dl-act.danger:hover:not(:disabled) {
+  background: #fdecea;
 }
 .dl-act.dl-more {
   width: 28px;

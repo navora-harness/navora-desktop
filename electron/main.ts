@@ -1290,6 +1290,21 @@ function registerIpc(): void {
     if (res.ok) pushBrowserDownloadsChanged()
     return res
   })
+  rpcHandle('navora:downloads.pause', (_e, id: string) => {
+    const res = browserDownloads.pause(String(id || ''))
+    if (res.ok) pushBrowserDownloadsChanged()
+    return res
+  })
+  rpcHandle('navora:downloads.resume', (_e, id: string) => {
+    const res = browserDownloads.resume(String(id || ''))
+    if (res.ok) pushBrowserDownloadsChanged()
+    return res
+  })
+  rpcHandle('navora:downloads.cancel', (_e, id: string) => {
+    const res = browserDownloads.cancel(String(id || ''))
+    if (res.ok) pushBrowserDownloadsChanged()
+    return res
+  })
   rpcHandle('navora:downloads.reveal', async (_e, id: string) => {
     const entry = browserDownloads.get(String(id || ''))
     if (!entry?.relPath) return { ok: false, error: 'not_found' }
@@ -1675,26 +1690,27 @@ if (!gotLock) {
         }
       },
       onBrowserDownload: (info) => {
-        browserDownloads.upsert(info)
+        const entry = browserDownloads.upsert(info)
         pushBrowserDownloadsChanged()
         // intercepted is logged inside agent.promptDownloadConfirm
-        if (info.state === 'intercepted') return
-        if (!agent) return
+        if (info.state === 'intercepted') return entry
+        if (!agent) return entry
         if (info.state === 'started' && info.relPath) {
           // Skip noisy progress ticks (same state, only bytes changing).
-          if (typeof info.receivedBytes === 'number' && info.receivedBytes > 0) return
+          if (typeof info.receivedBytes === 'number' && info.receivedBytes > 0) return entry
           agent.pushUserOpLog(
             info.chatId,
             logBrowserDownloadStarted(info.filename, info.relPath, info.url),
           )
-          return
+          return entry
         }
+        if (info.state === 'paused') return entry
         if (info.state === 'completed' && info.relPath) {
           agent.pushUserOpLog(
             info.chatId,
             logBrowserDownloadCompleted(info.filename, info.relPath, info.receivedBytes),
           )
-          return
+          return entry
         }
         if (info.state === 'failed' || info.state === 'cancelled') {
           agent.pushUserOpLog(
@@ -1706,6 +1722,10 @@ if (!gotLock) {
             ),
           )
         }
+        return entry
+      },
+      bindBrowserDownloadItem: (entryId, item) => {
+        browserDownloads.bindItem(entryId, item)
       },
       confirmBrowserDownload: async (info) => {
         if (!agent) return 'reject'

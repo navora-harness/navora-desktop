@@ -409,6 +409,12 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
       clear: (chatId?: string) =>
         invoke<{ ok: true; removed: number }>('navora:downloads.clear', chatId),
       remove: (id: string) => invoke<{ ok: boolean }>('navora:downloads.remove', id),
+      pause: (id: string) =>
+        invoke<{ ok: boolean; error?: string }>('navora:downloads.pause', id),
+      resume: (id: string) =>
+        invoke<{ ok: boolean; error?: string }>('navora:downloads.resume', id),
+      cancel: (id: string) =>
+        invoke<{ ok: boolean; error?: string }>('navora:downloads.cancel', id),
       reveal: (id: string) =>
         invoke<{ ok: boolean; path?: string; error?: string }>('navora:downloads.reveal', id),
       open: (id: string) =>

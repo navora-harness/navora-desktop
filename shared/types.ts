@@ -362,6 +362,7 @@ export type SkillReviewResponse = {
 export type BrowserDownloadState =
   | 'intercepted'
   | 'started'
+  | 'paused'
   | 'completed'
   | 'failed'
   | 'cancelled'
@@ -381,5 +382,11 @@ export type BrowserDownloadEntry = {
   error?: string
   createdAt: number
   updatedAt: number
+  /** UI: pause is available (in-progress + live DownloadItem). */
+  canPause?: boolean
+  /** UI: resume is available (paused + live item that canResume). */
+  canResume?: boolean
+  /** UI: cancel is available (not finished + live item, or still awaiting confirm). */
+  canCancel?: boolean
 }
 
