@@ -1,6 +1,6 @@
 /**
  * Shared Chromium-navigation-like request headers for Session.fetch / net.fetch.
- * Relies on CloudBypass Electron `headerOrder` to preserve wire order.
+ * Relies on custom Electron `headerOrder` to preserve wire order.
  */
 export const NAVIGATION_LIKE_ACCEPT =
   'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'

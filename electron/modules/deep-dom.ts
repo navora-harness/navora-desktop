@@ -1,5 +1,5 @@
 /**
- * CloudBypass Electron 41.0.0-cloudbypass.3+ DOM helpers.
+ * Custom Electron DOM helpers (querySelectorDeep / pierce closed shadow roots).
  * Pierces closed author shadow roots without debugger.attach().
  */
 import type { WebContents } from 'electron'

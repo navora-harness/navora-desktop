@@ -1,5 +1,5 @@
 /**
- * Type augmentations for CloudBypass Electron custom APIs.
+ * Type augmentations for custom Electron APIs.
  */
 export {}
 

@@ -37,7 +37,7 @@ navora-harness/
 | 项 | 说明 |
 |----|------|
 | OS | 主要面向 **Windows x64**（portable / NSIS） |
-| 运行时 | **定制 Electron**（CloudBypass fork；非原版 Electron） |
+| 运行时 | **定制 Electron**（非原版 Electron） |
 | 前端 | Vite + Vue 3 + Vuetify + TypeScript |
 | LLM | **OpenAI 兼容** HTTP API（流式 + tool calling）；设置页多家预设 |
 | Node（插件 CLI） | ≥ 20（sdk）；协议库侧常用 ≥ 18 |

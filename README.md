@@ -12,7 +12,7 @@
 
 ## 技术栈
 
-- 运行时：定制 Electron（CloudBypass fork）
+- 运行时：定制 Electron
 - 前端：Vite + Vue 3 + Vuetify + TypeScript
 - LLM：OpenAI 兼容 API（流式 + tool calling）
 
