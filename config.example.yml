@@ -1,0 +1,95 @@
+# Navora example config — copied to dataRoot/config.yml on first run
+
+app:
+  language: zh-CN
+  close_to_tray: true
+  show_main_on_start: true
+  show_followup_suggestions: true
+  # 输入框 / 草稿最大字数（每对话独立，可远程同步）
+  max_composer_chars: 16000
+  # 首次启动欢迎引导；完成后会变为 true
+  onboarding_completed: false
+
+browser:
+  default_ua_preset: edge152
+  custom_ua: ""
+  show_agent_windows: false
+  url_allowlist: []
+
+files:
+  root_dirname: workspace
+  max_read_chars: 200000
+  max_write_bytes: 52428800
+  max_list_entries: 500
+  download_timeout_ms: 600000
+  download_max_bytes: 524288000
+  shell_timeout_ms: 30000
+  shell_timeout_ms_max: 120000
+  shell_max_output_chars: 80000
+  # shell_exec 仅允许这些命令 basename（禁止路径）；shell:true 默认关闭
+  shell_allowlist:
+    - git
+    - node
+    - npm
+    - npx
+    - python
+    - python3
+    - py
+    - pip
+    - pip3
+    - dir
+    - ls
+    - echo
+    - type
+    - cat
+    - where
+    - which
+    - powershell
+    - pwsh
+  shell_allow_shell_flag: false
+
+ai:
+  # 设置页可选预设：openai / deepseek / moonshot / qwen / zhipu /
+  # siliconflow / groq / openrouter / mimo / ollama / custom
+  # 每个 provider 可配置多个 models，model 为默认项
+  default_provider: openai
+  providers:
+    - id: openai
+      type: openai_compatible
+      label: OpenAI
+      base_url: https://api.openai.com/v1
+      api_key_ref: secrets/openai
+      model: gpt-5.4
+      models:
+        - gpt-5.4
+        - gpt-5-mini
+        - gpt-4.1
+      timeout_ms: 120000
+
+# 分叉决策（路径选择弹窗；缺省键由程序 deepMerge 补齐）
+fork_decision:
+  enabled: true
+  allow_custom: true
+  option_hints: true
+  context_evidence: true
+  recommended: true
+  remember_in_chat: true
+  # 等待用户选择的超时（毫秒）；默认 60 秒，0 表示不限时
+  ask_timeout_ms: 60000
+  # 以下两项尚未实现，请保持 false
+  inline_low_risk: false
+  allow_revise: false
+
+# 子对话（并行子 Agent；缺省键由程序 deepMerge 补齐）
+# max_parallel 为同一父对话同时运行的子对话上限（不含父对话本身）；范围 1～8
+subchat:
+  enabled: true
+  max_parallel: 4
+
+# 本地商店（navora-store serve）；也可填 catalog 目录绝对路径或 file URL
+store:
+  base_url: http://127.0.0.1:8791
+
+# 插件开发：注入 SDK 契约到 Agent 提示词；外链插件 dist 变更后自动 reload
+plugins:
+  dev_mode: false
