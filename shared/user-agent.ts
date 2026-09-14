@@ -1,6 +1,6 @@
 /**
  * 从 UA 字符串解析 Client Hints / platform，供魔改 Electron setUserAgent 第二参使用。
- * 逻辑对齐 electron-api `UserAgentObject`（定制 Electron）。
+ * 逻辑对齐 electron-api `UserAgentObject`（unofficial Electron）。
  */
 
 export type UserAgentBrandVersion = { brand: string; version: string }

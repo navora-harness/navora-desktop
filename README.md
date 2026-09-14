@@ -12,7 +12,7 @@
 
 ## 技术栈
 
-- 运行时：定制 Electron
+- 运行时：unofficial Electron
 - 前端：Vite + Vue 3 + Vuetify + TypeScript
 - LLM：OpenAI 兼容 API（流式 + tool calling）
 
@@ -91,7 +91,7 @@ npm run electron:dev
 
 - **勿提交** `portable/`、`secrets/`、`config.yml`、`.env`、本机 `.npmrc`
 - 远程访问默认密码为 `admin`（仅用于本机门闩检测）；启用远程前必须修改
-- 定制 Electron 默认走本机 mirror `http://127.0.0.1:8787/`（需先启动仓库旁 `mirror/`）
+- unofficial Electron 默认走本机 mirror `http://127.0.0.1:8787/`（需先启动仓库旁 `mirror/`）
 
 ## 品牌
 

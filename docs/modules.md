@@ -384,7 +384,7 @@ UI send → navora:agent.run
 
 | 项 | 内容 |
 |----|------|
-| 问题 | 渲染沙箱弱；XSS/注入时影响面更大（定制 Electron / 自定义能力可能依赖非沙箱）。 |
+| 问题 | 渲染沙箱弱；XSS/注入时影响面更大（unofficial Electron / 自定义能力可能依赖非沙箱）。 |
 | 方案 | **短期**：保持 `sandbox: false` 若 fork 硬依赖；强化 `ChatMarkdown` DOMPurify、禁止加载远程任意脚本、CSP（`session.defaultSession.webRequest` 或 `session.setCSP`）限制主窗。**中期**：对主窗试开 `sandbox: true`，回归 preload/IPC；Agent 浏览器窗可继续 false。**硬规则**：主窗不执行 Agent `evaluate`；远程 HTML 不进主窗特权上下文。 |
 | 落点 | `main.ts` `webPreferences`、CSP 配置、`src/utils/markdown.ts` |
 | 验收 | 主窗无法 `require('fs')`；恶意 Markdown 脚本被剥除 |

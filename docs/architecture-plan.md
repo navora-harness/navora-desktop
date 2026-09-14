@@ -9,9 +9,9 @@
 | **产品名称** | **Navora**（副标题：AI Agent Browser） |
 | **appId** | `com.navora.app` |
 | 产品定位 | 桌面端 AI Agent Harness + 可控浏览器会话（Chat 驱动自动化） |
-| 运行时 | **定制 Electron** |
+| 运行时 | **unofficial Electron** |
 | 前端 | Vite + Vue 3 + Vuetify + TypeScript |
-| UA / Session | `UserAgentObject` + `setUserAgent`（定制 Electron） |
+| UA / Session | `UserAgentObject` + `setUserAgent`（unofficial Electron） |
 | 默认 UA | **Edge 152** 预设（设置可改） |
 | 数据目录 | 开发 → `portable/`；便携 → `<exe>/data/`；安装版 → `%APPDATA%\Navora` |
 | 一期 LLM | **OpenAI 兼容**（流式 + tools）；设置页多家预设 |
@@ -243,7 +243,7 @@ Registry 订阅 `page-title-updated`、`did-navigate`、`did-start/stop-loading`
 
 | 层 | 选型 |
 |----|------|
-| 运行时 | 定制 Electron 41 |
+| 运行时 | unofficial Electron 41 |
 | 前端 | Vite + Vue 3 + TS + Vuetify |
 | 配置 | YAML 热更新，落在 `dataRoot` |
 | AI | Provider 注册表；一期仅 OpenAI 兼容 |
@@ -300,7 +300,7 @@ src/   # Vue：Chat + 资源树 + Settings
 
 Session `webRequest`：观察 / 改头 / 阻断；与 `network_idle` 联动。
 
-**`webRequest` 规则是否作用于 `session.fetch`**：不在文档里猜死；**P1 骨架开工前**用定制 Electron 写最小测试（同 partition 上挂 `onBeforeRequest`/`onBeforeSendHeaders`，再调 `ses.fetch`，看是否进回调）。结果写入 `docs/notes/webrequest-vs-fetch.md` 并回填本节。
+**`webRequest` 规则是否作用于 `session.fetch`**：不在文档里猜死；**P1 骨架开工前**用 unofficial Electron 写最小测试（同 partition 上挂 `onBeforeRequest`/`onBeforeSendHeaders`，再调 `ses.fetch`，看是否进回调）。结果写入 `docs/notes/webrequest-vs-fetch.md` 并回填本节。
 
 ### 5.4 `session.fetch`（已拍板）
 
