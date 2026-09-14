@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-electron/
+release/
+release-build/
+*.tsbuildinfo
+
+# Local runtime / portable data
+portable/
+secrets/
+.env
+.env.*
+config.yml
+**/config.yml
+!config.example.yml
+
+# Local npm overrides (use .npmrc.example)
+.npmrc
+
+# Plugin pack fixtures (generated)
+test-fixtures/plugins/*.zip
+
+# Logs & OS
+*.log
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Misc local junk / probes
+xxx
+xxx-*
+*.pem
+*.key

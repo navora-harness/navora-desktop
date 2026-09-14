@@ -1,0 +1,101 @@
+{
+  "name": "navora",
+  "version": "0.3.20",
+  "private": true,
+  "author": "Navora",
+  "description": "AI Agent Browser - Chat-driven browser automation on custom Electron",
+  "main": "dist-electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node scripts/build-electron.mjs",
+    "build:electron": "node scripts/build-electron.mjs",
+    "typecheck": "vue-tsc -b --noEmit",
+    "electron:dev": "node scripts/dev.mjs",
+    "electron:install": "node -e \"process.env.ELECTRON_MIRROR=process.env.ELECTRON_MIRROR||'http://127.0.0.1:8787/';process.env.electron_use_remote_checksums='1';require('child_process').execFileSync(process.execPath,['node_modules/electron/install.js'],{stdio:'inherit',env:process.env})\"",
+    "start": "electron .",
+    "dist": "npm run build && electron-builder --win portable",
+    "dist:nsis": "npm run build && electron-builder --win nsis",
+    "dist:all": "npm run build && electron-builder --win portable nsis"
+  },
+  "build": {
+    "appId": "com.navora.app",
+    "productName": "Navora",
+    "copyright": "Copyright (c) Navora",
+    "directories": {
+      "output": "release"
+    },
+    "icon": "electron/assets/app-icon.ico",
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "extraMetadata": {
+      "main": "dist-electron/main.js"
+    },
+    "win": {
+      "icon": "electron/assets/app-icon.ico",
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "requestExecutionLevel": "user",
+      "artifactName": "${productName}-${version}-Portable.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Navora",
+      "uninstallDisplayName": "Navora",
+      "artifactName": "${productName}-${version}-Setup.${ext}"
+    }
+  },
+  "dependencies": {
+    "@fortawesome/fontawesome-svg-core": "^6.7.2",
+    "@fortawesome/free-solid-svg-icons": "^6.7.2",
+    "@fortawesome/vue-fontawesome": "^3.0.8",
+    "adm-zip": "^0.6.1",
+    "dompurify": "^3.4.15",
+    "js-yaml": "^4.1.0",
+    "marked": "^18.0.12",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0",
+    "vuetify": "^3.8.0"
+  },
+  "devDependencies": {
+    "@mdi/font": "^7.4.47",
+    "@types/adm-zip": "^0.5.8",
+    "@types/dompurify": "^3.0.5",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.13.10",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "electron": "http://127.0.0.1:8787/npm/electron/-/electron-41.0.0-cloudbypass.3.tgz",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.25.0",
+    "typescript": "~5.7.2",
+    "vite": "^6.2.0",
+    "vite-plugin-vuetify": "^2.1.0",
+    "vue-tsc": "^2.2.8"
+  },
+  "allowScripts": {
+    "electron@41.0.0-cloudbypass.3": true,
+    "esbuild@0.25.12": true,
+    "electron-winstaller@5.4.0": true
+  }
+}

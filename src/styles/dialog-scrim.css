@@ -1,0 +1,8 @@
+/* Shared blur scrim for Navora dialogs (settings / docs / skills).
+ * Vuetify puts content-class on .v-overlay__content; scrim is a sibling. */
+.v-overlay:has(.settings-dialog-content) > .v-overlay__scrim,
+.v-overlay:has(.docs-dialog-content) > .v-overlay__scrim,
+.v-overlay:has(.skill-dialog-content) > .v-overlay__scrim {
+  backdrop-filter: blur(16px) saturate(1.12);
+  -webkit-backdrop-filter: blur(16px) saturate(1.12);
+}

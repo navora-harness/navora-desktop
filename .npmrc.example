@@ -1,0 +1,8 @@
+# Electron 定制二进制（CloudBypass fork）无法从 GitHub 下载。
+# 复制本文件为 `.npmrc` 后按需修改；`.npmrc` 已被 gitignore，勿提交本机覆盖。
+#
+# 使用仓库旁本地 mirror（mirror/）：
+registry=https://registry.npmjs.org/
+electron_mirror=http://127.0.0.1:8787/
+electron_custom_dir=v{{ version }}
+electron_use_remote_checksums=1
