@@ -4547,6 +4547,23 @@ function refKey(r: BrowserContextRef) {
   return r.kind === 'window' ? `w:${r.windowId}` : `s:${r.sessionId}`
 }
 
+/** Strip Vue proxies so refs survive Electron IPC structured clone. */
+function plainContextRefs(list: BrowserContextRef[]): BrowserContextRef[] {
+  return list.map((r) => {
+    const out: BrowserContextRef = {
+      kind: r.kind,
+      sessionId: String(r.sessionId || ''),
+      label: String(r.label || ''),
+    }
+    if (r.windowId) out.windowId = String(r.windowId)
+    if (r.url) out.url = String(r.url)
+    if (typeof r.sessionIndex === 'number' && Number.isFinite(r.sessionIndex)) {
+      out.sessionIndex = r.sessionIndex
+    }
+    return out
+  })
+}
+
 function chipLabel(r: BrowserContextRef) {
   return r.kind === 'window' ? `@窗口 ${r.label}` : `@Session ${r.label}`
 }
@@ -5148,7 +5165,7 @@ async function toggleWindowVisible(w: BrowserTreeWindow) {
 
 async function send() {
   const text = draft.value.trim()
-  const refs = [...contextRefs.value]
+  const refs = plainContextRefs(contextRefs.value)
   if ((!text && !refs.length) || !activeId.value || !window.navora || agentRunning.value || sending.value) {
     return
   }
