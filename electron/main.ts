@@ -308,6 +308,27 @@ function pushBrowserTree(chatId: string): void {
 }
 
 let downloadsPushTimer: ReturnType<typeof setTimeout> | null = null
+const workspaceChangedPending = new Set<string>()
+let workspacePushTimer: ReturnType<typeof setTimeout> | null = null
+function pushWorkspaceChanged(chatId: string): void {
+  const id = String(chatId || '').trim()
+  if (!id) return
+  workspaceChangedPending.add(id)
+  if (workspacePushTimer) return
+  workspacePushTimer = setTimeout(() => {
+    workspacePushTimer = null
+    const ids = [...workspaceChangedPending]
+    workspaceChangedPending.clear()
+    for (const cid of ids) {
+      const payload = { chatId: cid }
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('navora:workspace.changed', payload)
+      }
+      remote?.broadcast('navora:workspace.changed', payload)
+    }
+  }, 80)
+}
+
 function pushBrowserDownloadsChanged(): void {
   if (downloadsPushTimer) return
   downloadsPushTimer = setTimeout(() => {
@@ -1249,6 +1270,7 @@ function registerIpc(): void {
     const chat = chats.setWorkspaceRoot(chatId, absPath)
     if (!chat) return { ok: false, error: 'chat_not_found' }
     const info = files.rootInfo(chatId)
+    pushWorkspaceChanged(chatId)
     return { ...info, ok: true }
   })
 
@@ -1274,6 +1296,24 @@ function registerIpc(): void {
     if (!chatId) throw new Error('chatId_required')
     try {
       return await workspaceShell.open(String(chatId), String(relPath || ''))
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  rpcHandle('navora:workspace.list', async (_e, chatId: string, relDir?: string) => {
+    if (!chatId) throw new Error('chatId_required')
+    try {
+      return await files.list(chatId, String(relDir || '.'), false)
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  rpcHandle('navora:workspace.delete', async (_e, chatId: string, relPath: string) => {
+    if (!chatId) throw new Error('chatId_required')
+    try {
+      return await files.remove(chatId, String(relPath || ''))
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
@@ -1740,6 +1780,7 @@ if (!gotLock) {
     registry.bindNetwork(network)
 
     files = new WorkspaceFiles(dataRoot, () => config.get(), (chatId) => chats.getWorkspaceRoot(chatId))
+    files.setOnChanged((chatId) => pushWorkspaceChanged(chatId))
     // Grandfather existing per-chat workspace roots so restarts keep user picks.
     for (const c of chats.list()) {
       const root = c.workspaceRoot?.trim()

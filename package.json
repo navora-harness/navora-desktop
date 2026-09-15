@@ -2,6 +2,7 @@
   "name": "navora",
   "version": "0.3.22",
   "private": true,
+  "license": "MIT",
   "author": "Navora",
   "description": "AI Agent Browser - Chat-driven browser automation on unofficial Electron",
   "main": "dist-electron/main.js",

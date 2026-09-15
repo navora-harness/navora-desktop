@@ -301,6 +301,7 @@ export class FileDownloadService {
     }
 
     const rel = this.files.toRel(chatId, destAbs)
+    this.files.emitChanged(chatId)
     return {
       ok: true,
       path: rel,
