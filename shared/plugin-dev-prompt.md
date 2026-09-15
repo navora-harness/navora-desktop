@@ -6,15 +6,15 @@
 
 1. 将 Chat **工作区**设为插件工程根（优先 `navora-plugins/<id>`，或独立插件目录），用 `workspace_*` / `file_*` 读写源码。
 2. **构建 / 检查 / 打包 / 外链（优先内置工具，勿用 shell_exec 调 npm）**：
-   - `plugin_build` — 编译到 `dist/<packageId>/`，**默认自动外链到本会话**（仅当前会话及子对话可见，不进全局插件列表）；`link=false` 可跳过。
-   - `plugin_check` — 校验 dist。
-   - `plugin_pack` — 打 zip。
+   - `plugin_build` — 编译到 `dist/<packageId>/`，**默认自动外链到本会话**（仅当前会话及子对话可见，不进全局插件列表）；`link=false` 可跳过。需本机 Node + `navora-plugin` CLI。
+   - `plugin_check` — 校验 dist（同样走 CLI）。
+   - `plugin_pack` — **宿主内置打 zip**（安装包可用，不依赖 CLI / 系统 Node）。单入口 → 工作区 `dist/*-plugin.zip`；多入口不带 `entry` → 各变体 + `*-suite.zip`。缺 dist 时先 `plugin_build`。
    - `plugin_link` — 手动外链 `dist/<packageId>` 到本会话（kind=session）。
    - **热重载**监视本会话外链的 dist；**未外链则不会出现在 plugin_list**。
    - 多入口可传 `entry=<packageId>`；`root` 为相对工作区的可选路径。
 3. Desktop **全局**设置里的「外链文件夹」仍是全局安装；开发模式 `plugin_link` / `plugin_build` 默认只对本会话生效。
 4. 外链产物变更后宿主会 **自动重新加载**；工具列表在 **下一次发消息** 时生效。用 `plugin_list` / `plugin_read` 验证（session 项标注本会话）。
-5. 仅当内置工具不可用（如 CLI 未找到）时，再退回 `shell_exec`（`npm` / `npx` / `node`）。
+5. 仅 `plugin_build` / `plugin_check` 在 CLI 未找到时，才退回 `shell_exec`（`npm` / `npx` / `node`）。`plugin_pack` 不要用 shell。
 
 ### 目录与产物
 

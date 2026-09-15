@@ -41,6 +41,7 @@ import { resolveGeolocation } from './geolocation'
 import { latestPackageVersion } from '../../shared/store'
 import { resolvePluginDevMode } from '../../shared/config'
 import { runPluginDevCli, type PluginDevCliAction } from './plugin-dev-cli'
+import { packPluginProject } from './plugin-pack'
 import { findPluginReadmePath } from './plugin-store'
 
 export type ToolExecContext = {
@@ -3920,14 +3921,45 @@ export async function executeAgentTool(
       return out
     }
 
+    case 'plugin_pack': {
+      if (!resolvePluginDevMode(cfg)) {
+        return {
+          ok: false,
+          error: 'plugin_dev_mode_disabled',
+          hint: '请在设置 → 插件 → 开启「插件开发模式」后再使用 plugin_pack。',
+        }
+      }
+      if (ctx.signal.aborted) return { ok: false, error: 'aborted' }
+      const packed = packPluginProject({
+        workspaceRoot: ctx.files.chatRoot(ctx.chatId),
+        id: rawArgs.id != null ? String(rawArgs.id) : undefined,
+        entry: rawArgs.entry != null ? String(rawArgs.entry) : undefined,
+        root: rawArgs.root != null ? String(rawArgs.root) : undefined,
+        out: rawArgs.out != null ? String(rawArgs.out) : undefined,
+        includeNodeModules: Boolean(rawArgs.include_node_modules),
+      })
+      if (!packed.ok) return packed
+      return {
+        ok: true,
+        projectId: packed.projectId,
+        zips: packed.zips.map((z) => ({
+          kind: z.kind,
+          packageId: z.packageId,
+          path: ctx.files.toRel(ctx.chatId, z.path),
+          absolutePath: z.path,
+          size: z.size,
+        })),
+        note: packed.note,
+      }
+    }
+
     case 'plugin_build':
-    case 'plugin_pack':
     case 'plugin_check': {
       if (!resolvePluginDevMode(cfg)) {
         return {
           ok: false,
           error: 'plugin_dev_mode_disabled',
-          hint: '请在设置 → 插件 → 开启「插件开发模式」后再使用 plugin_build / plugin_pack / plugin_check。',
+          hint: '请在设置 → 插件 → 开启「插件开发模式」后再使用 plugin_build / plugin_check。',
         }
       }
       const action = name.slice('plugin_'.length) as PluginDevCliAction
@@ -3938,8 +3970,6 @@ export async function executeAgentTool(
         id: rawArgs.id != null ? String(rawArgs.id) : undefined,
         entry: rawArgs.entry != null ? String(rawArgs.entry) : undefined,
         root: rawArgs.root != null ? String(rawArgs.root) : undefined,
-        out: rawArgs.out != null ? String(rawArgs.out) : undefined,
-        includeNodeModules: Boolean(rawArgs.include_node_modules),
         signal: ctx.signal,
         timeoutMs: typeof rawArgs.timeoutMs === 'number' ? rawArgs.timeoutMs : undefined,
       })
@@ -3972,9 +4002,7 @@ export async function executeAgentTool(
             ? link?.ok
               ? '已构建并外链到本会话（及子对话）；下次发消息即可调用。不影响其它会话；后续 plugin_build 会热重载本会话外链。'
               : '已构建。请用 plugin_link 指向 dist/<packageId>（仅对本会话生效）。'
-            : action === 'pack'
-              ? '打包完成；zip 路径见 stdout。'
-              : '检查通过。',
+            : '检查通过。',
       }
     }
 

@@ -1675,7 +1675,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'plugin_pack',
       description:
-        'Pack a built Navora plugin into zip(s) under the workspace (plugin-dev mode only). Prefer over shell_exec. Run plugin_build first if dist is missing. Multi-entry without entry also emits suite zip when configured.',
+        'Pack a built Navora plugin into zip(s) under the Chat workspace (plugin-dev mode). In-process — works in the packaged app, does not need navora-plugin CLI or a system Node. Run plugin_build first if dist is missing. Single-entry → dist/*-plugin.zip; multi-entry without entry also emits *-suite.zip. Prefer this over shell_exec.',
       parameters: {
         type: 'object',
         properties: {

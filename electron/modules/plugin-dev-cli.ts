@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { isPathInsideOrEqual } from './workspace-files'
 
-export type PluginDevCliAction = 'build' | 'pack' | 'check'
+export type PluginDevCliAction = 'build' | 'check'
 
 export type PluginDevCliResult =
   | {
@@ -65,7 +65,8 @@ export function resolveNavoraPluginCli(): string | null {
 }
 
 /**
- * Run sibling/installed `navora-plugin` CLI.
+ * Run sibling/installed `navora-plugin` CLI for build/check.
+ * plugin_pack is in-process (see plugin-pack.ts) and does not use this.
  * - Directory with plugin.json → single-plugin mode (cwd=that dir, no --root).
  * - Otherwise treat as plugins monorepo root (--root=that dir).
  */
@@ -75,8 +76,6 @@ export function runPluginDevCli(opts: {
   id?: string
   entry?: string
   root?: string
-  out?: string
-  includeNodeModules?: boolean
   signal?: AbortSignal
   timeoutMs?: number
 }): Promise<PluginDevCliResult> {
@@ -118,34 +117,10 @@ export function runPluginDevCli(opts: {
       resolvedId = path.basename(target)
     }
   }
-  if (opts.action === 'pack' && !resolvedId) {
-    return Promise.resolve({
-      ok: false,
-      error: 'pack_id_required',
-      hint: 'pack 需要 id，或工作区根目录需有含 id 的 plugin.json。',
-    })
-  }
-
   const args: string[] = [cli, opts.action]
   if (resolvedId) args.push(resolvedId)
   if (rootFlag) args.push('--root', rootFlag)
   if (opts.entry?.trim()) args.push('--entry', opts.entry.trim())
-  if (opts.action === 'pack') {
-    if (opts.out?.trim()) {
-      const outAbs = path.isAbsolute(opts.out)
-        ? path.resolve(opts.out)
-        : path.resolve(workspaceRoot, opts.out.trim())
-      if (!isPathInsideOrEqual(workspaceRoot, outAbs)) {
-        return Promise.resolve({
-          ok: false,
-          error: 'out_outside_workspace',
-          hint: 'out 必须位于当前 Chat 工作区内。',
-        })
-      }
-      args.push('--out', outAbs)
-    }
-    if (opts.includeNodeModules) args.push('--include-node-modules')
-  }
 
   const timeoutMs = Math.min(Math.max(opts.timeoutMs || 120_000, 5_000), 600_000)
 
