@@ -51,13 +51,17 @@ import {
   faBars,
   faRobot,
   faTerminal,
+  faFolder,
   faFolderOpen,
+  faFile,
   faPuzzlePiece,
   faThumbtack,
   faBook,
   faDownload,
   faArrowRotateRight,
   faSitemap,
+  faScissors,
+  faPaste,
 } from '@fortawesome/free-solid-svg-icons'
 import App from './App.vue'
 import { router } from './router'
@@ -106,13 +110,17 @@ library.add(
   faBars,
   faRobot,
   faTerminal,
+  faFolder,
   faFolderOpen,
+  faFile,
   faPuzzlePiece,
   faThumbtack,
   faBook,
   faDownload,
   faArrowRotateRight,
   faSitemap,
+  faScissors,
+  faPaste,
 )
 
 const vuetify = createVuetify({

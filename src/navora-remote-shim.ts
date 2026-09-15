@@ -402,6 +402,29 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
           chatId,
           relPath,
         ),
+      list: (chatId: string, relDir?: string) =>
+        invoke<{
+          ok: boolean
+          root?: string
+          absoluteRoot?: string
+          entries?: Array<{
+            path: string
+            name: string
+            type: 'file' | 'dir'
+            size?: number
+            mtimeMs?: number
+          }>
+          truncated?: boolean
+          error?: string
+        }>('navora:workspace.list', chatId, relDir),
+      delete: (chatId: string, relPath: string) =>
+        invoke<{ ok: boolean; path?: string; error?: string }>(
+          'navora:workspace.delete',
+          chatId,
+          relPath,
+        ),
+      onChanged: (cb: (payload: { chatId: string }) => void) =>
+        on<{ chatId: string }>('navora:workspace.changed', cb),
     },
     downloads: {
       list: (chatId?: string) =>

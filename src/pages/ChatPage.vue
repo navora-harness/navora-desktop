@@ -111,6 +111,7 @@
               @touchmove="chatBatchMode ? undefined : onChatTouchMove($event, c.id)"
               @touchend="chatBatchMode ? undefined : onChatTouchEnd(c.id)"
               @touchcancel="chatBatchMode ? undefined : onChatTouchEnd(c.id)"
+              @contextmenu.prevent.stop="onChatItemContext($event, c)"
             >
               <button type="button" class="chat-item-main" @click="onChatItemActivate(c.id)">
                 <Transition name="batch-check">
@@ -309,6 +310,7 @@
                       'menu-open': chatMoreOpenId === sub.id,
                       running: Boolean(runningChats[sub.id] || sub.spawnStatus === 'running'),
                     }"
+                    @contextmenu.prevent.stop="onChatItemContext($event, sub)"
                   >
                     <button
                       type="button"
@@ -396,79 +398,20 @@
       </div>
 
       <Transition name="res-slide" mode="out-in">
-        <div v-if="!chatBatchMode" key="resources" class="sidebar-resources">
-        <div class="res-head">
-          <span class="res-label">浏览器资源</span>
-          <button
-            type="button"
-            class="res-add"
-            :disabled="!activeId || busySession"
-            :class="{ loading: busySession }"
-            title="新建 Session 并打开窗口"
-            @click="createSession"
-          >
-            <font-awesome-icon icon="plus" />
-          </button>
+        <div v-if="!chatBatchMode" key="resources" class="sidebar-dock">
+          <WorkspaceFilesPanel :chat-id="activeId || ''" @notify="onPanelNotify" />
+          <BrowserResourcesPanel
+            :chat-id="activeId || ''"
+            :tree="tree"
+            :is-remote="isWebRemote()"
+            :owner-label="treeOwnerLabel"
+            :dnd-mime="DND_MIME"
+            @add-ref="addRef"
+            @ask-close-session="askCloseSession"
+            @remote-view="openRemoteWindow"
+            @notify="onPanelNotify"
+          />
         </div>
-        <div v-if="!activeId" class="res-empty">先选择一个 Chat</div>
-        <div v-else-if="!tree.length" class="res-empty">暂无浏览资源，点右侧 + 创建</div>
-        <div v-else class="res-tree">
-          <div v-for="s in tree" :key="s.sessionId" class="tree-sess">
-            <div
-              class="tree-row sess"
-              draggable="true"
-              @dragstart="onDragStart($event, sessionRef(s))"
-              @click="addRef(sessionRef(s))"
-              title="拖到输入框或点击以引用"
-            >
-              <span class="tree-name">
-                Session #{{ s.sessionIndex }}
-                <span v-if="s.chatId !== activeId" class="tree-meta">{{ treeOwnerLabel(s.chatId) }}</span>
-                <span v-if="!s.persist" class="tree-meta">临时</span>
-              </span>
-              <span class="tree-actions" @click.stop>
-                <button
-                  type="button"
-                  class="icon-btn"
-                  :disabled="busyWindow === s.sessionId"
-                  title="创建窗口"
-                  @click="createWindow(s.sessionId)"
-                >
-                  <font-awesome-icon icon="window-maximize" />
-                </button>
-                <button type="button" class="icon-btn danger" title="关闭 Session" @click="askCloseSession(s)">
-                  <font-awesome-icon icon="xmark" />
-                </button>
-              </span>
-            </div>
-            <div
-              v-for="w in s.windows"
-              :key="w.windowId"
-              class="tree-row win"
-              draggable="true"
-              @dragstart="onDragStart($event, windowRef(s, w))"
-              @click="addRef(windowRef(s, w))"
-              title="拖到输入框或点击以引用"
-            >
-              <span class="tree-name" :title="w.url">
-                {{ w.title || '无标题' }}
-                <span v-if="w.loading" class="tree-meta">加载中</span>
-                <span v-else-if="!w.visible" class="tree-meta">已隐藏</span>
-              </span>
-              <span class="tree-actions" @click.stop>
-                <button
-                  type="button"
-                  class="icon-btn"
-                  :title="isWebRemote() ? '远程查看/操控此窗口' : w.visible ? '隐藏本机窗口' : '显示本机窗口'"
-                  @click="toggleWindowVisible(w)"
-                >
-                  <font-awesome-icon :icon="isWebRemote() ? 'window-maximize' : w.visible ? 'eye' : 'eye-slash'" />
-                </button>
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
         <div v-else key="batch-actions" class="batch-list-footer">
           <v-btn
             size="small"
@@ -679,7 +622,13 @@
         </header>
 
         <div class="messages-wrap">
-          <section ref="msgBox" class="messages" @scroll="onMessagesScroll" @click="onMessagesClick">
+          <section
+            ref="msgBox"
+            class="messages"
+            @scroll="onMessagesScroll"
+            @click="onMessagesClick"
+            @contextmenu.prevent="onMessagesContext"
+          >
             <div v-if="!active.messages.length && !agentRunning" class="msg-empty">
               <div class="msg-empty-title">开始一段对话</div>
               <p class="msg-empty-desc">描述你想完成的浏览任务，或点选下方推荐；也可拖入左侧 Session / 窗口作为上下文。</p>
@@ -1375,7 +1324,11 @@
             </span>
             <button type="button" class="chip-clear" @click="contextRefs = []">清空</button>
           </div>
-          <div class="composer-box" :class="{ expanded: composerExpanded }">
+          <div
+            class="composer-box"
+            :class="{ expanded: composerExpanded }"
+            @contextmenu.prevent="onComposerContext"
+          >
             <div class="composer-input-row">
               <v-textarea
                 ref="draftField"
@@ -1904,6 +1857,81 @@
       </v-card>
     </v-dialog>
 
+    <SidebarContextMenu ref="pageCtxMenu">
+      <template v-if="pageCtx?.kind === 'chat' || pageCtx?.kind === 'sub'">
+        <button type="button" class="sidebar-more-item" role="menuitem" @click="startRenameChat(pageCtx.chat)">
+          <font-awesome-icon icon="pen-to-square" />
+          <span>修改标题</span>
+        </button>
+        <button
+          v-if="pageCtx.kind === 'chat'"
+          type="button"
+          class="sidebar-more-item"
+          role="menuitem"
+          @click="toggleChatPinned(pageCtx.chat)"
+        >
+          <font-awesome-icon icon="thumbtack" />
+          <span>{{ pageCtx.chat.pinned ? '取消置顶' : '置顶' }}</span>
+        </button>
+        <button type="button" class="sidebar-more-item danger" role="menuitem" @click="askDeleteChat(pageCtx.chat)">
+          <font-awesome-icon icon="trash" />
+          <span>删除</span>
+        </button>
+      </template>
+      <template v-else-if="pageCtx?.kind === 'msg'">
+        <button
+          type="button"
+          class="sidebar-more-item"
+          role="menuitem"
+          :disabled="!pageCtx.selected"
+          @click="copyText(pageCtx.selected)"
+        >
+          <font-awesome-icon icon="clipboard-list" />
+          <span>复制</span>
+        </button>
+        <button
+          type="button"
+          class="sidebar-more-item"
+          role="menuitem"
+          :disabled="!pageCtx.selected"
+          @click="quoteToComposer(pageCtx.selected)"
+        >
+          <font-awesome-icon icon="pen-to-square" />
+          <span>引用到输入框</span>
+        </button>
+      </template>
+      <template v-else-if="pageCtx?.kind === 'composer'">
+        <button
+          type="button"
+          class="sidebar-more-item"
+          role="menuitem"
+          :disabled="!pageCtx.selected"
+          @click="composerCut"
+        >
+          <font-awesome-icon icon="scissors" />
+          <span>剪切</span>
+        </button>
+        <button
+          type="button"
+          class="sidebar-more-item"
+          role="menuitem"
+          :disabled="!pageCtx.selected"
+          @click="copyText(pageCtx.selected)"
+        >
+          <font-awesome-icon icon="clipboard-list" />
+          <span>复制</span>
+        </button>
+        <button type="button" class="sidebar-more-item" role="menuitem" @click="composerPaste">
+          <font-awesome-icon icon="paste" />
+          <span>粘贴</span>
+        </button>
+        <button type="button" class="sidebar-more-item" role="menuitem" @click="composerSelectAll">
+          <font-awesome-icon icon="check" />
+          <span>全选</span>
+        </button>
+      </template>
+    </SidebarContextMenu>
+
     <Teleport to="body">
       <div
         v-if="chatSearchOpen"
@@ -1993,7 +2021,6 @@ import type {
   AgentPhase,
   BrowserContextRef,
   BrowserTreeSession,
-  BrowserTreeWindow,
   ChatMessage,
   ChatPermissions,
   ChatSession,
@@ -2017,6 +2044,9 @@ import ToolCatalogList from '@/components/store/ToolCatalogList.vue'
 import { useStoreUi } from '@/composables/useStoreUi'
 import { storeErrorText } from '@shared/store'
 import BrowserDownloadsMenu from '@/components/BrowserDownloadsMenu.vue'
+import WorkspaceFilesPanel from '@/components/sidebar/WorkspaceFilesPanel.vue'
+import BrowserResourcesPanel from '@/components/sidebar/BrowserResourcesPanel.vue'
+import SidebarContextMenu from '@/components/sidebar/SidebarContextMenu.vue'
 import { useMobileLayout } from '@/composables/useMobileLayout'
 import {
   extractImagePathFromToolResult,
@@ -2140,8 +2170,7 @@ const phase = ref<AgentPhase>('idle')
 const phaseDetail = ref('')
 const runStartedAt = ref(0)
 const nowTick = ref(Date.now())
-const busySession = ref(false)
-const busyWindow = ref<string | null>(null)
+
 const dropActive = ref(false)
 const msgBox = ref<HTMLElement | null>(null)
 const draftField = ref<{ focus?: () => void } | null>(null)
@@ -4568,26 +4597,6 @@ function chipLabel(r: BrowserContextRef) {
   return r.kind === 'window' ? `@窗口 ${r.label}` : `@Session ${r.label}`
 }
 
-function sessionRef(s: BrowserTreeSession): BrowserContextRef {
-  return {
-    kind: 'session',
-    sessionId: s.sessionId,
-    sessionIndex: s.sessionIndex,
-    label: `#${s.sessionIndex}`,
-  }
-}
-
-function windowRef(s: BrowserTreeSession, w: BrowserTreeWindow): BrowserContextRef {
-  return {
-    kind: 'window',
-    sessionId: s.sessionId,
-    windowId: w.windowId,
-    sessionIndex: s.sessionIndex,
-    label: w.title || w.windowId,
-    url: w.url,
-  }
-}
-
 function addRef(ref: BrowserContextRef) {
   if (contextRefs.value.some((x) => refKey(x) === refKey(ref))) return
   contextRefs.value = [...contextRefs.value, ref]
@@ -4595,13 +4604,6 @@ function addRef(ref: BrowserContextRef) {
 
 function removeRef(ref: BrowserContextRef) {
   contextRefs.value = contextRefs.value.filter((x) => refKey(x) !== refKey(ref))
-}
-
-function onDragStart(e: DragEvent, ref: BrowserContextRef) {
-  if (!e.dataTransfer) return
-  e.dataTransfer.effectAllowed = 'copy'
-  e.dataTransfer.setData(DND_MIME, JSON.stringify(ref))
-  e.dataTransfer.setData('text/plain', chipLabel(ref))
 }
 
 function onDragEnter(e: DragEvent) {
@@ -5113,54 +5115,111 @@ async function pickFirstSearchHit() {
   await pickSearchChat(first.id)
 }
 
-async function createSession() {
-  if (!window.navora || !activeId.value) return
-  busySession.value = true
+function onPanelNotify(text: string, color = 'error') {
+  showToast(text, color)
+}
+
+type PageCtx =
+  | { kind: 'chat'; chat: ChatSession }
+  | { kind: 'sub'; chat: ChatSession }
+  | { kind: 'msg'; selected: string }
+  | { kind: 'composer'; selected: string; start: number; end: number }
+
+const pageCtx = ref<PageCtx | null>(null)
+const pageCtxMenu = ref<{ show: (e: MouseEvent) => void } | null>(null)
+
+function composerTextarea(): HTMLTextAreaElement | null {
+  const field = draftField.value as unknown as { $el?: HTMLElement } | null
+  return (field?.$el?.querySelector?.('textarea') as HTMLTextAreaElement | undefined) || null
+}
+
+function onChatItemContext(e: MouseEvent, c: ChatSession) {
+  if (chatBatchMode.value) return
+  pageCtx.value = { kind: c.kind === 'sub' ? 'sub' : 'chat', chat: c }
+  pageCtxMenu.value?.show(e)
+}
+
+function onMessagesContext(e: MouseEvent) {
+  const selected = String(window.getSelection?.()?.toString() || '').trim()
+  pageCtx.value = { kind: 'msg', selected }
+  pageCtxMenu.value?.show(e)
+}
+
+function onComposerContext(e: MouseEvent) {
+  const el = composerTextarea()
+  const start = el?.selectionStart ?? 0
+  const end = el?.selectionEnd ?? 0
+  const selected = el && end > start ? el.value.slice(start, end) : ''
+  pageCtx.value = { kind: 'composer', selected, start, end }
+  pageCtxMenu.value?.show(e)
+}
+
+async function copyText(text: string) {
+  const t = String(text || '')
+  if (!t) return
   try {
-    const sess = await window.navora.browser.createSession(activeId.value, { persist: true })
-    await window.navora.browser.createWindow(sess.sessionId)
-    tree.value = await window.navora.browser.tree(activeId.value)
-    windowCounts.value = await window.navora.browser.windowCounts()
-  } catch (e) {
-    console.error(e)
-    showToast(e instanceof Error ? e.message : '创建浏览失败')
-  } finally {
-    busySession.value = false
+    await navigator.clipboard.writeText(t)
+    showToast('已复制', 'primary')
+  } catch {
+    showToast('复制失败')
   }
 }
 
-async function createWindow(sessionId: string) {
-  if (!window.navora) return
-  busyWindow.value = sessionId
+function quoteToComposer(text: string) {
+  const t = String(text || '').trim()
+  if (!t) return
+  const quoted = t
+    .split('\n')
+    .map((line) => `> ${line}`)
+    .join('\n')
+  const cur = draft.value.trimEnd()
+  applyDraftLocally(clampDraftText(cur ? `${cur}\n\n${quoted}\n` : `${quoted}\n`), Date.now())
+  scheduleDraftSave()
+  focusComposer()
+}
+
+function replaceComposerRange(start: number, end: number, insert: string) {
+  const el = composerTextarea()
+  const src = el?.value ?? draft.value
+  const next = clampDraftText(`${src.slice(0, start)}${insert}${src.slice(end)}`)
+  applyDraftLocally(next, Date.now())
+  scheduleDraftSave()
+  void nextTick(() => {
+    const box = composerTextarea()
+    if (!box) return
+    const pos = Math.min(start + insert.length, box.value.length)
+    box.focus()
+    box.setSelectionRange(pos, pos)
+  })
+}
+
+function composerCut() {
+  const ctx = pageCtx.value
+  if (ctx?.kind !== 'composer' || !ctx.selected) return
+  void copyText(ctx.selected)
+  replaceComposerRange(ctx.start, ctx.end, '')
+}
+
+async function composerPaste() {
+  const ctx = pageCtx.value
+  if (ctx?.kind !== 'composer') return
   try {
-    await window.navora.browser.createWindow(sessionId)
-    if (activeId.value) {
-      tree.value = await window.navora.browser.tree(activeId.value)
-      windowCounts.value = await window.navora.browser.windowCounts()
-    }
-  } catch (e) {
-    console.error(e)
-    showToast(e instanceof Error ? e.message : '创建窗口失败')
-  } finally {
-    busyWindow.value = null
+    const text = await navigator.clipboard.readText()
+    replaceComposerRange(ctx.start, ctx.end, text)
+  } catch {
+    showToast('无法读取剪贴板')
   }
 }
 
-async function toggleWindowVisible(w: BrowserTreeWindow) {
-  if (!window.navora) return
-  if (isWebRemote()) {
-    await router.push(`/remote/${encodeURIComponent(w.windowId)}`)
-    return
-  }
-  try {
-    await window.navora.browser.setVisible(w.windowId, !w.visible)
-    if (activeId.value) {
-      tree.value = await window.navora.browser.tree(activeId.value)
-    }
-  } catch (e) {
-    console.error(e)
-    showToast(e instanceof Error ? e.message : '切换窗口显示失败')
-  }
+function composerSelectAll() {
+  const el = composerTextarea()
+  if (!el) return
+  el.focus()
+  el.select()
+}
+
+async function openRemoteWindow(windowId: string) {
+  await router.push(`/remote/${encodeURIComponent(windowId)}`)
 }
 
 async function send() {
@@ -6047,7 +6106,7 @@ onUnmounted(() => {
 }
 .res-slide-enter-to,
 .res-slide-leave-from {
-  max-height: min(38vh, 320px);
+  max-height: min(48vh, 440px);
 }
 .chat-item {
   position: relative;
@@ -6612,138 +6671,16 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sidebar-resources {
+.sidebar-dock {
   flex: 0 1 auto;
-  max-height: min(38vh, 320px);
+  max-height: min(48vh, 440px);
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
   margin-top: 8px;
   padding-top: 10px;
-  padding-right: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  margin-right: 0;
-}
-.res-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-  padding: 0 12px 0 2px;
-}
-.res-label {
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.65;
-}
-.res-add {
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: rgba(236, 240, 241, 0.55);
-  display: inline-grid;
-  place-items: center;
-  font-size: 0.7rem;
-  cursor: pointer;
-  line-height: 1;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-.res-add:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(236, 240, 241, 0.92);
-}
-.res-add:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-.res-add.loading {
-  opacity: 0.45;
-  pointer-events: none;
-}
-.res-empty {
-  font-size: 0.75rem;
-  opacity: 0.5;
-  padding: 4px 12px 8px 2px;
-}
-.res-tree {
-  overflow: auto;
-  min-height: 0;
-  padding-bottom: 4px;
-  padding-right: 2px;
-  scrollbar-gutter: stable;
-}
-.tree-sess + .tree-sess {
-  margin-top: 4px;
-}
-.tree-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-  border-radius: 6px;
-  padding: 4px 6px;
-  margin-right: 8px;
-  cursor: grab;
-  font-size: 0.78rem;
-}
-.tree-row:active {
-  cursor: grabbing;
-}
-.tree-row:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
-.tree-row.win {
-  padding-left: 18px;
-  opacity: 0.92;
-}
-.tree-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-}
-.tree-meta {
-  margin-left: 4px;
-  font-size: 0.65rem;
-  opacity: 0.55;
-  font-weight: 400;
-}
-.tree-actions {
-  display: flex;
-  gap: 2px;
-  flex-shrink: 0;
-}
-.icon-btn {
-  border: 0;
-  background: rgba(255, 255, 255, 0.08);
-  color: inherit;
-  border-radius: 4px;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  display: inline-grid;
-  place-items: center;
-  font-size: 0.72rem;
-  cursor: pointer;
-  line-height: 1;
-}
-.icon-btn:hover {
-  background: rgba(255, 255, 255, 0.16);
-}
-.icon-btn.danger:hover {
-  background: rgba(231, 76, 60, 0.35);
-}
-.icon-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 .sidebar-foot {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
@@ -9688,27 +9625,27 @@ onUnmounted(() => {
   padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
 }
 .shell.mobile-layout .chat-list,
-.shell.mobile-layout .res-tree {
+.shell.mobile-layout :deep(.res-tree) {
   padding-right: 6px;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: rgba(236, 240, 241, 0.28) transparent;
 }
 .shell.mobile-layout .chat-list::-webkit-scrollbar,
-.shell.mobile-layout .res-tree::-webkit-scrollbar {
+.shell.mobile-layout :deep(.res-tree)::-webkit-scrollbar {
   width: 4px;
 }
 .shell.mobile-layout .chat-list::-webkit-scrollbar-track,
-.shell.mobile-layout .res-tree::-webkit-scrollbar-track {
+.shell.mobile-layout :deep(.res-tree)::-webkit-scrollbar-track {
   background: transparent;
 }
 .shell.mobile-layout .chat-list::-webkit-scrollbar-thumb,
-.shell.mobile-layout .res-tree::-webkit-scrollbar-thumb {
+.shell.mobile-layout :deep(.res-tree)::-webkit-scrollbar-thumb {
   background: rgba(236, 240, 241, 0.28);
   border-radius: 999px;
 }
 .shell.mobile-layout .chat-list::-webkit-scrollbar-thumb:active,
-.shell.mobile-layout .res-tree::-webkit-scrollbar-thumb:active {
+.shell.mobile-layout :deep(.res-tree)::-webkit-scrollbar-thumb:active {
   background: rgba(236, 240, 241, 0.42);
 }
 .shell.mobile-layout .chat-item-main {
@@ -9956,7 +9893,7 @@ onUnmounted(() => {
 .shell.mobile-layout .composer-actions-right {
   gap: 6px;
 }
-.shell.mobile-layout .tree-actions .icon-btn {
+.shell.mobile-layout :deep(.tree-actions .icon-btn) {
   width: 34px;
   height: 34px;
 }

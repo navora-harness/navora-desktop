@@ -20,6 +20,7 @@ export class WorkspaceFiles {
   private getChatWorkspaceRoot?: (chatId: string) => string | undefined
   /** Extra roots allowed after user pickDirectory (or grandfathered chat overrides). */
   private allowedExtraRoots = new Set<string>()
+  private onChanged?: (chatId: string) => void
 
   constructor(
     dataRoot: string,
@@ -29,6 +30,15 @@ export class WorkspaceFiles {
     this.dataRoot = dataRoot
     this.getConfig = getConfig
     this.getChatWorkspaceRoot = getChatWorkspaceRoot
+  }
+
+  setOnChanged(cb: ((chatId: string) => void) | undefined): void {
+    this.onChanged = cb
+  }
+
+  emitChanged(chatId: string): void {
+    if (!chatId) return
+    this.onChanged?.(chatId)
   }
 
   /** Remember a user-picked (or legacy) absolute workspace root. */
@@ -240,6 +250,7 @@ export class WorkspaceFiles {
     if (opts?.append) await fsp.appendFile(abs, data)
     else await fsp.writeFile(abs, data)
     const st = await fsp.stat(abs)
+    this.emitChanged(chatId)
     return { ok: true as const, path: this.toRel(chatId, abs), size: st.size, append: Boolean(opts?.append) }
   }
 
@@ -250,6 +261,7 @@ export class WorkspaceFiles {
     await fsp.mkdir(path.dirname(abs), { recursive: true })
     await fsp.writeFile(abs, data)
     const st = await fsp.stat(abs)
+    this.emitChanged(chatId)
     return { ok: true as const, path: this.toRel(chatId, abs), size: st.size }
   }
 
@@ -288,6 +300,7 @@ export class WorkspaceFiles {
   async mkdir(chatId: string, relPath: string) {
     const abs = this.resolve(chatId, relPath)
     await fsp.mkdir(abs, { recursive: true })
+    this.emitChanged(chatId)
     return { ok: true as const, path: this.toRel(chatId, abs) }
   }
 
@@ -296,6 +309,7 @@ export class WorkspaceFiles {
     const root = this.chatRoot(chatId)
     if (abs === root) throw new Error('cannot_delete_workspace_root')
     await fsp.rm(abs, { recursive: true, force: true })
+    this.emitChanged(chatId)
     return { ok: true as const, path: this.toRel(chatId, abs) }
   }
 
@@ -306,6 +320,7 @@ export class WorkspaceFiles {
     if (src === root) throw new Error('cannot_move_workspace_root')
     await fsp.mkdir(path.dirname(dest), { recursive: true })
     await fsp.rename(src, dest)
+    this.emitChanged(chatId)
     return { ok: true as const, from: this.toRel(chatId, src), to: this.toRel(chatId, dest) }
   }
 
@@ -314,6 +329,7 @@ export class WorkspaceFiles {
     const dest = this.resolve(chatId, to)
     await fsp.mkdir(path.dirname(dest), { recursive: true })
     await fsp.cp(src, dest, { recursive: true, force: true })
+    this.emitChanged(chatId)
     return { ok: true as const, from: this.toRel(chatId, src), to: this.toRel(chatId, dest) }
   }
 
@@ -337,6 +353,7 @@ export class WorkspaceFiles {
     } finally {
       await fh.close()
     }
+    this.emitChanged(chatId)
     return { ok: true as const, path: this.toRel(chatId, destAbs), bytes, parts: sources.length }
   }
 }

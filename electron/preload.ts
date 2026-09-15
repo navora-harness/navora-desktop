@@ -263,6 +263,35 @@ const api = {
       relPath: string,
     ): Promise<{ ok: boolean; path?: string; action?: string; error?: string }> =>
       ipcRenderer.invoke('navora:workspace.open', chatId, relPath),
+    list: (
+      chatId: string,
+      relDir?: string,
+    ): Promise<{
+      ok: boolean
+      root?: string
+      absoluteRoot?: string
+      entries?: Array<{
+        path: string
+        name: string
+        type: 'file' | 'dir'
+        size?: number
+        mtimeMs?: number
+      }>
+      truncated?: boolean
+      error?: string
+    }> => ipcRenderer.invoke('navora:workspace.list', chatId, relDir),
+    delete: (
+      chatId: string,
+      relPath: string,
+    ): Promise<{ ok: boolean; path?: string; error?: string }> =>
+      ipcRenderer.invoke('navora:workspace.delete', chatId, relPath),
+    onChanged: (cb: (payload: { chatId: string }) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, payload: { chatId: string }) => cb(payload)
+      ipcRenderer.on('navora:workspace.changed', listener)
+      return () => {
+        ipcRenderer.removeListener('navora:workspace.changed', listener)
+      }
+    },
   },
   downloads: {
     list: (chatId?: string): Promise<BrowserDownloadEntry[]> =>

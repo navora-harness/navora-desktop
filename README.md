@@ -10,6 +10,8 @@
 
 架构说明：[`docs/modules.md`](docs/modules.md) · 规划草案：[`docs/architecture-plan.md`](docs/architecture-plan.md) · 对外摘要：[`docs/project-and-plugin-guide.md`](docs/project-and-plugin-guide.md)
 
+License: [MIT](./LICENSE)
+
 ## 技术栈
 
 - 运行时：unofficial Electron
@@ -86,6 +88,16 @@ npm run electron:dev
 | NSIS | `%APPDATA%\Navora` |
 
 可用 `NAVORA_DATA_ROOT` 覆盖。首次运行由 `config.example.yml` 生成 `config.yml`；API Key 写入 `secrets/`。
+
+## 免责声明
+
+本软件按「现状」提供，不提供任何明示或默示担保。作者及版权持有人对使用本软件导致的数据丢失、账号封禁、服务中断、站点违规使用或其它损失不承担责任。
+
+- Agent 可按你配置的权限操作本机浏览器会话、工作区文件与受限 shell；加载的插件在主进程运行，视为你信任的代码。
+- 仅用于你有权操作的目标；请遵守目标站点条款与当地法律。
+- 使用 unofficial Electron、第三方模型 API 以及自行安装的插件所产生的风险由使用者承担。
+
+法律条款以 [MIT License](./LICENSE) 为准。
 
 ## 安全须知（提交前）
 
