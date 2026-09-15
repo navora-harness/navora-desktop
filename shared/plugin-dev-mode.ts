@@ -7,7 +7,7 @@ import { resolvePluginDevMode } from './config'
 /** Short fallback if plugin-dev-prompt.md cannot be read (bundled main). */
 const PLUGIN_DEV_PROMPT_FALLBACK = `## 插件开发模式（SDK 契约）
 
-当前已开启插件开发模式。把 Chat 工作区指到插件工程根；优先用 plugin_build（默认外链到本会话及子对话）/ plugin_check / plugin_pack / plugin_link；会话外链不进全局插件列表。
+当前已开启插件开发模式。把 Chat 工作区指到插件工程根；优先用 plugin_build（默认外链到本会话及子对话）/ plugin_check / plugin_pack（宿主内置打 zip，安装包可用）/ plugin_link；会话外链不进全局插件列表。
 外链必须指向 \`dist/<packageId>\`（含 plugin.json + main.cjs），不要指工程根。
 模块必须导出 \`tools\` / \`planPermissions\`（非空 capabilities）/ \`execute\`；只走 \`api.registry\` / \`api.runTool\` / \`api.getConfig\` / \`api.helpers\`。
 查已装插件用 plugin_list / plugin_read。`
