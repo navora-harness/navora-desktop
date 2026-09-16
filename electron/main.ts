@@ -140,6 +140,7 @@ function resolveAsk(id: string, response: AgentAskResponse, notifyUi = true): bo
   if (!p) return false
   if (p.timer) clearTimeout(p.timer)
   pendingAsk.delete(id)
+  chats?.setPendingAsk(p.chatId, null)
   p.resolve(response)
   // Always dismiss dialogs on both local window and remote web clients.
   if (notifyUi) {
@@ -199,8 +200,16 @@ function abortAsksForChat(chatId: string): void {
   }
 }
 
-function abortAllAsks(): void {
-  for (const [id] of [...pendingAsk.entries()]) {
+function abortAllAsks(opts?: { preservePersistedUnlimited?: boolean }): void {
+  for (const [id, p] of [...pendingAsk.entries()]) {
+    if (opts?.preservePersistedUnlimited) {
+      const saved = chats?.get(p.chatId)?.pendingAsk
+      if (saved?.id === id && saved.timeoutMs <= 0 && saved.kind === 'user_choice') {
+        pendingAsk.delete(id)
+        if (p.timer) clearTimeout(p.timer)
+        continue
+      }
+    }
     resolveAsk(id, { id, answer: '', source: 'aborted' }, true)
   }
   for (const [id] of [...pendingPerm.entries()]) {
@@ -208,6 +217,21 @@ function abortAllAsks(): void {
   }
   for (const [id] of [...pendingSkillReview.entries()]) {
     resolveSkillReview(id, { id, source: 'aborted' }, true)
+  }
+}
+
+function replayPersistedAsks(): void {
+  if (!chats) return
+  for (const c of chats.list()) {
+    const req = c.pendingAsk
+    if (!req || req.timeoutMs > 0 || req.kind !== 'user_choice') continue
+    pushAgentAsk(req)
+    pushAgentEvent({
+      type: 'phase',
+      chatId: req.chatId,
+      phase: 'awaiting_user',
+      detail: req.question.slice(0, 120),
+    })
   }
 }
 
@@ -588,6 +612,7 @@ async function createWindow(): Promise<void> {
   win.once('ready-to-show', () => {
     if (winState.maximized) win.maximize()
     win.show()
+    replayPersistedAsks()
   })
 
   win.on('close', (e) => {
@@ -623,7 +648,7 @@ function registerIpc(): void {
   // Local-only IPC (not registered on remote RPC) so remote clients cannot quit the host
   ipcMain.handle('navora:app.quit', () => {
     isQuitting = true
-    abortAllAsks()
+    abortAllAsks({ preservePersistedUnlimited: true })
     agent?.stopAll()
     app.quit()
     return { ok: true as const }
@@ -1618,15 +1643,29 @@ function registerIpc(): void {
   rpcHandle(
     'navora:agent.ask.respond',
     (_e: unknown, id: string, response: Omit<AgentAskResponse, 'id'> & { id?: string }) => {
-      return resolveAsk(
+      const payload: AgentAskResponse = {
         id,
-        {
-          id,
-          answer: String(response?.answer || ''),
-          source: response?.source || 'deny',
-        },
-        true,
-      )
+        answer: String(response?.answer || ''),
+        source: response?.source || 'deny',
+      }
+      if (resolveAsk(id, payload, true)) return true
+      const parked = chats.list().find((c) => c.pendingAsk?.id === id)
+      if (!parked?.pendingAsk) return false
+      const req = parked.pendingAsk
+      const denied = payload.source === 'deny' || !payload.answer.trim()
+      if (denied) {
+        chats.setPendingAsk(parked.id, null)
+        void agent.continueAfterPersistedAsk(parked.id, req, payload).catch((e) => {
+          console.error('[ask] persist deny', e)
+        })
+        pushAgentAskCancel(id, 'deny')
+        return true
+      }
+      void agent.continueAfterPersistedAsk(parked.id, req, payload).catch((e) => {
+        console.error('[ask] persist resume', e)
+      })
+      pushAgentAskCancel(id, 'resolved')
+      return true
     },
   )
 
@@ -1919,6 +1958,9 @@ if (!gotLock) {
               : null
 
           pendingAsk.set(id, { chatId: req.chatId, timer, resolve })
+          if (req.timeoutMs <= 0 && req.kind === 'user_choice') {
+            chats.setPendingAsk(req.chatId, req)
+          }
 
           const hasLocal = !!(mainWindow && !mainWindow.isDestroyed())
           const remoteReady = !!(remote?.status().enabled && remote?.status().running)
@@ -2031,7 +2073,7 @@ if (!gotLock) {
       createWindow,
       onQuit: () => {
         isQuitting = true
-        abortAllAsks()
+        abortAllAsks({ preservePersistedUnlimited: true })
         agent.stopAll()
         app.quit()
       },
@@ -2055,7 +2097,7 @@ if (!gotLock) {
 
   app.on('before-quit', () => {
     isQuitting = true
-    abortAllAsks()
+    abortAllAsks({ preservePersistedUnlimited: true })
     agent?.stopAll()
     try {
       chats?.flushAll()

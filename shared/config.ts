@@ -68,9 +68,14 @@ export type ForkDecisionConfig = {
   inline_low_risk: boolean
   /** Allow revising a past decision from the timeline and continuing (default false) */
   allow_revise: boolean
-  /** How long to wait for a user choice before timing out (default 60000; 0 = wait forever) */
+  /** How long to wait for a user choice before timing out (default 0 = wait forever) */
   ask_timeout_ms: number
 }
+
+/** Default 询问/决策 wait: 0 = 不限时. */
+export const FORK_ASK_TIMEOUT_DEFAULT_MS = 0
+/** When the user turns off 不限时, restore this finite wait (2 minutes). */
+export const FORK_ASK_TIMEOUT_LIMITED_MS = 120_000
 
 /** Fresh default fork_decision block (safe to mutate after copy). */
 export function createDefaultForkDecision(): ForkDecisionConfig {
@@ -83,7 +88,7 @@ export function createDefaultForkDecision(): ForkDecisionConfig {
     remember_in_chat: true,
     inline_low_risk: false,
     allow_revise: false,
-    ask_timeout_ms: 60000,
+    ask_timeout_ms: FORK_ASK_TIMEOUT_DEFAULT_MS,
   }
 }
 

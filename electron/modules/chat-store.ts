@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type {
+  AgentAskRequest,
   ChatMessage,
   ChatPermissions,
   ChatSession,
@@ -35,7 +36,13 @@ export class ChatStore {
       try {
         const raw = fs.readFileSync(path.join(this.dir, name), 'utf8')
         const chat = JSON.parse(raw) as ChatSession
-        if (chat?.id) this.chats.set(chat.id, chat)
+        if (chat?.id) {
+          // Timed asks cannot be resumed after restart; drop them.
+          if (chat.pendingAsk && !(chat.pendingAsk.timeoutMs <= 0 && chat.pendingAsk.kind === 'user_choice')) {
+            delete chat.pendingAsk
+          }
+          this.chats.set(chat.id, chat)
+        }
       } catch (e) {
         console.warn('[chat-store] skip', name, e)
       }
@@ -331,6 +338,18 @@ export class ChatStore {
    * Persist unsent composer draft. Does not bump `updatedAt` (list order unchanged).
    * Empty string clears the draft fields.
    */
+  setPendingAsk(chatId: string, req: AgentAskRequest | null): ChatSession | null {
+    const chat = this.chats.get(chatId)
+    if (!chat) return null
+    if (req && req.kind === 'user_choice' && req.timeoutMs <= 0) {
+      chat.pendingAsk = req
+    } else {
+      delete chat.pendingAsk
+    }
+    this.persist(chat, 'immediate')
+    return chat
+  }
+
   setDraft(chatId: string, text: string, opts?: { updatedAt?: number }): ChatSession | null {
     const chat = this.chats.get(chatId)
     if (!chat) return null
