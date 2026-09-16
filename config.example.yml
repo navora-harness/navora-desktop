@@ -66,7 +66,7 @@ ai:
         - gpt-4.1
       timeout_ms: 120000
 
-# 分叉决策（路径选择弹窗；缺省键由程序 deepMerge 补齐）
+# 询问/决策（路径选择；缺省键由程序 deepMerge 补齐）
 fork_decision:
   enabled: true
   allow_custom: true
@@ -74,8 +74,8 @@ fork_decision:
   context_evidence: true
   recommended: true
   remember_in_chat: true
-  # 等待用户选择的超时（毫秒）；默认 60 秒，0 表示不限时
-  ask_timeout_ms: 60000
+  # 等待用户选择的超时（毫秒）；默认 0 = 不限时，关闭不限时后为 2 分钟
+  ask_timeout_ms: 0
   # 以下两项尚未实现，请保持 false
   inline_low_risk: false
   allow_revise: false

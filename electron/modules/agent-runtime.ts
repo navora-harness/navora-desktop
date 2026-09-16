@@ -67,10 +67,14 @@ export type AskUserFn = (req: Omit<AgentAskRequest, 'id' | 'timeoutMs'> & {
 
 /**
  * Parse optional per-ask timeout from tool args.
- * `undefined` → caller omits field → UI uses Settings default (`fork_decision.ask_timeout_ms`).
- * `0` → wait forever. Positive values clamped to 5s–10min.
+ * Settings `ask_timeout_ms === 0` (不限时) always wins.
+ * `undefined` → Settings default. `0` → wait forever. Positive values clamped to 5s–10min.
  */
-function resolveAgentAskTimeoutMs(args: Record<string, unknown>): number | undefined {
+function resolveAgentAskTimeoutMs(
+  args: Record<string, unknown>,
+  settingsMs: number,
+): number {
+  if (!(settingsMs > 0)) return 0
   const raw =
     args.timeoutMs ??
     args.timeout_ms ??
@@ -79,9 +83,9 @@ function resolveAgentAskTimeoutMs(args: Record<string, unknown>): number | undef
     (args.timeoutSec != null || args.timeout_sec != null
       ? Number(args.timeoutSec ?? args.timeout_sec) * 1000
       : undefined)
-  if (raw === undefined || raw === null || raw === '') return undefined
+  if (raw === undefined || raw === null || raw === '') return settingsMs
   const n = Number(raw)
-  if (!Number.isFinite(n)) return undefined
+  if (!Number.isFinite(n)) return settingsMs
   if (n <= 0) return 0
   return Math.min(600_000, Math.max(5_000, Math.floor(n)))
 }
@@ -447,6 +451,66 @@ export class AgentRuntime {
     this.subchatWaiters.delete(chatId)
   }
 
+  /**
+   * Resume after a process restart: user answered (or denied) a persisted 询问/决策.
+   * Deny only clears persistence / finishes the tool card. A choice starts a new run from history.
+   */
+  async continueAfterPersistedAsk(
+    chatId: string,
+    req: AgentAskRequest,
+    res: AgentAskResponse,
+  ): Promise<void> {
+    this.chats.setPendingAsk(chatId, null)
+    if (this.runs.has(chatId)) return
+
+    const denied = res.source === 'deny' || !String(res.answer || '').trim()
+    const chat = this.chats.get(chatId)
+    const toolMsg = [...(chat?.messages || [])].reverse().find(
+      (m) =>
+        m.role === 'tool' &&
+        m.meta?.status === 'running' &&
+        m.meta?.toolName === 'agent_ask_user',
+    )
+    const result = denied
+      ? { ok: false, error: 'user_denied' }
+      : {
+          ok: true,
+          answer: String(res.answer || '').trim(),
+          source: res.source === 'custom' ? 'custom' : 'option',
+        }
+    if (toolMsg) {
+      const updated = this.chats.updateMessage(chatId, toolMsg.id, {
+        content: truncateJson(result, 4000),
+        meta: {
+          ...toolMsg.meta,
+          status: denied ? 'error' : 'done',
+          result,
+        },
+      })
+      if (updated) this.emit({ type: 'message_update', chatId, message: updated })
+    }
+
+    if (denied) return
+
+    const answer = String(res.answer || '').trim()
+    const entry = logUserChoice(answer)
+    const log = this.chats.appendMessage(chatId, {
+      role: 'log',
+      content: `${entry.content}\n请按该选择继续任务，不要重复同一询问/决策。`,
+      meta: {
+        kind: 'user_choice',
+        source: res.source,
+        summary: entry.summary,
+        ...(entry.detail ? { detail: entry.detail } : {}),
+        ...(req.meta?.step != null ? { step: req.meta.step } : {}),
+        ...(req.meta?.forkGroup ? { forkGroup: req.meta.forkGroup } : {}),
+      },
+    })
+    if (log) this.emit({ type: 'message', chatId, message: log })
+    this.chats.flushChat(chatId)
+    await this.run({ chatId, userText: '' })
+  }
+
   stopAll(): void {
     for (const id of [...this.runs.keys()]) this.stop(id)
     for (const t of downloadProgressTimers.values()) clearTimeout(t)
@@ -483,6 +547,7 @@ export class AgentRuntime {
     }
 
     const cfg = this.getConfig()
+    const fork = resolveForkDecision(cfg)
     const chat = this.chats.get(chatId)
     // Sub-chats use Settings → subchat.max_parallel (per parent). Root chats use
     // max_parallel_agent_chats and only count other root runs — otherwise parent+3
@@ -559,7 +624,7 @@ export class AgentRuntime {
             question: `已达 ${rounds} 轮推理上限。是否再继续 ${continueBy} 轮？`,
             options: [`再继续 ${continueBy} 轮`, '停止'],
             allowCustom: false,
-            timeoutMs: cfg.permissions.confirm_timeout_ms || 120000,
+            timeoutMs: fork.ask_timeout_ms,
             meta: { roundsUsed: rounds, continueBy },
           })
           if (ctrl.signal.aborted) throw new Error('aborted')
@@ -1799,12 +1864,12 @@ export class AgentRuntime {
       chatId,
       'awaiting_user',
       progressMeta.step && progressMeta.totalSteps
-        ? `分叉 ${progressMeta.step}/${progressMeta.totalSteps}：${question.slice(0, 60)}`
+        ? `询问/决策 ${progressMeta.step}/${progressMeta.totalSteps}：${question.slice(0, 60)}`
         : question.slice(0, 80),
     )
 
     const evidence = fork.context_evidence ? this.collectAskEvidence(chatId) : undefined
-    const timeoutMs = resolveAgentAskTimeoutMs(args)
+    const timeoutMs = resolveAgentAskTimeoutMs(args, fork.ask_timeout_ms)
     const res = await this.askUser({
       chatId,
       kind: 'user_choice',
@@ -1814,7 +1879,7 @@ export class AgentRuntime {
       allowCustom,
       evidence,
       meta: askMeta,
-      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      timeoutMs,
     })
 
     if (signal.aborted || res.source === 'aborted') {

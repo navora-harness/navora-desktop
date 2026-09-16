@@ -4,7 +4,7 @@
 |----|------|
 | 文档用途 | 交给其它 AI / 协作者快速理解产品能力与插件开发契约 |
 | 对应代码 | `navora-desktop` + `navora-plugin-sdk` + `navora-plugins` |
-| 整理日期 | 2026-09-14 |
+| 整理日期 | 2026-09-16 |
 | 详细模块 | 见同目录 [`modules.md`](./modules.md)、[`architecture-plan.md`](./architecture-plan.md) |
 | 插件规范原文 | [`../../navora-plugin-sdk/SPEC.md`](../../navora-plugin-sdk/SPEC.md) |
 
@@ -107,20 +107,28 @@ Renderer (Vue)
 - Chat 绑定工作区目录；`file_*`、`file_download`、`shell_exec` 等
 - 下载可走 Session 网络（防盗链/Referer）
 
-### 3.6 子对话
+### 3.6 询问/决策
+
+- 设置 → **询问/决策**（配置键仍为 `fork_decision`）：可开关；默认开启。
+- Agent 路径不明或需确认时，在**对话流**里给出选项（不再弹窗）；权限授权同样在对话里点选。
+- 技能增删改、删除对话等仍用弹窗确认。
+- 默认 **不限时等待**（`ask_timeout_ms: 0`）。无超时时询问写入该 Chat JSON，重启后可继续选择；**拒绝回答**、停止 Agent、删除对话会清除持久化。
+- 有超时的询问不落盘。关闭「不限时」后默认等待 2 分钟。
+
+### 3.7 子对话
 
 - `agent_spawn_subchat`：子对话看不到父全文；需把 URL/sitekey 写入 `context`
 - 宿主会尝试从父对话近期消息补全 http(s) URL 与 Turnstile sitekey
 - 子对话结束清理其创建的浏览器资源
 
-### 3.7 远程
+### 3.8 远程
 
 - 可选局域网 RemoteServer：把同一套 RPC 暴露给 Web UI（`navora-remote-shim`）
 - 部分本机对话框类通道对远程禁止/降级
 
-### 3.8 设置页结构
+### 3.9 设置页结构
 
-基本 / 模型 / 浏览器 / 权限 / **插件** / 关于等。
+基本 / 模型 / 浏览器 / 工作区 / 技能 / 插件 / 远程 / 权限 / **询问/决策** / 子对话 / 关于等。
 
 插件：外链文件夹、导入 zip、导出、启用开关、批量卸载、**查看说明**（`README.md` / `docs.md`；无文件则按钮禁用）。
 
@@ -132,7 +140,7 @@ Renderer (Vue)
 
 | 域 | 工具名（节选） |
 |----|----------------|
-| Agent 协作 | `agent_ask_user`, `agent_spawn_subchat`, `agent_await_subchats`, `agent_subchat_status` |
+| 询问/决策与协作 | `agent_ask_user`, `agent_spawn_subchat`, `agent_await_subchats`, `agent_subchat_status` |
 | 系统信息 | `datetime_now`, `geolocation_get` |
 | Session | `browser_open`, `browser_session_create/close/clear`, `browser_session_set_proxy`, `browser_session_set_ua`, `browser_session_fetch` |
 | Cookie | `browser_cookies_get/set/remove` |

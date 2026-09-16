@@ -177,7 +177,7 @@
                       >
                         {{
                           pendingAskBadge(pendingAskForSidebar(c.id)!.chatId) ||
-                          (pendingAskForSidebar(c.id)!.chatId !== c.id ? '子任务' : '待决策')
+                          (pendingAskForSidebar(c.id)!.chatId !== c.id ? '子任务' : '询问/决策')
                         }}
                       </span>
                       <span
@@ -346,7 +346,7 @@
                       <span
                         v-if="pendingAskForSidebar(sub.id)"
                         class="chat-sub-chip-ask"
-                        :title="pendingAskBadge(sub.id) || '待决策'"
+                        :title="pendingAskBadge(sub.id) || '询问/决策'"
                       />
                     </button>
                     <v-menu
@@ -1102,51 +1102,40 @@
               </div>
             </template>
 
-            <button
-              v-if="showInlinePendingAsk"
-              ref="inlineAskCardEl"
-              type="button"
-              class="msg pending-ask-card"
-              @click="openActivePendingAsk"
+            <div
+              v-if="(showInlinePerm && permReq) || (showInlinePendingAsk && activePendingAsk)"
+              ref="inlineDecisionEl"
+              class="inchat-decision"
             >
-              <div class="msg-row">
-                <div class="msg-avatar pending-ask" aria-hidden="true">
-                  <font-awesome-icon icon="circle-question" />
-                </div>
-                <div class="msg-main">
-                  <div class="msg-role">
-                    <span>待决策</span>
-                    <span v-if="inlineAskProgress" class="pending-ask-step">{{
-                      inlineAskProgress
-                    }}</span>
-                  </div>
-                  <div class="pending-ask-question">{{ activePendingAsk?.question }}</div>
-                  <div v-if="inlineAskRemainingLabel" class="pending-ask-timeout-block">
-                    <div class="pending-ask-timeout">{{ inlineAskRemainingLabel }}</div>
-                    <div
-                      class="ask-countdown-bar"
-                      :class="{ urgent: inlineAskRemainingUrgent }"
-                      role="progressbar"
-                      :aria-valuenow="inlineAskRemainingPct"
-                      aria-valuemin="0"
-                      aria-valuemax="100"
-                      :aria-label="inlineAskRemainingLabel"
-                    >
-                      <div
-                        class="ask-countdown-bar-fill"
-                        :style="{ width: `${inlineAskRemainingPct}%` }"
-                      />
-                    </div>
-                  </div>
-                  <div class="pending-ask-cta">
-                    <span>点击打开选项并回答</span>
-                    <font-awesome-icon icon="chevron-right" />
-                  </div>
-                </div>
-              </div>
-            </button>
+              <InChatPermCard
+                v-if="showInlinePerm && permReq"
+                :req="permReq"
+                :capability-label="permCapabilityLabel"
+                :chat-title="permChatTitle"
+                :remaining-label="permRemainingLabel"
+                :remaining-urgent="permRemainingUrgent"
+                :remaining-pct="permRemainingPct"
+                :busy="permBusy"
+                @decide="respondPerm"
+              />
+              <InChatAskCard
+                v-if="showInlinePendingAsk && activePendingAsk"
+                :req="activePendingAsk"
+                :remaining-label="inlineAskRemainingLabel"
+                :remaining-urgent="inlineAskRemainingUrgent"
+                :remaining-pct="inlineAskRemainingPct"
+                :busy="askBusy"
+                @option="respondAskOption"
+                @custom="respondAskCustomText"
+                @deny="respondAskDeny"
+              />
+            </div>
 
-            <div v-if="agentRunning && !showInlinePendingAsk" class="thinking-row" aria-live="polite">
+            <div
+              v-if="agentRunning && !showInlinePendingAsk && !showInlinePerm"
+              class="thinking-row"
+              aria-live="polite"
+            >
               <div class="thinking-avatar" aria-hidden="true">
                 <img src="/app-icon.png" alt="" />
               </div>
@@ -1286,23 +1275,40 @@
           @drop.prevent="onDrop"
         >
           <button
-            v-if="showInlinePendingAsk"
+            v-if="showInlinePendingAsk || showInlinePerm"
             type="button"
             class="pending-ask-dock"
-            @click="openActivePendingAsk"
+            @click="scrollToInlineDecision"
           >
             <font-awesome-icon icon="circle-question" class="pending-ask-dock-icon" />
             <span class="pending-ask-dock-body">
               <span class="pending-ask-dock-label">
-                待决策
+                {{
+                  showInlinePerm && !showInlinePendingAsk
+                    ? '需要授权'
+                    : activePendingAsk?.kind === 'continue_rounds'
+                      ? '待决策'
+                      : activePendingAsk?.kind === 'download_confirm'
+                        ? '待决策'
+                        : '询问/决策'
+                }}
                 <template v-if="inlineAskProgress"> · {{ inlineAskProgress }}</template>
               </span>
-              <span class="pending-ask-dock-q">{{ activePendingAsk?.question }}</span>
+              <span class="pending-ask-dock-q">{{
+                showInlinePerm && !showInlinePendingAsk
+                  ? permCapabilityLabel
+                  : activePendingAsk?.question
+              }}</span>
             </span>
-            <span v-if="inlineAskRemainingLabel" class="pending-ask-dock-timeout">{{
-              inlineAskRemainingLabel
+            <span
+              v-if="inlineAskRemainingLabel || (showInlinePerm && permRemainingLabel)"
+              class="pending-ask-dock-timeout"
+            >{{
+              inlineAskRemainingLabel || permRemainingLabel
             }}</span>
-            <span class="pending-ask-dock-action">回答</span>
+            <span class="pending-ask-dock-action">{{
+              showInlinePerm && !showInlinePendingAsk ? '授权' : '选择'
+            }}</span>
             <span
               v-if="inlineAskRemainingLabel"
               class="pending-ask-dock-bar"
@@ -1586,219 +1592,6 @@
       </div>
     </v-dialog>
 
-    <v-dialog v-model="permDialog" max-width="440" persistent>
-      <div v-if="permReq" class="perm-card">
-        <header class="perm-head">
-          <p class="dialog-eyebrow">{{ permEyebrow }}</p>
-          <h2 class="perm-title" :title="permCapabilityLabel">{{ permCapabilityLabel }}</h2>
-          <p v-if="permRemainingLabel" class="ask-timeout" :class="{ urgent: permRemainingUrgent }">
-            {{ permRemainingLabel }}
-          </p>
-          <div
-            v-if="permRemainingLabel"
-            class="ask-countdown-bar"
-            :class="{ urgent: permRemainingUrgent }"
-            role="progressbar"
-            :aria-valuenow="permRemainingPct"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            :aria-label="permRemainingLabel"
-          >
-            <div class="ask-countdown-bar-fill" :style="{ width: `${permRemainingPct}%` }" />
-          </div>
-        </header>
-
-        <div class="perm-body">
-          <div v-if="permReq.detail" class="perm-detail-card">
-            <div class="perm-detail-text" :title="permReq.detail">{{ permReq.detail }}</div>
-            <code class="perm-cap" :title="permReq.capability">{{ permReq.capability }}</code>
-          </div>
-
-          <div class="perm-group">
-            <div class="perm-group-label">本次操作</div>
-            <div class="perm-row">
-              <button type="button" class="perm-btn primary" @click="respondPerm('allow')">
-                允许一次
-              </button>
-              <button type="button" class="perm-btn ghost" @click="respondPerm('deny')">
-                拒绝
-              </button>
-            </div>
-          </div>
-
-          <div class="perm-group">
-            <div class="perm-group-label">记住选择</div>
-            <div class="perm-stack">
-              <button type="button" class="perm-btn tonal" @click="respondPerm('allow_chat')">
-                本 Chat 内允许
-              </button>
-              <button type="button" class="perm-btn tonal" @click="respondPerm('always_allow')">
-                本会话始终允许
-              </button>
-              <button type="button" class="perm-btn danger-ghost" @click="respondPerm('always_deny')">
-                本会话始终拒绝
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </v-dialog>
-
-    <v-dialog
-      v-model="askDialog"
-      max-width="480"
-      persistent
-      scrollable
-      content-class="ask-dialog-host"
-    >
-      <div v-if="askReq" class="ask-card">
-        <header class="ask-head">
-          <p class="dialog-eyebrow">{{ askEyebrow }}</p>
-          <h2 class="ask-title" :title="askHeadingFull">{{ askHeading }}</h2>
-          <p v-if="askHeadMeta" class="ask-head-meta">{{ askHeadMeta }}</p>
-          <div
-            v-if="askReq.kind === 'user_choice' && askForkTotal"
-            class="ask-fork-steps"
-            role="progressbar"
-            :aria-valuenow="askForkStep"
-            :aria-valuemin="1"
-            :aria-valuemax="askForkTotal"
-            :aria-label="`第 ${askForkStep}/${askForkTotal} 步`"
-          >
-            <span
-              v-for="n in askForkTotal"
-              :key="n"
-              class="ask-fork-step-dot"
-              :class="{
-                done: n < askForkStep,
-                current: n === askForkStep,
-              }"
-            />
-          </div>
-          <p v-if="askRemainingLabel" class="ask-timeout" :class="{ urgent: askRemainingUrgent }">
-            {{ askRemainingLabel }}
-          </p>
-          <div
-            v-if="askRemainingLabel"
-            class="ask-countdown-bar"
-            :class="{ urgent: askRemainingUrgent }"
-            role="progressbar"
-            :aria-valuenow="askRemainingPct"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            :aria-label="askRemainingLabel"
-          >
-            <div class="ask-countdown-bar-fill" :style="{ width: `${askRemainingPct}%` }" />
-          </div>
-        </header>
-        <div class="ask-body">
-          <p v-if="askQuestionBody" class="ask-question-body" :title="askQuestionBody">
-            {{ askQuestionBody }}
-          </p>
-          <ul
-            v-if="askPriorAnswers.length"
-            class="ask-prior"
-            aria-label="本链已选"
-          >
-            <li v-for="(p, i) in askPriorAnswers" :key="i">
-              <span class="ask-prior-q" :title="p.question">{{
-                ellipsizeMiddle(p.question, 36)
-              }}</span>
-              <span class="ask-prior-a" :title="p.answer">{{
-                ellipsizeMiddle(p.answer, 36)
-              }}</span>
-            </li>
-          </ul>
-          <div v-if="askDownloadDetail" class="ask-dl-detail">
-            <div class="ask-dl-row">
-              <span class="ask-dl-k">文件</span>
-              <span class="ask-dl-v" :title="askDownloadDetail.filename">{{
-                ellipsizeMiddle(askDownloadDetail.filename, 42)
-              }}</span>
-            </div>
-            <div class="ask-dl-row">
-              <span class="ask-dl-k">保存到</span>
-              <span class="ask-dl-v" :title="askDownloadDetail.relPath">{{
-                ellipsizeMiddle(askDownloadDetail.relPath, 48)
-              }}</span>
-            </div>
-            <div class="ask-dl-row">
-              <span class="ask-dl-k">来源</span>
-              <span class="ask-dl-v" :title="askDownloadDetail.url">{{
-                ellipsizeUrl(askDownloadDetail.url, 52)
-              }}</span>
-            </div>
-            <div v-if="askDownloadDetail.sizeLabel" class="ask-dl-row">
-              <span class="ask-dl-k">大小</span>
-              <span class="ask-dl-v">{{ askDownloadDetail.sizeLabel }}</span>
-            </div>
-          </div>
-          <div v-else-if="askReq.evidence?.url" class="ask-evidence">
-            <div class="ask-evidence-label">当前页面</div>
-            <div
-              class="ask-evidence-title"
-              :title="askReq.evidence.title || askReq.evidence.url"
-            >
-              {{ ellipsizeMiddle(askReq.evidence.title || askReq.evidence.url, 40) }}
-            </div>
-            <div class="ask-evidence-url" :title="askReq.evidence.url">
-              {{ ellipsizeUrl(askReq.evidence.url, 56) }}
-            </div>
-          </div>
-          <div class="ask-options">
-            <button
-              v-for="opt in askOptionItems"
-              :key="opt.label"
-              type="button"
-              class="ask-opt"
-              :class="{
-                primary: askReq.kind === 'continue_rounds' && opt.label.startsWith('再继续'),
-                recommended: opt.recommended,
-                danger: askReq.kind === 'download_confirm' && opt.label === '拒绝',
-              }"
-              @click="respondAskOption(opt.label)"
-            >
-              <span class="ask-opt-main">
-                <span class="ask-opt-label">{{ opt.label }}</span>
-                <span v-if="opt.recommended" class="ask-opt-badge">推荐</span>
-              </span>
-              <span v-if="opt.hint" class="ask-opt-hint">{{ opt.hint }}</span>
-            </button>
-            <label v-if="askReq.allowCustom" class="ask-opt ask-opt-custom">
-              <span class="ask-opt-custom-tag">自定义</span>
-              <input
-                v-model="askCustom"
-                class="ask-opt-custom-input"
-                type="text"
-                placeholder="输入你的决定…"
-                @keydown.enter.prevent="respondAskCustom"
-              />
-              <button
-                type="button"
-                class="ask-opt-custom-submit"
-                :disabled="!askCustom.trim()"
-                @click.prevent="respondAskCustom"
-              >
-                提交
-              </button>
-            </label>
-          </div>
-          <div v-if="askReq.kind !== 'download_confirm'" class="ask-footer">
-            <button type="button" class="ask-shelve" @click="shelveAsk">
-              搁置
-            </button>
-            <button
-              v-if="askReq.kind === 'user_choice'"
-              type="button"
-              class="ask-deny"
-              @click="respondAskDeny"
-            >
-              拒绝回答
-            </button>
-          </div>
-        </div>
-      </div>
-    </v-dialog>
 
     <v-dialog v-model="deleteDialog" max-width="440" persistent>
       <v-card>
@@ -2028,7 +1821,13 @@ import type {
   PermissionPreset,
   PermissionRequest,
 } from '@shared/types'
-import { detectPermissionPreset, modesForPreset, type AiProviderConfig, type AppConfig } from '@shared/config'
+import {
+  detectPermissionPreset,
+  FORK_ASK_TIMEOUT_DEFAULT_MS,
+  modesForPreset,
+  type AiProviderConfig,
+  type AppConfig,
+} from '@shared/config'
 import {
   followupKey,
   normalizeFollowupList,
@@ -2047,6 +1846,8 @@ import BrowserDownloadsMenu from '@/components/BrowserDownloadsMenu.vue'
 import WorkspaceFilesPanel from '@/components/sidebar/WorkspaceFilesPanel.vue'
 import BrowserResourcesPanel from '@/components/sidebar/BrowserResourcesPanel.vue'
 import SidebarContextMenu from '@/components/sidebar/SidebarContextMenu.vue'
+import InChatAskCard from '@/components/chat/InChatAskCard.vue'
+import InChatPermCard from '@/components/chat/InChatPermCard.vue'
 import { useMobileLayout } from '@/composables/useMobileLayout'
 import {
   extractImagePathFromToolResult,
@@ -2178,8 +1979,9 @@ const stickToBottom = ref(true)
 const showJumpBottom = ref(false)
 const toolMediaSrc = ref<Record<string, string>>({})
 const lightbox = ref<{ src: string; alt: string }>({ src: '', alt: '' })
-const permDialog = ref(false)
 const permReq = ref<PermissionRequest | null>(null)
+const permBusy = ref(false)
+const askBusy = ref(false)
 const permCapabilityLabel = computed(
   () => PERM_LABELS[permReq.value?.capability || ''] || permReq.value?.capability || '权限确认',
 )
@@ -2410,9 +2212,7 @@ const chatSearchOpen = ref(false)
 const chatSearchQuery = ref('')
 const chatSearchInput = ref<HTMLInputElement | null>(null)
 const toast = ref({ show: false, text: '', color: 'error' as string })
-const askDialog = ref(false)
 const askReq = ref<AgentAskRequest | null>(null)
-const askCustom = ref('')
 /** Pending asks keyed by chatId — kept when shelved or when ask arrives for a background chat. */
 const pendingAsks = ref<Record<string, AgentAskRequest>>({})
 /** Absolute expiry time (ms) for each pending ask id */
@@ -2420,152 +2220,6 @@ const askExpiresAtById = ref<Record<string, number>>({})
 /** Ask ids the user explicitly shelved — don't auto-reopen on selectChat */
 const userShelvedAskIds = ref<Set<string>>(new Set())
 const phaseByChat = ref<Record<string, { phase: AgentPhase; detail: string }>>({})
-
-const askOptionItems = computed(() => {
-  const req = askReq.value
-  if (!req) return []
-  if (req.optionItems?.length) return req.optionItems
-  return (req.options || []).map((label) => ({ label }))
-})
-
-/** One meta line only: kind · chat — no step/rounds stacked here. */
-const askEyebrow = computed(() => {
-  const req = askReq.value
-  if (!req) return ''
-  const kind =
-    req.kind === 'continue_rounds'
-      ? '推理轮数'
-      : req.kind === 'download_confirm'
-        ? '文件下载'
-        : '需要选择'
-  const chat = askChatTitle.value.trim()
-  if (req.parentChatId && req.subChatTitle) {
-    return chat ? `${kind} · 子任务「${req.subChatTitle}」` : `${kind} · 子任务`
-  }
-  return chat ? `${kind} · ${chat}` : kind
-})
-
-const askHeadingFull = computed(() => {
-  const req = askReq.value
-  if (!req) return ''
-  if (req.kind === 'download_confirm') {
-    return String(req.question || '是否保存到工作区？').trim()
-  }
-  if (req.kind === 'user_choice') {
-    const forkTitle = req.meta?.forkTitle?.trim()
-    if (forkTitle) return forkTitle
-  }
-  return String(req.question || '').trim()
-})
-
-/** First line only; length handled by CSS line-clamp. */
-const askHeading = computed(() => {
-  const full = askHeadingFull.value
-  if (!full) return ''
-  return full.split(/\n/)[0]?.trim() || full
-})
-
-/** Secondary head meta (rounds etc.) — never duplicates eyebrow or the h2. */
-const askHeadMeta = computed(() => {
-  const req = askReq.value
-  if (!req || req.kind !== 'continue_rounds') return ''
-  const used = req.meta?.roundsUsed
-  if (!used) return ''
-  const extra = req.meta?.continueBy
-  return extra ? `已用 ${used} 轮 · 本次建议再加 ${extra}` : `已用 ${used} 轮`
-})
-
-/** Question body when h2 is forkTitle / first line only — avoid duplicating the title. */
-const askQuestionBody = computed(() => {
-  const req = askReq.value
-  if (!req) return ''
-  const q = String(req.question || '').trim()
-  if (!q) return ''
-  if (req.kind === 'download_confirm') return ''
-  if (req.kind === 'user_choice') {
-    const forkTitle = req.meta?.forkTitle?.trim()
-    if (forkTitle) {
-      if (q === forkTitle) return ''
-      // Drop a leading line identical to the fork title.
-      const lines = q.split(/\n/).map((s) => s.trim()).filter(Boolean)
-      if (lines[0] === forkTitle) return lines.slice(1).join('\n')
-      return q
-    }
-  }
-  const lines = q.split(/\n/).map((s) => s.trim()).filter(Boolean)
-  if (lines.length <= 1) return ''
-  return lines.slice(1).join('\n')
-})
-
-const permEyebrow = computed(() => {
-  const bits = ['需要授权']
-  const chat = String(permChatTitle.value || '').trim()
-  if (chat) bits.push(chat)
-  return bits.join(' · ')
-})
-
-const askDownloadDetail = computed(() => {
-  const req = askReq.value
-  if (!req || req.kind !== 'download_confirm') return null
-  const filename = String(req.meta?.downloadFilename || req.evidence?.title || '').trim()
-  const relPath = String(req.meta?.downloadRelPath || '').trim()
-  const url = String(req.meta?.downloadUrl || req.evidence?.url || '').trim()
-  if (!filename && !relPath && !url) return null
-  return {
-    filename: filename || 'download',
-    relPath: relPath || 'downloads/',
-    url: url || '',
-    sizeLabel: String(req.meta?.downloadSizeLabel || '').trim() || undefined,
-  }
-})
-
-function ellipsizeMiddle(raw: string, max = 40): string {
-  const s = String(raw || '').trim()
-  if (!s || s.length <= max) return s
-  const keep = Math.max(6, Math.floor((max - 1) / 2))
-  return `${s.slice(0, keep)}…${s.slice(-keep)}`
-}
-
-function ellipsizeUrl(raw: string, max = 52): string {
-  const s = String(raw || '').trim()
-  if (!s || s.length <= max) return s
-  try {
-    const u = new URL(s)
-    const host = u.host.replace(/^www\./i, '')
-    const path = `${u.pathname || ''}${u.search || ''}`
-    const compact = path && path !== '/' ? `${host}${path}` : host
-    if (compact.length <= max) return compact
-    const hostKeep = Math.min(host.length, Math.floor(max * 0.4))
-    const rest = max - hostKeep - 1
-    return `${host.slice(0, hostKeep)}…${compact.slice(-rest)}`
-  } catch {
-    return ellipsizeMiddle(s, max)
-  }
-}
-
-const askChatTitle = computed(() => {
-  if (!askReq.value) return ''
-  const c = chats.value.find((x) => x.id === askReq.value!.chatId)
-  if (c?.kind === 'sub') {
-    return c.title || askReq.value.subChatTitle || askReq.value.chatId
-  }
-  return c?.title || askReq.value.subChatTitle || askReq.value.chatId
-})
-
-const askForkStep = computed(() => {
-  const s = askReq.value?.meta?.step
-  return typeof s === 'number' && s >= 1 ? Math.floor(s) : 0
-})
-
-const askForkTotal = computed(() => {
-  const t = askReq.value?.meta?.totalSteps
-  return typeof t === 'number' && t >= 1 ? Math.floor(t) : 0
-})
-
-const askPriorAnswers = computed(() => {
-  const list = askReq.value?.meta?.priorAnswers
-  return Array.isArray(list) ? list : []
-})
 
 function formatAskRemaining(expiresAt: number | undefined): string {
   if (!expiresAt) return ''
@@ -2591,24 +2245,6 @@ function askRemainingPctOf(id: string | undefined, timeoutMs: number | undefined
   return Math.round(Math.min(1, Math.max(0, (expires - Date.now()) / total)) * 1000) / 10
 }
 
-const askRemainingLabel = computed(() => {
-  const id = askReq.value?.id
-  if (!id) return ''
-  return formatAskRemaining(askExpiresAtById.value[id])
-})
-
-const askRemainingUrgent = computed(() => {
-  const id = askReq.value?.id
-  if (!id) return false
-  const expires = askExpiresAtById.value[id]
-  if (!expires) return false
-  void nowTick.value
-  return expires - Date.now() <= 15000
-})
-
-const askRemainingPct = computed(() =>
-  askRemainingPctOf(askReq.value?.id, askReq.value?.timeoutMs),
-)
 
 const inlineAskRemainingLabel = computed(() => {
   const req = activePendingAsk.value
@@ -2632,7 +2268,7 @@ const inlineAskRemainingPct = computed(() => {
 })
 
 function trackAskExpiry(req: AgentAskRequest) {
-  const ms = typeof req.timeoutMs === 'number' ? req.timeoutMs : 60000
+  const ms = typeof req.timeoutMs === 'number' ? req.timeoutMs : FORK_ASK_TIMEOUT_DEFAULT_MS
   if (!(ms > 0)) {
     clearAskExpiry(req.id)
     return
@@ -2657,29 +2293,32 @@ function clearAskExpiry(id: string) {
 
 function pendingAskBadge(chatId: string): string {
   const req = pendingAsks.value[chatId]
-  if (!req) return '待决策'
+  if (!req) return '询问/决策'
   const step = req.meta?.step
   const total = req.meta?.totalSteps
   if (typeof step === 'number' && step >= 1 && typeof total === 'number' && total >= 1) {
-    return `待决策 ${Math.floor(step)}/${Math.floor(total)}`
+    return `询问/决策 ${Math.floor(step)}/${Math.floor(total)}`
   }
   if (req.kind === 'continue_rounds') return '待决策 · 轮数'
   if (req.kind === 'download_confirm') return '待决策 · 被动下载'
-  return '待决策'
+  return '询问/决策'
 }
 
 const activePendingAsk = computed(() => {
   const id = activeId.value
   if (!id) return null
-  return pendingAsks.value[id] || null
+  return pendingAsks.value[id] || pendingAskForSidebar(id)
 })
 
-/** Show in-chat card / dock when there is a pending ask and the dialog is not already open for it. */
-const showInlinePendingAsk = computed(() => {
-  const req = activePendingAsk.value
-  if (!req) return false
-  if (askDialog.value && askReq.value?.id === req.id) return false
-  return true
+const showInlinePendingAsk = computed(() => Boolean(activePendingAsk.value))
+
+const showInlinePerm = computed(() => {
+  const req = permReq.value
+  const id = activeId.value
+  if (!req || !id) return false
+  if (req.chatId === id) return true
+  const chat = chats.value.find((c) => c.id === req.chatId)
+  return chat?.kind === 'sub' && chat.parentChatId === id
 })
 
 /** Compact progress for inline card / dock — step only; title lives in the question line. */
@@ -2697,7 +2336,7 @@ const inlineAskProgress = computed(() => {
   return ''
 })
 
-const inlineAskCardEl = ref<HTMLElement | null>(null)
+const inlineDecisionEl = ref<HTMLElement | null>(null)
 
 const permChatTitle = computed(() => {
   if (!permReq.value) return ''
@@ -4062,10 +3701,10 @@ function chatListStatus(chatId: string): ChatListStatus | null {
       icon: 'circle-question',
       tone: 'ask',
       title: fromSub
-        ? `子任务待决策${badge ? `：${badge}` : ''}`
+        ? `子任务${badge ? `：${badge}` : '询问/决策'}`
         : badge
-          ? `有待决策：${badge}`
-          : '有待决策，点击打开',
+          ? badge
+          : '询问/决策',
     }
   }
   if (
@@ -4181,6 +3820,11 @@ function onChatStatusClick(chatId: string) {
   if (!st) return
   if (st.tone === 'ask') {
     void openPendingAsk(chatId)
+    return
+  }
+  if (st.tone === 'perm') {
+    if (activeId.value !== chatId) void selectChat(chatId)
+    else scrollToInlineDecision()
     return
   }
   if (st.tone === 'running' && !runningChats.value[chatId]) {
@@ -4635,9 +4279,18 @@ function onDrop(e: DragEvent) {
   }
 }
 
+function hydratePersistedAsks(list: ChatSession[]) {
+  for (const c of list) {
+    if (c.pendingAsk && c.pendingAsk.timeoutMs <= 0 && c.pendingAsk.kind === 'user_choice') {
+      rememberPendingAsk(c.pendingAsk)
+    }
+  }
+}
+
 async function refreshList() {
   if (!window.navora) return
   chats.value = await window.navora.chats.list()
+  hydratePersistedAsks(chats.value)
   windowCounts.value = await window.navora.browser.windowCounts()
   if (!activeId.value && chats.value.length) {
     const firstMain = chats.value.find((c) => c.kind !== 'sub') || chats.value[0]
@@ -4651,13 +4304,6 @@ async function selectChat(id: string) {
   if (prev && prev !== id) {
     await flushDraftSave(prev)
   }
-  // Leaving a chat with an open ask — keep pending, don't mark as user-shelved.
-  if (askReq.value && askReq.value.chatId !== id) {
-    rememberPendingAsk(askReq.value)
-    askDialog.value = false
-    askReq.value = null
-    askCustom.value = ''
-  }
   if (prev && prev !== id) revokeMediaUrlsForChat(prev)
   toolMediaSrc.value = {}
   expandedRuns.value = {}
@@ -4665,6 +4311,13 @@ async function selectChat(id: string) {
   closeReadPagesPanel()
   activeId.value = id
   active.value = await window.navora.chats.get(id)
+  if (
+    active.value?.pendingAsk &&
+    active.value.pendingAsk.timeoutMs <= 0 &&
+    active.value.pendingAsk.kind === 'user_choice'
+  ) {
+    rememberPendingAsk(active.value.pendingAsk)
+  }
   tree.value = await window.navora.browser.tree(id)
   const running = await window.navora.agent.isRunning(id)
   setRunning(id, running)
@@ -4702,10 +4355,6 @@ async function selectChat(id: string) {
   followupSuggestions.value = followupsByChat.value[id] || []
   await scrollMessages(true)
   focusComposer()
-  const pending = pendingAsks.value[id]
-  if (pending && !userShelvedAskIds.value.has(pending.id)) {
-    openAskDialog(pending)
-  }
   closeMobileSidebar()
 }
 
@@ -5307,75 +4956,68 @@ async function stopAgent() {
 
 async function respondPerm(decision: PermissionDecision) {
   if (!window.navora || !permReq.value) return
-  await window.navora.permission.respond(permReq.value.id, decision)
-  permDialog.value = false
-  permReq.value = null
-  clearPermExpiry()
+  permBusy.value = true
+  try {
+    await window.navora.permission.respond(permReq.value.id, decision)
+    permReq.value = null
+    clearPermExpiry()
+  } finally {
+    permBusy.value = false
+  }
 }
 
 async function respondAskOption(opt: string) {
-  if (!window.navora || !askReq.value) return
-  const id = askReq.value.id
-  const chatId = askReq.value.chatId
+  const req = activePendingAsk.value
+  if (!window.navora || !req) return
+  const id = req.id
+  const chatId = req.chatId
+  askBusy.value = true
   clearPendingAsk(chatId, id)
-  askDialog.value = false
-  askReq.value = null
-  askCustom.value = ''
-  const ok = await window.navora.agent.respondAsk(id, { answer: opt, source: 'option' })
-  if (!ok) showToast('选择未送达（可能已超时）', 'warning')
+  try {
+    const ok = await window.navora.agent.respondAsk(id, { answer: opt, source: 'option' })
+    if (!ok) showToast('选择未送达（可能已超时）', 'warning')
+  } finally {
+    askBusy.value = false
+  }
 }
 
-async function respondAskCustom() {
-  if (!window.navora || !askReq.value) return
-  const text = askCustom.value.trim()
-  if (!text) return
-  const id = askReq.value.id
-  const chatId = askReq.value.chatId
+async function respondAskCustomText(text: string) {
+  const req = activePendingAsk.value
+  if (!window.navora || !req) return
+  const trimmed = String(text || '').trim()
+  if (!trimmed) return
+  const id = req.id
+  const chatId = req.chatId
+  askBusy.value = true
   clearPendingAsk(chatId, id)
-  askDialog.value = false
-  askReq.value = null
-  askCustom.value = ''
-  const ok = await window.navora.agent.respondAsk(id, { answer: text, source: 'custom' })
-  if (!ok) showToast('选择未送达（可能已超时）', 'warning')
+  try {
+    const ok = await window.navora.agent.respondAsk(id, { answer: trimmed, source: 'custom' })
+    if (!ok) showToast('选择未送达（可能已超时）', 'warning')
+  } finally {
+    askBusy.value = false
+  }
 }
 
 async function respondAskDeny() {
-  if (!window.navora || !askReq.value) return
-  const id = askReq.value.id
-  const chatId = askReq.value.chatId
+  const req = activePendingAsk.value
+  if (!window.navora || !req) return
+  const id = req.id
+  const chatId = req.chatId
+  askBusy.value = true
   clearPendingAsk(chatId, id)
-  askDialog.value = false
-  askReq.value = null
-  askCustom.value = ''
-  const ok = await window.navora.agent.respondAsk(id, { answer: '', source: 'deny' })
-  if (!ok) showToast('操作未送达（可能已超时）', 'warning')
+  try {
+    const ok = await window.navora.agent.respondAsk(id, { answer: '', source: 'deny' })
+    if (!ok) showToast('操作未送达（可能已超时）', 'warning')
+  } finally {
+    askBusy.value = false
+  }
 }
 
-/** Close dialog but keep the ask pending for later (sidebar + in-chat card). */
-function shelveAsk() {
-  const req = askReq.value
-  if (req) {
-    rememberPendingAsk(req)
-    const shelved = new Set(userShelvedAskIds.value)
-    shelved.add(req.id)
-    userShelvedAskIds.value = shelved
-  }
-  askDialog.value = false
-  askReq.value = null
-  askCustom.value = ''
+function scrollToInlineDecision() {
   void nextTick(async () => {
     await scrollMessages(true)
-    inlineAskCardEl.value?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    inlineDecisionEl.value?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   })
-}
-
-function openActivePendingAsk() {
-  const req = activePendingAsk.value
-  if (!req) return
-  const shelved = new Set(userShelvedAskIds.value)
-  shelved.delete(req.id)
-  userShelvedAskIds.value = shelved
-  openAskDialog(req)
 }
 
 function rememberPendingAsk(req: AgentAskRequest) {
@@ -5407,9 +5049,7 @@ function openAskDialog(req: AgentAskRequest) {
   trackAskExpiry(req)
   rememberPendingAsk(req)
   askReq.value = req
-  askCustom.value = ''
-  askDialog.value = true
-  if (req.chatId === activeId.value) {
+  if (req.chatId === activeId.value || req.parentChatId === activeId.value) {
     phase.value = 'awaiting_user'
     phaseDetail.value = req.question.slice(0, 80)
   }
@@ -5417,24 +5057,19 @@ function openAskDialog(req: AgentAskRequest) {
     ...phaseByChat.value,
     [req.chatId]: { phase: 'awaiting_user', detail: req.question.slice(0, 80) },
   }
+  scrollToInlineDecision()
 }
 
 async function openPendingAsk(chatId: string) {
   const req = pendingAskForSidebar(chatId)
   if (!req) return
-  const shelved = new Set(userShelvedAskIds.value)
-  shelved.delete(req.id)
-  userShelvedAskIds.value = shelved
-  // Stay on the sidebar chat (often the parent); answering is keyed by ask id.
   if (activeId.value !== chatId) await selectChat(chatId)
-  openAskDialog(req)
+  scrollToInlineDecision()
 }
 
 function closeAskUi(id?: string) {
   if (id && askReq.value && askReq.value.id !== id) return
-  askDialog.value = false
   askReq.value = null
-  askCustom.value = ''
 }
 
 watch(activeId, async (id) => {
@@ -5719,15 +5354,14 @@ onMounted(async () => {
   unsubPerm = window.navora.permission.onRequest((req) => {
     permReq.value = req
     trackPermExpiry(req)
-    permDialog.value = true
     if (req.chatId === activeId.value) {
       phase.value = 'awaiting_permission'
       phaseDetail.value = `等待授权：${req.capability}`
+      scrollToInlineDecision()
     }
   })
   unsubPermCancel = window.navora.permission.onCancel((id) => {
     if (permReq.value?.id === id) {
-      permDialog.value = false
       permReq.value = null
       clearPermExpiry()
     }
@@ -5738,7 +5372,6 @@ onMounted(async () => {
       ...phaseByChat.value,
       [req.chatId]: { phase: 'awaiting_user', detail: req.question.slice(0, 80) },
     }
-    // Auto-open when this chat is active, or when viewing the parent of a sub-chat ask.
     if (req.chatId === activeId.value || req.parentChatId === activeId.value) {
       openAskDialog(req)
     }
@@ -5755,9 +5388,8 @@ onMounted(async () => {
   tickTimer = setInterval(() => {
     if (
       agentRunning.value ||
-      askDialog.value ||
       showInlinePendingAsk.value ||
-      permDialog.value
+      showInlinePerm.value
     ) {
       nowTick.value = Date.now()
     }
@@ -7188,6 +6820,13 @@ onUnmounted(() => {
   box-sizing: border-box;
   animation: fade-in 0.2s ease;
 }
+.inchat-decision {
+  width: min(720px, 100%);
+  max-width: 100%;
+  min-width: 0;
+  align-self: center;
+  box-sizing: border-box;
+}
 .pending-ask-card {
   display: block;
   width: min(720px, 100%);
@@ -7271,7 +6910,9 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  width: min(720px, 100%);
+  max-width: 100%;
+  box-sizing: border-box;
   margin: 0 0 8px;
   padding: 6px 8px 6px 10px;
   border-radius: 10px;
@@ -9781,7 +9422,8 @@ onUnmounted(() => {
 .shell.mobile-layout .thinking-row,
 .shell.mobile-layout .followup-block,
 .shell.mobile-layout .retry-bar,
-.shell.mobile-layout .pending-ask-card {
+.shell.mobile-layout .pending-ask-card,
+.shell.mobile-layout .inchat-decision {
   width: 100%;
   max-width: 100%;
 }

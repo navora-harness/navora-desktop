@@ -13,7 +13,7 @@
 
 ## 0. 一句话架构
 
-**主进程是系统真相源**（Chat / Config / Agent / Browser / Files）；**渲染进程是 UI 与事件消费者**；**preload 定义契约**；**RemoteServer 把同一套 RPC 暴露到局域网**。Agent 能力由 `shared/agent-tools.ts` 声明，经 `agent-runtime` + `browser-tools` 执行，由 `PermissionGate` 与用户分叉 / 技能审核约束。
+**主进程是系统真相源**（Chat / Config / Agent / Browser / Files）；**渲染进程是 UI 与事件消费者**；**preload 定义契约**；**RemoteServer 把同一套 RPC 暴露到局域网**。Agent 能力由 `shared/agent-tools.ts` 声明，经 `agent-runtime` + `browser-tools` 执行，由 `PermissionGate` 与用户询问/决策 / 技能审核约束。
 
 ```
 Renderer (Vue) ──preload/WS──► Main IPC/RPC
@@ -95,7 +95,7 @@ Renderer (Vue) ──preload/WS──► Main IPC/RPC
 
 | 文件 | 细化功能 |
 |------|----------|
-| `modules/agent-runtime.ts` | 每 Chat 一个 `AbortController`；构建 messages + tools；流式 LLM；tool_calls 调度；`agent_ask_user` 分叉记忆；技能审核；下载确认询问；轮次上限 / 停止 |
+| `modules/agent-runtime.ts` | 每 Chat 一个 `AbortController`；构建 messages + tools；流式 LLM；tool_calls 调度；`agent_ask_user` 询问/决策（含无超时时落盘）；技能审核；下载确认询问；轮次上限 / 停止 |
 | `modules/browser-tools.ts` | `executeAgentTool`：全部工具实现的大开关（浏览器 / 文件 / shell / 设置 / 技能等） |
 | `modules/llm/openai-compatible.ts` | OpenAI 兼容流式 completion、超时解析 |
 | `modules/permission-gate.ts` | 五档：`deny` / `ask` / `ask_chat` / `allow_notify` / `allow`；进程内 `alwaysAllow` / `alwaysDeny`；按 Chat 的 `ask_chat` 记忆 |
@@ -152,7 +152,7 @@ Renderer (Vue) ──preload/WS──► Main IPC/RPC
 |------|----------|
 | `shared/agent-tools.ts` | `AGENT_TOOLS` 全量 schema + `SYSTEM_PROMPT` / `buildSystemPrompt` |
 | `shared/settings-tools.ts` | 设置类工具辅助 |
-| `shared/config.ts` | `AppConfig`、默认值、fork_decision、远程默认哈希 |
+| `shared/config.ts` | `AppConfig`、默认值、询问/决策（`fork_decision`）、远程默认哈希 |
 | `shared/types.ts` | Chat / Agent 事件 / 权限 / 浏览器树等类型 |
 | `shared/skills.ts` | 技能 frontmatter / 校验 |
 | `shared/plugins.ts` | 插件清单 / 导入预览 / index 外链字段；`PLUGIN_ZIP_MAX_BYTES`（200MB） |
@@ -177,7 +177,7 @@ Renderer (Vue) ──preload/WS──► Main IPC/RPC
 
 | 工具 | 功能 |
 |------|------|
-| `agent_ask_user` | 路径分叉询问（选项 / 自定义 / 证据 / 超时） |
+| `agent_ask_user` | 询问/决策（选项 / 自定义 / 证据 / 超时；无超时时写入对话 JSON，拒绝回答即清除） |
 | `agent_spawn_subchat` | 异步并行子对话；子对话看不到父消息，须把 URL/sitekey 等写入 `context`（宿主会尝试从父对话近期消息补全） |
 | `agent_await_subchats` | 等待一个或多个子对话结束并收集结果 |
 | `agent_subchat_status` | 查询子对话状态 |
@@ -377,7 +377,7 @@ UI send → navora:agent.run
 |----|------|
 | 问题 | 进程内全局 Set；跨 Chat 串台；不落盘则重启丢失（语义不清）。 |
 | 方案 | **按 Chat 作用域**：将 `alwaysAllow`/`alwaysDeny` 改为 `Map<chatId, Set<capability>>`（与 `chatAllow` 一致）；UI「始终允许」文案改为「本会话始终允许」。**可选持久化**：写入 `chat.permissions.modes` 为 `allow`/`deny`，或单独 `sticky` 字段。进程级「全局始终」仅保留给设置页显式「全局权限预设」。 |
-| 落点 | `permission-gate.ts`、权限弹窗响应处理（`main.ts`）、设置页文案 |
+| 落点 | `permission-gate.ts`、对话内授权卡片（`InChatPermCard` / `main.ts`）、设置页文案 |
 | 验收 | Chat A 点「始终允许」不影响 Chat B；重启后行为与文档一致 |
 
 #### R7 — 主窗 `sandbox: false`

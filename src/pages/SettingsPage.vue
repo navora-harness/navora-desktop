@@ -1270,17 +1270,17 @@
             </div>
           </section>
 
-          <!-- 分叉决策 -->
+          <!-- 询问/决策 -->
           <section v-show="tab === 'fork'" class="section">
             <header class="section-head">
-              <h2>分叉决策</h2>
-              <p>任务路径不明时询问你如何继续</p>
+              <h2>询问/决策</h2>
+              <p>任务路径不明或需确认时，在对话里询问你如何继续</p>
             </header>
             <div class="card">
               <div class="switch-row">
                 <div>
-                  <div class="switch-title">启用分叉决策</div>
-                  <div class="switch-hint">路径不明时询问你如何继续</div>
+                  <div class="switch-title">启用询问/决策</div>
+                  <div class="switch-hint">路径不明或需确认时在对话中给出选项</div>
                 </div>
                 <v-switch
                   v-model="cfg.fork_decision.enabled"
@@ -1309,7 +1309,7 @@
               <div class="field-row mt-2" :class="{ muted: askTimeoutUnlimited }">
                 <div>
                   <div class="switch-title">自定义时间</div>
-                  <div class="switch-hint">超时未选将按超时处理；默认 60 秒；需点「应用」后生效</div>
+                  <div class="switch-hint">超时未选将按超时处理；关闭「不限时」后默认 2 分钟；需点「应用」后生效</div>
                 </div>
                 <v-text-field
                   v-model.number="askTimeoutSec"
@@ -1407,7 +1407,7 @@
               <div class="switch-row">
                 <div>
                   <div class="switch-title">低风险内联选择</div>
-                  <div class="switch-hint">低风险分叉以消息流呈现</div>
+                  <div class="switch-hint">低风险询问以消息流呈现</div>
                 </div>
                 <v-switch
                   :model-value="false"
@@ -1535,6 +1535,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   createDefaultForkDecision,
+  FORK_ASK_TIMEOUT_DEFAULT_MS,
+  FORK_ASK_TIMEOUT_LIMITED_MS,
   createDefaultSubchat,
   modesForPreset,
   detectPermissionPreset,
@@ -1641,7 +1643,7 @@ const subchatMaxMax = SUBCHAT_MAX_PARALLEL_MAX
 /** 0 = wait forever; otherwise seconds UI for fork_decision.ask_timeout_ms. */
 const askTimeoutUnlimited = computed({
   get() {
-    return (cfg.value?.fork_decision?.ask_timeout_ms ?? 60000) <= 0
+    return (cfg.value?.fork_decision?.ask_timeout_ms ?? FORK_ASK_TIMEOUT_DEFAULT_MS) <= 0
   },
   set(on: boolean) {
     if (!cfg.value) return
@@ -1652,14 +1654,15 @@ const askTimeoutUnlimited = computed({
       return
     }
     if (fork.ask_timeout_ms > 0) return
-    fork.ask_timeout_ms = 60000
+    fork.ask_timeout_ms = FORK_ASK_TIMEOUT_LIMITED_MS
   },
 })
 
 const askTimeoutSec = computed({
   get() {
     const ms = cfg.value?.fork_decision?.ask_timeout_ms
-    const n = typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms : 60000
+    const n =
+      typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms : FORK_ASK_TIMEOUT_LIMITED_MS
     return Math.round(n / 1000)
   },
   set(sec: number) {
@@ -1667,7 +1670,9 @@ const askTimeoutSec = computed({
     const fork = ensureForkDecision()
     if (fork.ask_timeout_ms <= 0) return
     const v = typeof sec === 'number' ? sec : Number(sec)
-    const clamped = Number.isFinite(v) ? Math.min(600, Math.max(5, Math.floor(v))) : 60
+    const clamped = Number.isFinite(v)
+      ? Math.min(600, Math.max(5, Math.floor(v)))
+      : Math.round(FORK_ASK_TIMEOUT_LIMITED_MS / 1000)
     const nextMs = clamped * 1000
     if (fork.ask_timeout_ms === nextMs) return
     fork.ask_timeout_ms = nextMs
@@ -1738,7 +1743,7 @@ const navItems = [
   { value: 'plugins', title: '插件', desc: '可选工具包' },
   { value: 'remote', title: '远程访问', desc: '全功能控制' },
   { value: 'permissions', title: '权限', desc: 'Agent 能力' },
-  { value: 'fork', title: '分叉决策', desc: '路径选择' },
+  { value: 'fork', title: '询问/决策', desc: '选项确认' },
   { value: 'subchat', title: '子对话', desc: '并行子任务' },
   { value: 'about', title: '关于', desc: '版本信息' },
 ]

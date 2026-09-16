@@ -124,6 +124,11 @@ export type ChatSession = {
   spawnPurpose?: string
   /** Lifecycle of an Agent-spawned sub-chat. */
   spawnStatus?: SubChatSpawnStatus
+  /**
+   * Unlimited (timeoutMs === 0) 询问/决策 parked across restarts.
+   * Timed asks are not stored. Cleared on answer, deny, stop, or delete.
+   */
+  pendingAsk?: AgentAskRequest
 }
 
 export type BrowserTreeWindow = {

@@ -7,7 +7,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'agent_ask_user',
       description:
-        'Path-fork UI: ask the user ONE blocking decision when the next action is ambiguous or high-impact. Use instead of writing A/B/C/D in chat. Do NOT use to re-confirm an intent the user already stated (e.g. they said download → just download). One question per call; for multi-step wizards call again after each answer with the same forkGroup/forkTitle and increasing step. Options: 2–6 concrete action labels (not "选项A"); optional hint + recommended. timeoutMs overrides Settings default.',
+        'Ask/decision UI: ask the user ONE blocking decision when the next action is ambiguous or high-impact. Use instead of writing A/B/C/D in chat. Do NOT use to re-confirm an intent the user already stated (e.g. they said download → just download). One question per call; for multi-step wizards call again after each answer with the same forkGroup/forkTitle and increasing step. Options: 2–6 concrete action labels (not "选项A"); optional hint + recommended. timeoutMs overrides Settings default unless Settings is unlimited.',
       parameters: {
         type: 'object',
         properties: {
@@ -56,7 +56,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
           timeoutMs: {
             type: 'number',
             description:
-              'Wait for the user (ms). Omit = Settings → 分叉决策 default (usually 60000). 0 = wait forever. Positive values clamped to 5000–600000.',
+              'Wait for the user (ms). Omit = Settings → 询问/决策 default (unlimited / 0). Ignored when Settings is unlimited. 0 = wait forever. Positive values clamped to 5000–600000.',
           },
           step: {
             type: 'number',
@@ -1945,9 +1945,9 @@ const SUBCHAT_RULE_ENABLED = (maxParallel: number) =>
 
 const SUBCHAT_RULE_DISABLED = `11b. 子对话已关：勿调用 agent_spawn_subchat / await / status；在本对话串行完成子任务。`
 
-const FORK_RULE_ENABLED = `12. 分叉（agent_ask_user）：仅当路径互斥且猜错成本高、缺关键参数、或需确认不可逆操作时调用。用户意图已明确（如下载某文件）勿再确认。被动下载由系统确认框/权限处理，禁止再用本工具重复问是否保存。每轮一问；选项 2～6 个具体动作（禁「选项A」）；级联固定 forkGroup/forkTitle，step 递增。缺密钥用 allowCustom。`
+const FORK_RULE_ENABLED = `12. 询问/决策（agent_ask_user）：仅当路径互斥且猜错成本高、缺关键参数、或需确认不可逆操作时调用。用户意图已明确（如下载某文件）勿再确认。被动下载由系统确认框/权限处理，禁止再用本工具重复问是否保存。每轮一问；选项 2～6 个具体动作（禁「选项A」）；级联固定 forkGroup/forkTitle，step 递增。缺密钥用 allowCustom。`
 
-const FORK_RULE_DISABLED = `12. 分叉已关：确需选择时在正文列 2～6 个具体选项让用户下条回复；意图已明勿反复确认。`
+const FORK_RULE_DISABLED = `12. 询问/决策已关：确需选择时在正文列 2～6 个具体选项让用户下条回复；意图已明勿反复确认。`
 
 const SYSTEM_PROMPT_TAIL = `13. 最终用中文短答：先结论，少过程；勿长篇复述工具步骤。信息已够则立即作答并停止工具。
 14. 已阅读网页由界面展示；正文不必再列来源，除非用户要链接。`

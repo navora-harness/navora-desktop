@@ -56,7 +56,7 @@
               <ol class="doc-list">
                 <li>侧边栏新建对话，在输入框描述任务（如打开网页、提取内容、下载文件）</li>
                 <li>Agent 会按需创建浏览器 Session / 窗口，并在需要时请求权限</li>
-                <li>运行中可点停止；需要选择时会出现路径分叉询问</li>
+                <li>运行中可点停止；需要选择时会出现询问/决策卡片</li>
               </ol>
             </div>
             <div class="card mt">
@@ -226,7 +226,7 @@
                 <li><strong>基本</strong>：托盘、展示、输入上限</li>
                 <li><strong>模型</strong>：服务商、超时、工具轮次</li>
                 <li><strong>浏览器</strong>：UA、超时、URL 白名单</li>
-                <li><strong>工作区 / 技能 / 插件 / 远程 / 权限 / 分叉决策</strong></li>
+                <li><strong>工作区 / 技能 / 插件 / 远程 / 权限 / 询问/决策</strong></li>
               </ul>
               <p class="doc-p muted">开关会即时写入；文本与数字需点「应用」后生效。</p>
             </div>
