@@ -21,6 +21,8 @@
     "start": "electron .",
     "dist": "npm run build && npm run test:browser && electron-builder --win portable",
     "dist:nsis": "npm run build && npm run test:browser && electron-builder --win nsis",
+    "dist:mac": "npm run build && npm run test:browser && electron-builder --mac",
+    "dist:linux": "npm run build && npm run test:browser && electron-builder --linux",
     "dist:all": "npm run build && npm run test:browser && electron-builder --win portable nsis"
   },
   "build": {
@@ -57,6 +59,18 @@
           ]
         }
       ]
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "electron/assets/app-icon.png",
+      "target": ["dmg", "zip"],
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "category": "Utility",
+      "icon": "electron/assets/app-icon.png",
+      "target": ["AppImage", "deb"],
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}"
     },
     "portable": {
       "requestExecutionLevel": "user",

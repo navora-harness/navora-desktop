@@ -4,6 +4,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applyUserDataPath, ensureDir, ensurePortableRoot, isPortableRuntime, PORTABLE_DATA_DIRNAME, resolveDataRoot } from './data-root'
 import { ConfigService } from './modules/config-service'
+import { mainWindowChrome } from './modules/window-chrome'
+import { fetchOpenAiModelsList } from '../shared/openai-models'
 import { ChatStore } from './modules/chat-store'
 import { BrowserRegistry } from './modules/browser-registry'
 import { BrowserNetworkManager } from './modules/browser-network'
@@ -24,7 +26,7 @@ import { NavoraRpcRegistry } from './modules/remote-rpc'
 import { loadWindowState, trackWindowState } from './modules/window-state'
 import type { AppConfig } from '../shared/config'
 import {
-  assertRemoteAccessConfig,
+  assertRemoteAccessChange,
   resolveForkDecision,
   resolvePluginDevMode,
   resolveUserAgent,
@@ -591,11 +593,11 @@ async function createWindow(): Promise<void> {
     ...(typeof winState.x === 'number' && typeof winState.y === 'number'
       ? { x: winState.x, y: winState.y }
       : {}),
-    minWidth: 1100,
-    minHeight: 720,
+    minWidth: 720,
+    minHeight: 540,
     title: 'Navora',
-    frame: false,
-    backgroundColor: '#15202b',
+    ...mainWindowChrome(process.platform),
+    backgroundColor: '#ffffff',
     show: false,
     autoHideMenuBar: true,
     ...(icon ? { icon } : {}),
@@ -644,6 +646,12 @@ async function createWindow(): Promise<void> {
 }
 
 function registerIpc(): void {
+  rpcHandle('navora:models.list', async (_e, providerId: string) => {
+    const provider = config.get().ai.providers.find(p => p.id === providerId)
+    if (!provider) return { ok: false as const, error: 'provider_not_found' }
+    const result = await fetchOpenAiModelsList({ url: provider.base_url, apiKey: secrets.get(provider.api_key_ref), timeoutMs: 20000 })
+    return result.ok ? { ok: true as const, models: result.models } : { ok: false as const, error: result.status === 401 || result.status === 403 ? '请先填写此服务的 API Key 并应用设置' : result.error }
+  })
   rpcHandle('navora:app.info', (): AppInfo => ({
     name: 'Navora',
     version: app.getVersion(),
@@ -703,13 +711,12 @@ function registerIpc(): void {
       ...next,
       remote: { ...prev.remote, ...(next.remote || {}) },
     } as AppConfig
-    assertRemoteAccessConfig(preview.remote)
+    assertRemoteAccessChange(prev.remote, preview.remote)
     const saved = config.update(next)
     // Config is already on disk; remote bind failures must not fail the save.
-    try {
-      await remote.syncFromConfig()
-    } catch (e) {
-      console.warn('[remote] sync after config.save failed', e)
+    if (JSON.stringify(prev.remote) !== JSON.stringify(saved.remote)) {
+      try { await remote.syncFromConfig() }
+      catch (e) { console.warn('[remote] sync after config.save failed', e) }
     }
     if (
       prev.browser.log_datadome_telemetry !== saved.browser.log_datadome_telemetry
@@ -1503,12 +1510,18 @@ function registerIpc(): void {
   )
   rpcHandle(
     'navora:chats.setProvider',
-    (_e: unknown, chatId: string, providerId: string | null, model?: string | null) => {
-      const chat = chats.setProvider(chatId, providerId, model)
+    (_e: unknown, chatId: string, providerId: string | null, model?: string | null, reasoningLevel?: string | null) => {
+      const chat = chats.setProvider(chatId, providerId, model, reasoningLevel)
       if (chat) pushChatChanged({ type: 'upsert', chatId })
       return chat
     },
   )
+  rpcHandle('navora:chats.setExecutionMode', (_e, chatId: string, mode: 'auto' | 'chat' | 'agent') => {
+    if (agent.isRunning(chatId)) throw new Error('chat_running')
+    const chat = chats.setExecutionMode(chatId, mode)
+    if (chat) pushChatChanged({ type: 'upsert', chatId })
+    return chat
+  })
   rpcHandle(
     'navora:chats.append',
     (
@@ -1924,12 +1937,11 @@ if (!gotLock) {
           ...next,
           remote: { ...prev.remote, ...(next.remote || {}) },
         } as AppConfig
-        assertRemoteAccessConfig(preview.remote)
+        assertRemoteAccessChange(prev.remote, preview.remote)
         const saved = config.update(next)
-        try {
-          await remote.syncFromConfig()
-        } catch (e) {
-          console.warn('[remote] sync after agent settings update failed', e)
+        if (JSON.stringify(prev.remote) !== JSON.stringify(saved.remote)) {
+          try { await remote.syncFromConfig() }
+          catch (e) { console.warn('[remote] sync after agent settings update failed', e) }
         }
         if (
           prev.browser.log_datadome_telemetry !== saved.browser.log_datadome_telemetry

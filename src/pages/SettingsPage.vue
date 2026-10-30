@@ -74,7 +74,7 @@
       <div class="panel">
         <div ref="contentEl" class="content">
           <!-- 基本 -->
-          <section v-show="tab === 'basic'" class="section">
+          <section v-if="tab === 'basic'" class="section">
             <header class="section-head">
               <h2>基本</h2>
               <p>窗口、对话与消息展示</p>
@@ -102,8 +102,8 @@
               <h3 class="card-title">对话与标题</h3>
               <div class="switch-row">
                 <div>
-                  <div class="switch-title">回复后显示相关追问</div>
-                  <div class="switch-hint">回复结束后生成推荐追问</div>
+                  <div class="switch-title">回复后显示后续操作建议</div>
+                  <div class="switch-hint">显示任务相关的快捷操作，不增加模型请求</div>
                 </div>
                 <v-switch
                   v-model="cfg.app.show_followup_suggestions"
@@ -204,7 +204,7 @@
           </section>
 
           <!-- 模型 -->
-          <section v-show="tab === 'model'" class="section">
+          <section v-if="tab === 'model'" class="section">
             <header class="section-head">
               <h2>模型</h2>
               <p>模型服务商与推理轮数</p>
@@ -329,19 +329,10 @@
                       base-color="#c5d0db"
                       class="span-2"
                     />
-                    <v-textarea
-                      v-model="modelsText"
-                      label="可用模型（每行一个）"
-                      rows="4"
-                      auto-grow
-                      variant="outlined"
-                      density="comfortable"
-                      color="primary"
-                      base-color="#c5d0db"
-                      class="span-2"
-                      :hint="presetHint || '每行一个模型名'"
-                      persistent-hint
-                    />
+                    <v-select v-model="provider.protocol" :items="[{title:'OpenAI Chat Completions', value:'chat_completions'}]" label="API 协议" class="span-2" :menu-props="selectMenuProps" />
+                    <v-select v-model="provider.output_token_param" :items="['max_tokens','max_completion_tokens']" label="输出上限参数" class="span-2" :menu-props="selectMenuProps" />
+                    <p v-if="presetHint" class="span-2">{{ presetHint }}</p>
+                    <ModelCatalogEditor :key="provider.id" :provider="provider" />
                     <v-select
                       v-model="provider.model"
                       :items="provider.models"
@@ -421,7 +412,7 @@
           </section>
 
           <!-- 浏览器 -->
-          <section v-show="tab === 'browser'" class="section">
+          <section v-if="tab === 'browser'" class="section">
             <header class="section-head">
               <h2>浏览器</h2>
               <p>Agent 窗口与访问限制</p>
@@ -553,7 +544,7 @@
           </section>
 
           <!-- 权限 -->
-          <section v-show="tab === 'permissions'" class="section">
+          <section v-if="tab === 'permissions'" class="section">
             <header class="section-head">
               <h2>权限</h2>
               <p>Agent 能力门闸；新 Chat 继承此处配置</p>
@@ -603,7 +594,7 @@
           </section>
 
           <!-- 工作区 -->
-          <section v-show="tab === 'workspace'" class="section">
+          <section v-if="tab === 'workspace'" class="section">
             <header class="section-head">
               <h2>工作区</h2>
               <p>文件工具根目录；每个 Chat 独立子目录</p>
@@ -645,7 +636,7 @@
           </section>
 
           <!-- 技能 -->
-          <section v-show="tab === 'skills'" class="section">
+          <section v-if="tab === 'skills'" class="section">
             <header class="section-head">
               <h2>技能</h2>
               <p>启用后注入系统提示；可新建、导入或从商店安装</p>
@@ -921,7 +912,7 @@
           </section>
 
           <!-- 插件 -->
-          <section v-show="tab === 'plugins'" class="section">
+          <section v-if="tab === 'plugins'" class="section">
             <header class="section-head">
               <h2>插件</h2>
               <p>启用后向 Agent 注册工具；对外链、压缩包或商店安装，下次发消息生效</p>
@@ -1225,7 +1216,7 @@
           </section>
 
           <!-- 远程访问 -->
-          <section v-show="tab === 'remote'" class="section">
+          <section v-if="tab === 'remote'" class="section">
             <header class="section-head">
               <h2>远程访问</h2>
               <p>在其他设备浏览器中远程使用本机 Navora</p>
@@ -1291,7 +1282,7 @@
           </section>
 
           <!-- 询问/决策 -->
-          <section v-show="tab === 'fork'" class="section">
+          <section v-if="tab === 'fork'" class="section">
             <header class="section-head">
               <h2>询问/决策</h2>
               <p>任务路径不明或需确认时，在对话里询问你如何继续</p>
@@ -1454,7 +1445,7 @@
           </section>
 
           <!-- 子对话 -->
-          <section v-show="tab === 'subchat'" class="section">
+          <section v-if="tab === 'subchat'" class="section">
             <header class="section-head">
               <h2>子对话</h2>
               <p>并行子任务与数量上限</p>
@@ -1504,7 +1495,7 @@
           </section>
 
           <!-- 关于 -->
-          <section v-show="tab === 'about'" class="section">
+          <section v-if="tab === 'about'" class="section">
             <header class="section-head">
               <h2>关于</h2>
               <p>版本与运行环境</p>
@@ -1553,6 +1544,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import ModelCatalogEditor from '@/components/ModelCatalogEditor.vue'
 import {
   createDefaultForkDecision,
   FORK_ASK_TIMEOUT_DEFAULT_MS,
@@ -1575,7 +1567,6 @@ import {
   defaultProviderList,
   ensureDefaultProvider,
   newCustomProvider,
-  normalizeModelList,
   normalizeProvider,
   pickDefaultProviderId,
 } from '@shared/model-providers'
@@ -1637,7 +1628,7 @@ function selectTab(value: string) {
   void nextTick(() => {
     contentEl.value?.scrollTo({ top: 0 })
     const active = navListEl.value?.querySelector<HTMLElement>('.nav-item.active')
-    active?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' })
+    active?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
   })
 }
 
@@ -2846,32 +2837,6 @@ const provider = computed(() => {
   return list.find((p) => p.id === selectedProviderId.value) || list[0]
 })
 
-const modelsText = computed({
-  get() {
-    return (provider.value?.models || []).join('\n')
-  },
-  set(v: string) {
-    if (!provider.value) return
-    // Textarea is source of truth — do not re-inject the previous default model.
-    const models = normalizeModelList(
-      String(v || '')
-        .split(/\r?\n/)
-        .map((s) => s.trim())
-        .filter(Boolean),
-      '',
-    )
-    const prev = String(provider.value.model || '').trim()
-    const nextModel = prev && models.includes(prev) ? prev : models[0]
-    const same =
-      provider.value.model === nextModel &&
-      provider.value.models?.length === models.length &&
-      provider.value.models.every((m, i) => m === models[i])
-    if (same) return
-    provider.value.models = models
-    provider.value.model = nextModel
-  },
-})
-
 const apiKeyLabel = computed(() =>
   apiKeyPreview.value
     ? `API Key（已配置 ${apiKeyPreview.value}，留空不改）`
@@ -3311,7 +3276,7 @@ async function load() {
     } catch {
       remoteStatus.value = null
     }
-    await loadSkills()
+    if (tab.value === 'skills') await loadSkills()
     await nextTick()
   } finally {
     hydrating.value = false

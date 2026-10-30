@@ -2,7 +2,7 @@
   <div class="msg inchat-card ask" role="group" :aria-label="eyebrow">
     <div class="msg-row">
       <div class="msg-avatar pending-ask" aria-hidden="true">
-        <font-awesome-icon icon="circle-question" />
+        <StatusIcon kind="ask" />
       </div>
       <div class="msg-main">
         <div class="msg-role">
@@ -123,6 +123,7 @@
 </template>
 
 <script setup lang="ts">
+import StatusIcon from '@/components/StatusIcon.vue'
 import { computed, ref, watch } from 'vue'
 import type { AgentAskOption, AgentAskRequest } from '@shared/types'
 

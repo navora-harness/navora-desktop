@@ -12,19 +12,15 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue'
-import { installPostpileUI } from '@postpile/ui'
+import { onMounted } from 'vue'
 import OnboardingWizard from './components/OnboardingWizard.vue'
 import StoreUiHost from './components/store/StoreUiHost.vue'
 import TextContextMenuHost from './components/TextContextMenuHost.vue'
 import { useOnboarding } from './composables/useOnboarding'
 
 const { open: wizardOpen, manual: wizardManual, show: showWizard } = useOnboarding()
-let postpileUI: ReturnType<typeof installPostpileUI> | undefined
-onBeforeUnmount(() => postpileUI?.destroy())
 
 onMounted(async () => {
-  postpileUI = installPostpileUI(document)
   if (!window.navora) return
   try {
     const cfg = await window.navora.config.get()
@@ -53,12 +49,16 @@ body,
   }
 }
 html {
+  /* Postpile reserves a page scrollbar gutter; Navora scrolls inside panels. */
+  scrollbar-gutter: auto;
   /* 覆盖 Vuetify reset 的 overflow-y: scroll，仅在需要时显示滚动条 */
-  overflow-y: auto;
+  overflow-y: hidden;
   overflow-x: hidden;
 }
 body {
-  overflow-x: hidden;
+  overflow: hidden;
+  background: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 .v-application {
   font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;

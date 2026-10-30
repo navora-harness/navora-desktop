@@ -6,6 +6,7 @@
       'remote-web': isWebRemote(),
       'sidebar-open': isMobileLayout && mobileSidebarOpen,
       frameless: showDesktopChrome,
+      'platform-mac': windowPlatform === 'darwin',
     }"
   >
     <div
@@ -37,7 +38,7 @@
             <v-btn
               size="small"
               color="primary"
-              variant="flat"
+              variant="text"
               class="new-chat-btn"
               @click="createChat"
             >
@@ -165,10 +166,7 @@
                       :aria-label="chatStatusById[c.id].title"
                       @click.stop="onChatStatusClick(c.id)"
                     >
-                      <font-awesome-icon
-                        :icon="chatStatusById[c.id].icon"
-                        :spin="Boolean(chatStatusById[c.id].spin)"
-                      />
+                      <StatusIcon :kind="chatStatusById[c.id].tone" />
                     </button>
                   </div>
                   <div class="chat-item-meta">
@@ -225,10 +223,7 @@
                     :aria-label="chatStatusById[c.id].title"
                     @click.stop="onChatStatusClick(c.id)"
                   >
-                    <font-awesome-icon
-                      :icon="chatStatusById[c.id].icon"
-                      :spin="Boolean(chatStatusById[c.id].spin)"
-                    />
+                    <StatusIcon :kind="chatStatusById[c.id].tone" />
                   </button>
                 </div>
                 <div class="chat-item-trail-more">
@@ -337,10 +332,7 @@
                         :class="chatStatusById[sub.id].tone"
                         :title="chatStatusById[sub.id].title"
                       >
-                        <font-awesome-icon
-                          :icon="chatStatusById[sub.id].icon"
-                          :spin="Boolean(chatStatusById[sub.id].spin)"
-                        />
+                        <StatusIcon :kind="chatStatusById[sub.id].tone" />
                       </span>
                       <input
                         v-if="renamingChatId === sub.id"
@@ -424,6 +416,7 @@
         <div v-if="!chatBatchMode" key="resources" class="sidebar-dock">
           <WorkspaceFilesPanel :chat-id="activeId || ''" @notify="onPanelNotify" />
           <BrowserResourcesPanel
+            ref="browserResources"
             :chat-id="activeId || ''"
             :tree="tree"
             :is-remote="isWebRemote()"
@@ -539,7 +532,6 @@
 
     <main class="main">
       <div v-if="showDesktopChrome" class="win-drag-main" aria-hidden="true" />
-      <WindowChrome v-if="showDesktopChrome" class="win-chrome-host" />
       <header v-if="isMobileLayout" class="mobile-topbar">
         <button
           v-if="active?.kind === 'sub' && active.parentChatId"
@@ -640,9 +632,10 @@
             </h1>
           </div>
           <div v-if="agentRunning" class="agent-live">
-            <span class="pulse-ring" />
+            <StatusIcon kind="running" />
             <span class="agent-live-text">{{ phaseLabel }}</span>
             <span class="agent-elapsed">{{ elapsedLabel }}</span>
+            <button type="button" class="quick-stop-btn" title="停止任务（Esc）" aria-label="停止任务" @click="stopAgent"><StatusIcon kind="stopped" />停止</button>
           </div>
         </header>
 
@@ -657,28 +650,9 @@
           >
             <div v-if="!active.messages.length && !agentRunning" class="msg-empty">
               <div class="msg-empty-title">开始一段对话</div>
-              <p class="msg-empty-desc">描述你想完成的浏览任务，或点选下方推荐；也可拖入左侧 Session / 窗口作为上下文。</p>
-              <div class="suggest-marquee" aria-label="推荐对话">
-                <div
-                  v-for="(row, rowIdx) in suggestionRows"
-                  :key="rowIdx"
-                  class="suggest-rail"
-                  :class="rowIdx % 2 === 1 ? 'reverse' : ''"
-                >
-                  <div class="suggest-track">
-                    <button
-                      v-for="(s, i) in [...row, ...row]"
-                      :key="`${rowIdx}-${i}-${s}`"
-                      type="button"
-                      class="suggest-chip"
-                      :tabindex="i < row.length ? 0 : -1"
-                      :aria-hidden="i >= row.length ? 'true' : undefined"
-                      @click="useSuggestion(s)"
-                    >
-                      {{ s }}
-                    </button>
-                  </div>
-                </div>
+              <p class="msg-empty-desc">直接提问，或让 Navora 帮你浏览、整理和完成任务。</p>
+              <div class="suggest-grid" aria-label="推荐对话">
+                <button v-for="s in suggestions.slice(0,4)" :key="s" type="button" class="suggest-chip" @click="useSuggestion(s)">{{ s }}</button>
               </div>
             </div>
 
@@ -707,7 +681,7 @@
                         @click="toggleRun(block.key)"
                       >
                         <span class="run-status">
-                          <span v-if="runGroupLive(block.items)" class="spin" />
+                          <StatusIcon v-if="runGroupLive(block.items)" kind="running" />
                           <font-awesome-icon
                             v-else-if="runGroupHasError(block.items)"
                             icon="xmark"
@@ -744,19 +718,7 @@
                                 @click="toggleTool(item.id)"
                               >
                                 <span class="tool-status" :class="effectiveToolStatus(item)">
-                                  <span
-                                    v-if="effectiveToolStatus(item) === 'running'"
-                                    class="spin"
-                                  />
-                                  <font-awesome-icon
-                                    v-else-if="effectiveToolStatus(item) === 'error'"
-                                    icon="xmark"
-                                  />
-                                  <font-awesome-icon
-                                    v-else-if="effectiveToolStatus(item) === 'aborted'"
-                                    icon="stop"
-                                  />
-                                  <font-awesome-icon v-else icon="check" />
+                                  <StatusIcon :kind="effectiveToolStatus(item) === 'aborted' ? 'stopped' : effectiveToolStatus(item) === 'running' ? 'running' : effectiveToolStatus(item) === 'error' ? 'error' : 'success'" />
                                 </span>
                                 <span class="tool-kind-chip" :class="toolDisplay(item).kind">{{
                                   toolDisplay(item).label
@@ -845,7 +807,7 @@
               >
                 <div class="msg-row">
                   <div class="msg-avatar log" aria-hidden="true">
-                    <font-awesome-icon icon="clipboard-list" />
+                    <StatusIcon :kind="block.message.meta?.kind === 'agent_error' ? 'error' : block.message.meta?.kind === 'agent_stop' ? 'stopped' : 'success'" />
                   </div>
                   <div class="msg-main">
                     <div class="msg-role">
@@ -914,16 +876,7 @@
                     <div class="tool-card" :class="{ open: expandedTools[block.message.id] }">
                       <button type="button" class="tool-head" @click="toggleTool(block.message.id)">
                         <span class="tool-status" :class="effectiveToolStatus(block.message)">
-                          <span v-if="effectiveToolStatus(block.message) === 'running'" class="spin" />
-                          <font-awesome-icon
-                            v-else-if="effectiveToolStatus(block.message) === 'error'"
-                            icon="xmark"
-                          />
-                          <font-awesome-icon
-                            v-else-if="effectiveToolStatus(block.message) === 'aborted'"
-                            icon="stop"
-                          />
-                          <font-awesome-icon v-else icon="check" />
+                          <StatusIcon :kind="effectiveToolStatus(block.message) === 'aborted' ? 'stopped' : effectiveToolStatus(block.message) === 'running' ? 'running' : effectiveToolStatus(block.message) === 'error' ? 'error' : 'success'" />
                         </span>
                         <span class="tool-title" v-if="toolHeadTitle(block.message)">{{
                           toolHeadTitle(block.message)
@@ -1310,7 +1263,7 @@
             class="pending-ask-dock"
             @click="scrollToInlineDecision"
           >
-            <font-awesome-icon icon="circle-question" class="pending-ask-dock-icon" />
+            <StatusIcon kind="ask" class="pending-ask-dock-icon" />
             <span class="pending-ask-dock-body">
               <span class="pending-ask-dock-label">
                 {{
@@ -1400,6 +1353,12 @@
             </div>
             <div class="composer-actions">
               <div class="composer-actions-left">
+                <v-menu location="top start" :disabled="agentRunning">
+                  <template #activator="{ props: modeProps }"><button type="button" class="composer-perm-btn execution-mode-button" v-bind="modeProps" :disabled="agentRunning" aria-label="工作模式">{{ executionModeLabel }}<font-awesome-icon icon="chevron-down" /></button></template>
+                  <div class="composer-perm-panel" role="menu" aria-label="工作模式">
+                    <button v-for="mode in executionModes" :key="mode.id" type="button" class="composer-perm-item" role="menuitemradio" :aria-checked="(active?.executionMode || 'auto') === mode.id" @click="applyExecutionMode(mode.id)"><span class="composer-perm-item-label">{{ mode.label }}</span><span class="composer-perm-item-desc">{{ mode.hint }}</span></button>
+                  </div>
+                </v-menu>
                 <v-menu
                   v-model="permMenuOpen"
                   location="top start"
@@ -1443,6 +1402,14 @@
               </div>
 
               <div class="composer-actions-right">
+                <v-menu v-if="reasoningLevels.length" location="top end" :disabled="agentRunning">
+                  <template #activator="{ props: tierProps }">
+                    <button type="button" class="composer-perm-btn reasoning-tier-button" v-bind="tierProps" :disabled="agentRunning" aria-label="推理档位">{{ selectedReasoningLevel === 'off' ? '关闭思考' : selectedReasoningLevel }}<font-awesome-icon icon="chevron-down" /></button>
+                  </template>
+                  <div class="composer-perm-panel" role="menu" aria-label="推理档位">
+                    <button v-for="level in reasoningLevels" :key="level.id" type="button" class="composer-perm-item" role="menuitemradio" :aria-checked="selectedReasoningLevel === level.id" @click="applyReasoningLevel(level.id)"><span>{{ level.id === 'off' ? '关闭思考' : level.id }}</span><font-awesome-icon v-if="selectedReasoningLevel === level.id" icon="check" /></button>
+                  </div>
+                </v-menu>
                 <v-menu
                   v-model="modelMenuOpen"
                   location="top end"
@@ -1536,7 +1503,7 @@
                       <strong>{{ usagePctLabel }}</strong>
                     </div>
                     <p class="composer-usage-note">
-                      按本会话消息字符估算，预算约 {{ CONTENT_BUDGET_CHARS.toLocaleString() }} 字符。
+                      按消息字符粗略估算；模型上下文 {{ chatModelSettings.context_window.toLocaleString() }} token，输出上限 {{ chatModelSettings.max_output_tokens.toLocaleString() }} token。实际用量以服务端分词为准。
                     </p>
                   </div>
                 </v-menu>
@@ -1785,16 +1752,7 @@
       </template>
     </SidebarContextMenu>
 
-    <Teleport to="body">
-      <div
-        v-if="chatSearchOpen"
-        class="chat-search-overlay"
-        role="dialog"
-        aria-modal="true"
-        aria-label="搜索对话"
-        @keydown.esc.prevent="closeChatSearch"
-      >
-        <div class="chat-search-scrim" @click="closeChatSearch" />
+    <v-dialog v-model="chatSearchOpen" max-width="600" content-class="chat-search-dialog" aria-label="搜索对话" @after-enter="chatSearchInput?.focus()">
         <div class="chat-search-panel">
           <div class="chat-search-box">
             <font-awesome-icon icon="magnifying-glass" class="chat-search-lead" />
@@ -1818,8 +1776,8 @@
             </button>
           </div>
           <div class="chat-search-results">
-            <p v-if="!chatSearchQuery.trim()" class="chat-search-hint">输入关键词开始搜索</p>
-            <p v-else-if="!chatSearchHits.length" class="chat-search-hint">没有匹配的对话</p>
+            <p v-if="!chatSearchQuery.trim()" class="chat-search-hint">最近对话 · 输入关键词搜索标题或消息</p>
+            <p v-if="chatSearchQuery.trim() && !chatSearchHits.length" class="chat-search-hint">没有匹配的对话</p>
             <button
               v-for="hit in chatSearchHits"
               :key="hit.id"
@@ -1834,8 +1792,7 @@
             </button>
           </div>
         </div>
-      </div>
-    </Teleport>
+    </v-dialog>
 
     <Teleport to="body">
       <div
@@ -1868,6 +1825,8 @@
 <script setup lang="ts">
 defineOptions({ name: 'ChatPage' })
 import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
+import StatusIcon from '@/components/StatusIcon.vue'
+import { modelCapabilities } from '@shared/model-capabilities'
 import { useRoute, useRouter } from 'vue-router'
 import type {
   AgentAskRequest,
@@ -1903,7 +1862,6 @@ import ToolCatalogList from '@/components/store/ToolCatalogList.vue'
 import { useStoreUi } from '@/composables/useStoreUi'
 import { storeErrorText } from '@shared/store'
 import BrowserDownloadsMenu from '@/components/BrowserDownloadsMenu.vue'
-import WindowChrome from '@/components/WindowChrome.vue'
 import WorkspaceFilesPanel from '@/components/sidebar/WorkspaceFilesPanel.vue'
 import BrowserResourcesPanel from '@/components/sidebar/BrowserResourcesPanel.vue'
 import SidebarContextMenu from '@/components/sidebar/SidebarContextMenu.vue'
@@ -1945,8 +1903,34 @@ const router = useRouter()
 const route = useRoute()
 const { isMobileLayout } = useMobileLayout()
 const showDesktopChrome = computed(
-  () => Boolean(window.navora?.app?.minimize) && !isWebRemote(),
+  () => Boolean(window.navora?.app?.nativeTitleBar) && !isWebRemote(),
 )
+const windowPlatform = window.navora?.app?.platform || 'web'
+const browserResources = ref<{ quickOpen: () => Promise<void> } | null>(null)
+const executionModes = [
+  { id: 'auto' as const, label: '自动', hint: '按问题选择问答或工具' },
+  { id: 'chat' as const, label: '快速问答', hint: '直接回复，不访问浏览器与文件' },
+  { id: 'agent' as const, label: '执行任务', hint: '浏览器、工作区与插件' },
+]
+const executionModeLabel = computed(() => executionModes.find(m => m.id === (active.value?.executionMode || 'auto'))?.label || '自动')
+async function applyExecutionMode(mode: 'auto' | 'chat' | 'agent') {
+  if (!window.navora || !activeId.value || agentRunning.value) return
+  try {
+    const chat = await window.navora.chats.setExecutionMode(activeId.value, mode)
+    if (chat) { active.value = chat; await refreshList() }
+  } catch (error) { showToast(error instanceof Error ? error.message : '切换模式失败') }
+}
+function onAppShortcut(event: KeyboardEvent) {
+  if (event.isComposing || settingsOpen.value || docsOpen.value || document.querySelector('.v-dialog.v-overlay--active')) return
+  const key = event.key.toLowerCase()
+  if (event.ctrlKey || event.metaKey) {
+    if (key === 'k') { event.preventDefault(); openChatSearch() }
+    else if (key === 'n') { event.preventDefault(); void createChat() }
+    else if (key === 'b' && event.shiftKey) { event.preventDefault(); void browserResources.value?.quickOpen() }
+  } else if (key === 'escape' && agentRunning.value && !pendingAsks.value[activeId.value || '']) {
+    event.preventDefault(); void stopAgent()
+  }
+}
 
 const DND_MIME = 'application/x-navora-browser-ref'
 
@@ -2011,7 +1995,6 @@ const settingsPermissions = ref<ChatPermissions | null>(null)
 const aiProviders = ref<AiProviderConfig[]>([])
 const aiDefaultProviderId = ref('')
 const providerKeyOk = ref<Record<string, boolean>>({})
-const CONTENT_BUDGET_CHARS = 200_000
 const runningChats = ref<Record<string, boolean>>({})
 const chatErrors = ref<Record<string, { message: string; code?: string }>>({})
 const chatSwipeOpenId = ref<string | null>(null)
@@ -2463,6 +2446,10 @@ let resizeObserver: ResizeObserver | undefined
 let onWinResize: (() => void) | undefined
 
 const suggestions = [
+  '帮我润色一段文字，表达更简洁',
+  '请解释什么是大语言模型',
+  '整理当前网页的要点和相关链接',
+  '帮我写一份今天的任务清单',
   '用权威天气站查一下北京今天天气和穿衣建议',
   '搜索今日热点新闻，用三条要点概括',
   '帮我对比两家外卖平台同款套餐的价格与配送时长',
@@ -2482,11 +2469,6 @@ const suggestions = [
   '查一下国家图书馆开放时间与网上借阅/预约流程',
   '用 shell 在工作区建个 notes 文件夹，并写一份今日备忘',
 ]
-
-const suggestionRows = computed(() => {
-  const mid = Math.ceil(suggestions.length / 2)
-  return [suggestions.slice(0, mid), suggestions.slice(mid)]
-})
 
 const showFollowupSuggestions = ref(true)
 const showReadPages = ref(true)
@@ -2787,7 +2769,18 @@ const chatModelName = computed(() => {
   return resolveModelName(resolved, active.value?.model)
 })
 
-const chatModelLabel = computed(() => chatModelName.value || '模型')
+const chatModelSettings = computed(() => modelCapabilities(aiProviders.value.find(p => p.id === chatProviderId.value), chatModelName.value))
+const chatModelLabel = computed(() => chatModelSettings.value.label || chatModelName.value || '模型')
+const reasoningLevels = computed(() => chatModelSettings.value.reasoning.enabled ? chatModelSettings.value.reasoning.levels : [])
+const selectedReasoningLevel = computed(() => {
+  const selected = active.value?.reasoningLevel
+  return reasoningLevels.value.some(l => l.id === selected) ? selected! : chatModelSettings.value.reasoning.default
+})
+async function applyReasoningLevel(level: string) {
+  if (!window.navora || !activeId.value || agentRunning.value) return
+  const updated = await window.navora.chats.setProvider(activeId.value, chatProviderId.value, chatModelName.value, level)
+  if (updated) { active.value = updated; await refreshList() }
+}
 
 const chatModelKey = computed(() =>
   chatProviderId.value && chatModelName.value
@@ -2824,7 +2817,7 @@ const usageChars = computed(() =>
 )
 const usageTokensEst = computed(() => Math.max(0, Math.ceil(usageChars.value / 2)))
 const usageRatio = computed(() =>
-  Math.min(1, usageChars.value / CONTENT_BUDGET_CHARS),
+  Math.min(1, usageTokensEst.value / chatModelSettings.value.context_window),
 )
 const usagePctLabel = computed(() => `${Math.round(usageRatio.value * 1000) / 10}%`)
 const USAGE_RING_LEN = 2 * Math.PI * 14
@@ -2878,7 +2871,7 @@ async function applyChatPreset(preset: PermissionPreset) {
 async function applyChatModel(providerId: string, model: string) {
   if (!window.navora || !activeId.value || agentRunning.value) return
   try {
-    const chat = await window.navora.chats.setProvider(activeId.value, providerId, model)
+    const chat = await window.navora.chats.setProvider(activeId.value, providerId, model, null)
     if (chat) {
       active.value = chat
       const idx = chats.value.findIndex((c) => c.id === chat.id)
@@ -4803,7 +4796,7 @@ function messageSearchSnippet(c: ChatSession, q: string): string {
 
 const chatSearchHits = computed((): ChatSearchHit[] => {
   const q = chatSearchQuery.value.trim()
-  if (!q) return []
+  if (!q) return chats.value.slice(0, 30).map(c => ({ id: c.id, title: displayChatTitle(c.title), updatedAt: c.updatedAt, snippet: '' }))
   const needle = normalizeSearchText(q)
   const hits: ChatSearchHit[] = []
   for (const c of chats.value) {
@@ -4818,7 +4811,7 @@ const chatSearchHits = computed((): ChatSearchHit[] => {
       snippet: titleHit && !snippet ? '' : snippet,
     })
   }
-  return hits
+  return hits.slice(0, 50)
 })
 
 function openChatSearch() {
@@ -5219,6 +5212,7 @@ watch(
 )
 
 onMounted(async () => {
+  window.addEventListener('keydown', onAppShortcut)
   if (!window.navora) {
     console.warn('Navora API unavailable (open via Electron)')
     return
@@ -5527,6 +5521,7 @@ onActivated(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', onAppShortcut)
   void flushDraftSave(activeId.value)
   clearTimeout(draftSaveTimer)
   unsubTree?.()
@@ -5707,7 +5702,7 @@ onUnmounted(() => {
   font-size: 0.85rem !important;
   font-weight: 600 !important;
   letter-spacing: 0;
-  color: #fff !important;
+  color: #20252c !important;
 }
 .chat-toolbar-icon-btn {
   flex-shrink: 0;
@@ -5746,8 +5741,8 @@ onUnmounted(() => {
   padding: 0 10px !important;
   font-size: 0.82rem !important;
   font-weight: 600 !important;
-  color: #ecf0f1 !important;
-  background: rgba(255, 255, 255, 0.1) !important;
+  color: #39414d !important;
+  background: #e8eaee !important;
 }
 .batch-list-footer {
   flex-shrink: 0;
@@ -5767,8 +5762,8 @@ onUnmounted(() => {
   padding: 0 12px !important;
   font-size: 0.88rem !important;
   font-weight: 600 !important;
-  color: #ecf0f1 !important;
-  background: rgba(255, 255, 255, 0.1) !important;
+  color: #39414d !important;
+  background: #e8eaee !important;
 }
 .batch-pin-icon {
   margin-right: 6px;
@@ -5839,18 +5834,17 @@ onUnmounted(() => {
   transition:
     opacity 0.22s ease,
     transform 0.22s ease,
-    max-height 0.28s ease;
+    color 0.16s ease;
   overflow: hidden;
 }
 .res-slide-enter-from,
 .res-slide-leave-to {
   opacity: 0;
   transform: translateY(10px);
-  max-height: 0;
 }
 .res-slide-enter-to,
 .res-slide-leave-from {
-  max-height: min(48vh, 440px);
+  opacity: 1;
 }
 .chat-item {
   position: relative;

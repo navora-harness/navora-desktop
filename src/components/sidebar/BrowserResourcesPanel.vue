@@ -5,6 +5,7 @@
         <font-awesome-icon :icon="collapsed ? 'chevron-right' : 'chevron-down'" class="res-chevron" />
         <span class="res-label">浏览器资源</span>
       </button>
+      <button type="button" class="quick-browser-btn" :disabled="!chatId || busyQuickOpen" title="打开或复用浏览器（Ctrl/⌘ Shift B）" aria-label="快速打开浏览器" @click="quickOpen">{{ busyQuickOpen ? '打开中' : '打开' }}</button>
       <button
         type="button"
         class="icon-btn"
@@ -73,6 +74,7 @@
               >
                 <font-awesome-icon :icon="isRemote ? 'window-maximize' : w.visible ? 'eye' : 'eye-slash'" />
               </button>
+              <button type="button" class="icon-btn danger" title="关闭窗口" aria-label="关闭浏览器窗口" @click="closeWindow(w)"><font-awesome-icon icon="xmark" /></button>
             </span>
           </div>
         </div>
@@ -146,6 +148,7 @@ const emit = defineEmits<{
 
 const collapsed = ref(false)
 const busySession = ref(false)
+const busyQuickOpen = ref(false)
 const busyWindow = ref<string | null>(null)
 const sessMenu = ref<{ show: (e: MouseEvent) => void } | null>(null)
 const winMenu = ref<{ show: (e: MouseEvent) => void } | null>(null)
@@ -202,6 +205,20 @@ async function createSession() {
     busySession.value = false
   }
 }
+
+async function quickOpen() {
+  if (!window.navora || !props.chatId || busyQuickOpen.value) return
+  busyQuickOpen.value = true
+  collapsed.value = false
+  try {
+    const existing = props.tree.flatMap(s => s.windows)[0]
+    if (existing) { await focusWindow(existing); return }
+    const session = props.tree[0] || await window.navora.browser.createSession(props.chatId, { persist: false })
+    await window.navora.browser.createWindow(session.sessionId, { show: true })
+  } catch (error) { emit('notify', error instanceof Error ? error.message : '打开浏览器失败') }
+  finally { busyQuickOpen.value = false }
+}
+defineExpose({ quickOpen })
 
 async function createWindow(sessionId: string) {
   if (!window.navora) return

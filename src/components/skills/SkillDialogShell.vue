@@ -28,7 +28,7 @@
                     role="img"
                     :aria-label="titleWarning"
                   >
-                    <font-awesome-icon icon="circle-exclamation" />
+                    <StatusIcon kind="error" />
                   </span>
                 </template>
                 <span>{{ titleWarning }}</span>
@@ -57,6 +57,7 @@
 </template>
 
 <script setup lang="ts">
+import StatusIcon from '@/components/StatusIcon.vue'
 import { computed } from 'vue'
 import { useMobileLayout } from '@/composables/useMobileLayout'
 

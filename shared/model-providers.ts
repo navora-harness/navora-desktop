@@ -2,6 +2,7 @@
 
 import type { AiProviderConfig } from './config'
 import { MODEL_PRESETS, type ModelPreset, findModelPreset } from './model-presets'
+import { normalizeModelCapabilities } from './model-capabilities'
 
 /** Legacy / default-config ids that do not match `MODEL_PRESETS[].id`. */
 const PRESET_ID_ALIASES: Record<string, string> = {
@@ -57,6 +58,15 @@ export function normalizeProvider(p: AiProviderConfig): AiProviderConfig {
   if (!model || !models.includes(model)) model = models[0]
   p.models = models
   p.model = model
+  p.protocol = 'chat_completions'
+  if (p.output_token_param !== 'max_tokens' && p.output_token_param !== 'max_completion_tokens') {
+    p.output_token_param = /^https:\/\/api\.openai\.com(?:\/|$)/i.test(p.base_url) && /^(gpt-[5-9]|o[1-9])/i.test(model) ? 'max_completion_tokens' : 'max_tokens'
+  }
+  if (p.model_settings) {
+    p.model_settings = Object.fromEntries(Object.entries(p.model_settings)
+      .filter(([id]) => models.includes(id))
+      .map(([id, settings]) => [id, normalizeModelCapabilities(settings, id)]))
+  }
   if (!String(p.api_key_ref || '').trim()) p.api_key_ref = stockApiKeyRef(p.id)
   return p
 }
@@ -76,6 +86,9 @@ export function providerFromPreset(
     api_key_ref: stockApiKeyRef(providerId),
     model: models.includes(preset.model) ? preset.model : models[0],
     models,
+    ...(preset.model_settings ? { model_settings: structuredClone(preset.model_settings) } : {}),
+    protocol: 'chat_completions',
+    output_token_param: preset.id === 'openai' ? 'max_completion_tokens' : 'max_tokens',
     timeout_ms: preset.timeout_ms ?? 120000,
     source_preset: preset.id,
   }

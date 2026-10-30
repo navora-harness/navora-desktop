@@ -21,6 +21,7 @@ import type {
 import type { SkillDetail, SkillImportPreview, SkillRecord, SkillWriteInput } from '../shared/skills'
 
 const api = {
+  models: { list: (providerId: string): Promise<{ ok: boolean; models?: string[]; error?: string }> => ipcRenderer.invoke('navora:models.list', providerId) },
   /**
    * Resolve absolute path for a File from drag-drop / input.
    * Electron removed File.path in renderer; use webUtils.getPathForFile.
@@ -34,6 +35,8 @@ const api = {
     }
   },
   app: {
+    platform: process.platform as string,
+    nativeTitleBar: process.platform === 'win32' || process.platform === 'darwin',
     info: (): Promise<AppInfo> => ipcRenderer.invoke('navora:app.info'),
     openExternal: (url: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke('navora:app.openExternal', url),
@@ -75,6 +78,7 @@ const api = {
       ipcRenderer.invoke('navora:secrets.clearApiKey', ref),
   },
   chats: {
+    setExecutionMode: (chatId: string, mode: 'auto' | 'chat' | 'agent'): Promise<ChatSession | null> => ipcRenderer.invoke('navora:chats.setExecutionMode', chatId, mode),
     list: (): Promise<ChatSession[]> => ipcRenderer.invoke('navora:chats.list'),
     get: (id: string): Promise<ChatSession | null> => ipcRenderer.invoke('navora:chats.get', id),
     export: (
@@ -88,8 +92,9 @@ const api = {
       chatId: string,
       providerId: string | null,
       model?: string | null,
+      reasoningLevel?: string | null,
     ): Promise<ChatSession | null> =>
-      ipcRenderer.invoke('navora:chats.setProvider', chatId, providerId, model),
+      ipcRenderer.invoke('navora:chats.setProvider', chatId, providerId, model, reasoningLevel),
     append: (
       chatId: string,
       msg: {

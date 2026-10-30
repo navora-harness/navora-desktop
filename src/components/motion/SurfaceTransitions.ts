@@ -1,5 +1,4 @@
-import { defineComponent, h, nextTick, onBeforeUnmount, Transition, type PropType } from 'vue'
-import { animateDialogSurface, animateMenuSurface, dialogAnchor } from '@postpile/ui'
+import { defineComponent, h, mergeProps, onBeforeUnmount, Transition, type PropType } from 'vue'
 
 function surfaceTransition(name: string, menu: boolean) {
   return defineComponent({
@@ -10,59 +9,41 @@ function surfaceTransition(name: string, menu: boolean) {
       disabled: Boolean,
     },
     setup(props, { slots, attrs }) {
-      const cancellations = new Map<Element, () => void>()
-      const anchors = new WeakMap<Element, HTMLElement>()
+      const running = new Map<Element, Animation>()
       const cancel = (el: Element) => {
-        cancellations.get(el)?.()
-        cancellations.delete(el)
-        el.removeAttribute('data-pp-menu-pending')
+        running.get(el)?.cancel()
+        running.delete(el)
       }
       onBeforeUnmount(() => {
-        for (const el of cancellations.keys()) cancel(el)
+        for (const el of running.keys()) cancel(el)
       })
       function motion(el: Element, done: () => void, opening: boolean) {
         cancel(el)
-        if (props.disabled) { done(); return }
-        const anchor = opening
-          ? props.target instanceof HTMLElement ? props.target : dialogAnchor()
-          : anchors.get(el) || null
-        if (anchor) anchors.set(el, anchor)
-        let cancelled = false
-        let frame = 0
-        let cancelAnimation = () => {}
-        const finish = () => {
-          // A completed enter still owns its source-button placeholder. Retain
-          // its cleanup until leave/unmount, including rapidly interrupted menus.
-          el.removeAttribute('data-pp-menu-pending')
-          done()
-        }
-        const animate = () => {
-          if (cancelled) return
-          cancelAnimation = menu
-            ? animateMenuSurface(el as HTMLElement, anchor, opening, finish)
-            : animateDialogSurface(el as HTMLElement, anchor, opening, finish)
-          el.removeAttribute('data-pp-menu-pending')
-        }
-        cancellations.set(el, () => {
-          cancelled = true
-          cancelAnimationFrame(frame)
-          cancelAnimation()
+        if (props.disabled || matchMedia('(prefers-reduced-motion: reduce)').matches) { done(); return }
+        // Composite only; resizing, blur, live shadows and source-button clones
+        // force large repaints and make borderless activators disappear on return.
+        const full = { opacity: 1, transform: 'translateY(0px)' }
+        const small = { opacity: 0, transform: `translateY(${menu ? '-4' : '8'}px)` }
+        const animation = el.animate(opening ? [small, full] : [full, small], {
+          duration: opening ? (menu ? 140 : 180) : 100,
+          easing: 'cubic-bezier(.2,.8,.2,1)',
         })
-        if (opening) {
-          el.setAttribute('data-pp-menu-pending', '')
-          void nextTick().then(() => { if (!cancelled) frame = requestAnimationFrame(animate) })
-        } else animate()
+        running.set(el, animation)
+        animation.finished.then(() => {
+          if (running.get(el) !== animation) return
+          running.delete(el)
+          animation.cancel()
+          done()
+        }).catch(() => {})
       }
-      return () => h(Transition, {
-        ...attrs,
+      return () => h(Transition, mergeProps(attrs, {
         css: false,
-        onBeforeEnter: (el: Element) => { if (!props.disabled) el.setAttribute('data-pp-menu-pending', '') },
         onEnter: (el: Element, done: () => void) => motion(el, done, true),
         onLeave: (el: Element, done: () => void) => motion(el, done, false),
         onEnterCancelled: cancel,
         onLeaveCancelled: cancel,
         onAfterLeave: cancel,
-      }, slots)
+      }), slots)
     },
   })
 }

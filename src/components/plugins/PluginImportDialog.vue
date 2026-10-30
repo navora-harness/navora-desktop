@@ -133,7 +133,7 @@
         </div>
 
         <div v-if="saving" class="progress-panel" role="status" aria-live="polite">
-          <div class="progress-spinner" aria-hidden="true" />
+          <StatusIcon kind="running" class="progress-glyph" />
           <div class="progress-copy">
             <div class="progress-title">{{ progressTitle }}</div>
             <div class="progress-steps">
@@ -191,6 +191,7 @@
 </template>
 
 <script setup lang="ts">
+import StatusIcon from '@/components/StatusIcon.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type {
   PluginImportPreview,
@@ -743,14 +744,12 @@ async function goNextFromTarget() {
   border: 1px solid #d5e3ef;
   background: linear-gradient(180deg, #f7fbfe 0%, #eef5fb 100%);
 }
-.progress-spinner {
+.progress-glyph {
   width: 28px;
   height: 28px;
   margin-top: 2px;
   border-radius: 50%;
-  border: 2.5px solid #c5d6e6;
-  border-top-color: #1b4f72;
-  animation: plugin-spin 0.75s linear infinite;
+  border: 0;
   flex-shrink: 0;
 }
 .progress-title {

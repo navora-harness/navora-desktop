@@ -1,4 +1,5 @@
 import type { PermissionCapability, PermissionMode, PermissionPreset } from './types'
+import type { ModelCapabilities } from './model-capabilities'
 import { DEFAULT_EDGE_UA } from './types'
 import { findUaPresetByUa, getUaPreset } from './ua-presets'
 import { DEFAULT_ACCEPT_LANGUAGE, DEFAULT_ACCEPT_LANGUAGE_LIST, generateAcceptLanguageHeader, toAcceptLanguageList } from './user-agent'
@@ -58,6 +59,13 @@ export function assertRemoteAccessConfig(remote: RemoteAccessConfig): void {
   if (!remote.enabled) return
   if (!remote.passwordHash) throw new Error('remote_no_password')
   if (isDefaultRemotePasswordHash(remote.passwordHash)) throw new Error('remote_default_password')
+}
+
+/** Legacy unsafe remote state stays disabled by the server, but must not block
+ * unrelated saves such as skipping onboarding. Any remote change is validated. */
+export function assertRemoteAccessChange(previous: RemoteAccessConfig, next: RemoteAccessConfig): void {
+  const keys: (keyof RemoteAccessConfig)[] = ['enabled', 'host', 'port', 'username', 'passwordHash']
+  if (keys.some(key => previous[key] !== next[key])) assertRemoteAccessConfig(next)
 }
 
 /** Agent path-fork / ask-user decision UX */
@@ -134,6 +142,10 @@ export type AiProviderConfig = {
   model: string
   /** Selectable model ids (must include `model`) */
   models: string[]
+  /** Per-model limits, input modalities and configurable reasoning API values. */
+  model_settings?: Record<string, ModelCapabilities>
+  protocol?: 'chat_completions'
+  output_token_param?: 'max_tokens' | 'max_completion_tokens'
   timeout_ms: number
   /** Built-in template id this entry was created from (`custom` for user-defined). */
   source_preset?: string

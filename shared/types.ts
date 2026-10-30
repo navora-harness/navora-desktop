@@ -110,6 +110,9 @@ export type ChatSession = {
   providerId?: string
   /** Preferred model id within the provider; falls back to provider.model. */
   model?: string
+  /** Selected UI reasoning tier; resolved through provider.model_settings. */
+  reasoningLevel?: string
+  executionMode?: 'auto' | 'chat' | 'agent'
   /** Unsent composer draft (Telegram-style; synced across local + remote clients). */
   draft?: string
   /** Last draft write time (ms); used for remote last-write-wins. */

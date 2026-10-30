@@ -2,8 +2,8 @@
   <v-dialog
     :model-value="modelValue"
     :fullscreen="isMobileLayout"
-    :max-width="isMobileLayout ? undefined : 1420"
-    :width="isMobileLayout ? undefined : '94vw'"
+    :max-width="isMobileLayout ? undefined : 1180"
+    :width="isMobileLayout ? undefined : '92vw'"
     scrollable
     class="settings-dialog-root"
     :content-class="isMobileLayout ? 'settings-dialog-content settings-dialog-content--mobile' : 'settings-dialog-content'"

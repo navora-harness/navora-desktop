@@ -233,6 +233,8 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
   return {
     pathForFile: () => '',
     app: {
+      platform: 'web',
+      nativeTitleBar: false,
       info: () => invoke<AppInfo>('navora:app.info'),
       openExternal: (url: string) => invoke<{ ok: boolean }>('navora:app.openExternal', url),
       quit: () => invoke<{ ok: boolean }>('navora:app.quit'),
@@ -242,6 +244,7 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
       isMaximized: async () => ({ maximized: false }),
       onMaximized: () => () => {},
     },
+    models: { list: (providerId: string) => invoke<{ ok: boolean; models?: string[]; error?: string }>('navora:models.list', providerId) },
     config: {
       get: () => invoke<AppConfig>('navora:config.get'),
       save: (patch: Partial<AppConfig>) => invoke<AppConfig>('navora:config.save', patch),
@@ -257,6 +260,7 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
       clearApiKey: (ref: string) => invoke<{ ok: boolean }>('navora:secrets.clearApiKey', ref),
     },
     chats: {
+      setExecutionMode: (chatId: string, mode: 'auto' | 'chat' | 'agent') => invoke<ChatSession | null>('navora:chats.setExecutionMode', chatId, mode),
       list: () => invoke<ChatSession[]>('navora:chats.list'),
       get: (id: string) => invoke<ChatSession | null>('navora:chats.get', id),
       export: (chatId: string) =>
@@ -267,8 +271,8 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
       create: (title?: string) => invoke<ChatSession>('navora:chats.create', title),
       setPermissions: (chatId: string, permissions: ChatPermissions) =>
         invoke<ChatSession | null>('navora:chats.setPermissions', chatId, permissions),
-      setProvider: (chatId: string, providerId: string | null, model?: string | null) =>
-        invoke<ChatSession | null>('navora:chats.setProvider', chatId, providerId, model),
+      setProvider: (chatId: string, providerId: string | null, model?: string | null, reasoningLevel?: string | null) =>
+        invoke<ChatSession | null>('navora:chats.setProvider', chatId, providerId, model, reasoningLevel),
       append: (
         chatId: string,
         msg: {
