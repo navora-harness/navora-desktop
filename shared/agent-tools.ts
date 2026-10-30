@@ -661,15 +661,16 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_click',
       description:
-        'Trusted click. Main page: CSS selector (pierces closed shadow). Inside iframe: iframeSelector plus innerSelector and/or offsets. If the click starts a navigation, waits briefly for main-frame load and returns the new url/title (navigated=true). Do NOT immediately browser_find for placeholder text like View Details — use browser_get(dom_summary or text, waitUntil=load).',
+        'Trusted click. Prefer a ref from browser_get(snapshot) or browser_find; existing CSS selectors remain supported. A stale ref requires a fresh snapshot. Inside iframe: iframeSelector plus innerSelector and/or offsets. Returns navigation state; read the new page when needed.',
       parameters: {
         type: 'object',
         properties: {
           windowId: { type: 'string' },
           selector: {
             type: 'string',
-            description: 'Host-page selector, or inner selector when used with iframeSelector',
+            description: 'Host-page selector, or inner selector when used with iframeSelector. Optional when ref is supplied.',
           },
+          ref: { type: 'string', description: 'Exact element ref from the current page snapshot or browser_find' },
           iframeSelector: {
             type: 'string',
             description:
@@ -814,13 +815,14 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_query_deep',
       description:
-        'Locate one element by CSS selector via Blink querySelectorDeep (no page JS, no debugger). Sees closed author shadow roots. Returns backendNodeId, tagName, viewport box (x/y/width/height) and center. Use before click when verifying shadow-tree selectors, or when document.querySelector fails but the node exists in closed shadow.',
+        'Locate one element via native Blink APIs, without page JS or debugger. Default searches closed/open shadow roots in the main document. acrossDocuments=true also searches frames, including cross-origin frames; scope explicitly, e.g. iframe#checkout button.submit. Returns main-viewport geometry and backendNodeId.',
       parameters: {
         type: 'object',
         properties: {
           windowId: { type: 'string' },
           selector: { type: 'string' },
           pierce: { type: 'boolean', description: 'Pierce shadow roots (default true)' },
+          acrossDocuments: { type: 'boolean', description: 'Use native querySelectorAcrossDocuments to include iframe documents (default false)' },
           scrollIntoView: {
             type: 'boolean',
             description: 'Scroll matched element into view before measuring (default false)',
@@ -855,13 +857,14 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_type',
       description:
-        'Type into a CSS selector (clears unless append=true). submit=true only presses Enter — many sites ignore it. If the returned url does not change / navigated=false, immediately browser_click the Search/submit button. Do not ask the user to click.',
+        'Type into an element ref or CSS selector (clears unless append=true). Prefer a ref from browser_get(snapshot) or browser_find. submit=true presses Enter; observe the result before choosing another action.',
       parameters: {
         type: 'object',
         properties: {
           windowId: { type: 'string' },
           selector: { type: 'string' },
           text: { type: 'string' },
+          ref: { type: 'string', description: 'Element ref; use ref or selector' },
           append: { type: 'boolean' },
           submit: {
             type: 'boolean',
@@ -874,7 +877,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
           },
           waitTimeoutMs: { type: 'number' },
         },
-        required: ['windowId', 'selector', 'text'],
+        required: ['windowId', 'text'],
       },
     },
   },
@@ -971,17 +974,20 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_get',
       description:
-        'Read page info. Default wait is a short main-frame load (not text_stable). Prefer text/dom_summary; do not fetch html if those suffice. Avoid waitUntil=text_stable on search/result/captcha pages — it rarely settles and just burns time. If that answers the user, stop.',
+        'Read page info. Prefer snapshot for structured content, exact element refs and capability coverage; query filters its element index. text reads prose, dom_summary remains compatible, capabilities probes the running custom Electron APIs. Default wait is a short main-frame load. Do not request full html when a snapshot or text suffices.',
       parameters: {
         type: 'object',
         properties: {
           windowId: { type: 'string' },
           what: {
             type: 'string',
-            enum: ['title', 'url', 'text', 'html', 'dom_summary'],
-            description: 'Prefer text/dom_summary; html is last resort',
+            enum: ['title', 'url', 'text', 'html', 'dom_summary', 'snapshot', 'capabilities'],
+            description: 'snapshot returns content and actionable refs; capabilities reports actual native API availability',
           },
           selector: { type: 'string', description: 'Optional scope for text/html' },
+          query: { type: 'string', description: 'Optional snapshot index query, in Chinese or English' },
+          limit: { type: 'number', description: 'Snapshot element limit, 1–80 (default 60)' },
+          refresh: { type: 'boolean', description: 'Force rebuilding the page index instead of using a fresh cached index' },
           waitUntil: {
             type: 'string',
             enum: ['none', 'load', 'text_stable'],
@@ -1923,58 +1929,5 @@ export const PLUGIN_DEV_TOOL_NAMES = new Set([
   'plugin_link',
 ])
 
-export const SYSTEM_PROMPT_BASE = `你是 Navora，桌面端 AI Agent Browser。用工具完成浏览、抓取、下载与工作区文件操作；也可用 app_settings_* / app_models_list / app_provider_add 改软件设置（permissions 除外，仅用户可改）。
-技能 ≠ 插件：技能是 Markdown 流程说明（skill_list / skill_read）；插件是可执行 tools（「已启用插件」附录或 plugin_list / plugin_read）。问插件/加解密/验证码能力用 plugin_*，禁止 skill_read(插件 id)。已启用插件工具直接按名调用，勿虚构未启用工具。缺能力时先 plugin_list / skill_list，未安装再用 store_search 查商店并推荐，勿擅自安装。skill_create/update/delete/export 仅当用户明确要求增删改/导出技能时才调用。
-规则：
-1. 资源：同一任务默认 1 Session + 1 窗口；已有则 list_resources / navigate 复用，禁止再 browser_open。勿为换关键词新开 Session。
-1b. 打开本地文件夹/工作目录/资源管理器：必须 file_open（首选）或 file_reveal；path 相对当前工作区根，打开根用 "."（勿再拼与根同名的子路径）。禁止 browser_open/navigate 的 file://，禁止只 file_list 却声称已打开。用户说「打开文件夹」用 file_open；「在资源管理器中显示文件」才用 file_reveal。
-1c. 用户关闭窗口后 Session 可能仍在（windows 为空）：优先 browser_open（会在原 Session 上重建窗口）或 browser_window_create；禁止误以为要新建 Session。清 cookie：browser_session_clear → browser_navigate（或 browser_open 带 url）。
-1d. 禁止只口述「让我/先/接下来/然后重新访问…」而不发起 function call。同一轮必须真正调用工具，或直接给出最终结论。
-2. 查事实/版本/附近：日期先 datetime_now；附近先 geolocation_get。能直达官网就直达。查版本：首页 get(text) 一次即可，最多再 navigate 一篇公告，禁止连环搜/回退空转。搜索最多一次。简单查询工具预算 ≤6，够答就停。模型列表优先 app_provider_add / app_models_list；纯 API 用 session_fetch 或已允许的 shell；勿为 API 乱开可视窗。
-3. 创建：browser_open 带目标 url；仅已有 Session 再开窗用 window_create；仅 fetch 用 session_create。默认临时 Session；仅用户要求保留登录才 persist。网络规则 urlPattern 须含 scheme（如 *://*.example.com/*）；裸主机通配会被自动补全，但仍请直接写对。
-4. 用户绑定了 sessionId/windowId 则优先用。
-5. 读取：get(text/dom_summary) 够用即停；遇 partial/timeout 用已有内容作答。等待优先 load；SPA 正文晚出才 text_stable。窗口已销毁时不要空转 get，先 list_resources / window_create。
-6. 交互：有 href/url 就 navigate，勿 click；仅按钮/无链接控件才 click。Shadow DOM 用 pierce/query_deep。搜索框先 type（可带 submit=true）；若 url 未变 / navigated=false，必须立刻 click 搜索/提交按钮，禁止停下来让用户手动点。**禁止臆造产品路径**（如 /xiaomi-15、/shop/buy/phone）；只用 dom_summary/find 返回的绝对 url（或可解析的 https href）。协议相对 //host/path 已在 url 字段补全，优先用 url 字段。
-7. 截图仅用户要图或 DOM 不足以说明布局时用；桌面用 desktop_screenshot。用工作区相对路径展示图，勿塞 base64。
-8. 点击前确认选择器；禁猜数字 id；失败换策略。
-9. 未就绪页用 wait / click / flow，勿空转 get；需要点击必须真正 click/flow。
-10. 下载分两种，勿重复询问：
-   - 主动：已有完整文件 URL → file_download(_compose)（同 Session 网络 + Referer）；成功后用返回 path，勿反复 file_list。
-   - 被动：用户要「点击页面下载按钮」→ browser_click / navigate 触发链接；系统会拦截并弹出「被动文件下载」确认（或按权限自动允许）。此时禁止再 agent_ask_user 问「要不要下载/保存」；等日志里出现下载开始/完成即可。
-   - 直链须完整含 query；Referer 用来源页而非 CDN 文件 URL。遇 CDN 403 时绑定 sessionId/windowId 并带来源页 referer 重试，勿改用未允许的 curl 硬下。
-10b. 设置：改前 app_settings_get；禁改 permissions。加模型优先 app_provider_add；401/403 再用 agent_ask_user 收 API Key。勿用 app_settings_get 查插件列表（用 plugin_list）。
-10c. 技能：仅查/执行技能用 skill_*；问插件能力用 plugin_list / plugin_read。业务请求≠建技能；有插件一键工具则优先用。正文宜 ≤1500 字；create/update 默认 wait=false。
-10d. 商店：用户缺插件/技能时 store_search；只推荐、由界面安装。套件用 productId（如 crypto-suite），不要拿变体包 id 当产品 id。
-11. 工具失败则调整，勿编造页面/文件或虚构工具名。计算器用 calc_eval（不要 calc_evaluate / calc_convert）。
-`
-
-const SUBCHAT_RULE_ENABLED = (maxParallel: number) =>
-  `11b. 子对话：可并行调研用 spawn + await（同一父对话同时最多 ${maxParallel} 个运行中的子对话，不含父对话本身）；子对话看不到父对话原文，context/goal 必须自包含（含目标 URL、sitekey、路径等关键标识，禁止让子对话猜 example.com）；子对话勿再 spawn；子对话只出结果、勿润色成长文。子对话结束（完成/失败/取消）后会自动关闭其创建的浏览器 Session/窗口。`
-
-const SUBCHAT_RULE_DISABLED = `11b. 子对话已关：勿调用 agent_spawn_subchat / await / status；在本对话串行完成子任务。`
-
-const FORK_RULE_ENABLED = `12. 询问/决策（agent_ask_user）：仅当路径互斥且猜错成本高、缺关键参数、或需确认不可逆操作时调用。用户意图已明确（如下载某文件）勿再确认。被动下载由系统确认框/权限处理，禁止再用本工具重复问是否保存。每轮一问；选项 2～6 个具体动作（禁「选项A」）；级联固定 forkGroup/forkTitle，step 递增。缺密钥用 allowCustom。`
-
-const FORK_RULE_DISABLED = `12. 询问/决策已关：确需选择时在正文列 2～6 个具体选项让用户下条回复；意图已明勿反复确认。`
-
-const SYSTEM_PROMPT_TAIL = `13. 最终用中文短答：先结论，少过程；勿长篇复述工具步骤。信息已够则立即作答并停止工具。
-14. 已阅读网页由界面展示；正文不必再列来源，除非用户要链接。
-15. 若本轮需要工具：只发 function call（可附极短说明），禁止用「让我去…」单独收尾。`
-
-/** Build system prompt; fork/subchat flags mirror Settings defaults. */
-export function buildSystemPrompt(
-  forkEnabled: boolean,
-  opts?: { subchatEnabled?: boolean; maxSubchats?: number },
-): string {
-  const subchatEnabled = opts?.subchatEnabled !== false
-  const maxSubchats = Math.max(1, Math.floor(opts?.maxSubchats ?? 4))
-  return [
-    SYSTEM_PROMPT_BASE.trimEnd(),
-    subchatEnabled ? SUBCHAT_RULE_ENABLED(maxSubchats) : SUBCHAT_RULE_DISABLED,
-    forkEnabled ? FORK_RULE_ENABLED : FORK_RULE_DISABLED,
-    SYSTEM_PROMPT_TAIL,
-  ].join('\n')
-}
-
-/** Default prompt assumes fork UI + subchat are enabled (matches default config). */
-export const SYSTEM_PROMPT = buildSystemPrompt(true)
+// Keep the public exports stable while prompt policy evolves independently.
+export { SYSTEM_PROMPT_BASE, SYSTEM_PROMPT, buildSystemPrompt } from './agent-prompt'

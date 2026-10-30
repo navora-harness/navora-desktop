@@ -5,6 +5,7 @@ import {
   extractPageHeadlines,
   isLlmContentRejected,
   prepareToolResultForModel,
+  serializeToolResultForModel,
 } from './page-digest.ts'
 
 assert.equal(
@@ -54,3 +55,19 @@ const local = buildLocalPageSummaryFromToolJson([
 assert.match(local, /内容安全策略|标题/)
 
 console.log('page-digest ok')
+
+const structured = {
+  title: 'Shop', url: 'https://example.com/', headings: [{ text: 'Shop' }],
+  links: [{ text: 'Product', url: 'https://example.com/product?id=1', selector: '#product' }],
+  inputs: [{ text: 'Search', selector: '#search', ref: 'd1e2' }],
+}
+const normal = prepareToolResultForModel({ ok: true, value: structured }, 8000) as { value: typeof structured }
+assert.equal(normal.value.links[0]?.url, structured.links[0]?.url)
+assert.equal(normal.value.inputs[0]?.ref, 'd1e2')
+const huge = serializeToolResultForModel({ ok: true, value: { ...structured, links: Array(300).fill(structured.links[0]) } }, 4000)
+assert.ok(huge.length <= 4000)
+const parsedHuge = JSON.parse(huge)
+assert.equal(parsedHuge.ok, true)
+assert.ok(parsedHuge.value.inputs.length)
+assert.ok(parsedHuge.value.links.length)
+assert.doesNotThrow(() => JSON.parse(serializeToolResultForModel({ ok: false, error: 'failed', content: 'x'.repeat(100000) }, 2000)))

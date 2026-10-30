@@ -61,7 +61,7 @@ const editorDraft = computed<SkillReviewDraft>(() => ({
 const editorSubtitle = computed(() => {
   if (!req.value) return ''
   if (!req.value.wait && req.value.canDefer) {
-    return '无需立即确认 · 可稍后在 设置→技能→待确�?打开'
+    return '无需立即确认 · 可稍后在 设置→技能→待确认中打开'
   }
   if (!req.value.wait) return '无需立即确认 · 请在弹窗中确认或取消'
   if (req.value.canDefer) return '可改稿后确认，或稍后处理'
@@ -113,7 +113,7 @@ function closeAll() {
   deleteOpen.value = false
 }
 
-/** Esc / X：仅可搁置的新建/编辑在非阻塞时保留提案�?*/
+/** Esc / X：仅可搁置的新建/编辑在非阻塞时保留提案。 */
 function dismissSource(): 'deferred' | 'cancel' {
   if (req.value?.canDefer && req.value.wait === false) return 'deferred'
   return 'cancel'
@@ -170,7 +170,7 @@ async function onExportConfirm() {
   const skillId = current?.skillId
   if (!current || !skillId || responding.value) return
   responding.value = true
-  // 先关预览再开系统另存为；responding 已置位，onExportModel 不会误取�?
+  // 先关预览再开系统另存为；responding 已置位，onExportModel 不会误取消
   exportOpen.value = false
   try {
     const res = await window.navora?.skills?.export(skillId)

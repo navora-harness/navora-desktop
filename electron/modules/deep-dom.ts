@@ -38,6 +38,24 @@ export function hasQuerySelectorDeep(wc: WebContents): boolean {
   return typeof (wc as WcDeep).querySelectorDeep === 'function'
 }
 
+export function hasQuerySelectorAcrossDocuments(wc: WebContents): boolean {
+  return typeof wc.querySelectorAcrossDocuments === 'function'
+}
+
+export async function querySelectorAcrossDocuments(
+  wc: WebContents,
+  selector: string,
+  opts?: { pierce?: boolean; scrollIntoView?: boolean },
+): Promise<DeepDomInfo | null> {
+  if (!hasQuerySelectorAcrossDocuments(wc)) return null
+  const info = await wc.querySelectorAcrossDocuments(selector, {
+    pierce: opts?.pierce !== false,
+    scrollIntoView: Boolean(opts?.scrollIntoView),
+  })
+  if (!info) return null
+  return {backendNodeId:info.backendNodeId,tagName:info.tagName,x:info.x,y:info.y,width:info.width,height:info.height}
+}
+
 export function hasClickSelector(wc: WebContents): boolean {
   return typeof (wc as WcDeep).clickSelector === 'function'
 }

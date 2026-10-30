@@ -79,6 +79,26 @@ function digestDomSummary(value: Record<string, unknown>, maxChars: number): str
   return lines.join('\n').slice(0, maxChars)
 }
 
+/** Preserve actionable records; headline-only compression loses links and controls. */
+function compactStructuredPage(value: Record<string, unknown>, maxChars: number): Record<string, unknown> {
+  if (JSON.stringify(value).length <= maxChars) return value
+  const groups = ['headings', 'inputs', 'links', 'entries', 'frames'] as const
+  const output = { ...value, truncated: true } as Record<string, unknown>
+  if (typeof output.text === 'string') output.text = output.text.slice(0, Math.floor(maxChars / 4))
+  for (const key of groups) if (Array.isArray(value[key])) output[key] = []
+  // Interleave groups so navigation links cannot crowd all input controls out.
+  for (let index = 0; index < 80; index++) {
+    for (const key of groups) {
+      const source = value[key]
+      const target = output[key]
+      if (!Array.isArray(source) || !Array.isArray(target) || index >= source.length) continue
+      target.push(source[index])
+      if (JSON.stringify(output).length > maxChars) target.pop()
+    }
+  }
+  return output
+}
+
 /**
  * Build a model-facing digest from page text (or return as-is if already short).
  */
@@ -136,8 +156,8 @@ export function prepareToolResultForModel(
     }
   } else if (obj.value && typeof obj.value === 'object' && !Array.isArray(obj.value)) {
     const v = obj.value as Record<string, unknown>
-    if ('headings' in v || 'links' in v || 'inputs' in v) {
-      obj.value = digestDomSummary(v, budget)
+    if ('headings' in v || 'links' in v || 'inputs' in v || 'entries' in v) {
+      obj.value = safe ? digestDomSummary(v, budget) : compactStructuredPage(v, budget)
       obj.digested = true
       if (safe) obj.safe_digest = true
     }
@@ -149,6 +169,35 @@ export function prepareToolResultForModel(
   }
 
   return obj
+}
+
+/** Always return valid JSON, even when an unusually large result exceeds its budget. */
+export function serializeToolResultForModel(result: unknown, maxChars: number, safe = false): string {
+  const prepared = prepareToolResultForModel(result, maxChars, safe)
+  let serialized = JSON.stringify(prepared) ?? 'null'
+  if (serialized.length <= maxChars) return serialized
+  const shrink = (value: unknown, limit: number, depth = 0): unknown => {
+    if (typeof value === 'string') return value.length > limit ? `${value.slice(0, limit)}…` : value
+    if (value === null || typeof value !== 'object') return value
+    if (depth > 6) return '[omitted]'
+    if (Array.isArray(value)) return value.slice(0, Math.max(1, Math.floor(limit / 100))).map((v) => shrink(v, limit, depth + 1))
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key,
+      // Never turn an URL or locator into a plausible but incorrect target.
+      ['url', 'href', 'selector', 'ref'].includes(key) && typeof item === 'string' && item.length > limit
+        ? null : shrink(item, limit, depth + 1),
+    ]))
+  }
+  for (let limit = Math.max(128, Math.floor(maxChars / 4)); limit >= 64; limit = Math.floor(limit / 2)) {
+    const reduced = shrink(prepared, limit)
+    const object = reduced && typeof reduced === 'object' && !Array.isArray(reduced)
+      ? { ...reduced, truncated: true } : { value: reduced, truncated: true }
+    serialized = JSON.stringify(object)
+    if (serialized.length <= maxChars) return serialized
+  }
+  const meta = prepared && typeof prepared === 'object' ? prepared as Record<string, unknown> : {}
+  return JSON.stringify({ ok: meta.ok, error: meta.error, partial: meta.partial,
+    truncated: true, originalChars: (JSON.stringify(prepared) || '').length,
+    message: 'Result exceeds context budget; request a smaller scope or search the page index.' })
 }
 
 /** Best-effort local summary when the model keeps rejecting the page. */

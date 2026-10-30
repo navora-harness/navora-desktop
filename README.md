@@ -44,6 +44,17 @@ npm run build:plugins
 
 ## 开发
 
+重构分支已对齐 `45.0.0-cloudbypass.2`。原发布包的原生文件输入存在文件读权限遗漏：选择文件后导航可能导致渲染进程被 Chromium 终止。本仓库保留修复补丁 [`patches/electron/file-input-read-grants.patch`](patches/electron/file-input-read-grants.patch)。当前本机已编译、安装并验证修复后的内核；外部分发包尚未重新发布。
+
+在匹配的 Electron 源码中应用补丁并增量编译后，可安装本机产物：
+
+```bash
+npm run electron:use-build -- <Electron-out/Release目录>
+npm run test:browser
+```
+
+此命令只将同主版本的可执行文件复制进当前项目的 Electron 分发目录，并保存校验信息，不修改 Postpile 或其它项目的内核。安装新的原始 Electron 包后，应重新应用此步骤。打包会先运行浏览器回归，并通过 `electronDist` 使用当前项目实际验证的分发目录。
+
 ```bash
 cd navora-desktop
 cp .npmrc.example .npmrc   # electron_mirror → http://127.0.0.1:8787/electron/
@@ -58,11 +69,16 @@ npm run electron:dev
 | 命令 | 说明 |
 |------|------|
 | `npm run typecheck` | Vue / TS 类型检查 |
+| `npm test` | 单元与契约回归 |
+| `npm run test:browser` | 实际定制 Electron 的浏览器、插件与文件输入回归 |
+| `npm run test:ui` | 完整构建及隔离的桌面/窄屏 UI 回归，包含减少动态效果模式 |
 | `npm run build` | 构建渲染进程 + 主进程 |
 | `npm start` | 启动已构建产物 |
 | `npm run dist` / `dist:nsis` / `dist:all` | Windows 打包 |
 
 产物输出到 `release/`。
+
+UI 使用仓库内版本化的 `@postpile/ui` 包，复用 Postpile 的材质和动效；不依赖外部项目的绝对路径。界面回归截图位于 `release/ui-smoke/`。页面结构索引使用 `browser_get(what=snapshot)`，可附 `query` 检索；返回的 `ref` 可用于 `browser_click` 和 `browser_type`。完整闭合 Shadow DOM 与 frame 内容索引仍未实现；原生跨 frame 定位通过 `browser_query_deep(acrossDocuments=true)` 提供。
 
 ## 插件（运行时）
 

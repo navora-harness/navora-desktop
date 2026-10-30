@@ -16,5 +16,5 @@
     },
     "baseUrl": "."
   },
-  "include": ["vite.config.ts", "scripts/**/*.mjs", "electron/**/*.ts", "shared/**/*.ts"]
+  "include": ["vite.config.ts", "scripts/**/*.mjs", "scripts/**/*.ts", "electron/**/*.ts", "shared/**/*.ts"]
 }

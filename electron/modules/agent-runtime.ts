@@ -25,7 +25,7 @@ import {
   buildLocalPageSummaryFromToolJson,
   digestPageTextForModel,
   isLlmContentRejected,
-  prepareToolResultForModel,
+  serializeToolResultForModel,
 } from '../../shared/page-digest'
 import { normalizeLlmReply } from '../../shared/llm-reply-normalize'
 import {
@@ -2424,21 +2424,7 @@ function truncateJson(v: unknown, max: number): string {
 
 /** Prefer truncating / digesting large string fields so ok/error/partial stay visible. */
 function truncateJsonForModel(v: unknown, max: number, safe = false): string {
-  const prepared = prepareToolResultForModel(v, max, safe)
-  if (prepared && typeof prepared === 'object' && !Array.isArray(prepared)) {
-    const obj = prepared as Record<string, unknown>
-    for (const key of ['value', 'body', 'content', 'html', 'text'] as const) {
-      if (typeof obj[key] === 'string' && (obj[key] as string).length > max / 2) {
-        const s = obj[key] as string
-        obj[key] = `${s.slice(0, Math.floor(max / 2))}\n…[truncated ${s.length - Math.floor(max / 2)} chars]`
-        obj.truncated = true
-      }
-    }
-    const s = JSON.stringify(obj)
-    if (s.length <= max) return s
-    return `${s.slice(0, max)}…[truncated]`
-  }
-  return truncateJson(prepared, max)
+  return serializeToolResultForModel(v, max, safe)
 }
 
 /** After a content-policy rejection, shrink prior tool payloads to safer digests in-place. */

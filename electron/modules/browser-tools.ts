@@ -32,12 +32,18 @@ import {
 } from './permission-gate'
 import { dispatchTrustedPointer } from './trusted-input'
 import { jsDialogHost } from './js-dialog-host'
+import { browserCapabilities } from './browser-capabilities'
+import { setBrowserFileInput } from './browser-file-input'
+import { pageIndexReadScript, pageIndexFocusScript, pageIndexResolveScript } from './browser-page-index'
+import type { PageSnapshot } from '../../shared/page-index'
 import {
   centerOf,
   clickSelector,
   hasClickSelector,
   hasQuerySelectorDeep,
+  hasQuerySelectorAcrossDocuments,
   querySelectorDeep,
+  querySelectorAcrossDocuments,
 } from './deep-dom'
 import { clickInIframe, clickInIframeWhenReady } from './iframe-click'
 import { loadDocumentWithResponse } from './load-document-response'
@@ -1198,6 +1204,19 @@ export async function executeAgentTool(
         if (!gate.ok) return { ok: false, error: gate.reason || 'permission_denied' }
       }
     }
+  }
+
+  if ((name === 'browser_click' || name === 'browser_type') && rawArgs.ref) {
+    if (rawArgs.iframeSelector) return {ok:false,error:'ref_and_iframe_scope_conflict'}
+    const rec = ctx.registry.assertWindowOwned(ctx.chatId, String(rawArgs.windowId || ''))
+    const target = await isolatedEval(rec.win.webContents, cfg.browser.evaluate_world_id,
+      pageIndexResolveScript(String(rawArgs.ref)),
+      { timeoutMs: 3000, signal: ctx.signal, label: 'resolve_ref' })
+    if (!target || typeof target !== 'object' || !('selector' in target) || typeof target.selector !== 'string') {
+      return { ok: false, error: 'stale_element_ref', hint: 'Read a fresh browser_get(snapshot), then use its ref.' }
+    }
+    if ('disabled' in target && target.disabled) return { ok: false, error: 'element_disabled' }
+    rawArgs = { ...rawArgs, selector: target.selector }
   }
 
   switch (name) {
@@ -2752,6 +2771,7 @@ export async function executeAgentTool(
     case 'browser_type': {
       const windowId = String(rawArgs.windowId || '')
       const selector = String(rawArgs.selector || '')
+      if (!selector) return {ok:false,error:'selector_or_ref_required'}
       const text = String(rawArgs.text ?? '')
       const append = Boolean(rawArgs.append)
       const submit = Boolean(rawArgs.submit)
@@ -2778,7 +2798,7 @@ export async function executeAgentTool(
       const okFocus = await isolatedEval(
         wc,
         worldId,
-        `(() => {
+        rawArgs.ref ? pageIndexFocusScript(String(rawArgs.ref), append) : `(() => {
           const el = document.querySelector(${JSON.stringify(selector)});
           if (!el) return false;
           el.focus();
@@ -2826,6 +2846,9 @@ export async function executeAgentTool(
       const max = cfg.browser.page_get_max_chars || 80000
       const worldId = cfg.browser.evaluate_world_id
       const getMs = Math.max(cfg.browser.action_timeout_ms || 15000, 20000)
+      if (what === 'capabilities') {
+        return { ok: true, value: browserCapabilities(wc), url: wc.getURL(), title: wc.getTitle() }
+      }
       if (what === 'title') {
         return {
           ok: true,
@@ -2868,6 +2891,20 @@ export async function executeAgentTool(
         label: `get_${what}`,
       }
       try {
+        if (what === 'snapshot') {
+          const snapshot = await isolatedEval(wc, worldId, pageIndexReadScript({
+            refresh: rawArgs.refresh === true,
+            query: rawArgs.query ? String(rawArgs.query) : undefined,
+            limit: Number(rawArgs.limit) || 60,
+            maxChars: Math.min(max, 16000),
+          }), evalOpts)
+          return {
+            ok: true,
+            value: snapshot,
+            capabilities: browserCapabilities(wc),
+            ...meta,
+          }
+        }
         if (what === 'text') {
           const code = selector
             ? `(() => {
@@ -3447,46 +3484,24 @@ export async function executeAgentTool(
       const limit = Math.min(30, Math.max(1, Number(rawArgs.limit) || 15))
       const findMs = Math.min(5000, Math.max(800, Number(rawArgs.timeoutMs) || 4000))
       try {
-        const v = await isolatedEval(
+        const snapshot = await isolatedEval(
           wc,
           cfg.browser.evaluate_world_id,
-          `(() => {
-            const needle = ${JSON.stringify(text)}.toLowerCase();
-            const nodes = [...document.querySelectorAll('a,button,input,textarea,select,summary,[role="button"],label,h1,h2,h3,li,td,th')];
-            const out = [];
-            for (const el of nodes) {
-              if (out.length >= ${limit}) break;
-              const t = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('value') || '').trim();
-              if (!t || !t.toLowerCase().includes(needle)) continue;
-              const tag = el.tagName.toLowerCase();
-              let sel = tag;
-              if (el.id) sel = '#' + CSS.escape(el.id);
-              else if (el.getAttribute('name')) sel = tag + '[name=' + JSON.stringify(el.getAttribute('name')) + ']';
-              out.push({
-                tag,
-                text: t.slice(0, 120),
-                selector: sel,
-                href: el.getAttribute('href') || undefined,
-                url: (() => {
-                  try {
-                    if (typeof el.href === 'string' && el.href && !/^javascript:/i.test(el.href)) return el.href;
-                    const raw = el.getAttribute('href');
-                    if (!raw || /^javascript:/i.test(raw)) return undefined;
-                    return new URL(raw, location.href).href;
-                  } catch { return undefined; }
-                })(),
-              });
-            }
-            return out;
-          })()`,
+          pageIndexReadScript({query:text,limit,maxChars:12000}),
           { timeoutMs: findMs, signal: ctx.signal, label: 'find' },
-        )
+        ) as PageSnapshot
+        const matches = snapshot.entries
         return {
           ok: true,
-          matches: v,
+          matches: matches.map((entry) => ({ ...entry, text: entry.name, href: entry.url })),
+          documentId: snapshot.documentId,
+          reused: snapshot.reused,
+          captureMs: snapshot.captureMs,
+          truncated: snapshot.truncated,
+          coverage: snapshot.coverage,
           url: wc.getURL(),
           title: wc.getTitle(),
-          hint: '这是即时快照，不是等待器。点击/跳转后请用 browser_get(dom_summary 或 text, waitUntil=load)。若 match.url 为 http(s)，用 browser_navigate。',
+          hint: 'Use the returned ref for click/type, or navigate to a returned URL. Refresh browser_get(snapshot) after stale_element_ref.',
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
@@ -3510,6 +3525,10 @@ export async function executeAgentTool(
       const scrollIntoView = Boolean(rawArgs.scrollIntoView)
       const rec = ctx.registry.assertWindowOwned(ctx.chatId, windowId)
       const wc = rec.win.webContents
+      const acrossDocuments = rawArgs.acrossDocuments === true
+      if (acrossDocuments && !hasQuerySelectorAcrossDocuments(wc)) {
+        return {ok:false,error:'querySelectorAcrossDocuments_unavailable'}
+      }
       if (!hasQuerySelectorDeep(wc)) {
         return {
           ok: false,
@@ -3517,11 +3536,14 @@ export async function executeAgentTool(
           hint: 'Requires unofficial Electron (querySelectorDeep); fall back to browser_evaluate(document.querySelector).',
         }
       }
-      const info = await querySelectorDeep(wc, selector, { pierce, scrollIntoView })
+      const info = acrossDocuments
+        ? await querySelectorAcrossDocuments(wc, selector, { pierce, scrollIntoView })
+        : await querySelectorDeep(wc, selector, { pierce, scrollIntoView })
       if (!info) return { ok: false, error: 'element_not_found', pierce }
       return {
         ok: true,
         pierce,
+        acrossDocuments,
         element: info,
         center: centerOf(info),
         hint: '坐标可用于可信点击；优先 browser_click(selector)（内部会用 clickSelector）。',
@@ -3574,8 +3596,8 @@ export async function executeAgentTool(
       for (const p of absPaths) {
         if (!fsExists(p)) return { ok: false, error: `file_not_found:${p}` }
       }
-      await setFileInputFiles(wc, selector, absPaths)
-      return { ok: true, files: absPaths.length, selector }
+      const method = await setBrowserFileInput(wc, selector, absPaths, ctx.signal)
+      return { ok: true, files: absPaths.length, selector, method }
     }
 
     case 'browser_window_focus': {
@@ -4478,24 +4500,4 @@ function fsExists(p: string): boolean {
   } catch {
     return false
   }
-}
-
-async function setFileInputFiles(
-  wc: WebContents,
-  selector: string,
-  files: string[],
-): Promise<void> {
-  const native = wc as WebContents & {
-    setFileInputFiles?: (
-      sel: string,
-      paths: string[],
-      opts?: { pierce?: boolean },
-    ) => Promise<void>
-  }
-  if (typeof native.setFileInputFiles !== 'function') {
-    throw new Error(
-      'setFileInputFiles_unsupported: need Electron with webContents.setFileInputFiles (no CDP)',
-    )
-  }
-  await native.setFileInputFiles(selector, files, { pierce: true })
 }
