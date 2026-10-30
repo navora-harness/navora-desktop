@@ -7,6 +7,7 @@
     </router-view>
     <OnboardingWizard v-model="wizardOpen" :manual="wizardManual" />
     <StoreUiHost />
+    <TextContextMenuHost />
   </v-app>
 </template>
 
@@ -14,6 +15,7 @@
 import { onMounted } from 'vue'
 import OnboardingWizard from './components/OnboardingWizard.vue'
 import StoreUiHost from './components/store/StoreUiHost.vue'
+import TextContextMenuHost from './components/TextContextMenuHost.vue'
 import { useOnboarding } from './composables/useOnboarding'
 
 const { open: wizardOpen, manual: wizardManual, show: showWizard } = useOnboarding()

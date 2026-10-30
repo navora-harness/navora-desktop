@@ -11,7 +11,7 @@ import {
   WEB_TOKEN_TTL_MS,
 } from '../../shared/crypto-util'
 import type { AppConfig } from '../../shared/config'
-import { isDefaultRemotePasswordHash } from '../../shared/config'
+import { assertRemoteAccessConfig, isDefaultRemotePasswordHash } from '../../shared/config'
 import { acceptWebSocket, type WsLiteSocket } from './ws-lite'
 import { BridgeRemoteService } from './bridge-remote'
 import type { BrowserRegistry } from './browser-registry'
@@ -92,6 +92,7 @@ export class RemoteServer {
     if (!st.running) return { ok: false, error: 'remote_not_running' }
     const cfg = this.getConfig().remote
     if (!cfg.passwordHash) return { ok: false, error: 'remote_no_password' }
+    if (isDefaultRemotePasswordHash(cfg.passwordHash)) return { ok: false, error: 'remote_default_password' }
     const issued = createWebToken(cfg.username || 'admin', cfg.passwordHash)
     return { ok: true, token: issued.token, exp: issued.exp, url: st.url }
   }
@@ -123,13 +124,7 @@ export class RemoteServer {
   async start(): Promise<void> {
     if (this.server) return
     const cfg = this.getConfig().remote
-    if (!cfg.passwordHash) {
-      console.warn('[remote] enabled but no passwordHash; refuse to start')
-      throw new Error('remote_no_password')
-    }
-    if (isDefaultRemotePasswordHash(cfg.passwordHash)) {
-      console.warn('[remote] default password still in use; starting anyway (settings shows a warning)')
-    }
+    assertRemoteAccessConfig({ ...cfg, enabled: true })
     this.server = http.createServer((req, res) => {
       void this.handle(req, res)
     })
@@ -180,6 +175,7 @@ export class RemoteServer {
     if (!patchRemote) return
     const pwd = patchRemote.password
     if (typeof pwd === 'string' && pwd.trim()) {
+      if (pwd.trim() === 'admin') throw new Error('remote_default_password')
       patchRemote.passwordHash = hashPassword(pwd.trim())
     }
     delete patchRemote.password
@@ -190,7 +186,13 @@ export class RemoteServer {
     if (auth.startsWith('Bearer ')) return auth.slice(7).trim()
     const cookie = req.headers.cookie || ''
     const m = cookie.match(/(?:^|;\s*)nv_token=([^;]+)/)
-    if (m) return decodeURIComponent(m[1]!)
+    if (m) {
+      try {
+        return decodeURIComponent(m[1]!)
+      } catch {
+        return ''
+      }
+    }
     try {
       const u = new URL(req.url || '/', 'http://localhost')
       const q = u.searchParams.get('token')

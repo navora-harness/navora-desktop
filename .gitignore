@@ -36,6 +36,8 @@ Desktop.ini
 !.vscode/settings.json
 
 # Misc local junk / probes
+_tmp_*/
+_tmp_*.mjs
 xxx
 xxx-*
 *.pem

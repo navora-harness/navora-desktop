@@ -26,7 +26,7 @@
         </button>
       </span>
     </div>
-    <div v-if="!collapsed" class="res-body" @contextmenu="onRootMenu">
+    <div v-if="!collapsed" class="res-body" data-ctx-menu="workspace" @contextmenu="onRootMenu">
       <div v-if="rootLabel" class="ws-root" :title="absoluteRoot">{{ rootLabel }}</div>
       <div v-if="!chatId" class="res-empty">先选择一个 Chat</div>
       <div v-else-if="loadError" class="res-empty">{{ loadError }}</div>

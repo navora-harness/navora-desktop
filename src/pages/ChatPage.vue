@@ -5,6 +5,7 @@
       'mobile-layout': isMobileLayout,
       'remote-web': isWebRemote(),
       'sidebar-open': isMobileLayout && mobileSidebarOpen,
+      frameless: showDesktopChrome,
     }"
   >
     <div
@@ -14,9 +15,12 @@
       @click="closeMobileSidebar"
     />
     <aside class="sidebar">
-      <div class="brand">
+      <div class="brand" :class="{ 'app-drag': showDesktopChrome }">
         <div class="brand-top">
-          <div class="brand-name">Navora</div>
+          <div class="brand-identity">
+            <img class="brand-logo" src="/app-icon.png" alt="" />
+            <div class="brand-name">Navora</div>
+          </div>
           <button
             type="button"
             class="brand-search-btn"
@@ -26,7 +30,6 @@
             <font-awesome-icon icon="magnifying-glass" />
           </button>
         </div>
-        <div class="brand-sub">AI Agent Browser</div>
       </div>
       <div class="chat-toolbar">
         <Transition name="toolbar-swap" mode="out-in">
@@ -111,7 +114,7 @@
               @touchmove="chatBatchMode ? undefined : onChatTouchMove($event, c.id)"
               @touchend="chatBatchMode ? undefined : onChatTouchEnd(c.id)"
               @touchcancel="chatBatchMode ? undefined : onChatTouchEnd(c.id)"
-              @contextmenu.prevent.stop="onChatItemContext($event, c)"
+              @contextmenu="onChatItemContext($event, c)"
             >
               <button type="button" class="chat-item-main" @click="onChatItemActivate(c.id)">
                 <Transition name="batch-check">
@@ -269,6 +272,16 @@
                       </button>
                       <button
                         type="button"
+                        class="chat-more-item"
+                        role="menuitem"
+                        :disabled="exportingChat || !c.messages?.length"
+                        @click="exportChatById(c.id)"
+                      >
+                        <font-awesome-icon icon="file-export" />
+                        <span>导出对话</span>
+                      </button>
+                      <button
+                        type="button"
                         class="chat-more-item danger"
                         role="menuitem"
                         @click="askDeleteChat(c)"
@@ -310,7 +323,7 @@
                       'menu-open': chatMoreOpenId === sub.id,
                       running: Boolean(runningChats[sub.id] || sub.spawnStatus === 'running'),
                     }"
-                    @contextmenu.prevent.stop="onChatItemContext($event, sub)"
+                    @contextmenu="onChatItemContext($event, sub)"
                   >
                     <button
                       type="button"
@@ -377,6 +390,16 @@
                         >
                           <font-awesome-icon icon="pen-to-square" />
                           <span>修改标题</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="chat-more-item"
+                          role="menuitem"
+                          :disabled="exportingChat || !sub.messages?.length"
+                          @click="exportChatById(sub.id)"
+                        >
+                          <font-awesome-icon icon="file-export" />
+                          <span>导出对话</span>
                         </button>
                         <button
                           type="button"
@@ -472,7 +495,7 @@
                 type="button"
                 class="sidebar-more-item"
                 role="menuitem"
-                @click="onMoreRemoteWindows"
+                @click="openRemoteWindows"
               >
                 <font-awesome-icon icon="window-maximize" />
                 <span>远程窗口</span>
@@ -515,6 +538,8 @@
     </aside>
 
     <main class="main">
+      <div v-if="showDesktopChrome" class="win-drag-main" aria-hidden="true" />
+      <WindowChrome v-if="showDesktopChrome" class="win-chrome-host" />
       <header v-if="isMobileLayout" class="mobile-topbar">
         <button
           v-if="active?.kind === 'sub' && active.parentChatId"
@@ -625,6 +650,7 @@
           <section
             ref="msgBox"
             class="messages"
+            data-ctx-menu="messages"
             @scroll="onMessagesScroll"
             @click="onMessagesClick"
             @contextmenu.prevent="onMessagesContext"
@@ -657,7 +683,7 @@
             </div>
 
             <template v-for="block in messageBlocks" :key="block.key">
-              <div v-if="block.type === 'run'" class="msg run">
+              <div v-if="block.type === 'run'" class="msg run" :data-run-key="block.key">
                 <div class="msg-row">
                   <div class="msg-avatar run" aria-hidden="true">
                     <font-awesome-icon icon="wrench" />
@@ -701,13 +727,14 @@
                       </button>
                       <div v-if="isRunExpanded(block.key)" class="run-card-body">
                         <template v-for="item in block.items" :key="item.id">
-                          <div v-if="item.role === 'log'" class="run-item log">
+                          <div v-if="item.role === 'log'" class="run-item log" :data-msg-id="item.id">
                             <span class="log-kind-chip">{{ logKindText(item) }}</span>
                             <span class="run-item-text">{{ logFullText(item) }}</span>
                           </div>
                           <div
                             v-else
                             class="run-item tool"
+                            :data-msg-id="item.id"
                             :class="[toolStatusClass(item), `kind-${toolDisplay(item).kind}`]"
                           >
                             <div class="tool-card" :class="{ open: expandedTools[item.id] }">
@@ -813,6 +840,7 @@
               <div
                 v-else-if="block.type === 'log'"
                 class="msg log"
+                :data-msg-id="block.message.id"
                 :class="logToneClass(block.message)"
               >
                 <div class="msg-row">
@@ -865,6 +893,7 @@
               <div
                 v-else-if="block.type === 'tool'"
                 class="msg"
+                :data-msg-id="block.message.id"
                 :class="['tool', toolStatusClass(block.message), `kind-${toolDisplay(block.message).kind}`]"
               >
                 <div class="msg-row">
@@ -1004,6 +1033,7 @@
               <div
                 v-else
                 class="msg"
+                :data-msg-id="block.message.id"
                 :class="[block.message.role]"
               >
                 <div class="msg-row">
@@ -1333,7 +1363,6 @@
           <div
             class="composer-box"
             :class="{ expanded: composerExpanded }"
-            @contextmenu.prevent="onComposerContext"
           >
             <div class="composer-input-row">
               <v-textarea
@@ -1666,62 +1695,93 @@
           <font-awesome-icon icon="thumbtack" />
           <span>{{ pageCtx.chat.pinned ? '取消置顶' : '置顶' }}</span>
         </button>
+        <button
+          type="button"
+          class="sidebar-more-item"
+          role="menuitem"
+          :disabled="exportingChat || !pageCtx.chat.messages?.length"
+          @click="exportChatById(pageCtx.chat.id)"
+        >
+          <font-awesome-icon icon="file-export" />
+          <span>导出对话</span>
+        </button>
         <button type="button" class="sidebar-more-item danger" role="menuitem" @click="askDeleteChat(pageCtx.chat)">
           <font-awesome-icon icon="trash" />
           <span>删除</span>
         </button>
       </template>
       <template v-else-if="pageCtx?.kind === 'msg'">
-        <button
-          type="button"
-          class="sidebar-more-item"
-          role="menuitem"
-          :disabled="!pageCtx.selected"
-          @click="copyText(pageCtx.selected)"
-        >
-          <font-awesome-icon icon="clipboard-list" />
-          <span>复制</span>
-        </button>
-        <button
-          type="button"
-          class="sidebar-more-item"
-          role="menuitem"
-          :disabled="!pageCtx.selected"
-          @click="quoteToComposer(pageCtx.selected)"
-        >
-          <font-awesome-icon icon="pen-to-square" />
-          <span>引用到输入框</span>
-        </button>
-      </template>
-      <template v-else-if="pageCtx?.kind === 'composer'">
-        <button
-          type="button"
-          class="sidebar-more-item"
-          role="menuitem"
-          :disabled="!pageCtx.selected"
-          @click="composerCut"
-        >
-          <font-awesome-icon icon="scissors" />
-          <span>剪切</span>
-        </button>
-        <button
-          type="button"
-          class="sidebar-more-item"
-          role="menuitem"
-          :disabled="!pageCtx.selected"
-          @click="copyText(pageCtx.selected)"
-        >
-          <font-awesome-icon icon="clipboard-list" />
-          <span>复制</span>
-        </button>
-        <button type="button" class="sidebar-more-item" role="menuitem" @click="composerPaste">
-          <font-awesome-icon icon="paste" />
-          <span>粘贴</span>
-        </button>
-        <button type="button" class="sidebar-more-item" role="menuitem" @click="composerSelectAll">
-          <font-awesome-icon icon="check" />
-          <span>全选</span>
-        </button>
+        <template v-if="pageCtx.selected">
+          <div class="sidebar-ctx-label" role="presentation">文本</div>
+          <button
+            type="button"
+            class="sidebar-more-item"
+            role="menuitem"
+            @click="copyText(pageCtx.selected)"
+          >
+            <font-awesome-icon icon="clipboard-list" />
+            <span>复制</span>
+          </button>
+          <button
+            type="button"
+            class="sidebar-more-item"
+            role="menuitem"
+            @click="quoteToComposer(pageCtx.selected)"
+          >
+            <font-awesome-icon icon="pen-to-square" />
+            <span>引用到输入框</span>
+          </button>
+        </template>
+        <template v-if="pageCtx.messageText || pageCtx.hasChat">
+          <div
+            class="sidebar-ctx-label"
+            :class="{ 'with-sep': !!pageCtx.selected }"
+            role="presentation"
+          >
+            对话
+          </div>
+          <button
+            v-if="pageCtx.messageText"
+            type="button"
+            class="sidebar-more-item"
+            role="menuitem"
+            @click="copyText(pageCtx.messageText)"
+          >
+            <font-awesome-icon icon="clipboard-list" />
+            <span>复制本条</span>
+          </button>
+          <button
+            v-if="pageCtx.messageText"
+            type="button"
+            class="sidebar-more-item"
+            role="menuitem"
+            @click="quoteToComposer(pageCtx.messageText)"
+          >
+            <font-awesome-icon icon="pen-to-square" />
+            <span>引用本条到输入框</span>
+          </button>
+          <button
+            v-if="pageCtx.hasChat"
+            type="button"
+            class="sidebar-more-item"
+            role="menuitem"
+            @click="copyEntireChat"
+          >
+            <font-awesome-icon icon="comments" />
+            <span>复制全部对话</span>
+          </button>
+          <button
+            v-if="pageCtx.hasChat"
+            type="button"
+            class="sidebar-more-item"
+            role="menuitem"
+            :disabled="exportingChat"
+            @click="exportActiveChat"
+          >
+            <font-awesome-icon icon="file-export" />
+            <span>导出对话</span>
+          </button>
+        </template>
       </template>
     </SidebarContextMenu>
 
@@ -1843,6 +1903,7 @@ import ToolCatalogList from '@/components/store/ToolCatalogList.vue'
 import { useStoreUi } from '@/composables/useStoreUi'
 import { storeErrorText } from '@shared/store'
 import BrowserDownloadsMenu from '@/components/BrowserDownloadsMenu.vue'
+import WindowChrome from '@/components/WindowChrome.vue'
 import WorkspaceFilesPanel from '@/components/sidebar/WorkspaceFilesPanel.vue'
 import BrowserResourcesPanel from '@/components/sidebar/BrowserResourcesPanel.vue'
 import SidebarContextMenu from '@/components/sidebar/SidebarContextMenu.vue'
@@ -1857,6 +1918,7 @@ import {
 } from '@/utils/chat-media'
 import {
   faviconForUrl,
+  makeSnippet,
   parseSourcesFromMarkdown,
   siteNameFromUrl,
   stripTrailingSourcesSection,
@@ -1882,6 +1944,9 @@ import { isWebRemote } from '@/remote-api'
 const router = useRouter()
 const route = useRoute()
 const { isMobileLayout } = useMobileLayout()
+const showDesktopChrome = computed(
+  () => Boolean(window.navora?.app?.minimize) && !isWebRemote(),
+)
 
 const DND_MIME = 'application/x-navora-browser-ref'
 
@@ -3070,7 +3135,12 @@ function messageSources(m: ChatMessage): AnswerSource[] {
       if (!/^https?:\/\//i.test(url)) continue
       const title = String(item.title || '').trim()
       const siteName = String(item.siteName || siteNameFromUrl(url) || '').trim()
-      const snippet = String(item.snippet || '').trim()
+      let snippet = String(item.snippet || '').trim()
+      // Soft-clean legacy snippets that stored raw JSON / JS.
+      if (snippet) {
+        const cleaned = makeSnippet(snippet)
+        snippet = cleaned || ''
+      }
       const readAt = typeof item.readAt === 'number' ? item.readAt : undefined
       const favicon = String(item.favicon || faviconForUrl(url) || '').trim()
       out.push({
@@ -4633,6 +4703,7 @@ function openMobileSidebar() {
 }
 
 function openRemoteWindows() {
+  sidebarMoreOpen.value = false
   closeMobileSidebar()
   void router.push('/remote')
 }
@@ -4653,10 +4724,18 @@ function onMoreQuit() {
 }
 
 async function exportActiveChat() {
-  if (!window.navora || !activeId.value || exportingChat.value) return
+  await exportChatById(activeId.value || undefined)
+}
+
+async function exportChatById(chatId?: string) {
+  const id = String(chatId || '').trim()
+  if (!window.navora || !id || exportingChat.value) return
   exportingChat.value = true
   try {
-    const chat = (await window.navora.chats.get(activeId.value)) || active.value
+    const chat =
+      (await window.navora.chats.get(id)) ||
+      chats.value.find((c) => c.id === id) ||
+      (active.value?.id === id ? active.value : null)
     if (!chat) {
       showToast('未找到当前对话')
       return
@@ -4684,7 +4763,7 @@ async function exportActiveChat() {
       showToast(errMap[res.error || ''] || res.error || '导出失败')
       return
     }
-    showToast('对话已导出', 'success')
+    showToast(res.path ? `已导出到 ${res.path}` : '对话已导出', 'success')
   } catch (e) {
     console.error(e)
     showToast(e instanceof Error ? e.message : '导出失败')
@@ -4771,35 +4850,82 @@ function onPanelNotify(text: string, color = 'error') {
 type PageCtx =
   | { kind: 'chat'; chat: ChatSession }
   | { kind: 'sub'; chat: ChatSession }
-  | { kind: 'msg'; selected: string }
-  | { kind: 'composer'; selected: string; start: number; end: number }
+  | {
+      kind: 'msg'
+      selected: string
+      messageText: string
+      messageId?: string
+      hasChat: boolean
+    }
 
 const pageCtx = ref<PageCtx | null>(null)
 const pageCtxMenu = ref<{ show: (e: MouseEvent) => void } | null>(null)
 
-function composerTextarea(): HTMLTextAreaElement | null {
-  const field = draftField.value as unknown as { $el?: HTMLElement } | null
-  return (field?.$el?.querySelector?.('textarea') as HTMLTextAreaElement | undefined) || null
+function messagePlainText(m: ChatMessage): string {
+  if (m.role === 'log') return logFullText(m)
+  if (m.role === 'tool') {
+    const name =
+      typeof m.meta?.toolName === 'string' && m.meta.toolName ? m.meta.toolName : 'tool'
+    const title = toolHeadTitle(m)
+    const head = title ? `[${name}] ${title}` : `[${name}]`
+    const body = String(m.content || '').trim()
+    return body ? `${head}\n${body}` : head
+  }
+  if (m.role === 'assistant') return displayMessageContent(m).trim()
+  return String(m.content || '').trim()
+}
+
+function resolveMsgContext(e: MouseEvent): { messageText: string; messageId?: string } {
+  const target = e.target as HTMLElement | null
+  if (!target?.closest) return { messageText: '' }
+
+  const msgEl = target.closest('[data-msg-id]') as HTMLElement | null
+  if (msgEl) {
+    const id = msgEl.getAttribute('data-msg-id') || ''
+    const m = active.value?.messages?.find((x) => x.id === id)
+    if (m) return { messageText: messagePlainText(m), messageId: id }
+  }
+
+  const runEl = target.closest('[data-run-key]') as HTMLElement | null
+  if (runEl) {
+    const key = runEl.getAttribute('data-run-key') || ''
+    const block = messageBlocks.value.find((b) => b.type === 'run' && b.key === key)
+    if (block && block.type === 'run') {
+      const text = block.items
+        .map((item) => messagePlainText(item))
+        .filter(Boolean)
+        .join('\n\n')
+      return { messageText: text, messageId: block.items[0]?.id }
+    }
+  }
+
+  return { messageText: '' }
 }
 
 function onChatItemContext(e: MouseEvent, c: ChatSession) {
   if (chatBatchMode.value) return
+  // Rename / other inputs: shared TextContextMenuHost handles them in capture.
+  if ((e.target as HTMLElement | null)?.closest?.('input, textarea, [contenteditable]')) return
+  e.preventDefault()
+  e.stopPropagation()
   pageCtx.value = { kind: c.kind === 'sub' ? 'sub' : 'chat', chat: c }
   pageCtxMenu.value?.show(e)
 }
 
 function onMessagesContext(e: MouseEvent) {
+  // Inputs inside the message list (rare) are handled globally.
+  if ((e.target as HTMLElement | null)?.closest?.('input, textarea, [contenteditable]')) return
   const selected = String(window.getSelection?.()?.toString() || '').trim()
-  pageCtx.value = { kind: 'msg', selected }
-  pageCtxMenu.value?.show(e)
-}
-
-function onComposerContext(e: MouseEvent) {
-  const el = composerTextarea()
-  const start = el?.selectionStart ?? 0
-  const end = el?.selectionEnd ?? 0
-  const selected = el && end > start ? el.value.slice(start, end) : ''
-  pageCtx.value = { kind: 'composer', selected, start, end }
+  const { messageText, messageId } = resolveMsgContext(e)
+  const hasChat = !!(active.value?.messages?.length)
+  if (!selected && !messageText && !hasChat) return
+  pageCtx.value = {
+    kind: 'msg',
+    selected,
+    messageText,
+    messageId,
+    hasChat,
+  }
   pageCtxMenu.value?.show(e)
 }
 
@@ -4814,6 +4940,12 @@ async function copyText(text: string) {
   }
 }
 
+async function copyEntireChat() {
+  const chat = active.value
+  if (!chat?.messages?.length) return
+  await copyText(formatChatExportContent(chat, 'md'))
+}
+
 function quoteToComposer(text: string) {
   const t = String(text || '').trim()
   if (!t) return
@@ -4825,46 +4957,6 @@ function quoteToComposer(text: string) {
   applyDraftLocally(clampDraftText(cur ? `${cur}\n\n${quoted}\n` : `${quoted}\n`), Date.now())
   scheduleDraftSave()
   focusComposer()
-}
-
-function replaceComposerRange(start: number, end: number, insert: string) {
-  const el = composerTextarea()
-  const src = el?.value ?? draft.value
-  const next = clampDraftText(`${src.slice(0, start)}${insert}${src.slice(end)}`)
-  applyDraftLocally(next, Date.now())
-  scheduleDraftSave()
-  void nextTick(() => {
-    const box = composerTextarea()
-    if (!box) return
-    const pos = Math.min(start + insert.length, box.value.length)
-    box.focus()
-    box.setSelectionRange(pos, pos)
-  })
-}
-
-function composerCut() {
-  const ctx = pageCtx.value
-  if (ctx?.kind !== 'composer' || !ctx.selected) return
-  void copyText(ctx.selected)
-  replaceComposerRange(ctx.start, ctx.end, '')
-}
-
-async function composerPaste() {
-  const ctx = pageCtx.value
-  if (ctx?.kind !== 'composer') return
-  try {
-    const text = await navigator.clipboard.readText()
-    replaceComposerRange(ctx.start, ctx.end, text)
-  } catch {
-    showToast('无法读取剪贴板')
-  }
-}
-
-function composerSelectAll() {
-  const el = composerTextarea()
-  if (!el) return
-  el.focus()
-  el.select()
 }
 
 async function openRemoteWindow(windowId: string) {
@@ -5165,7 +5257,7 @@ onMounted(async () => {
       return
     }
     await refreshList()
-    if (ev.chatId === activeId.value && window.navora) {
+    if (ev.type === 'upsert' && ev.chatId === activeId.value && window.navora) {
       const fresh = await window.navora.chats.get(ev.chatId)
       if (!fresh) return
       if (!agentRunning.value) {
@@ -5478,27 +5570,52 @@ onUnmounted(() => {
   min-width: 0;
   overflow: hidden;
 }
+.shell.frameless .sidebar {
+  padding-top: 0;
+}
 .brand {
   width: 100%;
   min-width: 0;
-  padding-right: 12px;
+  padding: 14px 12px 12px 0;
   box-sizing: border-box;
+}
+.brand.app-drag {
+  -webkit-app-region: drag;
 }
 .brand-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
+  min-height: 28px;
 }
-.brand-name {
-  font-size: 1.45rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+.brand-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
   flex: 1;
 }
+.brand-logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  flex-shrink: 0;
+  display: block;
+}
+.brand-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .brand-search-btn {
+  -webkit-app-region: no-drag;
   flex-shrink: 0;
   margin-left: auto;
   width: 32px;
@@ -5522,11 +5639,6 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.22);
   color: #fff;
-}
-.brand-sub {
-  font-size: 0.75rem;
-  opacity: 0.7;
-  margin-bottom: 12px;
 }
 .chat-toolbar {
   display: flex;
@@ -6156,6 +6268,13 @@ onUnmounted(() => {
 .chat-more-item:hover {
   background: rgba(255, 255, 255, 0.08);
 }
+.chat-more-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.chat-more-item:disabled:hover {
+  background: transparent;
+}
 .chat-more-item.danger {
   color: #f1948a;
 }
@@ -6418,6 +6537,28 @@ onUnmounted(() => {
   overflow: hidden;
   background: linear-gradient(180deg, #f7f9fb 0%, #eef2f5 100%);
 }
+.win-drag-main {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 138px;
+  height: 36px;
+  z-index: 4;
+  -webkit-app-region: drag;
+}
+.win-chrome-host {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 8;
+  -webkit-app-region: no-drag;
+}
+.shell.frameless .main-top {
+  padding: 40px 20px 8px;
+}
+.shell.frameless .mobile-topbar {
+  padding-right: 150px;
+}
 .main-top {
   padding: 16px 20px 8px;
   display: flex;
@@ -6438,9 +6579,11 @@ onUnmounted(() => {
 }
 .main-title {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: 1.05rem;
   font-weight: 600;
-  line-height: 1.35;
+  line-height: 1.3;
+  color: #1b2631;
+  letter-spacing: -0.01em;
   max-width: 100%;
   overflow: hidden;
   white-space: nowrap;
@@ -9371,6 +9514,10 @@ onUnmounted(() => {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+}
+.shell.mobile-layout .mobile-topbar-btn,
+.shell.mobile-layout .mobile-topbar-actions {
+  -webkit-app-region: no-drag;
 }
 .shell.mobile-layout .mobile-topbar-btn {
   width: 38px;

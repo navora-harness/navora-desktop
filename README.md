@@ -10,6 +10,8 @@
 
 架构说明：[`docs/modules.md`](docs/modules.md) · 规划草案：[`docs/architecture-plan.md`](docs/architecture-plan.md) · 对外摘要：[`docs/project-and-plugin-guide.md`](docs/project-and-plugin-guide.md)
 
+整体重构规划与阶段验收：[`docs/renovation-plan-2026-10.md`](docs/renovation-plan-2026-10.md)。
+
 License: [MIT](./LICENSE)
 
 ## 技术栈
@@ -44,7 +46,7 @@ npm run build:plugins
 
 ```bash
 cd navora-desktop
-cp .npmrc.example .npmrc   # electron_mirror → http://127.0.0.1:8787/
+cp .npmrc.example .npmrc   # electron_mirror → http://127.0.0.1:8787/electron/
 # 先启动仓库旁 mirror/（serve:local），再：
 npm install
 npm run electron:install   # 如需重下 Electron 二进制
@@ -109,7 +111,7 @@ npm run electron:dev
 
 - **勿提交** `portable/`、`secrets/`、`config.yml`、`.env`、本机 `.npmrc`
 - 远程访问默认密码为 `admin`（仅用于本机门闩检测）；启用远程前必须修改
-- unofficial Electron 默认走本机 mirror `http://127.0.0.1:8787/`（需先启动仓库旁 `mirror/`）
+- unofficial Electron 默认走本机 mirror `http://127.0.0.1:8787/electron/`（需先启动仓库旁 `mirror/`）
 
 ## 品牌
 

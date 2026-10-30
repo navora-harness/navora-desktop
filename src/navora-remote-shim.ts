@@ -236,6 +236,11 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
       info: () => invoke<AppInfo>('navora:app.info'),
       openExternal: (url: string) => invoke<{ ok: boolean }>('navora:app.openExternal', url),
       quit: () => invoke<{ ok: boolean }>('navora:app.quit'),
+      minimize: async () => ({ ok: false as const }),
+      toggleMaximize: async () => ({ ok: false as const, maximized: false }),
+      close: async () => ({ ok: false as const }),
+      isMaximized: async () => ({ maximized: false }),
+      onMaximized: () => () => {},
     },
     config: {
       get: () => invoke<AppConfig>('navora:config.get'),

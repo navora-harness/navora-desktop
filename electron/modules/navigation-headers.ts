@@ -2,6 +2,8 @@
  * Shared Chromium-navigation-like request headers for Session.fetch / net.fetch.
  * Relies on unofficial Electron `headerOrder` to preserve wire order.
  */
+import { DEFAULT_ACCEPT_LANGUAGE } from '../../shared/user-agent'
+
 export const NAVIGATION_LIKE_ACCEPT =
   'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'
 
@@ -66,7 +68,7 @@ export function buildNavigationLikeHeaders(opts: {
 
   const ua = headerValue(base, 'User-Agent') || opts.userAgent || ''
   const accept = headerValue(base, 'Accept') || NAVIGATION_LIKE_ACCEPT
-  const al = headerValue(base, 'Accept-Language') || opts.acceptLanguage || 'en-US,en;q=0.9'
+  const al = headerValue(base, 'Accept-Language') || opts.acceptLanguage || DEFAULT_ACCEPT_LANGUAGE
   const referer = opts.referer || headerValue(base, 'Referer')
   const site =
     headerValue(base, 'Sec-Fetch-Site') ||

@@ -17,5 +17,6 @@
     },
     "baseUrl": "."
   },
-  "include": ["electron/**/*.ts", "shared/**/*.ts"]
+  "include": ["electron/**/*.ts", "shared/**/*.ts"],
+  "exclude": ["shared/**/*.test.ts"]
 }

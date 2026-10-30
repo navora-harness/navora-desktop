@@ -21,6 +21,20 @@ import {
   stripTrailingSourcesSection,
   type AnswerSource,
 } from '../../shared/answer-sources'
+import {
+  buildLocalPageSummaryFromToolJson,
+  digestPageTextForModel,
+  isLlmContentRejected,
+  prepareToolResultForModel,
+} from '../../shared/page-digest'
+import { normalizeLlmReply } from '../../shared/llm-reply-normalize'
+import {
+  EMPTY_AFTER_TOOLS_NUDGE,
+  INCOMPLETE_REPLY_NUDGE,
+  isEmptyAgentReply,
+  isIncompleteAgentReply,
+  promoteReasoningToContent,
+} from '../../shared/incomplete-reply'
 import { extractHttpUrls } from '../../shared/url-text'
 import {
   logAgentError,
@@ -593,7 +607,12 @@ export class AgentRuntime {
     let hitRoundLimit = false
     let toolArgsRecoveries = 0
     const maxToolArgsRecoveries = 3
-    const client = new OpenAICompatibleClient({
+    let incompleteReplyRecoveries = 0
+    const maxIncompleteReplyRecoveries = 3
+      let emptyAfterToolRecoveries = 0
+      const maxEmptyAfterToolRecoveries = 2
+      let hostAutoPageReadDone = false
+      const client = new OpenAICompatibleClient({
       baseUrl: provider.base_url,
       apiKey,
       model: modelName,
@@ -668,7 +687,11 @@ export class AgentRuntime {
         )
         let reply: Awaited<ReturnType<OpenAICompatibleClient['chat']>>
         try {
-          reply = await client.chat(messages, this.toolsForConfig(cfg, chatId), ctrl.signal)
+          // Local models often emit <think> / <tool_call> as plain text instead of
+          // structured fields — lift them so tools actually run and CoT stays in the panel.
+          reply = normalizeLlmReply(
+            await client.chat(messages, this.toolsForConfig(cfg, chatId), ctrl.signal),
+          )
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
           if (ctrl.signal.aborted) throw e
@@ -716,77 +739,307 @@ export class AgentRuntime {
         }
 
         if (reply.tool_calls?.length) {
-          const assistantMsg: ChatMessageParam = {
-            role: 'assistant',
-            content: reply.content,
-            tool_calls: reply.tool_calls,
-          }
-          messages.push(assistantMsg)
-
-          if (reply.content?.trim()) {
-            this.clearPartialMarkers(chatId)
-            const m = this.chats.appendMessage(chatId, {
+          // If the provider already rejected the request as high-risk, do not keep
+          // feeding page bodies through more tool rounds — fall through to digest retry.
+          const earlyReject = normalizeLlmText(reply.content).trim()
+          if (isLlmContentRejected(earlyReject)) {
+            reply = { ...reply, tool_calls: undefined, content: earlyReject }
+          } else {
+            const assistantMsg: ChatMessageParam = {
               role: 'assistant',
               content: reply.content,
-              meta: { partial: true },
-            })
-            if (m) this.emit({ type: 'message', chatId, message: m })
-          }
+              tool_calls: reply.tool_calls,
+            }
+            messages.push(assistantMsg)
 
-          // Parallelize async subchat spawns in the same round; other tools stay serial.
-          const resultByCallId = new Map<string, unknown>()
-          const spawnCalls = reply.tool_calls.filter(
-            (c) => c.function.name === 'agent_spawn_subchat',
-          )
-          const otherCalls = reply.tool_calls.filter(
-            (c) => c.function.name !== 'agent_spawn_subchat',
-          )
+            if (reply.content?.trim()) {
+              this.clearPartialMarkers(chatId)
+              const m = this.chats.appendMessage(chatId, {
+                role: 'assistant',
+                content: reply.content,
+                meta: { partial: true },
+              })
+              if (m) this.emit({ type: 'message', chatId, message: m })
+            }
 
-          const runOne = async (call: ToolCall) => {
-            if (ctrl.signal.aborted) throw new Error('aborted')
-            const parsed = parseToolCallArguments(call.function.arguments)
-            const args = parsed.ok ? parsed.args : {}
-            const result = await this.runTool(chatId, call, ctrl.signal)
-            toolCallsThisRun += 1
-            collectReadPageSources(result, sourceBag, {
-              toolName: call.function.name,
-              args,
-            })
-            resultByCallId.set(call.id, result)
-          }
+            // Parallelize async subchat spawns in the same round; other tools stay serial.
+            const resultByCallId = new Map<string, unknown>()
+            const spawnCalls = reply.tool_calls.filter(
+              (c) => c.function.name === 'agent_spawn_subchat',
+            )
+            const otherCalls = reply.tool_calls.filter(
+              (c) => c.function.name !== 'agent_spawn_subchat',
+            )
 
-          if (spawnCalls.length > 1) {
-            await Promise.all(spawnCalls.map((c) => runOne(c)))
-          } else if (spawnCalls.length === 1) {
-            await runOne(spawnCalls[0])
-          }
+            const runOne = async (call: ToolCall) => {
+              if (ctrl.signal.aborted) throw new Error('aborted')
+              const parsed = parseToolCallArguments(call.function.arguments)
+              const args = parsed.ok ? parsed.args : {}
+              const result = await this.runTool(chatId, call, ctrl.signal)
+              toolCallsThisRun += 1
+              collectReadPageSources(result, sourceBag, {
+                toolName: call.function.name,
+                args,
+              })
+              resultByCallId.set(call.id, result)
+            }
 
-          for (const call of otherCalls) {
-            await runOne(call)
-          }
+            if (spawnCalls.length > 1) {
+              await Promise.all(spawnCalls.map((c) => runOne(c)))
+            } else if (spawnCalls.length === 1) {
+              await runOne(spawnCalls[0])
+            }
 
-          const modelMax = Math.min(
-            32000,
-            Math.max(8000, Math.floor((cfg.browser.page_get_max_chars || 80000) / 2)),
-          )
-          for (const call of reply.tool_calls) {
-            const result = resultByCallId.get(call.id)
-            messages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              content: truncateJsonForModel(result, modelMax),
-            })
+            for (const call of otherCalls) {
+              await runOne(call)
+            }
+
+            const modelMax = Math.min(
+              32000,
+              Math.max(8000, Math.floor((cfg.browser.page_get_max_chars || 80000) / 2)),
+            )
+            for (const call of reply.tool_calls) {
+              const result = resultByCallId.get(call.id)
+              messages.push({
+                role: 'tool',
+                tool_call_id: call.id,
+                content: truncateJsonForModel(result, modelMax, false),
+              })
+            }
+            const nudge = efficiencyNudge(toolCallsThisRun)
+            if (nudge) {
+              messages.push({ role: 'system', content: nudge })
+            }
+            // Tools progressed the task — allow fresh incomplete recoveries afterward.
+            incompleteReplyRecoveries = 0
+            continue
           }
-          const nudge = efficiencyNudge(toolCallsThisRun)
-          if (nudge) {
-            messages.push({ role: 'system', content: nudge })
-          }
-          continue
         }
 
         const isSub = this.chats.get(chatId)?.kind === 'sub'
         this.setPhase(chatId, 'thinking', isSub ? '输出结果…' : '整理回复…')
-        let text = (reply.content || '').trim() || '（无文本回复）'
+        // Local models often leave content empty and put the answer in reasoning.
+        let text = promoteReasoningToContent(reply.content, reply.reasoningContent)
+        if (!text.trim()) text = '（无文本回复）'
+
+        // Model narrated the next step (or hit max_tokens) without tool_calls.
+        if (
+          !isSub &&
+          incompleteReplyRecoveries < maxIncompleteReplyRecoveries &&
+          isIncompleteAgentReply(text, { finishReason: reply.finish_reason }) &&
+          !(toolCallsThisRun > 0 && isEmptyAgentReply(text))
+        ) {
+          incompleteReplyRecoveries += 1
+          messages.push({ role: 'assistant', content: text })
+          messages.push({ role: 'system', content: INCOMPLETE_REPLY_NUDGE })
+          const entry = makeRunLog(
+            '继续执行',
+            `模型只口述了下一步（第 ${incompleteReplyRecoveries} 次），已自动催促继续调用工具。`,
+          )
+          const log = this.chats.appendMessage(chatId, {
+            role: 'log',
+            content: entry.content,
+            meta: {
+              kind: 'incomplete_reply_retry',
+              summary: entry.summary,
+              ...(entry.detail ? { detail: entry.detail } : {}),
+            },
+          })
+          if (log) this.emit({ type: 'message', chatId, message: log })
+          this.setPhase(chatId, 'thinking', '检测到未完成操作，继续执行…')
+          continue
+        }
+
+        // After tools ran, empty/plan final turns are common on small local models.
+        // Prefer host-assisted browser_get once, then soft nudges — nudging alone is not enough for Bonsai-class models.
+        if (
+          !isSub &&
+          toolCallsThisRun > 0 &&
+          emptyAfterToolRecoveries < maxEmptyAfterToolRecoveries &&
+          (isEmptyAgentReply(text) ||
+            isIncompleteAgentReply(text, { finishReason: reply.finish_reason }))
+        ) {
+          emptyAfterToolRecoveries += 1
+          messages.push({ role: 'assistant', content: text })
+
+          const windowId = this.findLatestLiveWindowId(chatId)
+          if (!hostAutoPageReadDone && windowId) {
+            hostAutoPageReadDone = true
+            this.setPhase(chatId, 'calling_tool', '宿主代读页面…', 'browser_get')
+            const autoCallId = `call_host_get_${Date.now().toString(36)}`
+            const autoArgs = { windowId, what: 'text' as const }
+            const startMsg = this.chats.appendMessage(chatId, {
+              role: 'tool',
+              content: '执行中…',
+              meta: {
+                toolName: 'browser_get',
+                toolCallId: autoCallId,
+                args: autoArgs,
+                status: 'running',
+                hostAssisted: true,
+              },
+            })
+            if (startMsg) this.emit({ type: 'message', chatId, message: startMsg })
+
+            let autoResult: unknown
+            try {
+              autoResult = await executeAgentTool('browser_get', autoArgs, {
+                chatId,
+                pluginScopeChatId: this.chats.resolvePluginScopeChatId(chatId),
+                signal: ctrl.signal,
+                registry: this.registry,
+                network: this.network,
+                files: this.files,
+                downloads: this.downloads,
+                shell: this.shell,
+                chats: this.chats,
+                gate: this.gate,
+                getConfig: this.getConfig,
+                updateConfig: this.updateConfig,
+                secrets: this.secrets,
+                skills: this.skills,
+                plugins: this.plugins,
+                store: this.store,
+                askSkillReview: this.askSkillReview,
+              })
+            } catch (e) {
+              autoResult = {
+                ok: false,
+                error: e instanceof Error ? e.message : String(e),
+              }
+            }
+            toolCallsThisRun += 1
+            collectReadPageSources(autoResult, sourceBag, {
+              toolName: 'browser_get',
+              args: autoArgs,
+            })
+            const modelMax = Math.min(
+              32000,
+              Math.max(8000, Math.floor((cfg.browser.page_get_max_chars || 80000) / 2)),
+            )
+            const resultText = truncateJsonForModel(autoResult, modelMax, false)
+            if (startMsg) {
+              const ok =
+                !(
+                  autoResult &&
+                  typeof autoResult === 'object' &&
+                  'ok' in autoResult &&
+                  (autoResult as { ok: boolean }).ok === false
+                )
+              const updated = this.chats.updateMessage(chatId, startMsg.id, {
+                content: truncateJson(autoResult, 4000),
+                meta: {
+                  toolName: 'browser_get',
+                  toolCallId: autoCallId,
+                  args: autoArgs,
+                  status: ok ? 'done' : 'error',
+                  result: autoResult,
+                  hostAssisted: true,
+                },
+              })
+              if (updated) this.emit({ type: 'message_update', chatId, message: updated })
+            }
+            messages.push({
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: autoCallId,
+                  type: 'function',
+                  function: {
+                    name: 'browser_get',
+                    arguments: JSON.stringify(autoArgs),
+                  },
+                },
+              ],
+            })
+            messages.push({
+              role: 'tool',
+              tool_call_id: autoCallId,
+              content: resultText,
+            })
+            messages.push({
+              role: 'system',
+              content:
+                '宿主已自动调用 browser_get 读取当前页文本。请仅基于上述工具结果，用中文直接回答用户关于新手机/页面内容的问题。' +
+                '不要再调用工具，不要口述「让我获取/页面已打开」。信息不足也先根据已读内容作答。',
+            })
+            const entry = makeRunLog(
+              '宿主代读',
+              `本地模型未继续操作，已自动 browser_get（${windowId}）。`,
+            )
+            const log = this.chats.appendMessage(chatId, {
+              role: 'log',
+              content: entry.content,
+              meta: {
+                kind: 'host_auto_browser_get',
+                summary: entry.summary,
+                ...(entry.detail ? { detail: entry.detail } : {}),
+              },
+            })
+            if (log) this.emit({ type: 'message', chatId, message: log })
+            this.setPhase(chatId, 'thinking', '已代读页面，等待模型总结…')
+            continue
+          }
+
+          messages.push({ role: 'system', content: EMPTY_AFTER_TOOLS_NUDGE })
+          const entry = makeRunLog(
+            '继续执行',
+            `工具已执行但模型未给出结论（第 ${emptyAfterToolRecoveries} 次），已催促继续读取或作答。`,
+          )
+          const log = this.chats.appendMessage(chatId, {
+            role: 'log',
+            content: entry.content,
+            meta: {
+              kind: 'empty_after_tools_retry',
+              summary: entry.summary,
+              ...(entry.detail ? { detail: entry.detail } : {}),
+            },
+          })
+          if (log) this.emit({ type: 'message', chatId, message: log })
+          this.setPhase(chatId, 'thinking', '工具已执行，催促继续…')
+          continue
+        }
+
+        // Provider content filter: page bodies (esp. news) may come back as
+        // "The request was rejected because it was considered high risk".
+        // Retry once with safer digests, then fall back to a local title list.
+        if (isLlmContentRejected(text) && !ctrl.signal.aborted) {
+          console.warn('[agent] content rejected by provider; retrying with safe digests')
+          rewriteToolMessagesForSafeRetry(messages)
+          messages.push({
+            role: 'system',
+            content:
+              '上一轮因模型内容安全策略被拒。工具结果已改为公开网页标题摘要。' +
+              '请仅基于摘要用中文客观概述页面主题与文章列表，不要展开敏感细节，不要输出英文拒答原文，不要再调用工具。',
+          })
+          this.setPhase(chatId, 'thinking', '内容策略受限，改用摘要重试…')
+          try {
+            const retry = normalizeLlmReply(
+              await client.chat(messages, [], ctrl.signal, { temperature: 0.2 }),
+            )
+            const retryText = normalizeLlmText(retry.content).trim()
+            if (retryText && !isLlmContentRejected(retryText)) {
+              text = retryText
+            } else {
+              const toolBits = messages
+                .filter((m) => m.role === 'tool' && typeof m.content === 'string')
+                .map((m) => String((m as { content: string }).content))
+              text =
+                buildLocalPageSummaryFromToolJson(toolBits) ||
+                '页面已成功读取，但当前模型因内容安全策略拒绝分析。可更换模型后重试，或只要标题列表。'
+            }
+          } catch (e) {
+            console.warn('[agent] safe-digest retry failed', e instanceof Error ? e.message : e)
+            const toolBits = messages
+              .filter((m) => m.role === 'tool' && typeof m.content === 'string')
+              .map((m) => String((m as { content: string }).content))
+            text =
+              buildLocalPageSummaryFromToolJson(toolBits) ||
+              '页面已成功读取，但当前模型因内容安全策略拒绝分析。可更换模型后重试。'
+          }
+        }
+
         // UI shows read-pages panel; strip any model-written trailing 来源 block to avoid duplication.
         if (!isSub && cfg.app.show_read_pages !== false) {
           text = stripTrailingSourcesSection(text)
@@ -956,7 +1209,8 @@ export class AgentRuntime {
 
   /** Instant title from a short slice of the first user message (not marked as AI). */
   private maybeSetProvisionalTitle(chatId: string, userText: string): void {
-    const slice = this.chats.setProvisionalTitleFromFirstUser(chatId, userText)
+    const polished = polishLocalTitle(userText)
+    const slice = this.chats.setProvisionalTitleFromFirstUser(chatId, polished || userText)
     if (!slice) return
     this.emit({ type: 'title', chatId, title: slice, fromAi: false })
   }
@@ -1011,17 +1265,19 @@ export class AgentRuntime {
         role: 'system' as const,
         content: [
           '你是会话侧栏标题生成器。把用户主任务压成一句简明标题，只输出标题正文一行。',
-          '规则：',
+          '要求：',
           '1. 默认简体中文；任务全英文时可用英文，须完整单词。',
           '2. 中文≤36字，英文≤72字符；可稍长以便读懂，勿写成整段。',
           '3. 结构：动词/动作 + 对象；只抓主任务，忽略检查结果、路径、告知结果等收尾。',
-          '4. 专有名词照抄；不要 URL、哈希、路径、父任务上下文。',
+          '4. 专有名词照抄；URL 可改成站点名（如 economist.com→经济学人），不要输出完整 URL。',
           '5. 禁止：标点结尾、思考/解释、「帮我/用户需要」开头、「Chat/对话/助手」。',
+          '6. 禁止元话语与自我反思：不要写「所以」「我决定」「用中文标题」「规则回顾」「标题是」；不要加引号。',
+          '7. 直接输出最终标题本身，例如：访问经济学人 Asia 并分析',
         ].join('\n'),
       },
       {
         role: 'user' as const,
-        content: `任务：\n${userText.slice(0, 480)}\n\n标题：`,
+        content: `任务：\n${userText.slice(0, 480)}\n\n只输出标题正文：`,
       },
     ]
 
@@ -1039,12 +1295,19 @@ export class AgentRuntime {
 
     for (const attempt of attempts) {
       try {
-        const reply = await client.chat(messages, [], undefined, {
-          temperature: 0.2,
-          timeoutMs: attempt.timeoutMs,
-          ...(attempt.maxTokens != null ? { maxTokens: attempt.maxTokens } : {}),
-        })
-        const fromContent = cleanChatTitle(normalizeLlmText(reply.content))
+        const reply = normalizeLlmReply(
+          await client.chat(messages, [], undefined, {
+            temperature: 0.2,
+            timeoutMs: attempt.timeoutMs,
+            ...(attempt.maxTokens != null ? { maxTokens: attempt.maxTokens } : {}),
+          }),
+        )
+        const rawContent = normalizeLlmText(reply.content)
+        if (isLlmContentRejected(rawContent)) {
+          console.warn('[title] provider content rejected')
+          continue
+        }
+        const fromContent = cleanChatTitle(rawContent)
         if (fromContent && isUsableChatTitle(fromContent, userText)) return fromContent
         const fromReason = cleanChatTitle(extractTitleFromReasoning(reply.reasoningContent, userText))
         if (fromReason && isUsableChatTitle(fromReason, userText)) return fromReason
@@ -1137,7 +1400,7 @@ export class AgentRuntime {
         system: followupMessages[0].content,
         user: followupMessages[1].content,
       })
-      const reply = await client.chat(followupMessages, [], signal)
+      const reply = normalizeLlmReply(await client.chat(followupMessages, [], signal))
       const fromLlm = parseFollowupSuggestions(reply.content || '', artifacts)
       return mergeFollowups(seeded, fromLlm, 6)
     } catch {
@@ -1375,7 +1638,19 @@ export class AgentRuntime {
         })
       }
     } catch (e) {
-      result = { ok: false, error: e instanceof Error ? e.message : String(e) }
+      const msg = e instanceof Error ? e.message : String(e)
+      if (/Object has been destroyed|window_not_found/i.test(msg)) {
+        result = {
+          ok: false,
+          error: 'window_destroyed',
+          detail: msg,
+          hint:
+            '窗口已关闭或销毁。请先 browser_list_resources；若 Session 仍在且 windows 为空，用 browser_window_create（不要 browser_open）；清 cookie 用 browser_session_clear 后再 navigate。',
+          tree: this.registry.getTree(chatId),
+        }
+      } else {
+        result = { ok: false, error: msg }
+      }
     } finally {
       if (quietNav) this.registry.endQuietNavigateLogs(chatId)
     }
@@ -1964,6 +2239,26 @@ export class AgentRuntime {
       }))
   }
 
+  /** Prefer the newest live Agent window in this chat (for host-assisted page reads). */
+  private findLatestLiveWindowId(chatId: string): string | null {
+    const tree = this.registry.getTree(chatId)
+    let best: { windowId: string; sessionIndex: number } | null = null
+    for (const s of tree) {
+      for (const w of s.windows || []) {
+        if (!w?.windowId) continue
+        try {
+          this.registry.assertWindowOwned(chatId, w.windowId)
+        } catch {
+          continue
+        }
+        if (!best || s.sessionIndex >= best.sessionIndex) {
+          best = { windowId: w.windowId, sessionIndex: s.sessionIndex }
+        }
+      }
+    }
+    return best?.windowId || null
+  }
+
   private toolsForConfig(cfg: AppConfig, chatId?: string) {
     const fork = resolveForkDecision(cfg)
     const subchat = resolveSubchat(cfg)
@@ -2127,10 +2422,11 @@ function truncateJson(v: unknown, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max)}…`
 }
 
-/** Prefer truncating large string fields so ok/error/partial stay visible to the model. */
-function truncateJsonForModel(v: unknown, max: number): string {
-  if (v && typeof v === 'object' && !Array.isArray(v)) {
-    const obj = { ...(v as Record<string, unknown>) }
+/** Prefer truncating / digesting large string fields so ok/error/partial stay visible. */
+function truncateJsonForModel(v: unknown, max: number, safe = false): string {
+  const prepared = prepareToolResultForModel(v, max, safe)
+  if (prepared && typeof prepared === 'object' && !Array.isArray(prepared)) {
+    const obj = prepared as Record<string, unknown>
     for (const key of ['value', 'body', 'content', 'html', 'text'] as const) {
       if (typeof obj[key] === 'string' && (obj[key] as string).length > max / 2) {
         const s = obj[key] as string
@@ -2142,7 +2438,23 @@ function truncateJsonForModel(v: unknown, max: number): string {
     if (s.length <= max) return s
     return `${s.slice(0, max)}…[truncated]`
   }
-  return truncateJson(v, max)
+  return truncateJson(prepared, max)
+}
+
+/** After a content-policy rejection, shrink prior tool payloads to safer digests in-place. */
+function rewriteToolMessagesForSafeRetry(
+  messages: Array<{ role: string; content?: unknown; tool_call_id?: string }>,
+): void {
+  for (const m of messages) {
+    if (m.role !== 'tool' || typeof m.content !== 'string') continue
+    const content = m.content
+    try {
+      const parsed = JSON.parse(content) as unknown
+      m.content = truncateJsonForModel(parsed, 7000, true)
+    } catch {
+      m.content = digestPageTextForModel(content, { maxChars: 4000, safe: true })
+    }
+  }
 }
 
 function normalizeLlmText(raw: unknown): string {
@@ -2253,13 +2565,11 @@ function extractTitleFromReasoning(raw: unknown, userText = ''): string {
 
   const candidates: string[] = []
   for (const rawLine of lines) {
-    let line = rawLine
-    line = line.replace(/^[-*•\d.、]+\s*/, '')
-    line = line.replace(/^(标题|title)\s*[:：]\s*/i, '')
-    line = line.replace(/^["'`「『]+|["'`」』]+$/g, '').trim()
-    if (line.length < 2 || line.length > 80 || /[。！？；：:]$/.test(line)) continue
-    if (isMetaTitleLeak(line)) continue
-    candidates.push(line)
+    const cleaned = cleanChatTitle(rawLine)
+    if (!cleaned) continue
+    if (cleaned.length < 2 || cleaned.length > 80 || /[。！？；：:]$/.test(cleaned)) continue
+    if (isMetaTitleLeak(cleaned)) continue
+    candidates.push(cleaned)
   }
   if (!candidates.length) return ''
 
@@ -2281,10 +2591,57 @@ function isMetaTitleLeak(title: string): boolean {
   ) {
     return true
   }
+  if (
+    /^(所以|因此|那么|于是|综上|总之)[，,]?\s*(我)?(决定|选择|打算|想|觉得|认为)/u.test(t)
+  ) {
+    return true
+  }
+  if (/(用|生成|输出|给出).{0,8}标题\s*[:：]/u.test(t)) return true
+  if (/标题\s*[:：]/u.test(t) && /[「『""']/.test(t)) return true
   if (/^(用户需要|用户想要|我需要|首先[，,]|然后[，,]|最后[，,]|接下来[，,])/u.test(t)) return true
+  // Prompt self-reflection leaks (seen:「规则回顾」from the title instruction list).
+  if (/^(规则|要求|提示|指令|系统)?(回顾|说明|总结|梳理)?$/u.test(t)) return true
+  if (/规则回顾|标题规则|生成规则|系统提示|只输出标题|标题生成/u.test(t)) return true
+  if (isLlmContentRejected(t)) return true
   // Quoted draft leftovers: 「官网下载QQ安装包」–
   if (/^[「『"'`].+[」』"'`]\s*[–—\-·•]*$/u.test(t)) return true
   return false
+}
+
+/**
+ * Strip title-generator meta talk and unwrap quoted final titles.
+ * e.g. `所以，我决定用中文标题："访问经济学人世界本周主题页"` → `访问经济学人世界本周主题页`
+ */
+function unwrapTitleMeta(raw: string): string {
+  let t = (raw || '').trim()
+  if (!t) return ''
+
+  // Prefer the last well-quoted segment when the model narrates then quotes.
+  const quotePatterns = [
+    /[「『]([^「『」』]{2,80})[」』]/gu,
+    /[“"]([^“”"]{2,80})[”"]/gu,
+    /'([^']{2,80})'/gu,
+  ]
+  for (const re of quotePatterns) {
+    let last = ''
+    for (const m of t.matchAll(re)) {
+      const inner = (m[1] || '').trim()
+      if (inner && !isMetaTitleLeak(inner) && !/(标题|title)/i.test(inner)) last = inner
+    }
+    if (last) return last
+  }
+
+  t = t.replace(/^[-*•\d.、]+\s*/u, '')
+  t = t.replace(/^(所以|因此|那么|于是|综上|总之)[，,]?\s*/u, '')
+  t = t.replace(/^我\s*(决定|选择|打算|想|觉得|认为)[，,]?\s*/u, '')
+  t = t.replace(
+    /^(?:决定|选择|打算|准备)?(?:用|采用|使用|生成|输出|给出)(?:一[个句]|简体|繁体)?(?:中文|英文|简短)?标题\s*[:：]?\s*/u,
+    '',
+  )
+  t = t.replace(/^(?:最终|最终的|我的)?(?:中文|英文)?标题\s*(?:是|为|：|:)\s*/iu, '')
+  t = t.replace(/^(标题|title)\s*[:：]\s*/i, '')
+  t = t.replace(/^["'`「『“]+|["'`」』”]+$/gu, '').trim()
+  return t
 }
 
 /** Title is short, on-topic, and not a side verification / meta leak. */
@@ -2318,7 +2675,18 @@ function polishLocalTitle(userText: string): string | null {
   // Drop parent-task wrappers and trailing verification clauses.
   t = t.replace(/【父任务上下文】[\s\S]*$/u, '').trim()
   t = t.replace(/[，,、；;].{0,20}(检查|查看|确认|统计).{0,8}(大小|字数|体积|是否成功|结果).*$/u, '')
-  t = t.replace(/https?:\/\/\S+/gi, '')
+  // Map common hosts to short Chinese labels before stripping URLs.
+  // Stop at whitespace or CJK so「访问https://a.com/x并分析」keeps「并分析」.
+  t = t.replace(/https?:\/\/(?:www\.)?economist\.com\/[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]*/gi, '经济学人页面')
+  t = t.replace(/https?:\/\/(?:www\.)?hermes\.com\/[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]*/gi, '爱马仕官网')
+  t = t.replace(/https?:\/\/(?:www\.)?([A-Za-z0-9.-]+)\/?[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]*/gi, (_, host: string) => {
+    const h = String(host || '')
+      .replace(/^www\./i, '')
+      .toLowerCase()
+    if (h.includes('economist')) return '经济学人'
+    if (h.includes('hermes')) return '爱马仕'
+    return h || '网页'
+  })
   t = t.replace(/\bSitekey\s*(为|=|:)?\s*0x[a-zA-Z0-9_-]+/gi, '')
   t = t.replace(/^(请|麻烦|帮我|帮忙)?(看一下|看看|查一下|查询|检查|帮查)?/u, '')
   t = t.replace(/[。！？.!?：:]+$/u, '').trim()
@@ -2332,7 +2700,14 @@ function polishLocalTitle(userText: string): string | null {
     primary = primary.split(/\r?\n/)[0]?.trim() || primary
     primary = primary.replace(/【父任务上下文】[\s\S]*$/u, '').trim()
     primary = primary.replace(/[，,、；;].{0,20}(检查|查看|确认|统计).{0,8}(大小|字数|体积|是否成功|结果).*$/u, '')
-    primary = primary.replace(/https?:\/\/\S+/gi, '')
+    primary = primary.replace(/https?:\/\/(?:www\.)?economist\.com\/[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]*/gi, '经济学人页面')
+    primary = primary.replace(/https?:\/\/(?:www\.)?([A-Za-z0-9.-]+)\/?[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]*/gi, (_, host: string) => {
+      const h = String(host || '')
+        .replace(/^www\./i, '')
+        .toLowerCase()
+      if (h.includes('economist')) return '经济学人'
+      return h || '网页'
+    })
     primary = primary.replace(/^(请|麻烦|帮我|帮忙)/u, '').trim()
     if (primary.length > 80) primary = primary.slice(0, 80)
     if (primary && isUsableChatTitle(primary, userText)) return primary
@@ -2344,14 +2719,15 @@ function cleanChatTitle(raw: string): string | null {
   let t = raw.trim()
   if (!t) return null
   t = t.split(/\r?\n/)[0]?.trim() || ''
-  t = t.replace(/^["'`「『【《]+|["'`」』】》]+$/g, '').trim()
+  t = unwrapTitleMeta(t)
+  t = t.replace(/^["'`「『【《“]+|["'`」』】》”]+$/gu, '').trim()
   t = t.replace(/^(标题|title)\s*[:：]\s*/i, '').trim()
   t = t.replace(/\s*[–—\-·•]+\s*$/u, '').trim()
   t = t.replace(/[：:]\s*$/u, '').trim()
   t = t.replace(/\s+/g, ' ')
+  // Second pass: still looks like narration → reject
   if (!t || /^新\s*Chat$/i.test(t) || isMetaTitleLeak(t)) return null
   // Soft length clamp; sidebar shows CSS ellipsis (setTitle also caps at 80).
   if (t.length > 80) t = t.slice(0, 80)
   return t
 }
-

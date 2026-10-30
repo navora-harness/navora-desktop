@@ -149,6 +149,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import type { VMenu } from 'vuetify/components'
 import type { BrowserDownloadEntry, BrowserDownloadState } from '../../shared/types'
 
 const props = withDefaults(
@@ -156,7 +157,7 @@ const props = withDefaults(
     chatId?: string | null
     /** Scope list to current chat when true. */
     onlyActiveChat?: boolean
-    location?: string
+    location?: InstanceType<typeof VMenu>['$props']['location']
     btnClass?: string
   }>(),
   {

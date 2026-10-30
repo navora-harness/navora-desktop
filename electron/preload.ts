@@ -38,6 +38,19 @@ const api = {
     openExternal: (url: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke('navora:app.openExternal', url),
     quit: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('navora:app.quit'),
+    minimize: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('navora:app.window.minimize'),
+    toggleMaximize: (): Promise<{ ok: boolean; maximized?: boolean }> =>
+      ipcRenderer.invoke('navora:app.window.toggleMaximize'),
+    close: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('navora:app.window.close'),
+    isMaximized: (): Promise<{ maximized: boolean }> =>
+      ipcRenderer.invoke('navora:app.window.isMaximized'),
+    onMaximized: (cb: (maximized: boolean) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, maximized: boolean) => cb(Boolean(maximized))
+      ipcRenderer.on('navora:app.window.maximized', listener)
+      return () => {
+        ipcRenderer.removeListener('navora:app.window.maximized', listener)
+      }
+    },
   },
   config: {
     get: (): Promise<AppConfig> => ipcRenderer.invoke('navora:config.get'),
@@ -226,7 +239,7 @@ const api = {
       ipcRenderer.invoke('navora:remote.openWindow', windowId),
   },
   workspace: {
-    pickDirectory: (): Promise<{ ok: boolean; path?: string; canceled?: boolean }> =>
+    pickDirectory: (): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }> =>
       ipcRenderer.invoke('navora:workspace.pickDirectory'),
     info: (
       chatId: string,

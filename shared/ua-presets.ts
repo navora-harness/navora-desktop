@@ -1,4 +1,5 @@
 import { DEFAULT_EDGE_UA } from './types'
+import { FALLBACK_CHROME_UA_VERSION } from './user-agent'
 
 export type UaPreset = {
   id: string
@@ -6,48 +7,43 @@ export type UaPreset = {
   ua: string
 }
 
-const CHROME152_WIN =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36'
-const CHROME152_MAC =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36'
-const CHROME152_LINUX =
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36'
-
-const EDGE152_MAC =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36 Edg/152.0.0.0'
-const EDGE152_LINUX =
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36 Edg/152.0.0.0'
+const V = FALLBACK_CHROME_UA_VERSION
+const CHROME_WIN = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${V} Safari/537.36`
+const CHROME_MAC = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${V} Safari/537.36`
+const CHROME_LINUX = `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${V} Safari/537.36`
+const EDGE_MAC = `${CHROME_MAC} Edg/${V}`
+const EDGE_LINUX = `${CHROME_LINUX} Edg/${V}`
 
 export const UA_PRESETS: UaPreset[] = [
   {
     id: 'edge152',
-    label: 'Microsoft Edge 152 · Windows',
+    label: 'Microsoft Edge · Windows',
     ua: DEFAULT_EDGE_UA,
   },
   {
     id: 'edge152_mac',
-    label: 'Microsoft Edge 152 · macOS',
-    ua: EDGE152_MAC,
+    label: 'Microsoft Edge · macOS',
+    ua: EDGE_MAC,
   },
   {
     id: 'edge152_linux',
-    label: 'Microsoft Edge 152 · Linux',
-    ua: EDGE152_LINUX,
+    label: 'Microsoft Edge · Linux',
+    ua: EDGE_LINUX,
   },
   {
     id: 'chrome152',
-    label: 'Google Chrome 152 · Windows',
-    ua: CHROME152_WIN,
+    label: 'Google Chrome · Windows',
+    ua: CHROME_WIN,
   },
   {
     id: 'chrome152_mac',
-    label: 'Google Chrome 152 · macOS',
-    ua: CHROME152_MAC,
+    label: 'Google Chrome · macOS',
+    ua: CHROME_MAC,
   },
   {
     id: 'chrome152_linux',
-    label: 'Google Chrome 152 · Linux',
-    ua: CHROME152_LINUX,
+    label: 'Google Chrome · Linux',
+    ua: CHROME_LINUX,
   },
   {
     id: 'custom',
