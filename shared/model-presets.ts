@@ -2,6 +2,8 @@
  * Model IDs curated from public docs (MiMo / DeepSeek / OpenAI / Qwen / Kimi / GLM, 2026).
  */
 
+import { cloudbypassModelSettings, type ModelCapabilities } from './model-capabilities'
+
 export type ModelPreset = {
   id: string
   label: string
@@ -10,6 +12,7 @@ export type ModelPreset = {
   model: string
   /** Suggested selectable model IDs for this provider */
   models: string[]
+  model_settings?: Record<string, ModelCapabilities>
   /** Suggested secret path under dataRoot */
   api_key_ref: string
   timeout_ms?: number
@@ -17,6 +20,13 @@ export type ModelPreset = {
 }
 
 export const MODEL_PRESETS: ModelPreset[] = [
+  {
+    id: 'cloudbypass', label: 'SC117 512K · Cloudbypass',
+    base_url: 'https://chat.cloudbypass.com/v1', model: 'qwen38-turbo-q6',
+    models: ['qwen38-turbo-q6'], api_key_ref: 'secrets/cloudbypass', timeout_ms: 300000,
+    model_settings: cloudbypassModelSettings(),
+    hint: '按提供的配置：512K 上下文、81920 输出、文本与图片、自定义推理档位。需配置此服务的 Key。',
+  },
   {
     id: 'openai',
     label: 'OpenAI',

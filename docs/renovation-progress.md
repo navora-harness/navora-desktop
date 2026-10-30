@@ -37,18 +37,35 @@
 
 ## 界面和动效
 
-通过仓库内的 `vendor/postpile-ui-0.1.2.tgz` 安装 `@postpile/ui`。复用玻璃材质、按钮加载状态、从来源按钮展开的菜单和弹窗；在 Vue 适配层处理快速中断、离场及卸载清理。设置关闭按钮移到右上角，保留原有保存、取消和插件管理行为。
+通过仓库内的 `vendor/postpile-ui-0.1.2.tgz` 安装 `@postpile/ui`，保留其色彩、圆角和层次。后续真实使用发现尺寸形变、模糊与全局按钮测量带来卡顿，现已取消全局按钮增强，菜单和弹窗只合成 opacity/transform，进入 140～180ms、离开 100ms。Vue 适配层通过 mergeProps 保留 Vuetify 自带的离场回调，避免关闭后内容和焦点陷阱残留。
 
 真实应用的 preload、IPC、配置和渲染页面使用临时数据目录进行 UI 回归。测试以离屏合成器保持动画帧更新，不打开可见窗口；覆盖桌面、窄屏、菜单文字对比度、快速开关后的来源按钮恢复和设置弹窗。减少动态效果使用 Chromium 原生启动开关单独运行。
 
-截图输出在 `release/ui-smoke/`，减少动态效果版本位于其 `reduced-motion/` 子目录。这批只建立界面基础，尚未完成聊天、运行证据、浏览器资源与设置的整体布局重组。
+截图输出在 `release/ui-smoke/`，减少动态效果版本位于其 `reduced-motion/` 子目录。聊天调整为简洁的左右消息排版；侧栏和设置收紧间距、隐藏重复说明。错误、运行、询问、授权、停止、成功使用统一的 SVG。菜单、移动侧栏和按钮对比度统一检查。
+
+右侧深边的根因是 Postpile 的 `html { scrollbar-gutter: stable }`，与桌面内部面板滚动冲突；根页面改为不保留滚动条槽。搜索改用统一弹窗，真实指针点击和 Ctrl/⌘ K 回归覆盖标题、消息命中及焦点。Ctrl/⌘ N 新建对话，Ctrl/⌘ Shift B 复用/打开浏览器，Esc 或顶部按钮停止任务。浏览器资源提供直接关闭窗口操作。
+
+Windows 使用 titleBarOverlay，macOS 使用原生交通灯，Linux 保留窗口管理器边框。分别提供 macOS 和 Linux 构建目标；实机运行验证目前仅在 Windows，其他平台仍需在对应系统使用匹配的 Electron 分发进行打包和验证。
+
+## 模型、延迟与引导回归
+
+模型目录支持显示名、上下文、输出上限、文本/图片输入、推理档位及其 API 值映射。SC117 配置按提供的截图：`qwen38-turbo-q6`、524288 上下文、81920 输出，`high → xhigh`、`off → none`，默认 low。提供实际模型目录获取，Chat Completions 可选择 max_tokens 或 max_completion_tokens；图片通过多模态消息发送，生成截图的 base64 不进入持久化聊天日志。密钥只存本地被忽略的 secrets 目录。
+
+自动模式对普通问答采用单次模型请求；也可明确选择快速问答或执行任务。工具、插件和浏览器工作流继续保留。移除回答完成后阻塞运行状态的追问生成请求，快捷后续操作改用本地已有结果。问答不再额外生成 AI 标题。
+
+引导跳过和无关设置保存不再被旧的远程默认密码拦截。远程配置发生变化时仍校验，远程服务启动也仍拒绝默认密码。
+
+使用临时配置、真实 preload/IPC/Agent/界面和提供服务实测五档问答：off 3892ms、low 1528ms、medium 1636ms、high 2617ms、xhigh 1529ms，全部正确且无工具轮次。合成红色图片也正确识别。样本是一次本机网络测试，不能保证其他时刻或复杂任务相同耗时。结果保存在本机 `release/ui-live/live-model-results.json`，不含密钥。
 
 ## 验证
 
 - `npm run typecheck`：包含业务代码和 Electron 集成测试入口。
-- `npm test`：本轮 21 项测试通过；部分既有测试文件内部包含多条断言。
+- `npm test`：本轮 26 项测试通过；部分既有测试文件内部包含多条断言。
 - `npm run test:browser`：实际内核检查快照与缓存、可信点击、输入、开放 Shadow DOM、闭合 Shadow DOM 查询、跨域 frame、失效 ref、文件输入后导航、原生 prompt、自定义文档响应、插件契约，并确认 debugger 未附加。
-- `npm run test:ui`：完整构建后执行桌面/窄屏与动效回归，并独立执行减少动态效果模式。
+- `npm run test:ui`：完整构建后执行桌面/平板/窄屏、设置各页、图标对比度、搜索、引导跳过、档位持久化、浏览器快捷复用和停止任务，并独立执行减少动态效果模式。停止任务使用本地延迟服务验证取消，不消耗远程模型长输出。
+- 可选真实服务测试：设置 `NAVORA_LIVE_MODEL=1` 和 `NAVORA_LIVE_KEY_FILE=<本地密钥文件>` 后运行 `node scripts/ui-smoke.mjs`；临时密钥副本随测试数据目录清理。
+
+实现参考：[Electron 原生标题栏](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar)、[OpenAI Chat Completions 请求结构](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)。第三方模型的具体配置来自提供的截图与实际接口验证。
 
 本机 HTML 夹具包含 250 个商品块。一次记录中，10 次强制采集的宿主工具往返 p50 为 9.31ms，p95 为 17.29ms；20 次缓存查询 p50 为 0.80ms，p95 为 1.14ms，缓存命中 20/20，结果 5703 字符。这是本机页面采集与检索基线，不含外部网站、模型网络或推理耗时，不能推导真实站点的端到端提速比例。
 

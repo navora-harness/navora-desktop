@@ -102,10 +102,14 @@ defineExpose({ show, hide, open })
   z-index: 12001;
   min-width: 196px;
   padding: 6px;
-  background: #1c2833;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: #fff;
+  border: 1px solid #dfe2e7;
   border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 8px 28px rgba(24, 32, 48, 0.16);
   will-change: transform, opacity;
 }
 .sidebar-ctx-panel :deep(.sidebar-more-item) {
@@ -117,20 +121,20 @@ defineExpose({ show, hide, open })
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: rgba(236, 240, 241, 0.92);
+  color: #39414d;
   font-size: 0.88rem;
   cursor: pointer;
   text-align: left;
 }
 .sidebar-ctx-panel :deep(.sidebar-more-item:hover:not(:disabled)) {
-  background: rgba(255, 255, 255, 0.08);
+  background: #eef0f3;
 }
 .sidebar-ctx-panel :deep(.sidebar-more-item:disabled) {
   opacity: 0.45;
   cursor: default;
 }
 .sidebar-ctx-panel :deep(.sidebar-more-item.danger) {
-  color: #f1948a;
+  color: #b52b39;
 }
 .sidebar-ctx-panel :deep(.sidebar-more-item.danger:hover:not(:disabled)) {
   background: rgba(231, 76, 60, 0.14);
@@ -140,14 +144,14 @@ defineExpose({ show, hide, open })
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.06em;
-  color: rgba(236, 240, 241, 0.42);
+  color: #68717d;
   user-select: none;
   pointer-events: none;
 }
 .sidebar-ctx-panel :deep(.sidebar-ctx-label.with-sep) {
   margin-top: 4px;
   padding-top: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid #e5e7eb;
 }
 
 .ctx-scrim-enter-active,
@@ -176,5 +180,8 @@ defineExpose({ show, hide, open })
 .ctx-pop-leave-to {
   opacity: 0;
   transform: scale(0.96);
+}
+@media(prefers-reduced-motion:reduce) {
+  .ctx-pop-enter-active,.ctx-pop-leave-active,.ctx-scrim-enter-active,.ctx-scrim-leave-active { transition: none; }
 }
 </style>

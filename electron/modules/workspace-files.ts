@@ -301,7 +301,7 @@ export class WorkspaceFiles {
     width?: number
     height?: number
   }> {
-    const abs = this.resolve(chatId, relPath)
+    const abs = await this.resolveExisting(chatId, relPath)
     const ext = path.extname(abs).toLowerCase()
     const mime = mimeFromImageExt(ext)
     if (!mime) throw new Error('not_an_image')

@@ -2,7 +2,7 @@
   <div class="msg inchat-card perm" role="group" aria-label="需要授权">
     <div class="msg-row">
       <div class="msg-avatar perm" aria-hidden="true">
-        <font-awesome-icon icon="shield-halved" />
+        <StatusIcon kind="perm" />
       </div>
       <div class="msg-main">
         <div class="msg-role">
@@ -55,6 +55,7 @@
 </template>
 
 <script setup lang="ts">
+import StatusIcon from '@/components/StatusIcon.vue'
 import type { PermissionDecision, PermissionRequest } from '@shared/types'
 
 defineProps<{

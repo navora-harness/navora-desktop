@@ -1,17 +1,17 @@
 /* Navora product adapter over the versioned Postpile material and motion library. */
 :root {
-  --navora-background: #f5f6f8;
+  --navora-background: #f7f7f8;
   --navora-surface: #fff;
   --navora-ink: #1a2332;
   --navora-muted: #727b8a;
-  --navora-accent: #2f6fed;
+  --navora-accent: #3269ac;
   --navora-stroke: rgba(30, 43, 66, .08);
   --navora-ease: cubic-bezier(.22, .75, .2, 1);
 }
 .navora-app { color: var(--navora-ink); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; }
 .navora-app .shell { background: var(--navora-background); }
 .navora-app .shell .sidebar {
-  background: #eff1f5; color: var(--navora-ink); border-right: 1px solid var(--navora-stroke);
+  background: #f7f7f8; color: var(--navora-ink); border-right: 1px solid var(--navora-stroke);
 }
 .navora-app .shell .main { background: var(--navora-surface); }
 .navora-app .sidebar :is(.brand-name,.chat-item,.new-chat-btn,.sidebar-icon-btn,.brand-search-btn,.chat-toolbar-icon-btn) {
@@ -51,6 +51,125 @@
 .v-menu.v-overlay .sidebar-more-item:disabled { opacity: .4; }
 .v-tooltip .v-overlay__content { color: var(--navora-ink); }
 [data-pp-menu-pending] { visibility: hidden; }
+
+/* Opaque popup surfaces preserve Postpile's palette without stacking GPU blur
+   layers. All motion lives on the overlay itself, never on its activator. */
+:root, .v-theme--light { --pp-glass-alpha: .99; --pp-glass-filter: none; --pp-glass-edge: rgba(32,37,44,.12); }
+.v-overlay :is(.v-card,.v-sheet,.v-list), .v-menu .v-overlay__content > div {
+  color: #20252c; --pp-glass-filter: none;
+}
+.v-overlay .v-overlay__scrim { backdrop-filter: none !important; }
+.v-overlay__content { isolation: isolate; }
+.v-dialog .v-overlay__content { contain: layout; }
+.chat-search-dialog { align-self: flex-start; margin-top: min(14vh,100px) !important; }
+.chat-search-dialog .chat-search-panel { width: 100%; background: #fff; border-color: #dfe2e7; }
+.navora-app > .v-application__wrap { height: 100dvh; min-height: 0; overflow: hidden; }
+.navora-app .shell:has(> .sidebar) { height: 100dvh; grid-template-columns: 252px minmax(0,1fr); }
+.navora-app .sidebar { padding: 0 8px 8px; }
+.navora-app .sidebar .brand { padding: 8px 4px; }
+.navora-app .sidebar .brand-search-btn { border: 0; color: #39414d; }
+.navora-app .sidebar .chat-toolbar { padding-right: 0; }
+.navora-app .sidebar .new-chat-btn { box-shadow: none; background: transparent; border-color: transparent; justify-content: flex-start; font-weight: 500; }
+.navora-app .sidebar .chat-item { height: 48px; margin-right: 0; border-radius: 8px; }
+.navora-app .sidebar .chat-item-main { padding: 6px 8px; }
+.navora-app .sidebar .chat-more-btn { color: #505965; }
+.navora-app .sidebar .chat-more-btn:hover { background: #e7e8eb; color: #20252c; }
+.navora-app .sidebar .chat-item-meta { font-size: 11px; }
+.navora-app .sidebar :is(.tree-row,.tree-name,.res-label-btn,.dock-label,.workspace-label,.tree-actions .icon-btn,.res-head .icon-btn,.sidebar-icon-btn) { color: #505965; }
+.navora-app .sidebar :is(.res-empty,.tree-meta,.res-label,.dock-empty,.chat-date-label) { color: #68717d; opacity: 1; }
+.navora-app .sidebar :is(.icon-btn,.sidebar-icon-btn) { border-color: transparent; background: transparent; }
+.navora-app .sidebar .quick-browser-btn { margin-left: auto; padding: 4px 9px; background: #fff; border: 1px solid #dce0e6; border-radius: 7px; color: #39414d; font-size: 12px; cursor: pointer; }
+.navora-app .sidebar .quick-browser-btn:hover { background: #e7e8eb; }
+.navora-app .sidebar .tree-actions { opacity: 1; visibility: visible; }
+.navora-app .main .quick-stop-btn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; color: #505965; background: #f3f4f6; border: 1px solid #dfe2e7; border-radius: 7px; font-size: 12px; }
+.navora-app .main .quick-stop-btn:hover { background: #e9ecf0; }
+.navora-app .main .tool-status { background: transparent; border: 0; }
+.navora-app .main :is(.run-card-chevron,.tool-chevron,.log-card-chevron) { color: #626d7a; }
+.navora-app .main .composer-actions { gap: 6px; flex-wrap: wrap; }
+.navora-app .main :is(.composer-actions-left,.composer-actions-right) { gap: 4px; min-width: 0; }
+.navora-app .main .composer-actions-right { margin-left: auto; }
+.navora-app .main .reasoning-tier-button { max-width: 105px; }
+.navora-app .sidebar :is(.icon-btn,.sidebar-icon-btn):hover { color: #20252c; background: #e7e8eb; }
+.navora-app .sidebar, .navora-app .sidebar * { scrollbar-color: rgba(80,89,101,.4) transparent; }
+.navora-app .sidebar *::-webkit-scrollbar-thumb { background: rgba(80,89,101,.35); }
+.navora-app .sidebar :is(.tree-row:hover,.tree-row.active) { background: #e8eaee; }
+.navora-app .sidebar .chat-status-icon { background: #fff; border-color: #d9dfe6; opacity: 1; width: 28px; height: 28px; }
+.navora-app .main .win-drag-main { height: 40px; right: 0; }
+.navora-app .shell.frameless .main-top { padding: 48px 24px 10px; min-height: 78px; }
+.navora-app .main .main-top { border: 0; }
+.navora-app .main .main-title { font-size: 15px; }
+.navora-app .main :is(.msg.user,.msg.assistant) .msg-avatar { display: none; }
+.navora-app .main :is(.msg.user,.msg.assistant) .msg-role { display: none; }
+.navora-app .main .msg.user .msg-row { justify-content: flex-end; }
+.navora-app .main .msg.user .msg-main { flex: 0 1 auto; max-width: 85%; }
+.navora-app .main .msg.user .msg-body { background: #f0f1f3; border-color: transparent; border-radius: 16px; padding: 10px 14px; }
+.navora-app .main .msg.assistant .msg-body { padding: 8px 0; background: transparent; border: 0; }
+.navora-app .main .msg-avatar:has(.status-glyph) { background: #f3f5f7; box-shadow: none; border: 0; }
+.navora-app .main .messages { padding-inline: 24px; }
+.navora-app .main .msg-empty { text-align: center; max-width: 700px; padding-bottom: 36px; }
+.navora-app .main .msg-empty-title { font-size: 26px; font-weight: 600; margin-bottom: 12px; }
+.navora-app .main .msg-empty-desc { max-width: 560px; margin: 0 auto 24px; line-height: 1.7; }
+.navora-app .main .suggest-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; padding: 0 8px; }
+.navora-app .main .suggest-chip { white-space: normal; border-radius: 12px; text-align: left; padding: 12px 14px; color: #505965; font-size: 13px; }
+.navora-app .main .suggest-chip:hover { color: #20252c; border-color: #a9b4c2; transform: none; }
+.navora-app .main .composer { border-top: 0; background: #fff; padding: 8px 24px 16px; }
+.navora-app .main .composer-box { box-shadow: none; background: #f7f7f8; border-color: #dfe2e7; padding: 6px 8px; }
+.navora-app .main .composer-box:focus-within { box-shadow: 0 0 0 1px #b3becd; border-color: #b3becd; }
+.navora-app .main :is(.composer-perm-btn,.composer-expand,.usage-ring-btn) { color: #505965; opacity: 1; }
+.navora-app .main .composer-perm-btn { max-width: 220px; min-height: 30px; }
+.navora-app .main .composer-perm-btn > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.navora-app .main .composer-send { background: #292d33; color: #fff; box-shadow: none; }
+.navora-app .main .composer-send:disabled { background: #d8dce2; color: #68717d; opacity: 1; }
+.v-overlay :is(.composer-perm-item,.composer-perm-title,.composer-usage-panel,.sidebar-more-item,.v-label) { color: #39414d; }
+.v-overlay .composer-perm-item.active { color: #245bbd; }
+.v-overlay .composer-perm-item:hover { background: #eef0f3; }
+.v-menu.v-overlay .chat-more-item { color: #39414d; }
+.v-menu.v-overlay .chat-more-item:hover { background: #eef0f3; }
+.v-menu.v-overlay .chat-more-item.danger { color: #b52b39; }
+.v-overlay .v-field-label { opacity: 1; color: #5a626e; }
+.v-overlay .v-field__outline { color: #b2bac5; }
+.v-overlay :is(button,.v-btn):disabled { opacity: .45; }
+.settings-dialog-content .settings-page { background: #fff; border: 1px solid #dfe2e7; box-shadow: 0 18px 60px #17203026; }
+.v-overlay .settings-page .top { padding: 12px 20px; background: #fff; backdrop-filter: none; }
+.settings-dialog-root .settings-page.is-embedded .shell { grid-template-columns: 170px minmax(0,1fr); padding: 14px !important; gap: 14px; background: #fff; }
+.v-overlay .settings-page .nav { padding: 6px; background: #f7f7f8; border: 0; }
+.v-overlay .settings-page .nav-item { padding: 9px 10px; border-radius: 8px; }
+.v-overlay .settings-page .nav-desc { font-size: 11px; color: #68717d; }
+.v-overlay .settings-page :is(.nav-desc,.top-sub,.section-head > p,.switch-hint,.provider-edit-card .form-grid > p) { display: none; }
+.v-overlay .settings-page .v-input:not(.v-input--error) > .v-input__details { display: none; }
+.v-overlay .settings-page .nav-item { min-height: 36px; }
+.v-overlay .settings-page .switch-row { padding: 6px 0; min-height: 42px; }
+.v-overlay .settings-page .v-switch .v-selection-control { min-height: 32px; }
+.v-overlay .settings-page .panel { border-color: #e2e5e9; }
+.v-overlay .settings-page .content { padding: 18px; }
+.v-overlay .settings-page .card { padding: 14px; background: #fff; }
+.v-overlay .settings-page .section-head { margin-bottom: 12px; }
+.v-overlay .settings-page .section-head h2 { font-size: 17px; }
+.v-overlay .settings-page .form-grid { gap: 12px; }
+.v-overlay .settings-page .provider-layout { grid-template-columns: 160px minmax(0,1fr); gap: 12px; }
+.settings-page .section { animation: navora-panel-enter 120ms ease-out; }
+.navora-app .shell.platform-mac .brand { padding-top: 48px; }
+.navora-app .shell.platform-mac .win-drag-main { position: fixed; left: 80px; }
+.navora-app .shell.platform-mac .main-top { padding-top: 16px; }
+.navora-app .shell.mobile-layout:has(> .sidebar) { grid-template-columns: minmax(0,1fr); }
+.navora-app .shell.mobile-layout .sidebar .chat-item-track { background: #f7f7f8; }
+.navora-app .shell.mobile-layout .sidebar .chat-item.active .chat-item-track { background: #e5e8ef; }
+.navora-app .shell.mobile-layout .sidebar .chat-item:not(.active):hover .chat-item-track { background: #eceef2; }
+.navora-app .shell.frameless.mobile-layout .mobile-topbar { margin-top: 40px; padding-right: 12px; }
+.settings-dialog-root .settings-page.is-mobile.is-embedded .shell { grid-template-columns: 1fr; padding: 0 !important; gap: 0; }
+.v-overlay .settings-page.is-mobile .provider-layout { grid-template-columns: 1fr; }
+.v-overlay .settings-page.is-mobile .content { padding: 12px; }
+.v-overlay .settings-page.is-mobile .nav-item { padding: 7px 10px; }
+.navora-app :is(.app-drag,.win-drag-main) :is(button,input,a,select) { -webkit-app-region: no-drag; }
+@keyframes navora-panel-enter { from { opacity: .5; } to { opacity: 1; } }
+@media(max-width:800px) {
+  .navora-app .shell:has(> .sidebar) { grid-template-columns: minmax(0,1fr); }
+  .navora-app .main .messages { padding-inline: 12px; }
+  .navora-app .main .composer { padding: 8px 10px 12px; }
+  .navora-app .main .msg-empty-title { font-size: 23px; }
+}
+@media(max-width:480px) { .navora-app .main .suggest-grid { grid-template-columns: 1fr; } .navora-app .main .composer-perm-btn { max-width: 130px; font-size: 11px; } }
+@media(prefers-reduced-motion:reduce) { .settings-page .section { animation: none; } }
 @media (prefers-reduced-motion: reduce) {
   .navora-app :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn,.new-chat-btn) { transition: none; }
   .navora-app :is(.sidebar-icon-btn,.brand-search-btn,.new-chat-btn):active { transform: none; }

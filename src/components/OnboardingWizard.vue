@@ -848,9 +848,9 @@ watch(
 .v-overlay.onboarding-overlay > .v-overlay__scrim {
   /* 必须用背景 alpha，不能用 opacity，否则高斯模糊不生效 */
   opacity: 1 !important;
-  background: rgba(21, 32, 43, 0.52) !important;
-  backdrop-filter: blur(16px) saturate(1.15);
-  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  background: rgba(21, 32, 43, 0.34) !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 .onboarding-dialog--mobile {
   margin: 0 !important;

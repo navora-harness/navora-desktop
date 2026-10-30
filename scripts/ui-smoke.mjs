@@ -13,6 +13,10 @@ const entry = path.join(root, 'dist-electron', 'ui-smoke.mjs')
 const output = path.resolve(process.env.NAVORA_UI_OUTPUT || path.join(root, 'release', 'ui-smoke'))
 try {
   fs.mkdirSync(output, {recursive:true})
+  const live = process.env.NAVORA_LIVE_MODEL === '1'
+  if(live) {
+    if(!process.env.NAVORA_LIVE_KEY_FILE) throw new Error('Live tests require NAVORA_LIVE_KEY_FILE')
+  }
   await build({entryPoints:[path.join(root,'scripts/ui-smoke-entry.ts')],outfile:entry,
     bundle:true,platform:'node',target:'node20',format:'esm',external:['electron'],
     banner:{js:"import {createRequire as __createRequire} from 'node:module'; const require=__createRequire(import.meta.url);"},
@@ -32,15 +36,22 @@ try {
       },
     }],
   })
-  for(const reduced of [false,true]) {
+  for(const reduced of live ? [false] : [false,true]) {
     const images = reduced ? path.join(output,'reduced-motion') : output
     fs.mkdirSync(images,{recursive:true})
-    const env = {...process.env,NAVORA_DATA_ROOT:temporary,NAVORA_UI_OUTPUT:images,NAVORA_UI_REDUCED_MOTION:reduced ? '1' : '0'}
+    const profile = path.join(temporary,reduced ? 'reduced-motion' : 'normal')
+    fs.mkdirSync(profile,{recursive:true})
+    if(live) {
+      const secretDir = path.join(profile,'secrets','secrets')
+      fs.mkdirSync(secretDir,{recursive:true})
+      fs.copyFileSync(process.env.NAVORA_LIVE_KEY_FILE,path.join(secretDir,'cloudbypass.key'))
+    }
+    const env = {...process.env,NAVORA_DATA_ROOT:profile,NAVORA_UI_OUTPUT:images,NAVORA_UI_REDUCED_MOTION:reduced ? '1' : '0'}
     delete env.ELECTRON_RUN_AS_NODE
     delete env.VITE_DEV_SERVER_URL
     const status = await new Promise((resolve,reject) => {
       const child = spawn(require('electron'),[entry],{cwd:root,env,stdio:'inherit',windowsHide:true})
-      const timer = setTimeout(() => {child.kill();reject(new Error('UI smoke exceeded 60 seconds'))},60000)
+      const timer = setTimeout(() => {child.kill();reject(new Error('UI smoke exceeded its deadline'))},live ? 180000 : 60000)
       child.on('error',(error) => {clearTimeout(timer);reject(error)})
       child.on('exit',(code) => {clearTimeout(timer);resolve(code ?? 1)})
     })

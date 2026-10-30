@@ -170,7 +170,7 @@
           </div>
 
           <div v-if="busy === 'install'" class="progress-panel" role="status" aria-live="polite">
-            <div class="progress-spinner" aria-hidden="true" />
+            <StatusIcon kind="running" class="progress-glyph" />
             <div class="progress-copy">
               <div class="progress-title">{{ progressTitle }}</div>
               <div class="progress-steps">
@@ -237,6 +237,7 @@
 </template>
 
 <script setup lang="ts">
+import StatusIcon from '@/components/StatusIcon.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type {
   StoreCatalogPackage,
@@ -916,14 +917,12 @@ async function runInstall() {
   border: 1px solid #e0e7ee;
   background: #fff;
 }
-.progress-spinner {
+.progress-glyph {
   width: 18px;
   height: 18px;
   margin-top: 2px;
-  border: 2px solid rgba(27, 79, 114, 0.2);
-  border-top-color: #1b4f72;
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  border: 0;
   flex-shrink: 0;
 }
 .progress-title {

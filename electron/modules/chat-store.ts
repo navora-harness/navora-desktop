@@ -207,6 +207,7 @@ export class ChatStore {
     chatId: string,
     providerId: string | null,
     model?: string | null,
+    reasoningLevel?: string | null,
   ): ChatSession | null {
     const chat = this.chats.get(chatId)
     if (!chat) return null
@@ -220,6 +221,8 @@ export class ChatStore {
     } else if (model === null || model === '') {
       delete chat.model
     }
+    if (reasoningLevel === null || reasoningLevel === '') delete chat.reasoningLevel
+    else if (reasoningLevel !== undefined) chat.reasoningLevel = reasoningLevel.trim()
     chat.updatedAt = Date.now()
     this.persist(chat, 'immediate')
     return chat
@@ -229,6 +232,16 @@ export class ChatStore {
     const p = this.chats.get(chatId)?.permissions
     if (!p?.modes) return null
     return { preset: p.preset || 'custom', modes: { ...p.modes } }
+  }
+
+  setExecutionMode(chatId: string, mode: 'auto' | 'chat' | 'agent'): ChatSession | null {
+    if (!['auto', 'chat', 'agent'].includes(mode)) throw new Error('invalid_execution_mode')
+    const chat = this.chats.get(chatId)
+    if (!chat) return null
+    chat.executionMode = mode
+    chat.updatedAt = Date.now()
+    this.persist(chat, 'immediate')
+    return chat
   }
 
   appendMessage(chatId: string, msg: Omit<ChatMessage, 'id' | 'createdAt'> & { id?: string }): ChatMessage | null {
