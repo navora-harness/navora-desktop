@@ -21,5 +21,6 @@
     },
     "baseUrl": "."
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue", "shared/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue", "shared/**/*.ts"],
+  "exclude": ["shared/**/*.test.ts"]
 }

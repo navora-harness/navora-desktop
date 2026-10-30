@@ -455,6 +455,17 @@
                   base-color="#c5d0db"
                   @update:model-value="onUaTextChange"
                 />
+                <v-text-field
+                  v-model="cfg.browser.accept_language"
+                  label="Accept-Language"
+                  hint="语言列表或带 q 的完整头均可；setUserAgent 会自动去掉 q，由 Chromium 重新生成"
+                  persistent-hint
+                  placeholder="zh-CN,zh,en,en-GB,en-US"
+                  variant="outlined"
+                  density="comfortable"
+                  color="primary"
+                  base-color="#c5d0db"
+                />
               </div>
             </div>
 
@@ -473,6 +484,13 @@
                   <div class="switch-hint">拦截页面弹出的新窗口</div>
                 </div>
                 <v-switch v-model="cfg.browser.block_window_open" color="primary" hide-details density="compact" />
+              </div>
+              <div class="switch-row">
+                <div>
+                  <div class="switch-title">记录 DataDome 上报</div>
+                  <div class="switch-hint">将 captcha-delivery / datadome 请求与 body 写入 logs/datadome-telemetry.jsonl（调试用）</div>
+                </div>
+                <v-switch v-model="cfg.browser.log_datadome_telemetry" color="primary" hide-details density="compact" />
               </div>
             </div>
 
@@ -1264,7 +1282,7 @@
                   </span>
                 </div>
                 <div class="switch-hint mt-1">
-                  默认账号 admin / admin；账号端口等需点「应用」。
+                  首次启用请设置新密码；账号、端口和密码修改后需点「应用」。
                 </div>
               </div>
             </div>
@@ -2290,7 +2308,7 @@ async function onPluginDeleteConfirm() {
               if (r.ok) removed.push(id)
               else failed.push(id)
             }
-            return { ok: failed.length === 0 && removed.length > 0, removed, failed }
+            return { ok: failed.length === 0 && removed.length > 0, removed, failed, error: undefined }
           })()
       const removed = res.removed?.length ?? 0
       const failed = res.failed?.length ?? 0
@@ -2774,7 +2792,7 @@ async function onDeleteConfirm() {
                 failed.push(id)
               }
             }
-            return { ok: failed.length === 0 && removed.length > 0, removed, failed }
+            return { ok: failed.length === 0 && removed.length > 0, removed, failed, error: undefined }
           })()
       const removed = res.removed?.length ?? 0
       const failed = res.failed?.length ?? 0
@@ -3101,6 +3119,7 @@ function readInstantPrefs(c: AppConfig) {
     collapse_run_logs: c.app.collapse_run_logs !== false,
     show_agent_windows: c.browser.show_agent_windows,
     block_window_open: c.browser.block_window_open,
+    log_datadome_telemetry: c.browser.log_datadome_telemetry === true,
     wait_load: c.browser.wait.load,
     wait_network_idle: c.browser.wait.network_idle,
     remote_enabled: c.remote?.enabled === true,
@@ -3127,6 +3146,7 @@ function applyInstantPrefs(target: AppConfig, source: AppConfig) {
   target.app.collapse_run_logs = s.collapse_run_logs
   target.browser.show_agent_windows = s.show_agent_windows
   target.browser.block_window_open = s.block_window_open
+  target.browser.log_datadome_telemetry = s.log_datadome_telemetry
   target.browser.wait.load = s.wait_load
   target.browser.wait.network_idle = s.wait_network_idle
   if (!target.remote) {
@@ -3311,6 +3331,9 @@ async function pickCustomRoot() {
 }
 
 function errMessage(e: unknown, fallback: string): string {
+  if (e instanceof Error && e.message.includes('remote_default_password')) {
+    return '请设置新的远程访问密码，不能使用默认密码 admin'
+  }
   if (e instanceof Error && e.message) return e.message
   if (typeof e === 'string' && e.trim()) return e
   if (e && typeof e === 'object') {

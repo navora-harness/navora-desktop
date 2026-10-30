@@ -4,7 +4,7 @@ import type {
   ChatMessageParam,
   ChatCompletionTool,
   ToolCall,
-} from '../../shared/openai-types'
+} from '../../../shared/openai-types'
 
 export type OpenAIClientOptions = {
   baseUrl: string

@@ -3,6 +3,6 @@
 #
 # 使用仓库旁本地 mirror（mirror/）：
 registry=https://registry.npmjs.org/
-electron_mirror=http://127.0.0.1:8787/
+electron_mirror=http://127.0.0.1:8787/electron/
 electron_custom_dir=v{{ version }}
 electron_use_remote_checksums=1

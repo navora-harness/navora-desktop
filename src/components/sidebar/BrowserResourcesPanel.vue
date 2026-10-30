@@ -16,7 +16,7 @@
         <font-awesome-icon icon="plus" />
       </button>
     </div>
-    <div v-if="!collapsed" class="res-body">
+    <div v-if="!collapsed" class="res-body" data-ctx-menu="browser">
       <div v-if="!chatId" class="res-empty">先选择一个 Chat</div>
       <div v-else-if="!tree.length" class="res-empty">暂无浏览资源，点右侧 + 创建</div>
       <div v-else class="res-tree">

@@ -1,12 +1,13 @@
 import type { PermissionCapability, PermissionMode, PermissionPreset } from './types'
 import { DEFAULT_EDGE_UA } from './types'
 import { findUaPresetByUa, getUaPreset } from './ua-presets'
+import { DEFAULT_ACCEPT_LANGUAGE, DEFAULT_ACCEPT_LANGUAGE_LIST, generateAcceptLanguageHeader, toAcceptLanguageList } from './user-agent'
 
 /** Default remote password "admin" (scrypt). Kept here so renderer can import config without node:crypto. */
 export const DEFAULT_REMOTE_PASSWORD_HASH =
   'scrypt$84d1e3974951ea77e6bb823dbe9a2d67$a43bac39a620e3d129cb2f2c81442cf917d292d716d9457c56ac486d0398b8fd'
 
-/** True when remote still uses the shipped default password hash (settings shows a warning). */
+/** True when remote still uses the shipped default password hash. */
 export function isDefaultRemotePasswordHash(hash: string | null | undefined): boolean {
   return Boolean(hash && hash === DEFAULT_REMOTE_PASSWORD_HASH)
 }
@@ -32,6 +33,8 @@ export const DEFAULT_SHELL_ALLOWLIST = [
   'which',
   'powershell',
   'pwsh',
+  'curl',
+  'curl.exe',
 ] as const
 
 export type WaitConfig = {
@@ -48,6 +51,13 @@ export type RemoteAccessConfig = {
   username: string
   /** scrypt hash; empty means unset */
   passwordHash: string
+}
+
+/** Shared by desktop settings, Agent settings, and remote server startup. */
+export function assertRemoteAccessConfig(remote: RemoteAccessConfig): void {
+  if (!remote.enabled) return
+  if (!remote.passwordHash) throw new Error('remote_no_password')
+  if (isDefaultRemotePasswordHash(remote.passwordHash)) throw new Error('remote_default_password')
 }
 
 /** Agent path-fork / ask-user decision UX */
@@ -185,6 +195,11 @@ export type AppConfig = {
     max_fetch_inflight: number
     max_parallel_agent_chats: number
     tree_update_debounce_ms: number
+    /**
+     * Log DataDome / captcha-delivery requests (URL, headers, body snippet)
+     * to dataRoot/logs/datadome-telemetry.jsonl. Debug only.
+     */
+    log_datadome_telemetry: boolean
   }
   files: {
     /** Relative to dataRoot; each Chat uses workspace/<chatId>/ when custom_root is empty */
@@ -380,7 +395,7 @@ export function createDefaultConfig(): AppConfig {
     browser: {
       default_ua_preset: 'edge152',
       custom_ua: '',
-      accept_language: 'zh-CN,zh;q=0.9,en;q=0.8',
+      accept_language: DEFAULT_ACCEPT_LANGUAGE,
       show_agent_windows: false,
       default_width: 1280,
       default_height: 800,
@@ -406,6 +421,7 @@ export function createDefaultConfig(): AppConfig {
       max_fetch_inflight: 8,
       max_parallel_agent_chats: 4,
       tree_update_debounce_ms: 100,
+      log_datadome_telemetry: false,
     },
     files: {
       root_dirname: 'workspace',
@@ -555,6 +571,38 @@ export function migrateShowMainOnStartFromParsed(cfg: AppConfig, parsed: unknown
   }
 }
 
+/** Previous shipped default before en-GB / en-US q-values were added. */
+const LEGACY_ACCEPT_LANGUAGE = 'zh-CN,zh;q=0.9,en;q=0.8'
+
+/**
+ * Upgrade installs still on the short Accept-Language default; leave custom values alone.
+ */
+export function migrateAcceptLanguage(cfg: AppConfig): void {
+  const raw = cfg.browser?.accept_language
+  const trimmed = typeof raw === 'string' ? raw.trim() : ''
+  if (!trimmed || trimmed === LEGACY_ACCEPT_LANGUAGE) {
+    cfg.browser.accept_language = DEFAULT_ACCEPT_LANGUAGE
+  }
+}
+
+/** Ensure curl stays available for API-style shell_exec (chat history used it often). */
+export function migrateShellAllowlist(cfg: AppConfig): void {
+  const list = Array.isArray(cfg.files?.shell_allowlist)
+    ? cfg.files.shell_allowlist.map(String)
+    : [...DEFAULT_SHELL_ALLOWLIST]
+  const set = new Set(list)
+  let changed = false
+  for (const cmd of ['curl', 'curl.exe'] as const) {
+    if (!set.has(cmd)) {
+      set.add(cmd)
+      changed = true
+    }
+  }
+  if (changed || !Array.isArray(cfg.files?.shell_allowlist)) {
+    cfg.files.shell_allowlist = [...set]
+  }
+}
+
 export function resolveUserAgent(cfg: AppConfig): string {
   const custom = cfg.browser.custom_ua?.trim()
   const presetId = cfg.browser.default_ua_preset || 'edge152'
@@ -566,6 +614,26 @@ export function resolveUserAgent(cfg: AppConfig): string {
     return preset.ua
   }
   return custom || DEFAULT_EDGE_UA
+}
+
+/** Wire Accept-Language (with q) for fetch / explicit headers; empty → shipped default. */
+export function resolveAcceptLanguage(cfg: AppConfig | null | undefined): string {
+  const raw = cfg?.browser?.accept_language
+  const trimmed = typeof raw === 'string' ? raw.trim() : ''
+  if (!trimmed) return DEFAULT_ACCEPT_LANGUAGE
+  // Config may store list (`zh-CN,zh,en,…`) or wire form (`zh-CN,zh;q=0.9,…`).
+  return generateAcceptLanguageHeader(trimmed) || DEFAULT_ACCEPT_LANGUAGE
+}
+
+/**
+ * Language list for `session.setUserAgent({ acceptLanguage })`.
+ * Must NOT include `;q=` — Chromium adds them via GenerateAcceptLanguageHeader.
+ */
+export function resolveAcceptLanguageList(cfg: AppConfig | null | undefined): string {
+  const raw = cfg?.browser?.accept_language
+  const trimmed = typeof raw === 'string' ? raw.trim() : ''
+  if (!trimmed) return DEFAULT_ACCEPT_LANGUAGE_LIST
+  return toAcceptLanguageList(trimmed) || DEFAULT_ACCEPT_LANGUAGE_LIST
 }
 
 /**

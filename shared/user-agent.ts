@@ -276,6 +276,8 @@ export class UserAgentObject {
 
   static detectProductBrand(userAgent: string): string | null {
     const ua = userAgent || ''
+    // Electron stock UA contains Chrome/ but must NOT claim Google Chrome in Client Hints.
+    if (/Electron\//i.test(ua)) return null
     if (/Edg\/|EdgA\/|EdgiOS\//i.test(ua)) return 'Microsoft Edge'
     if (/OPR\//i.test(ua)) return 'Opera'
     if (/Brave\//i.test(ua)) return 'Brave'
@@ -308,8 +310,12 @@ export class UserAgentObject {
 
   /** 魔改 Electron setUserAgent 第二参（CDP 风格） */
   toSetUserAgentOptions(): UserAgentOverrideOptions {
-    const acceptLanguage =
+    const acceptLanguageRaw =
       this.initHeader?.['accept-language'] || this.initHeader?.['Accept-Language']
+    // setUserAgent → GenerateAcceptLanguageHeader: pass language list without q=.
+    const acceptLanguage = acceptLanguageRaw
+      ? toAcceptLanguageList(String(acceptLanguageRaw))
+      : undefined
     const family = UserAgentObject.detectBrowserFamily(this.originalUserAgent)
     const base: UserAgentOverrideOptions = {
       platform: this.navigatorPlatform || undefined,
@@ -345,8 +351,13 @@ export class UserAgentObject {
         this.initHeader?.['sec-ch-ua'] || this.initHeader?.['Sec-CH-UA'] || '',
       ),
     )
+    const headerMatchesSeed =
+      !!fromHeader &&
+      fromHeader.every(
+        (b) => /not.+brand/i.test(b.brand) || b.version.split('.')[0] === String(seed),
+      )
     const brands =
-      fromHeader ||
+      (headerMatchesSeed ? fromHeader : null) ||
       UserAgentObject.sanitizeBrandList(this.brands) ||
       UserAgentObject.generateSecChUaBrands(seed, productBrand)
 
@@ -388,37 +399,307 @@ export class UserAgentObject {
   }
 }
 
-const DEFAULT_ACCEPT_LANGUAGE = 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6'
+/**
+ * Language preference list for `setUserAgent({ acceptLanguage })`.
+ * Chromium's `GenerateAcceptLanguageHeader` adds `;q=` itself — do NOT pass wire q-values here.
+ */
+export const DEFAULT_ACCEPT_LANGUAGE_LIST = 'zh-CN,zh,en,en-GB,en-US'
+
+/** Strip `;q=…` (and other params) → comma-separated language tags. */
+export function toAcceptLanguageList(raw: string): string {
+  return String(raw || '')
+    .split(',')
+    .map((part) => part.trim().split(';')[0].trim())
+    .filter(Boolean)
+    .join(',')
+}
+
+/**
+ * Mirror `net::HttpUtil::GenerateAcceptLanguageHeader`: first tag implicit q=1.0,
+ * then q=0.9, 0.8, … down to 0.1.
+ */
+export function generateAcceptLanguageHeader(rawLanguageList: string): string {
+  const langs = toAcceptLanguageList(rawLanguageList)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (!langs.length) return ''
+  let q10 = 10
+  const out: string[] = []
+  for (const language of langs) {
+    if (q10 === 10) out.push(language)
+    else out.push(`${language};q=0.${q10}`)
+    if (q10 > 1) q10 -= 1
+  }
+  return out.join(',')
+}
+
+/** Wire Accept-Language (with q) matching Chromium / real Edge for the default list. */
+export const DEFAULT_ACCEPT_LANGUAGE = generateAcceptLanguageHeader(
+  DEFAULT_ACCEPT_LANGUAGE_LIST,
+)
+
+/**
+ * UA 字符串里的 Chrome/Edg 版本：主版本 + `.0.0.0`（与真实浏览器导航 UA 一致）。
+ */
+export const FALLBACK_CHROME_UA_VERSION = '152.0.0.0'
+
+/**
+ * Client Hints 高熵 `fullVersion` / `fullVersionList` 用的完整构建号。
+ * 运行时优先 `process.versions.chrome`。
+ */
+export const FALLBACK_CHROME_FULL_VERSION = '152.0.7977.130'
+
+/** @deprecated 使用 FALLBACK_CHROME_UA_VERSION；保留别名以免旧引用断裂 */
+export const FALLBACK_CHROME_VERSION = FALLBACK_CHROME_UA_VERSION
+
+export type EngineHint = {
+  /** Reduced form for User-Agent string tokens, e.g. `152.0.0.0`. */
+  chromeVersion: string
+  /** Full build for Sec-CH-UA-Full-Version*, e.g. `152.0.7977.130`. */
+  chromeFullVersion: string
+  platform: string
+}
+
+/** `152.0.7977.130` → `152.0.0.0` */
+export function toReducedChromeVersion(version: string): string {
+  const major = String(version || '').split('.')[0] || '0'
+  return /^\d+$/.test(major) ? `${major}.0.0.0` : '0.0.0.0'
+}
+
+export function getRuntimeEngineHint(): EngineHint {
+  const full =
+    typeof process !== 'undefined' && process.versions?.chrome
+      ? String(process.versions.chrome)
+      : FALLBACK_CHROME_FULL_VERSION
+  const platform =
+    typeof process !== 'undefined' && process.platform
+      ? String(process.platform)
+      : 'win32'
+  return {
+    chromeVersion: toReducedChromeVersion(full),
+    chromeFullVersion: full,
+    platform,
+  }
+}
+
+export type UserAgentAdaptation = {
+  original: string
+  ua: string
+  family: 'chromium' | 'firefox' | 'safari' | 'other'
+  electron: boolean
+  versionAligned: boolean
+  platformAligned: boolean
+  warnings: string[]
+}
+
+export function chromiumFamilyUserAgent(
+  engine: EngineHint,
+  product: 'chrome' | 'edge' = 'chrome',
+): string {
+  const { token } = enginePlatformToken(engine.platform)
+  const v = engine.chromeVersion
+  const base = `Mozilla/5.0 (${token}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`
+  return product === 'edge' ? `${base} Edg/${v}` : base
+}
+
+function enginePlatformToken(platform: string): {
+  token: string
+  os: 'Windows' | 'MacOS' | 'Linux'
+} {
+  if (platform === 'darwin') {
+    return { token: 'Macintosh; Intel Mac OS X 10_15_7', os: 'MacOS' }
+  }
+  if (platform === 'linux') {
+    return { token: 'X11; Linux x86_64', os: 'Linux' }
+  }
+  return { token: 'Windows NT 10.0; Win64; x64', os: 'Windows' }
+}
+
+function claimedOs(
+  ua: string,
+): 'Windows' | 'MacOS' | 'Linux' | 'iOS' | 'Android' | 'Unknown' {
+  const inner = ua.match(/\(([^)]+)\)/)?.[1] || ''
+  if (/Windows/.test(inner)) return 'Windows'
+  if (/iPhone|iPad/.test(inner)) return 'iOS'
+  if (/Mac OS X|Macintosh/.test(inner)) return 'MacOS'
+  if (/Android/.test(inner)) return 'Android'
+  if (/Linux/.test(inner)) return 'Linux'
+  return 'Unknown'
+}
+
+/**
+ * 把配置里的 UA 收束到本机真实引擎：UA 字符串用缩简版本（主版本.0.0.0），
+ * 桌面 OS 跟 process.platform 对齐。完整构建号留给 Client Hints fullVersion。
+ * Firefox/Safari 无法靠 setUserAgent options 对齐。
+ */
+export function adaptUserAgentToEngine(
+  userAgent: string,
+  engine: EngineHint = getRuntimeEngineHint(),
+): UserAgentAdaptation {
+  const original = String(userAgent || '').trim()
+  const warnings: string[] = []
+  const family = UserAgentObject.detectBrowserFamily(original)
+  const electron = /Electron\//i.test(original)
+  const uaVersion = toReducedChromeVersion(
+    engine.chromeVersion || engine.chromeFullVersion || FALLBACK_CHROME_UA_VERSION,
+  )
+  if (!original) {
+    return {
+      original,
+      ua: original,
+      family,
+      electron,
+      versionAligned: false,
+      platformAligned: false,
+      warnings,
+    }
+  }
+  if (electron) {
+    return {
+      original,
+      ua: original,
+      family,
+      electron: true,
+      versionAligned: true,
+      platformAligned: true,
+      warnings,
+    }
+  }
+  if (family !== 'chromium') {
+    warnings.push(
+      `non-Chromium UA (${family}) remapped to Chrome ${uaVersion}`,
+    )
+    return {
+      original,
+      ua: chromiumFamilyUserAgent({ ...engine, chromeVersion: uaVersion }, 'chrome'),
+      family: 'chromium',
+      electron: false,
+      versionAligned: true,
+      platformAligned: true,
+      warnings,
+    }
+  }
+
+  let ua = original.replace(
+    /(Chrome|Chromium|CriOS|Edg|EdgA|EdgiOS|OPR|Brave)\/(\d+(?:\.\d+)*)/gi,
+    (_m, name: string) => `${name}/${uaVersion}`,
+  )
+  const engineMajor = uaVersion.split('.')[0] || ''
+  const versionAligned = engineMajor
+    ? new RegExp(
+        `(?:Chrome|Chromium|CriOS|Edg|EdgA|EdgiOS|OPR)/${engineMajor}(?:\\.|\\s|$)`,
+        'i',
+      ).test(ua)
+    : false
+
+  const { token, os } = enginePlatformToken(engine.platform)
+  const claimed = claimedOs(ua)
+  let platformAligned = claimed === os
+  if (claimed === 'iOS' || claimed === 'Android') {
+    warnings.push(
+      `mobile UA platform ${claimed} left unchanged (engine is desktop ${engine.platform})`,
+    )
+    platformAligned = false
+  } else if (claimed !== os) {
+    if (/\([^)]*\)/.test(ua)) ua = ua.replace(/\([^)]*\)/, `(${token})`)
+    platformAligned = claimedOs(ua) === os
+  }
+
+  return {
+    original,
+    ua,
+    family,
+    electron: false,
+    versionAligned,
+    platformAligned,
+    warnings,
+  }
+}
+
+function applyFullVersionToOptions(
+  options: UserAgentOverrideOptions,
+  fullVersion: string,
+  productBrand: string | null,
+): UserAgentOverrideOptions {
+  const meta = options.userAgentMetadata
+  if (!meta || !fullVersion) return options
+  const seed = parseInt(fullVersion.split('.')[0] || '0', 10) || 0
+  const brands = meta.brands
+  const fullVersionList =
+    brands && brands.length
+      ? UserAgentObject.generateSecChUaFullVersionList(
+          seed,
+          fullVersion,
+          productBrand,
+        )
+      : meta.fullVersionList
+  return {
+    ...options,
+    userAgentMetadata: {
+      ...meta,
+      fullVersion,
+      ...(fullVersionList ? { fullVersionList } : {}),
+    },
+  }
+}
+
+export function buildSetUserAgentArgs(
+  userAgent: string,
+  initHeader: Record<string, string> = {},
+  engine: EngineHint = getRuntimeEngineHint(),
+): {
+  userAgent: string
+  options: UserAgentOverrideOptions
+  adaptation: UserAgentAdaptation
+} | null {
+  const raw = String(userAgent || '').trim()
+  if (!raw) return null
+  const adaptation = adaptUserAgentToEngine(raw, engine)
+  const parsed = UserAgentObject.parseUserAgent(adaptation.ua, {
+    'accept-language': DEFAULT_ACCEPT_LANGUAGE_LIST,
+    ...initHeader,
+  })
+  const productBrand = UserAgentObject.detectProductBrand(adaptation.ua)
+  const options = applyFullVersionToOptions(
+    parsed.toSetUserAgentOptions(),
+    engine.chromeFullVersion || FALLBACK_CHROME_FULL_VERSION,
+    productBrand,
+  )
+  return {
+    userAgent: parsed.toString(),
+    options,
+    adaptation,
+  }
+}
 
 type SetUserAgentTarget = {
   setUserAgent: (userAgent: string, options?: UserAgentOverrideOptions | string) => void
 }
 
 /**
- * 解析配置 UA，用魔改 Electron 的 setUserAgent(ua, options) 写入 session / webContents。
- * 官方 Electron 仅支持第二参为 Accept-Language 字符串时会降级。
- * @returns 解析后的 UserAgentObject（供请求头消毒使用）
+ * 解析配置 UA，按本机 Chromium 版本 / OS 适配后再调用魔改 setUserAgent(ua, options)。
+ * @returns 解析后的 UserAgentObject（UA 可能已被改成引擎版本）
  */
 export function applyUserAgentOverride(
   target: SetUserAgentTarget,
   userAgent: string,
   initHeader: Record<string, string> = {},
 ): UserAgentObject | null {
-  const ua = String(userAgent || '').trim()
-  if (!ua || !target?.setUserAgent) return null
-  const parsed = UserAgentObject.parseUserAgent(ua, {
-    'accept-language': DEFAULT_ACCEPT_LANGUAGE,
+  const built = buildSetUserAgentArgs(userAgent, initHeader)
+  if (!built || !target?.setUserAgent) return null
+  const parsed = UserAgentObject.parseUserAgent(built.userAgent, {
+    'accept-language': DEFAULT_ACCEPT_LANGUAGE_LIST,
     ...initHeader,
   })
-  const options = parsed.toSetUserAgentOptions()
   try {
-    target.setUserAgent(parsed.toString(), options)
+    target.setUserAgent(built.userAgent, built.options)
   } catch {
     try {
-      target.setUserAgent(parsed.toString(), { userAgentMetadata: null })
+      target.setUserAgent(built.userAgent, { userAgentMetadata: null })
     } catch {
       try {
-        target.setUserAgent(parsed.toString())
+        target.setUserAgent(built.userAgent)
       } catch {
         /* ignore */
       }

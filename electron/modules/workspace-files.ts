@@ -1,16 +1,37 @@
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { ensureDir } from '../data-root'
+import { randomUUID } from 'node:crypto'
 import type { AppConfig } from '../../shared/config'
 
 /** True if `child` is `parent` or a path under it (sep-safe). */
 export function isPathInsideOrEqual(parent: string, child: string): boolean {
-  const root = path.resolve(parent)
-  const full = path.resolve(child)
-  if (full === root) return true
-  const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep
-  return full.startsWith(rootWithSep)
+  const relative = path.relative(path.resolve(parent), path.resolve(child))
+  return relative === '' || (
+    relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+  )
+}
+
+/** Check existing ancestors as well as the lexical path, including junctions on Windows. */
+function assertRealPathInside(root: string, full: string): void {
+  if (!isPathInsideOrEqual(root, full)) throw new Error('path_outside_workspace')
+  const realRoot = fs.realpathSync.native(root)
+  let existing = full
+  for (;;) {
+    try {
+      // lstat distinguishes a missing path from a dangling link, which must fail closed.
+      fs.lstatSync(existing)
+      break
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      const parent = path.dirname(existing)
+      if (parent === existing) throw error
+      existing = parent
+    }
+  }
+  if (!isPathInsideOrEqual(realRoot, fs.realpathSync.native(existing))) {
+    throw new Error('path_outside_workspace')
+  }
 }
 
 /** Sandboxed file workspace under dataRoot/workspace/<chatId> or custom roots. */
@@ -72,7 +93,7 @@ export class WorkspaceFiles {
     if (perChat) {
       const root = path.resolve(perChat)
       if (this.isAllowedWorkspaceRoot(root)) {
-        ensureDir(root)
+        fs.mkdirSync(root, { recursive: true })
         return root
       }
       // Invalid / revoked override → fall through to builtin/custom
@@ -80,12 +101,15 @@ export class WorkspaceFiles {
     const custom = this.getConfig().files.custom_root?.trim()
     if (custom) {
       const root = path.resolve(custom, sanitizeSeg(chatId))
-      ensureDir(root)
+      fs.mkdirSync(root, { recursive: true })
+      assertRealPathInside(path.resolve(custom), root)
       return root
     }
     const dirName = this.getConfig().files.root_dirname || 'workspace'
-    const root = path.resolve(this.dataRoot, dirName, sanitizeSeg(chatId))
-    ensureDir(root)
+    const parent = path.resolve(this.dataRoot, dirName)
+    const root = path.resolve(parent, sanitizeSeg(chatId))
+    fs.mkdirSync(root, { recursive: true })
+    assertRealPathInside(parent, root)
     return root
   }
 
@@ -112,9 +136,7 @@ export class WorkspaceFiles {
       .replace(/\\/g, '/')
       .replace(/^\/+/, '')
     const full = path.resolve(root, cleaned || '.')
-    if (!isPathInsideOrEqual(root, full)) {
-      throw new Error('path_outside_workspace')
-    }
+    assertRealPathInside(root, full)
     return full
   }
 
@@ -341,17 +363,35 @@ export class WorkspaceFiles {
     if (!sources?.length) throw new Error('sources_required')
     const destAbs = this.resolve(chatId, dest)
     await fsp.mkdir(path.dirname(destAbs), { recursive: true })
+    const sourcePaths = sources.map((source) => this.resolve(chatId, source))
+    const maxBytes = this.getConfig().files.max_write_bytes || 52_428_800
+    // Write beside the destination and replace only after every input succeeds.
+    // This also supports the destination being one of the input files.
+    const tempPath = path.join(path.dirname(destAbs), `.navora-concat-${randomUUID()}.tmp`)
     let bytes = 0
-    const fh = await fsp.open(destAbs, 'w')
+    const fh = await fsp.open(tempPath, 'wx')
     try {
-      for (const src of sources) {
-        const abs = this.resolve(chatId, src)
-        const buf = await fsp.readFile(abs)
-        await fh.write(buf)
-        bytes += buf.length
+      for (const abs of sourcePaths) {
+        const input = await fsp.open(abs, 'r')
+        try {
+          if (!(await input.stat()).isFile()) throw new Error('not_a_file')
+          for await (const chunk of input.createReadStream({ autoClose: false })) {
+            const data = chunk as Buffer
+            bytes += data.length
+            if (bytes > maxBytes) throw new Error('write_too_large')
+            await fh.writeFile(data)
+          }
+        } finally {
+          await input.close()
+        }
       }
-    } finally {
       await fh.close()
+      await fsp.rename(tempPath, destAbs)
+    } finally {
+      await fh.close().catch(() => {})
+      await fsp.unlink(tempPath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw error
+      })
     }
     this.emitChanged(chatId)
     return { ok: true as const, path: this.toRel(chatId, destAbs), bytes, parts: sources.length }
@@ -359,7 +399,8 @@ export class WorkspaceFiles {
 }
 
 function sanitizeSeg(s: string): string {
-  return String(s || 'unknown').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80) || 'unknown'
+  const segment = String(s || 'unknown').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80)
+  return !segment || segment === '.' || segment === '..' ? 'unknown' : segment
 }
 
 function mimeFromImageExt(ext: string): string | null {

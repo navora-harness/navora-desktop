@@ -110,6 +110,7 @@ Renderer (Vue) ──preload/WS──► Main IPC/RPC
 | `modules/deep-dom.ts` | 深读 DOM / 跨 frame 查询辅助 |
 | `modules/iframe-click.ts` | iframe 内点击 |
 | `modules/trusted-input.ts` | CDP / `dispatchMouseEvent` 等可信输入 |
+| `modules/js-dialog-host.ts` | JS 对话框：优先 `setJsDialogHandler`（无 debugger），回退 CDP 懒挂载 |
 | `modules/geolocation.ts` | 地理位置工具实现 |
 | `modules/load-document-response.ts` | `loadURLWithResponse` / 协议回退：自定义主文档 |
 

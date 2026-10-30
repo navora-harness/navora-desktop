@@ -29,7 +29,7 @@ import { createWriteStream } from 'node:fs'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { AppConfig } from '../../shared/config'
-import { resolveUserAgent } from '../../shared/config'
+import { resolveAcceptLanguage, resolveUserAgent } from '../../shared/config'
 import { isUrlAllowed } from '../../shared/url-allowlist'
 import type { WorkspaceFiles } from './workspace-files'
 
@@ -109,9 +109,7 @@ export class FileDownloadService {
         ? String(opts.session.getUserAgent() || '').trim()
         : '') ||
       resolveUserAgent(cfg)
-    const acceptLanguage =
-      String(cfg.browser.accept_language || '').trim() ||
-      'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6'
+    const acceptLanguage = resolveAcceptLanguage(cfg)
 
     const pageReferer = String(opts.referer || '').trim() || undefined
     // Do not send Origin by default — navigation downloads don't; CDNs often 403 CORS Origin.
@@ -218,9 +216,7 @@ export class FileDownloadService {
         ? String(opts.session.getUserAgent() || '').trim()
         : '') ||
       resolveUserAgent(cfg)
-    const acceptLanguage =
-      String(cfg.browser.accept_language || '').trim() ||
-      'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6'
+    const acceptLanguage = resolveAcceptLanguage(cfg)
 
     for (const p of parts) {
       if (!isUrlAllowed(p.url, allowlist)) throw new Error(`url_not_allowed:${p.url}`)
@@ -457,7 +453,7 @@ async function electronFetch(
     body: init.body,
     redirect: init.redirect || 'follow',
     // Include session cookies when bound to an Agent Session.
-    credentials: 'include' as RequestCredentials,
+    credentials: 'include' as const,
     signal: init.signal,
     // Avoid custom protocol.handle intercepting downloads.
     bypassCustomProtocolHandlers: true,

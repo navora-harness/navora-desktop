@@ -548,7 +548,9 @@ async function persistCurrentStep(): Promise<boolean> {
     const raw = e instanceof Error ? e.message : ''
     errorText.value = raw.includes('remote_no_password')
         ? '请先设置远程密码'
-        : raw || '保存失败，请重试'
+        : raw.includes('remote_default_password')
+          ? '请设置新的远程访问密码，不能使用默认密码 admin'
+          : raw || '保存失败，请重试'
     return false
   } finally {
     saving.value = false

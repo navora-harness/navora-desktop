@@ -3,8 +3,11 @@ import { buildNavigationLikeHeaders } from './navigation-headers'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { AppConfig } from '../../shared/config'
+import { resolveAcceptLanguage } from '../../shared/config'
 import type { SkillReviewDraft, SkillReviewRequest, SkillReviewResponse } from '../../shared/types'
 import { isUrlAllowed } from '../../shared/url-allowlist'
+import { normalizeMatchPattern } from '../../shared/match-pattern'
+import { remapAgentToolCall } from '../../shared/tool-aliases'
 import {
   listSettingsSections,
   prepareSettingsPatch,
@@ -28,6 +31,7 @@ import {
   type PermissionGate,
 } from './permission-gate'
 import { dispatchTrustedPointer } from './trusted-input'
+import { jsDialogHost } from './js-dialog-host'
 import {
   centerOf,
   clickSelector,
@@ -518,6 +522,53 @@ function parseWaitUntil(raw: unknown, fallback: WaitUntilMode): WaitUntilMode {
   return fallback
 }
 
+/** Search / result / captcha pages rarely reach a quiet text_stable. */
+function shouldAvoidTextStable(url: string): boolean {
+  const raw = String(url || '').trim()
+  if (!raw) return false
+  try {
+    const u = new URL(raw)
+    const host = u.hostname
+    const pathq = `${u.pathname}${u.search}`
+    if (/(?:^|\.)(baidu|bing|google|duckduckgo)\./i.test(host)) return true
+    if (/\/(results|search|s|query|find)\b/i.test(u.pathname)) return true
+    if (/[?&](q|wd|query|name|keyword)=/i.test(u.search)) return true
+    if (/internalcaptcha|turnstile|challenge|captcha/i.test(pathq)) return true
+  } catch {
+    /* ignore */
+  }
+  return false
+}
+
+function resolveWaitUntil(raw: unknown, fallback: WaitUntilMode, url?: string): WaitUntilMode {
+  const mode = parseWaitUntil(raw, fallback)
+  if (mode === 'text_stable' && url && shouldAvoidTextStable(url)) return 'load'
+  return mode
+}
+
+async function settleAfterInteraction(
+  wc: WebContents,
+  cfg: AppConfig,
+  signal: AbortSignal,
+  beforeUrl: string,
+  timeoutMs = 8000,
+): Promise<SoftWaitResult> {
+  await sleep(80, signal)
+  if (!wc.isLoadingMainFrame() && wc.getURL() === beforeUrl) {
+    return {
+      ready: true,
+      timedOut: false,
+      loadingMainFrame: false,
+    }
+  }
+  return applyPageWait(wc, cfg, {
+    waitUntil: 'load',
+    timeoutMs: Math.min(12000, Math.max(1500, timeoutMs)),
+    signal,
+    worldId: cfg.browser.evaluate_world_id,
+  })
+}
+
 function pageWaitMeta(wc: WebContents, wait: SoftWaitResult) {
   return {
     partial: wait.timedOut || wait.loadingMainFrame || !wait.ready,
@@ -760,7 +811,7 @@ async function prepareActionPageWait(
   const waitBudget = Math.min(actionMs, Number(rawArgs.waitTimeoutMs) || 5000)
   let waitUntil: WaitUntilMode
   if (rawArgs.waitUntil != null && String(rawArgs.waitUntil).trim()) {
-    waitUntil = parseWaitUntil(rawArgs.waitUntil, 'load')
+    waitUntil = resolveWaitUntil(rawArgs.waitUntil, 'load', wc.getURL())
   } else if (rawArgs.iframeSelector) {
     // Iframe clicks should not wait for main-frame load (often never settles).
     waitUntil = 'none'
@@ -1087,6 +1138,12 @@ export async function executeAgentTool(
   assertNotAborted(ctx.signal)
   const cfg = ctx.getConfig()
 
+  const remapped = remapAgentToolCall(name, rawArgs)
+  if (remapped) {
+    name = remapped.name
+    rawArgs = remapped.args
+  }
+
   if (!opts?.skipPermission) {
     // Combined open checks both session.create and window.create.
     if (name === 'browser_open') {
@@ -1214,20 +1271,36 @@ export async function executeAgentTool(
       const sessionCount = existing.length
       const windowCount = existing.reduce((n, s) => n + (s.windows?.length || 0), 0)
       // Hard efficiency guard: one browse context per chat unless user needs isolation.
-      if (sessionCount >= 1) {
+      // If Session remains but all windows were closed, reopen a window on that Session.
+      if (sessionCount >= 1 && windowCount >= 1) {
         return {
           ok: false,
           error: 'reuse_existing_session',
           hint:
-            '本 Chat 已有浏览器资源。请用 browser_list_resources 查看，并用已有 windowId 执行 browser_navigate / browser_get。不要为同一问题再次 browser_open。',
+            '本 Chat 已有浏览器资源。请用 browser_list_resources 查看，并用已有 windowId 执行 browser_navigate / browser_get。' +
+            '清 cookie 用 browser_session_clear 后再 navigate；不要为同一问题再次 browser_open。',
           tree: existing,
           sessionCount,
           windowCount,
         }
       }
+      let reusedSessionId: string | undefined
+      if (sessionCount >= 1 && windowCount === 0) {
+        reusedSessionId = String(existing[existing.length - 1]?.sessionId || '')
+        if (!reusedSessionId) {
+          return {
+            ok: false,
+            error: 'reuse_existing_session',
+            hint: '已有 Session 但无法解析 sessionId。请 browser_list_resources 后 browser_window_create。',
+            tree: existing,
+            sessionCount,
+            windowCount,
+          }
+        }
+      }
       const wantPersist = rawArgs.persist === true
       let persist = false
-      if (wantPersist) {
+      if (wantPersist && !reusedSessionId) {
         const persistGate = await ctx.gate.check(
           ctx.chatId,
           'session.persist',
@@ -1236,13 +1309,25 @@ export async function executeAgentTool(
         )
         persist = persistGate.ok
       }
-      const sess = ctx.registry.createSession(ctx.chatId, {
-        persist,
-        ua: rawArgs.ua ? String(rawArgs.ua) : undefined,
-      })
+      const sess = reusedSessionId
+        ? (() => {
+            const rec = ctx.registry.assertSessionOwned(ctx.chatId, reusedSessionId)
+            return {
+              sessionId: rec.sessionId,
+              chatId: rec.chatId,
+              sessionIndex: rec.sessionIndex,
+              partition: rec.partition,
+              persist: rec.persist,
+              windows: [] as [],
+            }
+          })()
+        : ctx.registry.createSession(ctx.chatId, {
+            persist,
+            ua: rawArgs.ua ? String(rawArgs.ua) : undefined,
+          })
       const url = urlEarly
       if (url !== 'about:blank' && !isUrlAllowed(url, cfg.browser.url_allowlist)) {
-        await ctx.registry.closeSession(sess.sessionId, true)
+        if (!reusedSessionId) await ctx.registry.closeSession(sess.sessionId, true)
         return { ok: false, error: 'url_not_allowed' }
       }
       const win = ctx.registry.createWindow(sess.sessionId, {
@@ -1257,14 +1342,7 @@ export async function executeAgentTool(
         url !== 'about:blank' && (cfg.browser.wait.load || cfg.browser.wait.network_idle)
           ? 'load'
           : 'none'
-      let waitUntil = parseWaitUntil(rawArgs.waitUntil, defaultUntil)
-      // Search/result pages rarely reach a quiet text_stable; prefer load.
-      if (
-        waitUntil === 'text_stable' &&
-        /(?:^|\.)baidu\.com|(?:^|\.)bing\.com|(?:^|\.)google\./i.test(url)
-      ) {
-        waitUntil = 'load'
-      }
+      const waitUntil = resolveWaitUntil(rawArgs.waitUntil, defaultUntil, url)
       const timeout = Number(rawArgs.timeoutMs) || cfg.browser.navigation_timeout_ms || 30000
       const waitTimeout = waitUntil === 'text_stable' ? Math.min(timeout, 10000) : timeout
       const wait =
@@ -1284,7 +1362,13 @@ export async function executeAgentTool(
         ok: true,
         session: sess,
         persist: sess.persist,
-        ...(wantPersist && !persist
+        ...(reusedSessionId
+          ? {
+              reusedSession: true,
+              note: '已有 Session 但窗口已关闭：已在原 Session 上新建窗口（未新建 Session）。',
+            }
+          : {}),
+        ...(wantPersist && !persist && !reusedSessionId
           ? {
               persistDenied: true,
               note: 'User denied persist; created ephemeral Session (cookies/storage cleared when closed).',
@@ -1377,7 +1461,9 @@ export async function executeAgentTool(
           navigationLike: rawArgs.navigationLike === false ? false : true,
           userAgent: typeof rawArgs.userAgent === 'string' ? rawArgs.userAgent : undefined,
           acceptLanguage:
-            typeof rawArgs.acceptLanguage === 'string' ? rawArgs.acceptLanguage : undefined,
+            typeof rawArgs.acceptLanguage === 'string' && rawArgs.acceptLanguage.trim()
+              ? String(rawArgs.acceptLanguage)
+              : resolveAcceptLanguage(cfg),
           referer: typeof rawArgs.referer === 'string' ? rawArgs.referer : undefined,
         }),
         cfg.browser.fetch_timeout_ms || 30000,
@@ -1421,7 +1507,7 @@ export async function executeAgentTool(
         url !== 'about:blank' && (cfg.browser.wait.load || cfg.browser.wait.network_idle)
           ? 'load'
           : 'none'
-      const waitUntil = parseWaitUntil(rawArgs.waitUntil, defaultUntil)
+      const waitUntil = resolveWaitUntil(rawArgs.waitUntil, defaultUntil, url)
       const timeout = Number(rawArgs.timeoutMs) || cfg.browser.navigation_timeout_ms || 30000
       const wait =
         waitUntil === 'none'
@@ -1520,9 +1606,10 @@ export async function executeAgentTool(
         }
         throw e
       }
-      const waitUntil = parseWaitUntil(
+      const waitUntil = resolveWaitUntil(
         rawArgs.waitUntil,
         cfg.browser.wait.load || cfg.browser.wait.network_idle ? 'load' : 'none',
+        wc.getURL(),
       )
       const wait = await applyPageWait(wc, cfg, {
         waitUntil,
@@ -1532,8 +1619,6 @@ export async function executeAgentTool(
       })
       return {
         ok: true,
-        url: wc.getURL(),
-        title: wc.getTitle(),
         ...pageWaitMeta(wc, wait),
       }
     }
@@ -1602,9 +1687,10 @@ export async function executeAgentTool(
         }
         throw e
       }
-      const waitUntil = parseWaitUntil(
+      const waitUntil = resolveWaitUntil(
         rawArgs.waitUntil,
         cfg.browser.wait.load || cfg.browser.wait.network_idle ? 'load' : 'none',
+        wc.getURL(),
       )
       const wait = await applyPageWait(wc, cfg, {
         waitUntil,
@@ -1614,8 +1700,6 @@ export async function executeAgentTool(
       })
       return {
         ok: true,
-        url: wc.getURL(),
-        title: wc.getTitle(),
         injectModeUsed: prefer,
         ...pageWaitMeta(wc, wait),
       }
@@ -1775,7 +1859,7 @@ export async function executeAgentTool(
       const wantLoad =
         rawArgs.load !== false && (rawArgs.load || cfg.browser.wait.load || cfg.browser.wait.network_idle)
       const wantStable = Boolean(rawArgs.textStable) || String(rawArgs.waitUntil || '') === 'text_stable'
-      let waitLegacy = {
+      let waitLegacy: SoftWaitResult = {
         ready: true,
         timedOut: false,
         loadingMainFrame: wc.isLoadingMainFrame(),
@@ -1826,19 +1910,32 @@ export async function executeAgentTool(
       const iframeSelector = rawArgs.iframeSelector ? String(rawArgs.iframeSelector) : ''
       const pierce = rawArgs.pierce !== false
       const buttonRaw = String(rawArgs.button || 'left')
-      const button = (
-        ['left', 'middle', 'right', 'back', 'forward'].includes(buttonRaw) ? buttonRaw : 'left'
-      )
+      const button = buttonRaw === 'middle' || buttonRaw === 'right' ||
+        buttonRaw === 'back' || buttonRaw === 'forward' ? buttonRaw : 'left'
       const clickCount = Math.max(1, Math.min(3, Number(rawArgs.clickCount) || 1))
       const rec = ctx.registry.assertWindowOwned(ctx.chatId, windowId)
       const wc = rec.win.webContents
       const worldId = cfg.browser.evaluate_world_id
       const actionMs = cfg.browser.action_timeout_ms || 15000
+      const beforeUrl = wc.getURL()
       const wait = await prepareActionPageWait(wc, cfg, rawArgs, {
         signal: ctx.signal,
         worldId,
         selector: iframeSelector || selector,
       })
+      const finishClick = async (result: Record<string, unknown>) => {
+        if (!result.ok) return { ...result, ...pageWaitMeta(wc, wait) }
+        const after = iframeSelector
+          ? wait
+          : await settleAfterInteraction(wc, cfg, ctx.signal, beforeUrl, 8000)
+        return {
+          ...result,
+          ...pageWaitMeta(wc, after),
+          url: wc.getURL(),
+          title: wc.getTitle(),
+          navigated: wc.getURL() !== beforeUrl,
+        }
+      }
       const meta = {
         ...pageWaitMeta(wc, wait),
       }
@@ -1858,7 +1955,7 @@ export async function executeAgentTool(
           offsetRatioY:
             typeof rawArgs.offsetRatioY === 'number' ? rawArgs.offsetRatioY : undefined,
         })
-        return { ...fr, ...meta }
+        return finishClick(fr as Record<string, unknown>)
       }
 
       if (!selector) {
@@ -1888,12 +1985,11 @@ export async function executeAgentTool(
             scrollIntoView: true,
           })
           if (ok) {
-            return {
+            return finishClick({
               ok: true,
               method: 'clickSelector',
               pierce,
-              ...meta,
-            }
+            })
           }
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
@@ -1903,7 +1999,7 @@ export async function executeAgentTool(
         }
       }
 
-      let box = null
+      let box: { x: number; y: number } | null = null
       if (pierce && hasQuerySelectorDeep(wc)) {
         const info = await querySelectorDeep(wc, selector, {
           pierce: true,
@@ -1912,7 +2008,7 @@ export async function executeAgentTool(
         if (info && info.width >= 1 && info.height >= 1) box = centerOf(info)
       }
       if (!box) {
-        box = (await isolatedEval(
+        const located = await isolatedEval(
           wc,
           worldId,
           `(() => {
@@ -1924,7 +2020,12 @@ export async function executeAgentTool(
             return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height };
           })()`,
           { timeoutMs: actionMs, signal: ctx.signal, label: 'click_locate' },
-        ))
+        )
+        if (located && typeof located === 'object' && 'x' in located && 'y' in located &&
+          typeof located.x === 'number' && Number.isFinite(located.x) &&
+          typeof located.y === 'number' && Number.isFinite(located.y)) {
+          box = { x: located.x, y: located.y }
+        }
       }
       if (!box) return { ok: false, error: 'element_not_found', ...meta }
       await dispatchTrustedPointer(wc, {
@@ -1941,7 +2042,7 @@ export async function executeAgentTool(
         button: button === 'middle' || button === 'right' ? button : 'left',
         clickCount,
       })
-      return { ok: true, x: box.x, y: box.y, method: 'pointer', pierce, ...meta }
+      return finishClick({ ok: true, x: box.x, y: box.y, method: 'pointer', pierce })
     }
 
     case 'browser_flow': {
@@ -2693,12 +2794,27 @@ export async function executeAgentTool(
         { timeoutMs: actionMs, signal: ctx.signal, label: 'type_focus' },
       )
       if (!okFocus) return { ok: false, error: 'element_not_found', ...meta }
+      const beforeUrl = wc.getURL()
       wc.insertText(text)
       if (submit) {
         wc.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
         wc.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
+        const after = await settleAfterInteraction(wc, cfg, ctx.signal, beforeUrl, 8000)
+        const navigated = wc.getURL() !== beforeUrl
+        return {
+          ok: true,
+          length: text.length,
+          submitted: true,
+          navigated,
+          ...pageWaitMeta(wc, after),
+          url: wc.getURL(),
+          title: wc.getTitle(),
+          hint: navigated
+            ? undefined
+            : 'Enter 未导致跳转。不要停下来问用户；立刻 browser_click 页面上的 Search/提交按钮。',
+        }
       }
-      return { ok: true, length: text.length, ...meta }
+      return { ok: true, length: text.length, submitted: false, ...meta, url: wc.getURL() }
     }
 
     case 'browser_get': {
@@ -2737,7 +2853,7 @@ export async function executeAgentTool(
           : wc.isLoadingMainFrame()
             ? 'load'
             : 'none'
-      const waitUntil = parseWaitUntil(rawArgs.waitUntil, defaultUntil)
+      const waitUntil = resolveWaitUntil(rawArgs.waitUntil, defaultUntil, wc.getURL())
       const wait = await applyPageWait(wc, cfg, {
         waitUntil,
         timeoutMs: waitBudget,
@@ -2790,6 +2906,14 @@ export async function executeAgentTool(
             wc,
             worldId,
             `(() => {
+              const absUrl = (el) => {
+                try {
+                  if (typeof el.href === 'string' && el.href && !/^javascript:/i.test(el.href)) return el.href;
+                  const raw = el.getAttribute('href');
+                  if (!raw || /^javascript:/i.test(raw) || raw.startsWith('#')) return undefined;
+                  return new URL(raw, location.href).href;
+                } catch { return undefined; }
+              };
               const pick = (sel, n) => [...document.querySelectorAll(sel)].slice(0, n).map(el => ({
                 tag: el.tagName.toLowerCase(),
                 id: el.id || undefined,
@@ -2797,13 +2921,15 @@ export async function executeAgentTool(
                 type: el.getAttribute('type') || undefined,
                 text: (el.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').trim().slice(0, 80),
                 href: el.getAttribute('href') || undefined,
+                url: absUrl(el),
               }));
               return {
                 title: document.title,
                 url: location.href,
                 headings: pick('h1,h2,h3', 20),
-                links: pick('a[href]', 30),
+                links: pick('a[href]', 40),
                 inputs: pick('input,textarea,select,button', 40),
+                hint: '导航请用 links[].url（已解析的绝对地址）；不要臆造 /product 或机型路径。',
               };
             })()`,
             evalOpts,
@@ -3012,18 +3138,30 @@ export async function executeAgentTool(
     case 'browser_network_rule_add': {
       const sessionId = String(rawArgs.sessionId || '')
       ctx.registry.assertSessionOwned(ctx.chatId, sessionId)
+      const pat = normalizeMatchPattern(String(rawArgs.urlPattern || '*://*/*'))
       const rule = ctx.network.add(sessionId, {
         kind: (rawArgs.kind as 'observe' | 'modify' | 'block') || 'observe',
-        urlPattern: String(rawArgs.urlPattern || '*://*/*'),
+        urlPattern: pat.pattern,
         headers: rawArgs.headers as Record<string, string> | undefined,
       })
       return {
         ok: true,
         rule,
-        note:
-          rule.kind === 'observe'
-            ? 'observe 会暂存匹配请求的 statusCode / 请求头 / 响应头，用 browser_network_log 查看。'
-            : undefined,
+        ...(pat.normalized
+          ? {
+              patternNormalizedFrom: pat.original,
+              note:
+                `urlPattern 已从「${pat.original}」规范为「${pat.pattern}」（须含 ://）。` +
+                (rule.kind === 'observe'
+                  ? ' observe 会暂存匹配请求的 statusCode / 请求头 / 响应头，用 browser_network_log 查看。'
+                  : ''),
+            }
+          : {
+              note:
+                rule.kind === 'observe'
+                  ? 'observe 会暂存匹配请求的 statusCode / 请求头 / 响应头，用 browser_network_log 查看。'
+                  : undefined,
+            }),
       }
     }
 
@@ -3285,15 +3423,17 @@ export async function executeAgentTool(
       }
       const timeout = Number(rawArgs.timeoutMs) || cfg.browser.navigation_timeout_ms || 30000
       const wait = await applyPageWait(wc, cfg, {
-        waitUntil: parseWaitUntil(rawArgs.waitUntil, cfg.browser.wait.load ? 'load' : 'none'),
+        waitUntil: resolveWaitUntil(
+          rawArgs.waitUntil,
+          cfg.browser.wait.load ? 'load' : 'none',
+          wc.getURL(),
+        ),
         timeoutMs: timeout,
         signal: ctx.signal,
         worldId: cfg.browser.evaluate_world_id,
       })
       return {
         ok: true,
-        url: wc.getURL(),
-        title: wc.getTitle(),
         ...pageWaitMeta(wc, wait),
       }
     }
@@ -3304,36 +3444,62 @@ export async function executeAgentTool(
       if (!text) return { ok: false, error: 'text_required' }
       const rec = ctx.registry.assertWindowOwned(ctx.chatId, windowId)
       const wc = rec.win.webContents
-      // Find works on any page state so Agent can locate target widgets.
       const limit = Math.min(30, Math.max(1, Number(rawArgs.limit) || 15))
-      const v = await isolatedEval(
-        wc,
-        cfg.browser.evaluate_world_id,
-        `(() => {
-          const needle = ${JSON.stringify(text)}.toLowerCase();
-          const nodes = [...document.querySelectorAll('a,button,input,textarea,select,summary,[role="button"],label,h1,h2,h3,li,td,th')];
-          const out = [];
-          for (const el of nodes) {
-            if (out.length >= ${limit}) break;
-            const t = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('value') || '').trim();
-            if (!t || !t.toLowerCase().includes(needle)) continue;
-            const tag = el.tagName.toLowerCase();
-            let sel = tag;
-            if (el.id) sel = '#' + CSS.escape(el.id);
-            else if (el.getAttribute('name')) sel = tag + '[name=' + JSON.stringify(el.getAttribute('name')) + ']';
-            out.push({
-              tag,
-              text: t.slice(0, 120),
-              selector: sel,
-              href: el.getAttribute('href') || undefined,
-              url: (typeof el.href === 'string' && /^https?:/i.test(el.href)) ? el.href : undefined,
-            });
-          }
-          return out;
-        })()`,
-        { timeoutMs: cfg.browser.action_timeout_ms || 15000, signal: ctx.signal, label: 'find' },
-      )
-      return { ok: true, matches: v, hint: '若 match.url 或可解析的 http(s) href 存在，请用 browser_navigate，不要 click。Shadow 内元素用 browser_query_deep / browser_click(pierce)。' }
+      const findMs = Math.min(5000, Math.max(800, Number(rawArgs.timeoutMs) || 4000))
+      try {
+        const v = await isolatedEval(
+          wc,
+          cfg.browser.evaluate_world_id,
+          `(() => {
+            const needle = ${JSON.stringify(text)}.toLowerCase();
+            const nodes = [...document.querySelectorAll('a,button,input,textarea,select,summary,[role="button"],label,h1,h2,h3,li,td,th')];
+            const out = [];
+            for (const el of nodes) {
+              if (out.length >= ${limit}) break;
+              const t = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('value') || '').trim();
+              if (!t || !t.toLowerCase().includes(needle)) continue;
+              const tag = el.tagName.toLowerCase();
+              let sel = tag;
+              if (el.id) sel = '#' + CSS.escape(el.id);
+              else if (el.getAttribute('name')) sel = tag + '[name=' + JSON.stringify(el.getAttribute('name')) + ']';
+              out.push({
+                tag,
+                text: t.slice(0, 120),
+                selector: sel,
+                href: el.getAttribute('href') || undefined,
+                url: (() => {
+                  try {
+                    if (typeof el.href === 'string' && el.href && !/^javascript:/i.test(el.href)) return el.href;
+                    const raw = el.getAttribute('href');
+                    if (!raw || /^javascript:/i.test(raw)) return undefined;
+                    return new URL(raw, location.href).href;
+                  } catch { return undefined; }
+                })(),
+              });
+            }
+            return out;
+          })()`,
+          { timeoutMs: findMs, signal: ctx.signal, label: 'find' },
+        )
+        return {
+          ok: true,
+          matches: v,
+          url: wc.getURL(),
+          title: wc.getTitle(),
+          hint: '这是即时快照，不是等待器。点击/跳转后请用 browser_get(dom_summary 或 text, waitUntil=load)。若 match.url 为 http(s)，用 browser_navigate。',
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        if (msg === 'aborted') throw e
+        return {
+          ok: false,
+          error: msg.startsWith('timeout:') ? 'timeout:find' : 'find_failed',
+          url: wc.getURL(),
+          title: wc.getTitle(),
+          loading: wc.isLoadingMainFrame(),
+          hint: '页面忙或仍在跳转。不要反复 browser_find 等文案；改用 browser_get(dom_summary/text, waitUntil=load)。',
+        }
+      }
     }
 
     case 'browser_query_deep': {
@@ -3366,44 +3532,28 @@ export async function executeAgentTool(
       const windowId = String(rawArgs.windowId || '')
       const action = String(rawArgs.action || 'list')
       const rec = ctx.registry.assertWindowOwned(ctx.chatId, windowId)
-      const wc = rec.win.webContents
-      const worldId = cfg.browser.evaluate_world_id
+      const via = jsDialogHost.install(windowId, rec.win.webContents)
       if (action === 'set_policy') {
-        const confirm = rawArgs.confirm != null ? Boolean(rawArgs.confirm) : true
-        const promptAccept = rawArgs.promptAccept != null ? Boolean(rawArgs.promptAccept) : true
-        const promptText = rawArgs.promptText != null ? String(rawArgs.promptText) : ''
-        await isolatedEval(
-          wc,
-          worldId,
-          `(() => {
-            window.__navoraDlg = window.__navoraDlg || { queue: [], policy: {} };
-            window.__navoraDlg.policy = {
-              confirm: ${confirm},
-              promptAccept: ${promptAccept},
-              promptText: ${JSON.stringify(promptText)},
-            };
-            return window.__navoraDlg.policy;
-          })()`,
-          { timeoutMs: 5000, signal: ctx.signal, label: 'dialog_policy' },
-        )
-        return { ok: true, policy: { confirm, promptAccept, promptText } }
+        const confirm = rawArgs.confirm != null ? Boolean(rawArgs.confirm) : undefined
+        const promptAccept = rawArgs.promptAccept != null ? Boolean(rawArgs.promptAccept) : undefined
+        const promptText = rawArgs.promptText != null ? String(rawArgs.promptText) : undefined
+        const policy = jsDialogHost.setPolicy(windowId, {
+          ...(confirm != null ? { confirm } : {}),
+          ...(promptAccept != null ? { promptAccept } : {}),
+          ...(promptText != null ? { promptText } : {}),
+        })
+        return { ok: true, policy, via }
       }
       if (action === 'clear') {
-        await isolatedEval(
-          wc,
-          worldId,
-          `(() => { if (window.__navoraDlg) window.__navoraDlg.queue = []; return true; })()`,
-          { timeoutMs: 5000, signal: ctx.signal, label: 'dialog_clear' },
-        )
-        return { ok: true }
+        jsDialogHost.clearQueue(windowId)
+        return { ok: true, via }
       }
-      const queue = await isolatedEval(
-        wc,
-        worldId,
-        `(() => (window.__navoraDlg && Array.isArray(window.__navoraDlg.queue) ? window.__navoraDlg.queue.slice(-20) : []))()`,
-        { timeoutMs: 5000, signal: ctx.signal, label: 'dialog_list' },
-      )
-      return { ok: true, queue }
+      return {
+        ok: true,
+        queue: jsDialogHost.listQueue(windowId, 20),
+        policy: jsDialogHost.getPolicy(windowId),
+        via,
+      }
     }
 
     case 'browser_upload': {
@@ -4335,32 +4485,17 @@ async function setFileInputFiles(
   selector: string,
   files: string[],
 ): Promise<void> {
-  const dbg = wc.debugger
-  let attachedHere = false
-  try {
-    if (!dbg.isAttached()) {
-      dbg.attach('1.3')
-      attachedHere = true
-    }
-    const doc = (await dbg.sendCommand('DOM.getDocument', { depth: 0 })) as {
-      root: { nodeId: number }
-    }
-    const q = (await dbg.sendCommand('DOM.querySelector', {
-      nodeId: doc.root.nodeId,
-      selector,
-    })) as { nodeId: number }
-    if (!q?.nodeId) throw new Error('element_not_found')
-    await dbg.sendCommand('DOM.setFileInputFiles', {
-      nodeId: q.nodeId,
-      files,
-    })
-  } finally {
-    if (attachedHere) {
-      try {
-        dbg.detach()
-      } catch {
-        /* ignore */
-      }
-    }
+  const native = wc as WebContents & {
+    setFileInputFiles?: (
+      sel: string,
+      paths: string[],
+      opts?: { pierce?: boolean },
+    ) => Promise<void>
   }
+  if (typeof native.setFileInputFiles !== 'function') {
+    throw new Error(
+      'setFileInputFiles_unsupported: need Electron with webContents.setFileInputFiles (no CDP)',
+    )
+  }
+  await native.setFileInputFiles(selector, files, { pierce: true })
 }

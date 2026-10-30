@@ -166,13 +166,14 @@ function onExportCancel() {
 }
 
 async function onExportConfirm() {
-  if (!req.value?.skillId || responding.value) return
   const current = req.value
+  const skillId = current?.skillId
+  if (!current || !skillId || responding.value) return
   responding.value = true
   // 先关预览再开系统另存为；responding 已置位，onExportModel 不会误取�?
   exportOpen.value = false
   try {
-    const res = await window.navora?.skills?.export(current.skillId)
+    const res = await window.navora?.skills?.export(skillId)
     if (!res || res.canceled || !res.ok) {
       await window.navora?.skills?.respondReview?.(current.proposalId || current.id, {
         source: 'cancel',

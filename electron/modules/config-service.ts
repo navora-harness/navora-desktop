@@ -3,6 +3,8 @@ import path from 'node:path'
 import yaml from 'js-yaml'
 import {
   createDefaultConfig,
+  migrateAcceptLanguage,
+  migrateShellAllowlist,
   migrateOnboardingFromParsed,
   migrateShowMainOnStartFromParsed,
   normalizeAppStartupPrefs,
@@ -89,6 +91,8 @@ export class ConfigService {
     ensureDefaultProvider(this.cfg.ai)
     ensurePermissionModes(this.cfg)
     normalizeAppStartupPrefs(this.cfg)
+    migrateAcceptLanguage(this.cfg)
+    migrateShellAllowlist(this.cfg)
     this.cfg.subchat = resolveSubchat(this.cfg)
     return this.cfg
   }
@@ -98,6 +102,7 @@ export class ConfigService {
     ensureDefaultProvider(this.cfg.ai)
     ensurePermissionModes(this.cfg)
     normalizeAppStartupPrefs(this.cfg)
+    migrateShellAllowlist(this.cfg)
     this.cfg.subchat = resolveSubchat(this.cfg)
     ensureDir(this.root)
     const text = yaml.dump(this.cfg, { lineWidth: 120, noRefs: true })

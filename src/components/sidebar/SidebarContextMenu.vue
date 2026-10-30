@@ -95,12 +95,12 @@ defineExpose({ show, hide, open })
 .ctx-scrim {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 12000;
 }
 .sidebar-ctx-panel {
   position: fixed;
-  z-index: 81;
-  min-width: 168px;
+  z-index: 12001;
+  min-width: 196px;
   padding: 6px;
   background: #1c2833;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -134,6 +134,20 @@ defineExpose({ show, hide, open })
 }
 .sidebar-ctx-panel :deep(.sidebar-more-item.danger:hover:not(:disabled)) {
   background: rgba(231, 76, 60, 0.14);
+}
+.sidebar-ctx-panel :deep(.sidebar-ctx-label) {
+  padding: 6px 12px 2px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: rgba(236, 240, 241, 0.42);
+  user-select: none;
+  pointer-events: none;
+}
+.sidebar-ctx-panel :deep(.sidebar-ctx-label.with-sep) {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .ctx-scrim-enter-active,

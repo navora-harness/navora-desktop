@@ -24,6 +24,7 @@ import { NavoraRpcRegistry } from './modules/remote-rpc'
 import { loadWindowState, trackWindowState } from './modules/window-state'
 import type { AppConfig } from '../shared/config'
 import {
+  assertRemoteAccessConfig,
   resolveForkDecision,
   resolvePluginDevMode,
   resolveUserAgent,
@@ -593,6 +594,8 @@ async function createWindow(): Promise<void> {
     minWidth: 1100,
     minHeight: 720,
     title: 'Navora',
+    frame: false,
+    backgroundColor: '#15202b',
     show: false,
     autoHideMenuBar: true,
     ...(icon ? { icon } : {}),
@@ -623,6 +626,13 @@ async function createWindow(): Promise<void> {
   win.on('closed', () => {
     mainWindow = null
   })
+  const pushMaximized = () => {
+    if (win.isDestroyed()) return
+    win.webContents.send('navora:app.window.maximized', win.isMaximized())
+  }
+  win.on('maximize', pushMaximized)
+  win.on('unmaximize', pushMaximized)
+  win.webContents.on('did-finish-load', pushMaximized)
 
   const devUrl = process.env.VITE_DEV_SERVER_URL
   if (devUrl) {
@@ -653,6 +663,27 @@ function registerIpc(): void {
     app.quit()
     return { ok: true as const }
   })
+  ipcMain.handle('navora:app.window.minimize', (e) => {
+    const w = BrowserWindow.fromWebContents(e.sender)
+    if (w && !w.isDestroyed()) w.minimize()
+    return { ok: true as const }
+  })
+  ipcMain.handle('navora:app.window.toggleMaximize', (e) => {
+    const w = BrowserWindow.fromWebContents(e.sender)
+    if (!w || w.isDestroyed()) return { ok: true as const, maximized: false }
+    if (w.isMaximized()) w.unmaximize()
+    else w.maximize()
+    return { ok: true as const, maximized: w.isMaximized() }
+  })
+  ipcMain.handle('navora:app.window.close', (e) => {
+    const w = BrowserWindow.fromWebContents(e.sender)
+    if (w && !w.isDestroyed()) w.close()
+    return { ok: true as const }
+  })
+  ipcMain.handle('navora:app.window.isMaximized', (e) => {
+    const w = BrowserWindow.fromWebContents(e.sender)
+    return { maximized: Boolean(w && !w.isDestroyed() && w.isMaximized()) }
+  })
 
   rpcHandle('navora:config.get', () => config.get())
   rpcHandle('navora:config.save', async (_e, patch: Partial<AppConfig>) => {
@@ -672,15 +703,18 @@ function registerIpc(): void {
       ...next,
       remote: { ...prev.remote, ...(next.remote || {}) },
     } as AppConfig
-    if (preview.remote.enabled && !preview.remote.passwordHash) {
-      throw new Error('remote_no_password')
-    }
+    assertRemoteAccessConfig(preview.remote)
     const saved = config.update(next)
     // Config is already on disk; remote bind failures must not fail the save.
     try {
       await remote.syncFromConfig()
     } catch (e) {
       console.warn('[remote] sync after config.save failed', e)
+    }
+    if (
+      prev.browser.log_datadome_telemetry !== saved.browser.log_datadome_telemetry
+    ) {
+      registry.reapplyNetwork()
     }
     syncEmptyChatsToConfigDefaults(prev, saved)
     pluginDevWatch?.sync()
@@ -1815,6 +1849,7 @@ if (!gotLock) {
     network = new BrowserNetworkManager(
       () => config.get(),
       (sessionId) => registry.getSessionRecord(sessionId)?.ses ?? null,
+      () => path.join(dataRoot, 'logs'),
     )
     registry.bindNetwork(network)
 
@@ -1889,14 +1924,17 @@ if (!gotLock) {
           ...next,
           remote: { ...prev.remote, ...(next.remote || {}) },
         } as AppConfig
-        if (preview.remote.enabled && !preview.remote.passwordHash) {
-          throw new Error('remote_no_password')
-        }
+        assertRemoteAccessConfig(preview.remote)
         const saved = config.update(next)
         try {
           await remote.syncFromConfig()
         } catch (e) {
           console.warn('[remote] sync after agent settings update failed', e)
+        }
+        if (
+          prev.browser.log_datadome_telemetry !== saved.browser.log_datadome_telemetry
+        ) {
+          registry.reapplyNetwork()
         }
         syncEmptyChatsToConfigDefaults(prev, saved)
         pluginDevWatch?.sync()

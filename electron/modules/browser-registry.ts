@@ -12,11 +12,12 @@ import path from 'node:path'
 import type { BrowserTreeSession, BrowserTreeWindow } from '../../shared/types'
 import { applyUserAgentOverride } from '../../shared/user-agent'
 import type { AppConfig } from '../../shared/config'
-import { resolveUserAgent } from '../../shared/config'
+import { resolveAcceptLanguageList, resolveUserAgent } from '../../shared/config'
 import { isUrlAllowed } from '../../shared/url-allowlist'
 import type { BrowserNetworkManager } from './browser-network'
 import type { PermissionGate } from './permission-gate'
 import type { WorkspaceFiles } from './workspace-files'
+import { jsDialogHost } from './js-dialog-host'
 
 const WINDOW_MIN_W = 320
 const WINDOW_MIN_H = 240
@@ -161,6 +162,14 @@ export class BrowserRegistry {
     this.network = network
   }
 
+  /** Re-bind webRequest listeners for all live sessions (config toggles). */
+  reapplyNetwork(): void {
+    if (!this.network) return
+    for (const sessionId of this.sessions.keys()) {
+      this.network.touch(sessionId)
+    }
+  }
+
   bindPermissionGate(gate: PermissionGate): void {
     this.gate = gate
   }
@@ -214,17 +223,29 @@ export class BrowserRegistry {
   }
 
   private uaInitHeader(): Record<string, string> {
-    const lang = this.getConfig().browser.accept_language?.trim()
-    return lang ? { 'accept-language': lang } : {}
+    return { 'accept-language': resolveAcceptLanguageList(this.getConfig()) }
   }
 
-  /** session.setUserAgent once + webRequest onBeforeSendHeaders；不对每个 webContents 重复 setUserAgent。 */
+  /** session.setUserAgent once（UA/CH 按引擎适配）；不对每个 webContents 重复 setUserAgent。 */
   private applySessionUserAgent(s: AgentSessionRecord, ua: string): void {
+    const trimmed = String(ua || '').trim()
+    s.userAgent = trimmed
+    // Stock Electron UA: leave runtime Client Hints alone and skip webRequest UA rewriting.
+    // applyUserAgentOverride would invent "Google Chrome" brands while UA still says Electron/ —
+    // that mismatch is worse than the honest Chromium-only CH defaults.
+    if (/Electron\//i.test(trimmed)) {
+      // Do not call setUserAgent / uaGuard — keep Chromium's default Client Hints
+      // (grease + Chromium only). Rewriting invents Google Chrome brands and trips DD.
+      s.userAgent = trimmed
+      this.network?.setUaGuard(s.sessionId, '', {})
+      return
+    }
     const init = this.uaInitHeader()
-    const parsed = applyUserAgentOverride(s.ses, ua, init)
-    s.userAgent = parsed?.toString() || ua
-    // initHeader 默认空：只强制 UA + 剥 Full-Version（与常见可过站路径一致）
-    this.network?.setUaGuard(s.sessionId, s.userAgent, {})
+    const parsed = applyUserAgentOverride(s.ses, trimmed, init)
+    s.userAgent = parsed?.toString() || trimmed
+    // Native setUserAgent + UserAgentURLLoaderThrottle already rewrite UA / CH.
+    // webRequest onBeforeSendHeaders reorders headers and strips Sec-CH-UA-* — skip it.
+    this.network?.setUaGuard(s.sessionId, '', {})
   }
 
   private emitTree(chatId: string): void {
@@ -333,7 +354,9 @@ export class BrowserRegistry {
 
   assertWindowOwned(chatId: string, windowId: string): AgentWindowRecord {
     const w = this.windows.get(windowId)
-    if (!w || w.win.isDestroyed()) throw new Error(`window_not_found:${windowId}`)
+    if (!w || w.win.isDestroyed() || w.win.webContents.isDestroyed()) {
+      throw new Error(`window_not_found:${windowId}`)
+    }
     if (w.chatId !== chatId) throw new Error(`window_wrong_chat:${windowId}`)
     return w
   }
@@ -439,6 +462,8 @@ export class BrowserRegistry {
     this.applySessionUserAgent(rec, ua)
     this.installSessionPermissionHandlers(rec)
     this.installSessionDownloadHandler(rec)
+    // Apply webRequest (incl. optional DataDome telemetry) for this session.
+    this.network?.touch(sessionId)
     this.emitTree(chatId)
     return this.getTree(chatId).find((s) => s.sessionId === sessionId)!
   }
@@ -799,7 +824,8 @@ export class BrowserRegistry {
 
     this.attachWindowListeners(rec)
     this.installWindowOpenHandler(rec)
-    this.installDialogHooks(rec)
+    // Do NOT attach CDP / js-dialog here — permanent debugger is a bot signal.
+    // jsDialogHost installs lazily on browser_dialog (native handler if available).
 
     const url = opts.url?.trim() || 'about:blank'
     // Initial load is always programmatic — never a "user navigated" op.
@@ -897,38 +923,6 @@ export class BrowserRegistry {
     })
   }
 
-  private installDialogHooks(rec: AgentWindowRecord): void {
-    const wc = rec.win.webContents
-    const inject = () => {
-      void wc
-        .executeJavaScript(
-          `(() => {
-            if (window.__navoraDlgInstalled) return true;
-            window.__navoraDlgInstalled = true;
-            window.__navoraDlg = window.__navoraDlg || {
-              queue: [],
-              policy: { confirm: true, promptAccept: true, promptText: '' },
-            };
-            const q = window.__navoraDlg;
-            window.alert = (m) => { q.queue.push({ type: 'alert', message: String(m ?? '') }); };
-            window.confirm = (m) => {
-              q.queue.push({ type: 'confirm', message: String(m ?? '') });
-              return !!q.policy.confirm;
-            };
-            window.prompt = (m, d) => {
-              const def = d == null ? '' : String(d);
-              q.queue.push({ type: 'prompt', message: String(m ?? ''), defaultValue: def });
-              return q.policy.promptAccept ? String(q.policy.promptText || def) : null;
-            };
-            return true;
-          })()`,
-        )
-        .catch(() => undefined)
-    }
-    wc.on('dom-ready', inject)
-    wc.on('did-finish-load', inject)
-  }
-
   private installWindowOpenHandler(rec: AgentWindowRecord): void {
     const cfg = () => this.getConfig()
     rec.win.webContents.setWindowOpenHandler((details) => {
@@ -1005,6 +999,7 @@ export class BrowserRegistry {
   private detachWindow(windowId: string, byUserClose: boolean): void {
     const rec = this.windows.get(windowId)
     if (!rec) return
+    jsDialogHost.uninstall(windowId)
     this.windows.delete(windowId)
     this.programmaticClose.delete(windowId)
     const s = this.sessions.get(rec.sessionId)

@@ -2,6 +2,13 @@ import { randomUUID } from 'node:crypto'
 import type { Session } from 'electron'
 import type { AppConfig } from '../../shared/config'
 import { sanitizeRequestHeadersForUa } from '../../shared/user-agent'
+import {
+  DATADOME_URL_PATTERNS,
+  appendDatadomeTelemetry,
+  bodyFromUploadData,
+  isDatadomeUrl,
+  type UploadChunk,
+} from './datadome-telemetry'
 
 export type NetworkRuleKind = 'observe' | 'modify' | 'block'
 
@@ -27,6 +34,9 @@ export type NetworkLogEntry = {
   statusCode?: number
   /** Response headers (flattened; sensitive values redacted). */
   responseHeaders?: Record<string, string>
+  /** Request body snippet (DataDome telemetry / observe). */
+  requestBodyText?: string
+  requestBodyBytes?: number
   /** true until response headers arrive (observe only). */
   pending?: boolean
 }
@@ -44,6 +54,10 @@ type PendingObserve = {
   resourceType?: string
   ts: number
   requestHeaders?: Record<string, string>
+  requestBodyText?: string
+  requestBodyBytes?: number
+  requestBodyBase64?: string
+  bodyTruncated?: boolean
 }
 
 type SessionNetState = {
@@ -61,15 +75,35 @@ const SENSITIVE_HEADER_RE =
 /**
  * Per-session: UA onBeforeSendHeaders (electron-api style) + optional Agent network rules.
  * Observe rules also buffer statusCode + response/request headers for Agent lookup.
+ * When browser.log_datadome_telemetry is on, also mirrors DD traffic to logs/datadome-telemetry.jsonl.
  */
 export class BrowserNetworkManager {
   private bySession = new Map<string, SessionNetState>()
   private getConfig: () => AppConfig
   private getSes: (sessionId: string) => Session | null
+  private getLogDir: () => string
 
-  constructor(getConfig: () => AppConfig, getSes: (sessionId: string) => Session | null) {
+  constructor(
+    getConfig: () => AppConfig,
+    getSes: (sessionId: string) => Session | null,
+    getLogDir: () => string = () => '',
+  ) {
     this.getConfig = getConfig
     this.getSes = getSes
+    this.getLogDir = getLogDir
+  }
+
+  /** Ensure listeners applied (e.g. right after session create for DD telemetry). */
+  touch(sessionId: string): void {
+    this.ensure(sessionId)
+    this.reapply(sessionId)
+  }
+
+  /** Re-bind webRequest for every known session (e.g. after toggling DD telemetry). */
+  reapplyAll(): void {
+    for (const sessionId of this.bySession.keys()) {
+      this.reapply(sessionId)
+    }
   }
 
   list(sessionId: string): NetworkRule[] {
@@ -137,10 +171,13 @@ export class BrowserNetworkManager {
     initHeader: Record<string, string> = {},
   ): void {
     const st = this.ensure(sessionId)
-    st.uaGuard = {
-      ua: String(ua || '').trim(),
-      initHeader: { ...(initHeader || {}) },
-    }
+    const trimmed = String(ua || '').trim()
+    st.uaGuard = trimmed
+      ? {
+          ua: trimmed,
+          initHeader: { ...(initHeader || {}) },
+        }
+      : null
     this.reapply(sessionId)
   }
 
@@ -221,7 +258,7 @@ export class BrowserNetworkManager {
     const pending = st.pending.get(electronId)
     if (!pending) return
     st.pending.delete(electronId)
-    this.pushLog(sessionId, {
+    const entry: NetworkLogEntry = {
       id: pending.entryId,
       ts: pending.ts,
       url: pending.url,
@@ -234,8 +271,38 @@ export class BrowserNetworkManager {
       responseHeaders: patch.responseHeaders
         ? redactHeaders(flattenHeaders(patch.responseHeaders))
         : undefined,
+      requestBodyText: pending.requestBodyText,
+      requestBodyBytes: pending.requestBodyBytes,
       pending: false,
-    })
+    }
+    this.pushLog(sessionId, entry)
+
+    if (
+      this.getConfig().browser.log_datadome_telemetry &&
+      (pending.ruleId === 'datadome_auto' || isDatadomeUrl(pending.url))
+    ) {
+      const logDir = this.getLogDir()
+      if (logDir) {
+        appendDatadomeTelemetry(logDir, {
+          ts: new Date(pending.ts).toISOString(),
+          sessionId,
+          url: pending.url,
+          method: pending.method,
+          resourceType: pending.resourceType,
+          statusCode: patch.statusCode,
+          error: patch.error,
+          requestHeaders: pending.requestHeaders,
+          bodyText: pending.requestBodyText,
+          bodyBase64: pending.requestBodyBase64,
+          bodyBytes: pending.requestBodyBytes,
+          truncated: pending.bodyTruncated,
+        })
+        const preview = (pending.requestBodyText || '').slice(0, 120)
+        console.log(
+          `[datadome-telemetry] ${pending.method} ${patch.statusCode ?? patch.error ?? ''} ${pending.url.slice(0, 100)} ${preview}`,
+        )
+      }
+    }
   }
 
   private reapply(sessionId: string): void {
@@ -253,9 +320,14 @@ export class BrowserNetworkManager {
     const blocks = st.rules.filter((r) => r.kind === 'block')
     const observes = st.rules.filter((r) => r.kind === 'observe')
     const modifies = st.rules.filter((r) => r.kind === 'modify')
+    const ddTelemetry = !!this.getConfig().browser.log_datadome_telemetry
 
-    if (blocks.length || observes.length) {
-      const urls = [...blocks, ...observes].map((r) => r.urlPattern)
+    if (blocks.length || observes.length || ddTelemetry) {
+      const urls = [
+        ...blocks.map((r) => r.urlPattern),
+        ...observes.map((r) => r.urlPattern),
+        ...(ddTelemetry ? [...DATADOME_URL_PATTERNS] : []),
+      ]
       ses.webRequest.onBeforeRequest({ urls }, (details, callback) => {
         const block = blocks.find((r) => matchLoose(details.url, r.urlPattern))
         if (block) {
@@ -272,25 +344,39 @@ export class BrowserNetworkManager {
           return
         }
         const obs = observes.find((r) => matchLoose(details.url, r.urlPattern))
-        if (obs) {
+        const ddHit = ddTelemetry && isDatadomeUrl(details.url)
+        if (obs || ddHit) {
+          const upload = (details as { uploadData?: UploadChunk[] }).uploadData
+          const body = bodyFromUploadData(upload)
           st.pending.set(details.id, {
             entryId: `obs_${details.id}_${randomUUID().slice(0, 6)}`,
-            ruleId: obs.id,
+            ruleId: obs?.id || 'datadome_auto',
             url: details.url,
             method: details.method,
             resourceType: details.resourceType,
             ts: Date.now(),
+            requestBodyText: body.bodyText,
+            requestBodyBytes: body.bodyBytes,
+            requestBodyBase64: body.bodyBase64,
+            bodyTruncated: body.truncated,
           })
         }
         callback({})
       })
     }
 
-    const needSendHeaders = Boolean(st.uaGuard || modifies.length || observes.length)
+    const needSendHeaders = Boolean(
+      st.uaGuard || modifies.length || observes.length || ddTelemetry,
+    )
     if (needSendHeaders) {
       const filter =
-        observes.length && !st.uaGuard && !modifies.length
-          ? { urls: observes.map((r) => r.urlPattern) }
+        (observes.length || ddTelemetry) && !st.uaGuard && !modifies.length
+          ? {
+              urls: [
+                ...observes.map((r) => r.urlPattern),
+                ...(ddTelemetry ? [...DATADOME_URL_PATTERNS] : []),
+              ],
+            }
           : undefined
       const handler = (
         details: {
@@ -332,8 +418,11 @@ export class BrowserNetworkManager {
       else ses.webRequest.onBeforeSendHeaders(handler)
     }
 
-    if (observes.length) {
-      const urls = observes.map((r) => r.urlPattern)
+    if (observes.length || ddTelemetry) {
+      const urls = [
+        ...observes.map((r) => r.urlPattern),
+        ...(ddTelemetry ? [...DATADOME_URL_PATTERNS] : []),
+      ]
       ses.webRequest.onHeadersReceived({ urls }, (details, callback) => {
         if (st.pending.has(details.id)) {
           this.finalizeObserve(sessionId, details.id, {
@@ -344,7 +433,6 @@ export class BrowserNetworkManager {
         callback({ cancel: false, responseHeaders: details.responseHeaders })
       })
 
-      // Fallback if headers listener missed (rare); still record status.
       ses.webRequest.onCompleted({ urls }, (details) => {
         if (!st.pending.has(details.id)) return
         this.finalizeObserve(sessionId, details.id, {
