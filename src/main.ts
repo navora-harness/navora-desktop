@@ -4,7 +4,9 @@ import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
 import 'vuetify/styles'
 import '@mdi/font/css/materialdesignicons.css'
-import './styles/dialog-scrim.css'
+import '@postpile/ui/styles.css'
+import './styles/postpile-theme.css'
+import { ButtonMenuTransition, DialogTransition } from './components/motion/SurfaceTransitions'
 import { library } from '@fortawesome/fontawesome-svg-core'
 import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
 import {
@@ -130,17 +132,28 @@ library.add(
 const vuetify = createVuetify({
   components,
   directives,
+  defaults: {
+    VBtn: { rounded: 'lg' },
+    VCard: { elevation: 0, rounded: 'lg' },
+    VTextField: { rounded: 'lg', variant: 'outlined' },
+    VTextarea: { rounded: 'lg', variant: 'outlined' },
+    VSelect: { rounded: 'lg', variant: 'outlined' },
+    VMenu: { origin: 'overlap', transition: { component: ButtonMenuTransition } },
+    VDialog: { transition: { component: DialogTransition } },
+    VSnackbar: { transition: 'fade-transition' },
+  },
   theme: {
     defaultTheme: 'navoraLight',
     themes: {
       navoraLight: {
         dark: false,
         colors: {
-          background: '#f4f6f8',
+          background: '#f5f6f8',
           surface: '#ffffff',
-          primary: '#1b4f72',
-          secondary: '#5d6d7e',
-          error: '#c0392b',
+          primary: '#2f6fed',
+          secondary: '#5c6b7a',
+          'on-surface': '#1a2332',
+          error: '#ba1a1a',
         },
       },
     },

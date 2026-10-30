@@ -7,7 +7,7 @@
  * All renderer / frame evals are hard-timed out so sticky pages cannot hang the Agent.
  */
 import type { WebContents, WebFrameMain } from 'electron'
-import { hasQuerySelectorDeep, querySelectorDeep } from './deep-dom'
+import { hasQuerySelectorDeep, querySelectorDeep, hasQuerySelectorAcrossDocuments, querySelectorAcrossDocuments } from './deep-dom'
 import { dispatchTrustedPointer } from './trusted-input'
 
 export type IframeClickOpts = {
@@ -58,10 +58,12 @@ async function withBudget<T>(p: Promise<T>, ms: number, label: string): Promise<
   }
 }
 
-function collectFrames(root: WebFrameMain): WebFrameMain[] {
+export function collectFrames(root: WebFrameMain): WebFrameMain[] {
   const out: WebFrameMain[] = []
+  const seen = new Set<WebFrameMain>()
   const walk = (f: WebFrameMain | null | undefined) => {
-    if (!f) return
+    if (!f || seen.has(f)) return
+    seen.add(f)
     try {
       out.push(f)
       const kids =
@@ -317,6 +319,19 @@ export async function clickInIframe(
   }
 
   if (innerSelector) {
+    if (hasQuerySelectorAcrossDocuments(wc)) {
+      // The native frame-hop parser needs an explicit frame tag, even for #id scopes.
+      const frameScope = iframeSelector.includes('>>>') ? iframeSelector : `iframe:is(${iframeSelector})`
+      const native = await withBudget(querySelectorAcrossDocuments(wc, `${frameScope} ${innerSelector}`, {
+        pierce: true, scrollIntoView: true,
+      }), opts.locateBudgetMs ?? 600, 'iframe_native')
+      if (native && native.width > 0 && native.height > 0) {
+        const x = native.x + native.width / 2
+        const y = native.y + native.height / 2
+        await trustedClickAt(wc, x, y)
+        return {ok:true,method:'iframe-native-selector',iframeSelector,innerSelector,x,y,iframe:box}
+      }
+    }
     const probed = await probeInnerInMatchingFrames(wc, iframeSelector, innerSelector)
     if (probed) {
       const x = box.x + probed.x
@@ -332,6 +347,11 @@ export async function clickInIframe(
         iframe: box,
       }
     }
+  }
+
+  if (innerSelector && !hasExplicitOffset) {
+    return {ok:false,error:'iframe_element_not_found',iframeSelector,innerSelector,
+      detail:'The requested element was not found. Refresh the observation instead of clicking an arbitrary frame offset.'}
   }
 
   return doOffset(

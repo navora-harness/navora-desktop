@@ -13,12 +13,15 @@
     "build:electron": "node scripts/build-electron.mjs",
     "typecheck": "vue-tsc -b --noEmit",
     "test": "node scripts/test.mjs",
+    "test:browser": "node scripts/browser-smoke.mjs",
+    "test:ui": "npm run build && node scripts/ui-smoke.mjs",
     "electron:dev": "node scripts/dev.mjs",
+    "electron:use-build": "node scripts/use-electron-build.mjs",
     "electron:install": "node -e \"process.env.ELECTRON_MIRROR=process.env.ELECTRON_MIRROR||'http://127.0.0.1:8787/electron/';process.env.electron_use_remote_checksums='1';require('child_process').execFileSync(process.execPath,['node_modules/electron/install.js'],{stdio:'inherit',env:process.env})\"",
     "start": "electron .",
-    "dist": "npm run build && electron-builder --win portable",
-    "dist:nsis": "npm run build && electron-builder --win nsis",
-    "dist:all": "npm run build && electron-builder --win portable nsis"
+    "dist": "npm run build && npm run test:browser && electron-builder --win portable",
+    "dist:nsis": "npm run build && npm run test:browser && electron-builder --win nsis",
+    "dist:all": "npm run build && npm run test:browser && electron-builder --win portable nsis"
   },
   "build": {
     "appId": "com.navora.app",
@@ -34,6 +37,7 @@
       "package.json"
     ],
     "asar": true,
+    "electronDist": "node_modules/electron/dist",
     "extraMetadata": {
       "main": "dist-electron/main.js"
     },
@@ -72,6 +76,7 @@
     "@fortawesome/fontawesome-svg-core": "^6.7.2",
     "@fortawesome/free-solid-svg-icons": "^6.7.2",
     "@fortawesome/vue-fontawesome": "^3.0.8",
+    "@postpile/ui": "file:vendor/postpile-ui-0.1.2.tgz",
     "adm-zip": "^0.6.1",
     "dompurify": "^3.4.15",
     "js-yaml": "^4.1.0",
@@ -87,7 +92,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.13.10",
     "@vitejs/plugin-vue": "^5.2.1",
-    "electron": "http://127.0.0.1:8787/electron/npm/electron/-/electron-44.0.0-cloudbypass.6.tgz",
+    "electron": "https://github.com/ChengHoward/edist/releases/download/v45.0.0-cloudbypass.2/electron-45.0.0-cloudbypass.2.tgz",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.25.0",
     "typescript": "~5.7.2",
@@ -96,7 +101,7 @@
     "vue-tsc": "^2.2.8"
   },
   "allowScripts": {
-    "electron@44.0.0-cloudbypass.6": true,
+    "electron@45.0.0-cloudbypass.2": true,
     "esbuild@0.25.12": true,
     "electron-winstaller@5.4.0": true
   }

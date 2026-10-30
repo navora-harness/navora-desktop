@@ -1,0 +1,60 @@
+/* Navora product adapter over the versioned Postpile material and motion library. */
+:root {
+  --navora-background: #f5f6f8;
+  --navora-surface: #fff;
+  --navora-ink: #1a2332;
+  --navora-muted: #727b8a;
+  --navora-accent: #2f6fed;
+  --navora-stroke: rgba(30, 43, 66, .08);
+  --navora-ease: cubic-bezier(.22, .75, .2, 1);
+}
+.navora-app { color: var(--navora-ink); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+.navora-app .shell { background: var(--navora-background); }
+.navora-app .shell .sidebar {
+  background: #eff1f5; color: var(--navora-ink); border-right: 1px solid var(--navora-stroke);
+}
+.navora-app .shell .main { background: var(--navora-surface); }
+.navora-app .sidebar :is(.brand-name,.chat-item,.new-chat-btn,.sidebar-icon-btn,.brand-search-btn,.chat-toolbar-icon-btn) {
+  color: var(--navora-ink);
+}
+.navora-app .sidebar :is(.chat-date-label,.chat-sub-chip-title,.chat-item-title,.chat-sub-chip-more,.chat-stat) { color: #5c6675; }
+.navora-app .sidebar :is(.chat-item:hover,.chat-sub-chip:hover,.sidebar-icon-btn:hover,.brand-search-btn:hover,.chat-toolbar-icon-btn:hover) {
+  background: rgba(30, 43, 66, .05);
+}
+.navora-app .sidebar :is(.chat-item.active,.chat-sub-chip.active) {
+  color: #245bbd; background: rgba(47,111,237,.09); border-color: transparent;
+}
+.navora-app .sidebar .new-chat-btn {
+  border: 1px solid var(--navora-stroke); border-radius: 12px; background: rgba(255,255,255,.72);
+}
+.navora-app .sidebar :is(.sidebar-foot,.sidebar-dock) { border-color: var(--navora-stroke); }
+.navora-app .main .main-top { border-bottom: 1px solid var(--navora-stroke); }
+.navora-app .main .main-title { font-weight: 600; letter-spacing: -.02em; }
+.navora-app .main .composer-box { border-radius: 20px; border-color: rgba(30,43,66,.13); background: #f8f9fb; }
+.navora-app .main .composer-box:focus-within { border-color: rgba(47,111,237,.45); }
+.navora-app .main .msg-empty-title { color: var(--navora-ink); letter-spacing: -.025em; }
+.navora-app .main .msg-empty-desc { color: var(--navora-muted); }
+.navora-app :is(button,a):focus-visible { outline: 2px solid var(--navora-accent); outline-offset: 3px; }
+.navora-app :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn,.new-chat-btn) {
+  transition: background-color 160ms ease, color 160ms ease, transform 180ms var(--navora-ease);
+}
+.navora-app :is(.sidebar-icon-btn,.brand-search-btn,.new-chat-btn):active { transform: scale(.97); }
+.v-dialog > .v-overlay__scrim { background: rgba(12,16,24,.32); backdrop-filter: none; }
+.v-dialog .v-overlay__content > :is(.v-card,.v-sheet) { border: 1px solid var(--pp-glass-edge); border-radius: var(--pp-popup-radius); }
+.v-menu .v-overlay__content > div:not(.v-list) {
+  background: rgba(var(--pp-glass-rgb),var(--pp-glass-alpha));
+  backdrop-filter: var(--pp-glass-filter); border-color: var(--pp-glass-edge); border-radius: var(--pp-menu-radius);
+}
+.v-menu.v-overlay .sidebar-more-item { color: var(--navora-ink); }
+.v-menu.v-overlay .sidebar-more-item:hover:not(:disabled) { background: rgba(30,43,66,.06); }
+.v-menu.v-overlay .sidebar-more-item.danger { color: var(--pp-popup-danger); }
+.v-menu.v-overlay .sidebar-more-item:disabled { opacity: .4; }
+.v-tooltip .v-overlay__content { color: var(--navora-ink); }
+[data-pp-menu-pending] { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .navora-app :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn,.new-chat-btn) { transition: none; }
+  .navora-app :is(.sidebar-icon-btn,.brand-search-btn,.new-chat-btn):active { transform: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .v-menu .v-overlay__content > div:not(.v-list) { background: rgb(var(--pp-glass-rgb)); backdrop-filter: none; }
+}

@@ -2,16 +2,7 @@
   <div class="settings-page" :class="{ 'is-embedded': embedded, 'is-mobile': mobile }">
     <header class="top">
       <div class="top-left">
-        <v-btn
-          v-if="embedded"
-          variant="text"
-          class="close-btn"
-          aria-label="关闭"
-          @click="emit('close')"
-        >
-          <font-awesome-icon icon="xmark" />
-        </v-btn>
-        <v-btn v-else variant="text" class="back-btn" @click="$router.push('/')">
+        <v-btn v-if="!embedded" variant="text" class="back-btn" @click="$router.push('/')">
           <font-awesome-icon icon="arrow-left" class="mr-2" />
           返回
         </v-btn>
@@ -42,6 +33,17 @@
           @click="save(true)"
         >
           应用并退出
+        </v-btn>
+        <v-btn
+          v-if="embedded"
+          variant="text"
+          icon
+          class="close-btn settings-close"
+          aria-label="关闭设置"
+          :disabled="saving"
+          @click="emit('close')"
+        >
+          <font-awesome-icon icon="xmark" />
         </v-btn>
       </div>
     </header>

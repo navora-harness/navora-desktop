@@ -1,5 +1,5 @@
 <template>
-  <v-app>
+  <v-app class="navora-app dy-app">
     <router-view v-slot="{ Component }">
       <keep-alive include="ChatPage">
         <component :is="Component" />
@@ -12,15 +12,19 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onBeforeUnmount, onMounted } from 'vue'
+import { installPostpileUI } from '@postpile/ui'
 import OnboardingWizard from './components/OnboardingWizard.vue'
 import StoreUiHost from './components/store/StoreUiHost.vue'
 import TextContextMenuHost from './components/TextContextMenuHost.vue'
 import { useOnboarding } from './composables/useOnboarding'
 
 const { open: wizardOpen, manual: wizardManual, show: showWizard } = useOnboarding()
+let postpileUI: ReturnType<typeof installPostpileUI> | undefined
+onBeforeUnmount(() => postpileUI?.destroy())
 
 onMounted(async () => {
+  postpileUI = installPostpileUI(document)
   if (!window.navora) return
   try {
     const cfg = await window.navora.config.get()

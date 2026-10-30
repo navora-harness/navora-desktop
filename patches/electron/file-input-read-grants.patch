@@ -1,0 +1,37 @@
+diff --git a/shell/browser/api/electron_api_web_contents.cc b/shell/browser/api/electron_api_web_contents.cc
+index 8b78f12dd6..fb5b327aff 100644
+--- a/shell/browser/api/electron_api_web_contents.cc
++++ b/shell/browser/api/electron_api_web_contents.cc
+@@ -5751,6 +5751,17 @@ v8::Local<v8::Promise> WebContents::SetFileInputFiles(gin::Arguments* args) {
+   if (args->GetNext(&options))
+     options.Get("pierce", &pierce);
+ 
++  std::vector<base::FilePath> file_paths;
++  file_paths.reserve(paths.size());
++  for (const auto& path : paths) {
++    base::FilePath file_path = base::FilePath::FromUTF8Unsafe(path);
++    if (!file_path.IsAbsolute() || file_path.ReferencesParent()) {
++      promise.RejectWithErrorMessage("'files' must contain absolute paths");
++      return handle;
++    }
++    file_paths.push_back(std::move(file_path));
++  }
++
+   std::string error;
+   auto* frame_host = GetLiveMainFrame(web_contents(), &error);
+   if (!frame_host) {
+@@ -5758,6 +5769,14 @@ v8::Local<v8::Promise> WebContents::SetFileInputFiles(gin::Arguments* args) {
+     return handle;
+   }
+ 
++  // Match the normal file chooser's renderer grants. Without them, navigating
++  // away with selected files serializes an unreadable file into PageState and
++  // Chromium terminates the renderer (RFH_CAN_ACCESS_FILES_OF_PAGE_STATE).
++  auto* security_policy = content::ChildProcessSecurityPolicy::GetInstance();
++  const auto process_id = frame_host->GetProcess()->GetID();
++  for (const auto& file_path : file_paths)
++    security_policy->GrantReadFile(process_id, file_path);
++
+   auto electron_renderer =
+       std::make_unique<mojo::Remote<mojom::ElectronRenderer>>();
+   frame_host->GetRemoteInterfaces()->GetInterface(
