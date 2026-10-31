@@ -185,13 +185,17 @@
 .activity-rail-sections, .navora-app .activity-rail .sidebar-foot-actions, .navora-app .activity-rail .sidebar-foot-end { display: flex; flex-direction: column; gap: 8px; }
 .navora-app .activity-rail .sidebar-foot { border: 0; margin: 0; padding: 0; }
 .navora-app .sidebar :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn), .navora-app .mobile-topbar-btn {
-  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 32px; height: 32px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 32px; min-width:32px; height: 32px; padding: 0;
   border: 1px solid transparent; border-radius: 8px; background: transparent; color: #505965; cursor: pointer;
   transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease, transform 150ms ease;
 }
 .navora-app .sidebar :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn) svg, .navora-app .mobile-topbar-btn svg { width: 16px; height: 16px; }
 .navora-app .sidebar :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn):hover, .navora-app .mobile-topbar-btn:hover { background: #e7e9ee; color: #272d36; border-color: #dce0e7; }
-.navora-app .sidebar .sidebar-icon-btn.selected { background: #e9ecf2; border-color: #dce1e9; color: #303d54; }
+.navora-app .sidebar .sidebar-icon-btn.selected { background:#edf0f5; border-color:transparent; color:#3a587d; }
+.navora-app .activity-rail .sidebar-icon-btn { position:relative; }
+.navora-app .activity-rail .sidebar-icon-btn::before { content:''; position:absolute; left:-5px; width:2px; height:12px; border-radius:2px; background:#6b87a9; opacity:0; transition:opacity 150ms ease; pointer-events:none; }
+.navora-app .activity-rail .sidebar-icon-btn.selected::before { opacity:1; }
+.navora-app .sidebar .sidebar-icon-btn.selected:hover { background:#e5eaf1; border-color:#dce1e9; }
 .navora-app .sidebar .icon-btn { border: 1px solid transparent; border-radius: 8px; transition: background-color 150ms ease, border-color 150ms ease; }
 .navora-app .sidebar .icon-btn:hover { background: #e7e9ee; border-color: #dce0e7; }
 .navora-app .sidebar :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn):active { transform: scale(.94); }
@@ -311,9 +315,9 @@
 .rail-brand img { width: 24px; height: 24px; object-fit: contain; }
 .navora-app .sidebar .chat-toolbar { width: 100%; min-height: 44px; height: 44px; margin: 0 0 6px; padding: 6px 0; flex-shrink: 0; }
 .navora-app .sidebar .chat-toolbar-row { gap: 3px; height: 32px; }
-.navora-app .sidebar .new-chat-btn { flex: 1; min-width: 0; min-height: 32px !important; height: 32px !important; padding: 0 8px !important; font-size: 12px !important; border-radius: 8px; justify-content: flex-start; }
+.navora-app .sidebar .new-chat-btn { flex: 1; min-width: 0; min-height: 32px !important; height: 32px !important; padding: 0 8px !important; font-size: 12px !important; font-weight:500 !important; border-radius: 8px; justify-content: flex-start; border:1px solid transparent; background:transparent; }
 .navora-app .sidebar .new-chat-btn:hover { background: #e7e9ee; }
-.navora-app .sidebar .new-chat-icon { font-size: 14px; margin-right: 7px; }
+.navora-app .sidebar .new-chat-icon { width:16px; height:16px; font-size:16px; margin-right: 8px; }
 .navora-app .sidebar .brand-search-btn { margin-left: 0; }
 .navora-app .sidebar .chat-date-label { font-size: 11px; padding-top: 10px; padding-bottom: 5px; letter-spacing: 0; }
 .navora-app .main .main-top { align-items: center; border-bottom: 1px solid #f0f1f4; }
@@ -354,14 +358,19 @@
 .navora-app .sidebar .tree-meta { font-size: 10px; }
 .navora-app .sidebar :is(.sidebar-workspace-pane,.sidebar-browser-pane):has(.is-collapsed) { height: 36px; min-height: 36px; flex-shrink: 0; }
 
-/* A completed action is a small disclosure; the answer remains the focal point. */
-.navora-app .main .run-card:not(.open):not(.live):not(.error):not(.aborted) { width: max-content; max-width: 100%; background: transparent; border-color: transparent; }
-.navora-app .main .run-card:not(.open):not(.live):not(.error):not(.aborted):has(> .run-card-body) { width: 100%; background: #f8f9fb; border-color: #e0e5ec; }
-.navora-app .main .run-card:not(.open):not(.live):not(.error):not(.aborted) .run-card-head { min-height: 28px; padding: 4px 5px; gap: 7px; color: #687383; font-size: 12px; font-weight: 400; }
-.navora-app .main .run-card:not(.open):not(.live):not(.error):not(.aborted):hover { background: #f5f6f8; border-color: #e4e7ed; }
+/* Tools, plugins and folded logs share one disclosure in every terminal state.
+   The compact trigger and its detail surface own separate geometry during motion. */
+.navora-app .main .msg.run .run-card { width:100%; max-width:100%; background:transparent; border:0; border-radius:0; animation:none; overflow:visible; }
+.navora-app .main .run-card-head { display:inline-flex; width:fit-content; max-width:min(100%,440px); min-height:30px; padding:5px 8px; gap:7px; border:1px solid transparent; border-radius:7px; background:transparent; color:#687383; transition:background-color 140ms ease,border-color 140ms ease; }
+.navora-app .main .run-card-head:hover { background:#f0f3f7; border-color:#afbed0; }
+.navora-app .main .run-card.open .run-card-head { background:#edf2f7; border-color:#bdcbda; }
+.navora-app .main .run-card-body { margin-top:8px; padding:10px; border:1px solid #d5dde7; border-radius:9px; background:#fafbfc; }
+.navora-app .main .run-card .run-card-text { flex:0 1 auto; font-size:12px; font-weight:400; color:#596a80; }
+.navora-app .main .run-card .run-status { background:transparent; }
+.navora-app .main .tool-card:not(.open) { border-color:transparent; background:transparent; }
+.navora-app .main .tool-card:not(.open):hover { border-color:#d3dce7; background:#f5f7fa; }
 .navora-app .main .run-status { background: transparent; }
 .navora-app .main .run-card:not(.live) .run-status .status-glyph { width: 15px; height: 15px; }
-.navora-app .main .run-card:not(.open):not(.live):not(.error):not(.aborted) .run-card-text { flex: 0 1 auto; font-weight: 400; }
 .navora-app .main .run-card-chevron { font-size: 10px; }
 .navora-app .main .msg.assistant .msg-body-footer { justify-content: flex-start; margin-top: 12px; }
 .reply-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; }
@@ -436,7 +445,7 @@
 }
 
 /* Shared surface controls also cover dialogs teleported outside the application. */
-:root { --n-muted:var(--navora-muted); --n-surface:var(--navora-surface); --n-text:var(--navora-ink); --n-border:#e1e5eb; --n-accent:var(--navora-accent); --n-hover:#f0f2f6; }
+:root { --n-muted:var(--navora-muted); --n-surface:var(--navora-surface); --n-text:var(--navora-ink); --n-border:#bdc8d6; --n-accent:var(--navora-accent); --n-hover:#f0f2f6; }
 :is(.skill-dlg-card,.ob-card) { color:var(--navora-ink); }
 :is(.skill-dlg-card,.ob-card) :is(.v-field,.v-btn) { border-radius:8px; }
 :is(.skill-dlg-card,.ob-card) .v-field__input { min-height:40px; padding-top:8px; padding-bottom:8px; font-size:13px; }
@@ -464,13 +473,31 @@
 .filter-check { display:flex; gap:6px; align-items:center; font-size:12px; color:#626d7b; }
 .filter-check input { accent-color:#438da2; }
 .navora-app .settings-page .provider-list-item:focus-visible { outline:2px solid var(--navora-accent); outline-offset:-2px; }
-@media(min-width:900px) { .navora-app .settings-page .provider-list-card { position:sticky; top:0; max-height:calc(100dvh - 110px); overflow:auto; align-self:start; } }
 @media(pointer:coarse) { .catalog-button,.icon-control,.skill-dlg-card .skill-dlg-close { min-height:36px; min-width:36px; } }
 @media(prefers-reduced-motion:reduce) { .surface-toggle,.surface-toggle::after { transition:none; } }
 
 /* Keep field labels readable on both workspace and teleported surfaces. */
 :is(.navora-app .settings-page,.skill-dlg-card,.ob-card) .v-field .v-field-label { color:#626d7b; opacity:1; }
-:is(.navora-app .settings-page,.skill-dlg-card,.ob-card) .v-field__outline { color:#9ba8b8; opacity:1; }
+:is(.navora-app .settings-page,.skill-dlg-card,.ob-card) .v-field--variant-outlined .v-field__outline { --v-field-border-opacity:1; color:#b1becf; opacity:1; }
+:is(.navora-app .settings-page,.skill-dlg-card,.ob-card) .v-field--variant-outlined:hover:not(.v-field--focused):not(.v-field--error) .v-field__outline { color:#8d9eb4; }
+:is(.navora-app .settings-page,.skill-dlg-card,.ob-card) .v-field--variant-outlined.v-field--focused:not(.v-field--error) .v-field__outline { color:#527cab; }
+:is(.navora-app .settings-page,.skill-dlg-card,.ob-card) .v-field--variant-outlined.v-field--error .v-field__outline { color:#bd5260; }
+.navora-app .main .settings-workspace .card { border-color:#d5dde7; }
+.navora-app .settings-workspace :is(.switch-row,.field-row) { border-color:#d9e0e9; }
+/* Service selection owns a full row instead of competing with the connection editor. */
+.navora-app .main .settings-workspace .provider-layout { grid-template-columns:minmax(0,1fr); gap:2px; }
+.navora-app .settings-workspace .provider-list-toolbar { gap:8px; margin-bottom:12px; }
+.provider-list-title { display:flex; align-items:center; gap:8px; flex:1; min-width:100px; font-size:13px; font-weight:600; color:#516176; }
+.provider-list-title span { color:#8590a0; font-size:11px; font-weight:400; }
+.navora-app .settings-workspace .provider-add-select { flex:0 1 240px; min-width:200px; }
+.navora-app .settings-workspace .provider-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr)); gap:8px; padding:1px; border:0; border-radius:0; max-height:260px; }
+.navora-app .settings-workspace .provider-list-item { min-height:82px; gap:8px; padding:10px 12px; border:1px solid #d5dde7; border-radius:8px; }
+.navora-app .settings-workspace .provider-list-item.active { border-color:#96adc9; background:#edf3f9; box-shadow:inset 2px 0 0 #6f91b8; }
+.navora-app .settings-workspace .provider-list-label { white-space:normal; overflow-wrap:anywhere; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; font-size:12px; line-height:18px; }
+.navora-app .settings-workspace .provider-list-model { font-size:11px; line-height:16px; }
+.provider-more { display:grid; place-items:center; width:32px; height:32px; padding:6px; }
+.provider-more svg { width:14px; height:14px; }
+@media(max-width:600px) { .provider-list-title { flex-basis:100%; }.navora-app .settings-workspace .provider-add-select { flex:1 1 180px; min-width:0; } }
 
 .settings-save-status { color:var(--navora-muted); font-size:11px; white-space:nowrap; }
 @media(max-width:600px) { .settings-save-status { max-width:92px; overflow:hidden; text-overflow:ellipsis; } .settings-page .nav-guide { padding-inline:9px; } }
@@ -523,12 +550,31 @@
 .navora-app .sidebar .sidebar-dock.dock-layout { flex:1; min-height:0; }
 .navora-app .sidebar .dock-pane > :is(.sidebar-workspace-pane,.sidebar-browser-pane) { flex:1; height:auto; min-height:0; }
 .navora-app .sidebar .dock-pane .sidebar-panel { border:0; border-radius:0; background:transparent; }
-.navora-app .sidebar .dock-pane .chat-toolbar { height:36px; min-height:36px; margin:0; padding:2px 4px; }
-.navora-app .sidebar .dock-pane .chat-list { min-height:0; padding-inline:4px; }
+.navora-app .sidebar .dock-pane .chat-toolbar { height:38px; min-height:38px; margin:0; padding:3px 0; }
+.navora-app .sidebar .dock-pane .chat-list { min-height:0; padding-inline:0; gap:2px; }
+.navora-app .sidebar .dock-pane .chat-date-label { margin:10px 8px 2px; padding:3px 0; color:#85909e; font-weight:500; }
+.navora-app .sidebar .dock-pane .chat-date-label:first-child { margin-top:2px; }
+.navora-app .sidebar .chat-item.active .chat-item-title { color:#334a69; font-weight:500; }
+/* Explicit scrollbar styling avoids native arrow buttons and keeps a stable gutter. */
+.navora-app .shell .sidebar :is(.chat-list,.res-body,.res-tree) { scrollbar-width:auto; scrollbar-color:auto; }
+.navora-app .shell .sidebar :is(.chat-list,.res-body,.res-tree)::-webkit-scrollbar { width:6px; height:6px; }
+.navora-app .shell .sidebar :is(.chat-list,.res-body,.res-tree)::-webkit-scrollbar-track { background:transparent; }
+.navora-app .shell .sidebar :is(.chat-list,.res-body,.res-tree)::-webkit-scrollbar-thumb { border:1px solid #f7f7f8; border-radius:6px; background:#b9c1cc; }
+.navora-app .shell .sidebar :is(.chat-list,.res-body,.res-tree)::-webkit-scrollbar-thumb:hover { background:#929eaf; }
+.navora-app .shell .sidebar :is(.chat-list,.res-body,.res-tree)::-webkit-scrollbar-button { display:none; width:0; height:0; }
 .navora-app .sidebar .dock-panel-actions .docked-head { min-height:0; padding:0; border:0; margin:0; background:transparent; }
 .navora-app .sidebar .dock-panel-actions .docked-head .icon-btn { width:23px; height:24px; border-radius:6px; }
 .navora-app .sidebar .dock-panel-actions .docked-head .icon-btn svg { width:11px; height:11px; }
 .navora-app .sidebar .dock-pane .batch-list-footer { flex-shrink:0; padding:6px; }
+.navora-app .sidebar .dock-panel-actions .chat-batch-trigger { width:26px;min-width:26px;height:26px;padding:5px;border-radius:6px; }
+.navora-app .sidebar .chat-batch-trigger svg { width:13px;height:13px; }
+.navora-app .sidebar .batch-list-footer { gap:6px;margin:0;border-top:1px solid #d9e1eb;background:#f7f7f8; }
+.navora-app .sidebar .batch-list-footer :is(.batch-pin-btn,.batch-delete-btn) { min-height:32px!important;height:32px!important;padding-inline:8px!important;font-size:11px!important;font-weight:500!important; }
+.navora-app .sidebar .batch-delete-btn { background:#f6edef!important;color:#a34e5b!important;border:1px solid #e3cdd2; }
+.navora-app .sidebar :is(.batch-pin-icon,.batch-delete-icon) { width:12px;height:12px;margin-right:6px; }
+.navora-app .sidebar .batch-delete-btn:hover:not(:disabled) { background:#f0dfe3!important; }
+.navora-app .sidebar .batch-select-btn { flex:none;min-height:28px!important;height:28px!important;padding-inline:8px!important;font-size:11px!important;background:transparent!important; }
+.chat-batch-count { margin-left:auto;padding-inline:8px;font-size:11px;color:#768397; }
 .navora-app .sidebar .dock-pane .res-body { flex:1; }
 
 .navora-app .main:has(> .creator-workspace) { grid-template-rows:minmax(0,1fr); }

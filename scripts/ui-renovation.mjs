@@ -33,7 +33,8 @@ try {
       },
     }],
   })
-  for(const reduced of process.env.NAVORA_LIVE_CREATOR === '1' ? [false] : [false,true]) {
+  const motionModes = process.env.NAVORA_LIVE_CREATOR === '1' || process.env.NAVORA_UI_MOTION_MODE === 'normal' ? [false] : process.env.NAVORA_UI_MOTION_MODE === 'reduced' ? [true] : [false,true]
+  for(const reduced of motionModes) {
     const images = reduced ? path.join(output,'reduced-motion') : output
     fs.mkdirSync(images,{recursive:true})
     fs.rmSync(path.join(images,'completed.json'),{force:true})

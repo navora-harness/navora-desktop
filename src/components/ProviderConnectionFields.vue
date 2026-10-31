@@ -4,6 +4,7 @@
   <v-text-field
     :model-value="keyDraft"
     :label="keyLabel"
+    :placeholder="keyPlaceholder"
     type="password"
     autocomplete="off"
     class="span-2"
@@ -13,6 +14,6 @@
 </template>
 <script setup lang="ts">
 import type { AiProviderConfig } from '@shared/config'
-withDefaults(defineProps<{ provider:AiProviderConfig; keyDraft:string; keyLabel:string; showName?:boolean; showModel?:boolean }>(), { showName:true, showModel:false })
+withDefaults(defineProps<{ provider:AiProviderConfig; keyDraft:string; keyLabel:string; keyPlaceholder?:string; showName?:boolean; showModel?:boolean }>(), { showName:true, showModel:false, keyPlaceholder:'' })
 const emit = defineEmits<{ 'update:keyDraft':[value:string] }>()
 </script>

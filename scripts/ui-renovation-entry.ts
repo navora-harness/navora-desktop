@@ -31,6 +31,17 @@ for(let i=0;i<120;i++) {
     {id:'t'+n,role:'tool',content:'{"ok":true}',createdAt:n*3+1,meta:{toolName:n%2?'file_list':'fixture_plugin',status:'done'}},
     {id:'a'+n,role:'assistant',content:'这是一条用于检查排版、滚动和侧栏响应的本地测试回复。',createdAt:n*3+2},
   ]).flat() : []
+  if(i===119)messages.push(...([
+    {id:'ui-style-user-error',role:'user',content:'工具失败样式（本地测试夹具）',createdAt:400},
+    {id:'ui-style-tool-error',role:'tool',content:'{"ok":false,"error":"load_failed"}',createdAt:401,meta:{toolName:'browser_open',status:'error'}},
+    {id:'ui-style-answer-error',role:'assistant',content:'这里仅检查失败工具的折叠样式。',createdAt:402},
+    {id:'ui-style-user-plugin',role:'user',content:'插件样式（本地测试夹具）',createdAt:403},
+    {id:'ui-style-plugin',role:'tool',content:'{"ok":true}',createdAt:404,meta:{toolName:'fixture_plugin',status:'done',fromPlugin:true,pluginId:'fixture'}},
+    {id:'ui-style-answer-plugin',role:'assistant',content:'插件摘要。',createdAt:405},
+    {id:'ui-style-user-log',role:'user',content:'日志样式（本地测试夹具）',createdAt:406},
+    {id:'ui-style-log',role:'log',content:'本地日志样式记录',createdAt:407,meta:{kind:'agent_status'}},
+    {id:'ui-style-answer-log',role:'assistant',content:'日志摘要。',createdAt:408},
+  ]) as typeof messages)
   const chat={id:'chat_renovation'+i,title:'本地回归对话 '+i,createdAt:i+1,updatedAt:i+1,messages}
   fs.writeFileSync(path.join(root,'chats',chat.id+'.json'),JSON.stringify(chat))
 }
@@ -47,7 +58,7 @@ app.on('browser-window-created', (_,win) => {
   const errors: string[] = []
   win.webContents.on('console-message',event => { if (event.level === 'error') errors.push(event.message) })
   win.webContents.once('did-finish-load', () => void (async () => {
-    const js = (code: string) => win.webContents.executeJavaScript(code)
+    const js = async (code: string) => { try { return await win.webContents.executeJavaScript(code) } catch(error) { throw new Error('Renderer operation failed: '+code.slice(0,220)+' / '+String(error)) } }
     const click = async (selector: string) => {
       const point = await js(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});if(!el)throw Error('Missing '+${JSON.stringify(selector)});el.scrollIntoView({block:'nearest'});const r=el.getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`)
       win.webContents.sendInputEvent({type:'mouseMove',...point})
@@ -75,7 +86,7 @@ app.on('browser-window-created', (_,win) => {
     })
     try {
       for(let n=0;n<60;n++) { if(await js('!!document.querySelector(".composer")')) break; await wait(100) }
-      win.setMinimumSize(0,0); win.setContentSize(1440,900)
+      win.setMinimumSize(0,0); win.setContentSize(1440,900); await wait(150)
       await click('.sidebar-settings-btn'); await tab('模型')
       assert.equal(await js('document.querySelectorAll(".model-entry").length'),1,'Only the selected model is mounted')
       assert.equal(await js('document.querySelectorAll(".reasoning-row").length'),0,'Reasoning mappings start folded')
@@ -131,6 +142,7 @@ app.on('browser-window-created', (_,win) => {
       }
       await click('.settings-close')
       await wait(450)
+      await click('[data-panel="workspace"]')
       await js("document.querySelector('.workspace-panel [role=treeitem]').focus();document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}))")
       await wait(150)
       assert.equal(await js("document.querySelector('.workspace-panel [role=treeitem]').getAttribute('aria-expanded')"),'true','Right arrow expands a real workspace folder')
@@ -148,6 +160,7 @@ app.on('browser-window-created', (_,win) => {
       await capture('file-preview-text')
       const oldWidth = await js('document.querySelector(".file-preview").getBoundingClientRect().width')
       await js("document.querySelector('.preview-resizer').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}))")
+      await wait(80)
       assert.equal(await js('document.querySelector(".file-preview").getBoundingClientRect().width'),oldWidth+20)
       await click('.tree-row[title="preview.md"]')
       assert.equal(await js('document.querySelector(".preview-markdown h1")?.textContent'),'文件预览')
@@ -162,40 +175,78 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('document.querySelector(".preview-empty")?.textContent.includes("暂不支持预览")'),true)
       await click('[aria-label="关闭文件预览"]')
       assert.equal(await js('!!document.querySelector(".file-preview")'),false)
-      assert.equal(await js('document.querySelector(".chat-item").getBoundingClientRect().height'),34,'Chats use single-line compact rows')
-      // Drag panels through their real handlers, retaining their mounted component state.
-      await js("window.__workspaceNode=document.querySelector('.workspace-panel');window.__chatList=document.querySelector('.chat-list')")
-      const dockDrag = async (panel:string,target:string,placement:string) => {
-        await js(`(()=>{const dt=new DataTransfer();document.querySelector('#dock-tab-${panel}').dispatchEvent(new DragEvent('dragstart',{dataTransfer:dt,bubbles:true}));})()`)
-        await wait(30)
-        await js(`document.querySelector('[data-group="${target}"] .dock-drop-zone.${placement}').dispatchEvent(new DragEvent('drop',{dataTransfer:new DataTransfer(),bubbles:true,cancelable:true}))`)
-        await wait(180)
-      }
-      await dockDrag('workspace','group-chats','tab')
-      await dockDrag('browser','group-chats','tab')
-      assert.equal(await js('document.querySelectorAll(".dock-group").length'),1,'All three panels share one group')
-      assert.equal(await js('document.querySelectorAll(".dock-tab").length'),3)
-      assert.equal(await js('window.__workspaceNode===document.querySelector(".workspace-panel")&&window.__chatList===document.querySelector(".chat-list")'),true,'Grouping retains mounted panel instances')
       await click('[data-panel="chats"]')
-      assert.equal(await js('document.querySelector("#dock-tab-chats").getAttribute("aria-selected")'),'true','Rail selects an inactive tab before hiding it')
-      await click('#dock-tab-workspace')
-      await js("document.querySelector('#dock-tab-workspace').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}))")
-      assert.equal(await js('document.activeElement.id'),'dock-tab-chats','Tabs support arrow-key navigation')
-      await capture('dock-all-three')
-      await dockDrag('workspace','group-chats','after')
-      await dockDrag('browser','group-workspace','after')
-      assert.equal(await js('document.querySelectorAll(".dock-group").length'),3,'Each panel splits back out')
-      assert.equal(await js('window.__workspaceNode===document.querySelector(".workspace-panel")'),true)
-      await capture('dock-split')
+      assert.equal(await js('document.querySelector(".chat-item").getBoundingClientRect().height'),34,'Chats use single-line compact rows')
+      await capture('sidebar-detail')
+      await js('document.querySelector(".run-card.error").scrollIntoView({block:"center"})')
+      const compactError = await js('document.querySelector(".run-card.error .run-card-head").getBoundingClientRect().width')
+      assert.ok(compactError<400,'Failed tools use the same compact trigger as plugins')
+      await js('document.querySelector(".composer-input textarea").focus()')
+      win.webContents.sendInputEvent({type:'mouseMove',x:500,y:25});await wait(180)
+      assert.equal(await js('getComputedStyle(document.querySelector(".run-card.error .run-card-head")).borderTopColor'),'rgba(0, 0, 0, 0)','Collapsed activity has no resting border')
+      await click('.run-card.error .run-card-head')
+      assert.equal(await js('document.querySelector(".run-card.error .run-card-head").getBoundingClientRect().width'),compactError,'Opening details never resizes the trigger')
+      await capture('tool-error-disclosure')
+      await click('.run-card.error .run-card-head')
+      await js('(async()=>{const cfg=await window.navora.config.get();await window.navora.config.save({app:{...cfg.app,collapse_tool_runs:false,collapse_run_logs:true}})})()')
+      await wait(200)
+      assert.equal(await js('[...document.querySelectorAll(".run-card-text")].some(el=>el.textContent.includes("1 条日志"))'),true,'Even a single folded log uses the shared disclosure')
+      await js('[...document.querySelectorAll(".run-card-text")].find(el=>el.textContent.includes("1 条日志")).scrollIntoView({block:"center"})')
+      await capture('log-disclosure')
+      await js('(async()=>{const cfg=await window.navora.config.get();await window.navora.config.save({app:{...cfg.app,collapse_tool_runs:true}})})()')
       await wait(150)
-      const savedDock = await js('JSON.parse(localStorage.getItem("navora.sidebar.dock"))')
-      assert.deepEqual(savedDock.groups.map((g:any)=>g.panels),[['chats'],['workspace'],['browser']])
+      // Rail entries are mutually exclusive; dragging merges their ownership.
+      const railDrag = async (source:string,target:string,pane=false) => {
+        await js(`(()=>{const button=document.querySelector(${JSON.stringify(source)}),dt=new DataTransfer();button.dispatchEvent(new DragEvent('dragstart',{dataTransfer:dt,bubbles:true}));const destination=document.querySelector(${JSON.stringify(target)})${pane?'':".closest('.rail-group-entry')"};destination.dispatchEvent(new DragEvent('dragover',{dataTransfer:dt,bubbles:true,cancelable:true}));destination.dispatchEvent(new DragEvent('drop',{dataTransfer:dt,bubbles:true,cancelable:true}));})()`)
+        await wait(350)
+      }
+      await click('[data-panel="workspace"]')
+      assert.equal(await js('document.querySelector(".workspace-panel").checkVisibility()&&!document.querySelector(".chat-list").checkVisibility()'),true,'Opening a rail entry closes the previous entry')
+      await click('[data-panel="chats"]')
+      await js("window.__workspaceNode=document.querySelector('.workspace-panel');window.__chatList=document.querySelector('.chat-list')")
+      await railDrag('[data-panel="workspace"]','[data-panel="chats"]')
+      assert.equal(await js('document.querySelectorAll(".rail-group-button").length'),2,'Combined members share one icon')
+      assert.equal(await js('document.querySelector(".workspace-panel").checkVisibility()&&document.querySelector(".chat-list").checkVisibility()'),true,'Combined panes open together')
+      await capture('rail-combined-two')
+      await railDrag('[data-panel="browser"]','.sidebar-dock',true)
+      assert.equal(await js('!!document.querySelector(".rail-drag-hint")'),false,'Dropping into a pane clears the drag hint')
+      assert.equal(await js('document.querySelectorAll(".rail-group-button").length'),1,'Dragging into the open sidebar joins its group')
+      assert.equal(await js('window.__workspaceNode===document.querySelector(".workspace-panel")&&window.__chatList===document.querySelector(".chat-list")'),true,'Merging retains mounted pane state')
+      await click('.rail-group-button')
+      assert.equal(await js('document.querySelectorAll(".rail-group-button[aria-pressed=true]").length'),0)
+      assert.equal(await js('document.querySelector(".sidebar").getBoundingClientRect().width'),52,'Clicking the selected combination closes every member')
+      await click('.rail-group-button')
+      assert.equal(await js('document.querySelector(".workspace-panel").checkVisibility()&&document.querySelector(".browser-panel").checkVisibility()&&document.querySelector(".chat-list").checkVisibility()'),true)
+      const combinedHeight=await js('document.querySelector(".dock-group").getBoundingClientRect().height')
+      await js('document.querySelector(".dock-divider").dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown",bubbles:true}))')
+      await wait(120)
+      assert.ok(await js('document.querySelector(".dock-group").getBoundingClientRect().height')>combinedHeight,'Combined panes retain adjustable heights')
+      await click('[data-group="group-chats"] .dock-menu-button')
+      await js('[...document.querySelectorAll(".dock-menu button")].find(el=>el.checkVisibility()&&el.textContent==="下移此组").click()');await wait(120)
+      assert.equal(await js('[...document.querySelectorAll(".dock-group")].filter(el=>el.checkVisibility())[0].dataset.group'),'group-workspace','Reordering skips hidden groups')
+      await click('[data-group="group-chats"] .dock-menu-button')
+      await js('[...document.querySelectorAll(".dock-menu button")].find(el=>el.checkVisibility()&&el.textContent==="上移此组").click()');await wait(120)
+      await capture('rail-combined-three')
+      await wait(180);await win.webContents.reload();await wait(650)
+      assert.equal(await js('document.querySelectorAll(".rail-group-button").length'),1,'Combination membership survives restart')
+      await js('document.querySelector(".rail-group-button").dispatchEvent(new KeyboardEvent("keydown",{key:"F10",shiftKey:true,bubbles:true}))')
+      await wait(120);await js('[...document.querySelectorAll(".rail-group-menu button")].find(el=>el.textContent==="全部拆开").click()');await wait(180)
+      assert.equal(await js('document.querySelectorAll(".rail-group-button").length'),3,'Splitting restores independent icons')
+      await click('.chat-batch-trigger')
+      assert.equal(await js('document.querySelector(".batch-delete-btn").disabled'),true,'Batch actions start disabled')
+      await click('.chat-item-main')
+      assert.equal(await js('document.querySelector(".chat-batch-count").textContent.trim()'),'已选 1')
+      assert.equal(await js('document.querySelector(".batch-delete-btn").disabled'),false)
+      await capture('chat-batch-actions')
+      await click('.chat-batch-trigger')
+      assert.equal(await js('document.querySelector(".rail-search").closest(".activity-rail")!==null'),true,'Search stays in the rail')
       assert.equal(await js('document.querySelectorAll(".run-card.open").length'),0,'Tool and plugin groups start collapsed')
       await js('document.querySelectorAll(".outline-step")[70].click()')
       await wait(350)
       const jumpError = await js(`(()=>{const box=document.querySelector('.messages'),row=box.querySelector('[data-msg-id="u70"]');return Math.abs(row.getBoundingClientRect().top-box.getBoundingClientRect().top)})()`)
       assert.ok(jumpError < 5,'Long conversation jumps stay aligned after deferred painting: '+jumpError)
       // Stress interrupted transitions, then verify both visibility and pointer exclusion.
+      await click('[data-panel="workspace"]')
       const samples: Array<{p95:number;inputP95:number;samples:number}> = []
       for (let round = 0; round < 3; round++) {
         samples.push(await js(`(async()=>{
