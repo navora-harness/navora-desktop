@@ -7,14 +7,15 @@
       </button>
       <v-menu :model-value="menu===entry.id" location="end" @update:model-value="menu=$event?entry.id:''"><template #activator="{props:menuProps}"><button v-bind="menuProps" class="rail-menu-anchor" tabindex="-1" aria-hidden="true" /></template><div class="rail-group-menu" role="menu"><span>{{ entry.members.map(panel=>panel.label).join(' + ') }}</span><template v-if="entry.members.length>1"><button v-for="panel in entry.members" :key="panel.id" role="menuitem" @click="emit('split',panel.id);menu=''">拆出{{ panel.label }}</button><button role="menuitem" @click="emit('splitAll',entry.id);menu=''">全部拆开</button></template><button v-for="other in entries.filter(item=>item.id!==entry.id)" :key="other.id" role="menuitem" @click="emit('merge',entry.id,other.id);menu=''">与{{ other.members.map(panel=>panel.label).join('、') }}组合</button><button role="menuitem" @click="emit('activate',entry.id);menu=''">{{ state.active===entry.id?'关闭':'打开' }}侧栏</button></div></v-menu>
     </div>
-    <Teleport to="body"><div v-if="dragging" class="rail-drag-hint" role="status">拖到图标或当前侧栏中组合</div></Teleport>
+    <div v-if="detachingPanel" class="rail-detach-target" aria-hidden="true"><font-awesome-icon :icon="panels.find(panel=>panel.id===detachingPanel)?.icon || 'plus'" /></div>
+    <Teleport to="body"><div v-if="dragging || detachingPanel" class="rail-drag-hint" role="status">{{ detachingPanel ? '松开，拆成独立图标' : '拖到图标或当前侧栏中组合' }}</div></Teleport>
   </div>
 </template>
 <script setup lang="ts">
 import {computed,onMounted,onBeforeUnmount,ref} from 'vue'
 import type {SidebarRailState} from '../../../shared/sidebar-rail'
 import type {SidebarPanelDefinition} from '@/composables/useSidebarDock'
-const props=defineProps<{state:SidebarRailState;panels:SidebarPanelDefinition[];inactive:boolean}>()
+const props=defineProps<{state:SidebarRailState;panels:SidebarPanelDefinition[];inactive:boolean;detachingPanel?:string}>()
 const emit=defineEmits<{activate:[id:string];merge:[source:string,target:string];split:[panel:string];splitAll:[id:string];dragging:[id:string]}>()
 const entries=computed(()=>props.state.groups.map(group=>({...group,members:group.panels.flatMap(id=>props.panels.filter(panel=>panel.id===id))})).filter(group=>group.members.length))
 type Entry=(typeof entries.value)[number]
@@ -33,6 +34,7 @@ onBeforeUnmount(()=>{window.removeEventListener('dragend',clear);window.removeEv
 .rail-panel-groups{display:flex;flex-direction:column;gap:8px;min-height:0;max-height:calc(100dvh - 300px);overflow-y:auto;scrollbar-width:none;padding:3px 4px;margin-inline:-4px;width:40px}
 .rail-group-entry{position:relative;width:32px;height:32px;flex-shrink:0}.rail-group-button{cursor:grab}.rail-group-button:active{cursor:grabbing}.rail-drag-source{opacity:.5}.rail-menu-anchor{position:absolute;inset:0;visibility:hidden;pointer-events:none}
 .rail-drop-target .rail-group-button{background:#e2edf7!important;border-color:#86a7cc!important;outline:2px solid #7b9dc140;outline-offset:2px}
+.rail-detach-target{display:grid;place-items:center;width:32px;height:32px;flex-shrink:0;border:1px dashed #7f9dbf;border-radius:8px;color:#5b7b9e;background:#eaf1f8;pointer-events:none}.rail-detach-target svg{width:15px;height:15px}
 .rail-drag-hint{position:fixed;left:56px;top:96px;z-index:2400;pointer-events:none;padding:6px 9px;background:#fff;border:1px solid #dde5ee;border-radius:7px;color:#5c7592;font-size:11px;white-space:nowrap;box-shadow:0 3px 12px #2136500d}
 .rail-group-menu{min-width:170px;display:flex;flex-direction:column;padding:5px;border:1px solid #d5dde7;border-radius:9px;background:#fff;max-height:70dvh;overflow:auto}.rail-group-menu>span{padding:6px 8px;color:#8591a1;font-size:10px}.rail-group-menu button{padding:7px 8px;border-radius:6px;color:#56677e;text-align:left;font-size:12px;cursor:pointer}.rail-group-menu button:hover{background:#edf1f6}.rail-group-menu button:focus-visible{outline:2px solid #6489b5;outline-offset:-2px}
 </style>

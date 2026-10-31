@@ -43,7 +43,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { moveDockPanels, normalizeDock, splitDockPanel, type DockGroup, type DockPlacement, type SidebarDockLayout } from '../../../shared/sidebar-dock'
 import type { SidebarPanelDefinition } from '@/composables/useSidebarDock'
 const props = defineProps<{ modelValue: SidebarDockLayout; panels: SidebarPanelDefinition[]; singleSelection?:boolean }>()
-const emit = defineEmits<{ 'update:modelValue': [layout: SidebarDockLayout];close:[] }>()
+const emit = defineEmits<{ 'update:modelValue': [layout: SidebarDockLayout];close:[];panelDragging:[panels:string[]] }>()
 const ready = ref(false), dragging = ref<string[]>([]), dropTarget = ref(''), resizing = ref(false)
 const placements = computed<DockPlacement[]>(()=>props.singleSelection?['before','after']:['before','tab','after'])
 const members = (group: DockGroup) => group.panels.flatMap(id => props.modelValue.hidden.includes(id) ? [] : props.panels.filter(panel => panel.id === id))
@@ -67,10 +67,11 @@ function move(panels: string[], target: string, placement: DockPlacement) { upda
 function startDrag(event: DragEvent, panels: string[]) {
   if (!event.dataTransfer) return
   dragging.value = panels
+  emit('panelDragging',panels)
   event.dataTransfer.setData('application/x-navora-sidebar-panels', JSON.stringify(panels))
   event.dataTransfer.effectAllowed = 'move'
 }
-function clearDrag() { dragging.value = []; dropTarget.value = '' }
+function clearDrag() { dragging.value = []; dropTarget.value = '';emit('panelDragging',[]) }
 function over(event: DragEvent, group: string, placement: DockPlacement) { if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'; dropTarget.value = `${group}:${placement}` }
 function drop(target: string, placement: DockPlacement) { move(dragging.value, target, placement); clearDrag() }
 async function tabKey(event: KeyboardEvent, group: DockGroup, panel: string) {
