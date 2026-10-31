@@ -1,7 +1,16 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {ResourceAutoOpen,browserResourceIds} from './conversation-resources'
+import {ResourceAutoOpen,browserResourceIds,conversationSources} from './conversation-resources'
 import type {BrowserTreeSession} from './types'
+import type {ChatMessage} from './types'
+
+test('resource sources deduplicate citations and reject executable or credential URLs',()=>{
+  const messages=[
+    {id:'source',createdAt:1,role:'assistant',content:'',meta:{sources:[{url:'https://example.com/doc#old',title:'Old'}]}},
+    {id:'source',createdAt:1,role:'assistant',content:'',meta:{sources:[{url:'https://example.com/doc#new',title:'Latest'},{url:'javascript:alert(1)'},{url:'https://user:secret@example.com/private'},{url:'broken'}]}},
+  ] as ChatMessage[]
+  assert.deepEqual(conversationSources(messages),[{url:'https://example.com/doc',title:'Latest'}])
+})
 
 test('resource discovery opens new files and windows without reopening dismissed resources',()=>{
   const state=new ResourceAutoOpen()

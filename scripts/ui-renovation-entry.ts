@@ -42,7 +42,7 @@ for(let i=0;i<120;i++) {
     {id:'ui-style-answer-plugin',role:'assistant',content:'插件摘要。',createdAt:405},
     {id:'ui-style-user-log',role:'user',content:'日志样式（本地测试夹具）',createdAt:406},
     {id:'ui-style-log',role:'log',content:'本地日志样式记录',createdAt:407,meta:{kind:'agent_status'}},
-    {id:'ui-style-answer-log',role:'assistant',content:'日志摘要。',createdAt:408},
+    {id:'ui-style-answer-log',role:'assistant',content:'日志摘要。',createdAt:408,meta:{sources:[{url:'https://example.com/fixture',title:'本地来源测试'}]}},
   ]) as typeof messages)
   const chat={id:'chat_renovation'+i,title:'本地回归对话 '+i,createdAt:i+1,updatedAt:i+1,messages}
   fs.writeFileSync(path.join(root,'chats',chat.id+'.json'),JSON.stringify(chat))
@@ -50,7 +50,8 @@ for(let i=0;i<120;i++) {
 app.setPath('userData',root)
 BrowserWindow.prototype.show = function () {}
 BrowserWindow.prototype.focus = function () {}
-const openedPaths:string[]=[]
+const openedPaths:string[]=[],openedUrls:string[]=[]
+shell.openExternal=async url=>{openedUrls.push(url)}
 shell.openPath=async target=>{openedPaths.push(target);return ''}
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve,ms))
 let started = false
@@ -213,10 +214,49 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('!!document.querySelector(".chat-resource-popup")'),false,'Explorer never opens a file menu')
       if(await js('!!document.querySelector(".conversation-resource-card")'))await click('[aria-label="关闭资源面板"]')
       await click('[data-chat-resource="resources"]')
-      await click('[data-resource-tab="files"]')
+      assert.equal(await js('document.querySelector(".conversation-resource-card").classList.contains("is-overview")'),true,'Resources open as a compact overview')
+      assert.ok(await js('document.querySelector(".conversation-resource-card").getBoundingClientRect().height')<500,'The overview follows its content height')
+      await click('.resource-overview-section:nth-child(2) .resource-overview-row')
+      assert.equal(openedUrls.at(-1),'https://example.com/fixture','Source links open through the native external-link API')
+      assert.equal(await js('[...document.querySelectorAll(".resource-overview-row")].every(row=>!!row.querySelector("svg"))'),true,'Every overview resource has a visible SVG icon')
+      await capture('resource-compact-overview')
+      await click('[data-resource-view="files"]')
       assert.equal(await js('document.querySelector(".conversation-resource-card").textContent.includes("other-only.txt")'),false,'Current files exclude other conversations')
       assert.equal(await js('document.querySelector(".conversation-resource-card .res-head").checkVisibility()'),true,'Local file controls are visible')
       await capture('current-chat-files')
+      assert.equal(await js('document.querySelector(".conversation-resource-card").dataset.layout'),'docked','Enough conversation width keeps resources beside the answer')
+      await click('.composer-input textarea')
+      assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),true,'Outside clicks preserve a docked card')
+      // A wide sidebar makes the card float even in a wide application window.
+      await js('for(let n=0;n<21;n++)document.querySelector(".sidebar-divider.vertical").dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowRight",bubbles:true}))');await wait(180)
+      assert.equal(await js('document.querySelector(".conversation-resource-card").dataset.layout'),'overlay','Sidebar width contributes to available conversation space')
+      assert.equal(await js('getComputedStyle(document.querySelector(".messages-wrap")).marginRight'),'0px','Floating resources leave the conversation at its full width')
+      await click('[data-resource-tab="files"]')
+      assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),true,'Inside clicks keep the floating card open')
+      await js(`(()=>{const el=document.querySelector('.conversation-resource-card .tree-row[title="preview.md"]'),r=el.getBoundingClientRect();el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+20,clientY:r.y+10}))})()`);await wait(120)
+      await click('.sidebar-ctx-panel button:first-child')
+      assert.equal(openedPaths.at(-1),path.join(path.dirname(workspaceFixture),'preview.md'),'Teleported resource actions execute without dismissing the card')
+      assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),true,'The card owns its teleported context menu')
+      await capture('resource-overlay-wide-sidebar')
+      await click('.composer-input textarea')
+      assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),false,'Outside clicks dismiss floating resources')
+      assert.equal(await js('document.activeElement.matches(".composer-input textarea")'),true,'Dismissal preserves the underlying composer click and focus')
+      await click('[data-chat-resource="resources"]')
+      assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),true,'The resource button opens an overlay once')
+      await click('[data-chat-resource="resources"]')
+      assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),false,'The resource button closes without reopening the overlay')
+      await js('document.querySelector(".sidebar-divider.vertical").dispatchEvent(new KeyboardEvent("keydown",{key:"Home",bubbles:true}))');await wait(160)
+      win.setContentSize(1240,900);await wait(160)
+      await click('[data-chat-resource="resources"]')
+      assert.equal(await js('document.querySelector(".conversation-resource-card").dataset.layout'),'overlay','Narrow conversation space overlays resources')
+      await click('[data-panel="chats"]')
+      await click('[data-chat-resource="resources"]')
+      assert.equal(await js('document.querySelector(".conversation-resource-card").dataset.layout'),'docked','Closing the sidebar can restore enough space below the old viewport breakpoint')
+      await click('[data-panel="chats"]')
+      assert.equal(await js('document.querySelector(".conversation-resource-card").dataset.layout'),'overlay','Opening the sidebar switches an existing card to overlay mode')
+      win.setContentSize(1440,900);await wait(160)
+      assert.equal(await js('document.querySelector(".conversation-resource-card").dataset.layout'),'docked','Widening restores the dock without closing resources')
+      await click('[data-resource-view="files"]')
       await click('.conversation-resource-card .tree-row[title="preview.md"]')
       assert.equal(await js('document.querySelector(".preview-markdown h1")?.textContent'),'文件预览')
       await click('[aria-label="关闭文件预览"]')
@@ -243,8 +283,8 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),false,'Another conversation cannot auto-open current resources')
       await js('(async()=>{await window.navora.browser.createWindow(window.__localSession.sessionId,{url:"about:blank",show:false})})()');await wait(220)
       assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),true,'A new current-chat browser window automatically opens resources')
-      assert.equal(await js('document.querySelector("[data-resource-tab=browser]").getAttribute("aria-pressed")'),'true','New browser discovery selects its resource type')
-      await click('[data-resource-tab="browser"]')
+      assert.equal(await js('document.querySelector(".conversation-resource-card").classList.contains("is-overview")'),true,'New browser discovery shows the compact overview')
+      await click('[data-resource-view="browser"]')
       assert.equal(await js('document.querySelectorAll(".conversation-resource-card .tree-sess").length'),1,'Current browser card excludes unrelated sessions')
       await capture('current-chat-browser')
       await click('[aria-label="关闭资源面板"]')
@@ -350,7 +390,7 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('!!document.querySelector(".message-queue")'),false,'The empty queue disappears')
       await capture('conversation-unified-activity')
       assert.deepEqual(errors,[],'No renderer errors')
-      fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reduced,frameMetrics,modelRequests,checks:['provider-drafts','reopen-draft','tier-rename','preview-race','separate-probes','permission-search','visible-empty-states','workspace-keyboard','file-preview','file-preview-source-safety','file-preview-width','compact-chat-rows','native-explorer-current-path','floating-resource-files-browser-outputs','resource-auto-open-dismissal','all-chat-files','all-browser-owners','single-sidebar','old-group-migration','message-queue-edit-delete-insert','main-process-queue-persistence','active-context-insertion','long-conversation-jump','zoom-layout','interrupted-motion','single-mobile-header']},null,2))
+      fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reduced,frameMetrics,modelRequests,checks:['provider-drafts','reopen-draft','tier-rename','preview-race','separate-probes','permission-search','visible-empty-states','workspace-keyboard','file-preview','file-preview-source-safety','file-preview-width','compact-chat-rows','native-explorer-current-path','floating-resource-files-browser-outputs','resource-auto-open-dismissal','resource-space-aware-overlay','resource-outside-dismissal','resource-owned-menu','compact-resource-overview','resource-source-links','all-chat-files','all-browser-owners','single-sidebar','old-group-migration','message-queue-edit-delete-insert','main-process-queue-persistence','active-context-insertion','long-conversation-jump','zoom-layout','interrupted-motion','single-mobile-header']},null,2))
       console.log(JSON.stringify({ok:true,reduced,frameMetrics,modelRequests}))
       server.close(); app.exit(0)
     } catch(error) { console.error(error); await capture('failure'); server.close(); app.exit(1) }
