@@ -1,0 +1,33 @@
+/* One disclosure language for tools, plugins, automation, logs and reasoning. */
+.navora-app .shell .main .messages .activity-group {
+  width:100%;max-width:100%;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible;animation:none;
+}
+.navora-app .shell .main .messages .activity-trigger {
+  display:inline-flex;align-items:center;justify-content:flex-start;width:fit-content;max-width:min(100%,440px);min-height:30px;margin:0;padding:5px 8px;gap:7px;
+  border:1px solid transparent;border-radius:7px;background:transparent;box-shadow:none;color:#64748a;font-size:12px;font-weight:400;line-height:18px;text-align:left;cursor:pointer;
+  transition:background-color 150ms ease,color 150ms ease;
+}
+.navora-app .shell .main .messages .activity-trigger:hover {background:#f0f3f7;border-color:transparent;color:#354e6d}
+.navora-app .shell .main .messages .activity-group.open>.activity-trigger,.navora-app .shell .main .messages .activity-trigger[aria-expanded="true"] {background:#edf2f7;border-color:transparent;color:#3d5878}
+.navora-app .shell .main .messages .activity-trigger:focus-visible {outline:2px solid #6a8eb8;outline-offset:1px}
+.navora-app .shell .main .messages .activity-trigger :is(.run-card-text,.tool-title,.log-card-text,.thinking-reason-title) {min-width:0;flex:0 1 auto;font-size:12px;font-weight:400;line-height:18px;color:inherit;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.navora-app .shell .main .messages .activity-trigger :is(.run-status,.tool-status) {display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;min-width:16px;border:0;border-radius:0;padding:0;background:transparent;color:inherit}
+.navora-app .shell .main .messages .activity-trigger .status-glyph {width:15px;height:15px;flex-shrink:0}
+.navora-app .shell .main .messages .activity-trigger :is(.run-card-chevron,.tool-chevron,.log-card-chevron,.msg-reasoning-chevron,.thinking-reason-chevron) {display:inline-flex;align-items:center;justify-content:center;flex:none;width:10px;height:14px;margin-left:1px;color:#8a96a6;font-size:9px;transition:transform 180ms var(--navora-ease)}
+.navora-app .shell .main .messages .activity-trigger :is(.run-card-chevron,.tool-chevron,.log-card-chevron)>svg {width:8px;transform:none}
+.navora-app .shell .main .messages :is(.run-card.open,.tool-card.open,.log-card.open)>.activity-trigger :is(.run-card-chevron,.tool-chevron,.log-card-chevron),.navora-app .shell .main .messages .activity-trigger[aria-expanded="true"] :is(.msg-reasoning-chevron,.thinking-reason-chevron) {transform:rotate(90deg)}
+.navora-app .shell .main .messages .activity-trigger :is(.tool-kind-chip,.log-kind-chip) {display:inline-flex;align-items:center;flex-shrink:0;min-height:18px;height:18px;border:0;border-radius:4px;background:#edf1f5;padding:0 5px;color:#718198;font-size:10px;font-weight:400;letter-spacing:0;line-height:18px}
+.navora-app .shell .main .messages .activity-trigger .tool-raw {color:#91a0b2;font-size:10px;max-width:130px;overflow:hidden;text-overflow:ellipsis}
+.navora-app .shell .main .messages .activity-detail {margin:6px 0 10px 15px;padding:10px 12px;border:0;border-left:2px solid #dce4ee;border-radius:0 7px 7px 0;background:#f8fafc;color:#65758b;font-size:12px;line-height:1.7;max-width:calc(100% - 15px);overflow:auto;overscroll-behavior:contain}
+.navora-app .shell .main .messages :is(.thinking-reason-body,.msg-reasoning-body).activity-detail {white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;font-size:12px;color:#6a778b}
+.navora-app .shell .main .messages .run-card-body .run-item {padding:2px 0;border:0;background:transparent}
+.navora-app .shell .main .messages .run-card-body .activity-detail {background:#fff}
+.navora-app .shell .main .messages .activity-detail :is(.tool-sec-label,.log-kind-chip) {font-size:10px;font-weight:500;color:#8b97a7;margin-bottom:4px}
+.navora-app .shell .main .messages .activity-detail pre {max-height:280px;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;background:transparent;border:0;padding:0;color:#60738c;font-size:11px;line-height:1.65}
+.navora-app .shell .main .messages .thinking-bubble {border:0;background:transparent;box-shadow:none;padding:0;min-height:30px}
+.navora-app .shell .main .messages .thinking-label {font-size:12px;font-weight:400;color:#74869c;line-height:26px}
+.navora-app .shell .main .messages .thinking-row {gap:7px;align-items:flex-start}
+.navora-app .shell .main .messages .thinking-activity {width:15px;height:15px;margin-top:5px}
+.navora-app .shell .main .messages .thinking-reason {margin-top:3px}
+.navora-app .shell .main .messages .thinking-reason-round {font-size:10px;color:#94a0b0}
+@media(prefers-reduced-motion:reduce){.navora-app .shell .main .messages .activity-trigger,.navora-app .shell .main .messages .activity-trigger svg,.navora-app .shell .main .messages .activity-trigger span {transition:none}}

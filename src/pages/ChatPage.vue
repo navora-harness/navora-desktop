@@ -24,7 +24,7 @@
       <div class="sidebar-content-stack">
       <Transition name="sidebar-flip">
       <div v-show="(!settingsOpen && !creatorKind) || isMobileLayout" class="sidebar-chat-face">
-      <SidebarDock :model-value="dockLayout" :panels="sidebarPanels" :single-selection="true" :collapsible="sidebarCombined" :class="{'rail-merge-target':railDragging && sidebarRail.active && railDragging !== sidebarRail.active}" @panel-dragging="dockDraggingPanels=$event" @dragover="overSidebarRail" @drop="dropSidebarRail" @close="closeSidebar" @update:model-value="setDockLayout">
+      <SidebarDock :active="sidebarRail.active" :panels="sidebarPanels" @close="closeSidebar">
         <template #chats="slot">
       <Teleport :to="slot.headerTarget" defer><button v-show="slot.active" type="button" class="chat-toolbar-icon-btn chat-batch-trigger" :title="chatBatchMode ? '取消批量操作' : '批量管理对话'" :aria-label="chatBatchMode ? '取消批量操作' : '批量操作'" :aria-pressed="chatBatchMode" @click="chatBatchMode ? exitChatBatchMode() : enterChatBatchMode()"><font-awesome-icon :icon="chatBatchMode ? 'xmark' : 'list-check'" /></button></Teleport>
       <div v-if="chatBatchMode" class="chat-toolbar">
@@ -402,27 +402,10 @@
         </div>
         </template>
         <template #workspace="slot">
-          <div class="sidebar-workspace-pane" :data-visible="slot.active" :inert="!slot.active">
-            <WorkspaceFilesPanel :chat-id="activeId || ''" :header-target="slot.headerTarget" :header-visible="slot.active" @notify="onPanelNotify" @preview="openFilePreview($event.path)" />
-          </div>
+          <GlobalResourcesPanel v-if="loadedResourcePanels.has('workspace')" :active="slot.active" kind="files" :chats="chats" :active-chat-id="activeId || ''" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @notify="onPanelNotify" @preview="openFilePreview($event.path,$event.chatId)" @select-chat="selectChat" />
         </template>
         <template #browser="slot">
-          <div class="sidebar-browser-pane" :data-visible="slot.active" :inert="!slot.active">
-          <BrowserResourcesPanel
-            ref="browserResources"
-            :header-target="slot.headerTarget"
-            :header-visible="slot.active"
-            :chat-id="activeId || ''"
-            :tree="tree"
-            :is-remote="isWebRemote()"
-            :owner-label="treeOwnerLabel"
-            :dnd-mime="DND_MIME"
-            @add-ref="addRef"
-            @ask-close-session="askCloseSession"
-            @remote-view="openRemoteWindow"
-            @notify="onPanelNotify"
-          />
-          </div>
+          <GlobalResourcesPanel v-if="loadedResourcePanels.has('browser')" :active="slot.active" kind="browser" :chats="chats" :active-chat-id="activeId || ''" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @select-chat="selectChat" />
         </template>
       </SidebarDock>
 
@@ -436,14 +419,14 @@
         </div>
       </Transition>
       </div>
-      <nav class="activity-rail" :class="{'rail-detach-ready':!!detachingPanel}" aria-label="侧栏导航" @dragover="overDetachRail" @drop="dropDetachRail">
+      <nav class="activity-rail" aria-label="侧栏导航">
         <div class="activity-rail-sections">
           <div class="rail-brand" :class="{ 'app-drag': showDesktopChrome }" title="Navora">
             <img src="/app-icon.png" alt="Navora" draggable="false" />
           </div>
           <button type="button" class="sidebar-icon-btn rail-new-chat" title="开启新对话（Ctrl/⌘ N）" aria-label="开启新对话" @click="createChat"><font-awesome-icon icon="pen-to-square" /></button>
           <button type="button" class="sidebar-icon-btn rail-search brand-search-btn" title="搜索对话（Ctrl/⌘ K）" aria-label="搜索对话" @click="openChatSearch"><font-awesome-icon icon="magnifying-glass" /></button>
-          <SidebarRailGroups :panels="sidebarPanels" :state="sidebarRail" :detaching-panel="detachingPanel" :inactive="settingsOpen || !!creatorKind" @activate="toggleSidebarGroup" @merge="mergeSidebarGroups" @split="splitSidebarPanel" @split-all="splitSidebarGroup" @dragging="railDragging=$event" />
+          <SidebarNavigation :panels="sidebarPanels" :active="sidebarRail.active" :inactive="settingsOpen || !!creatorKind" @activate="toggleSidebarGroup" />
         </div>
         <div class="sidebar-foot">
         <div class="sidebar-foot-actions">
@@ -566,6 +549,7 @@
           </div>
         </div>
         <div class="mobile-topbar-actions">
+          <ChatResourcesMenu ref="browserResources" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @notify="onPanelNotify" @preview="openFilePreview" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" />
           <button
             v-if="isWebRemote()"
             type="button"
@@ -633,6 +617,7 @@
             <span class="agent-elapsed">{{ elapsedLabel }}</span>
             <button type="button" class="quick-stop-btn" title="停止任务（Esc）" aria-label="停止任务" @click="stopAgent"><StatusIcon kind="stopped" />停止</button>
           </div>
+          <ChatResourcesMenu v-if="!isMobileLayout" ref="browserResources" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @notify="onPanelNotify" @preview="openFilePreview" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" />
         </header>
 
         <div class="messages-wrap">
@@ -664,7 +649,7 @@
                       <span>{{ TOOL_RUN_GROUP_LABEL }}</span>
                     </div>
                     <div
-                      class="run-card"
+                      class="run-card activity-group"
                       :class="{
                         open: isRunExpanded(block.key),
                         live: runGroupLive(block.items),
@@ -674,7 +659,7 @@
                     >
                       <button
                         type="button"
-                        class="run-card-head"
+                        class="run-card-head activity-trigger"
                         :aria-expanded="isRunExpanded(block.key)"
                         :aria-controls="`run-details-${block.key}`"
                         :title="runGroupSummary(block.items)"
@@ -691,7 +676,7 @@
                         </span>
                       </button>
                       <DisclosureTransition>
-                      <div v-if="isRunExpanded(block.key)" :id="`run-details-${block.key}`" class="run-card-body">
+                      <div v-if="isRunExpanded(block.key)" :id="`run-details-${block.key}`" class="run-card-body activity-detail">
                         <template v-for="item in block.items" :key="item.id">
                           <div v-if="item.role === 'log'" class="run-item log" :data-msg-id="item.id">
                             <span class="log-kind-chip">{{ logKindText(item) }}</span>
@@ -703,10 +688,10 @@
                             :data-msg-id="item.id"
                             :class="[toolStatusClass(item), `kind-${toolDisplay(item).kind}`]"
                           >
-                            <div class="tool-card" :class="{ open: expandedTools[item.id] }">
+                            <div class="tool-card activity-group" :class="{ open: expandedTools[item.id] }">
                               <button
                                 type="button"
-                                class="tool-head"
+                                class="tool-head activity-trigger"
                                 @click="toggleTool(item.id)"
                               >
                                 <span class="tool-status" :class="effectiveToolStatus(item)">
@@ -805,7 +790,7 @@
                               </div>
                               <ToolCatalogList :message="item" />
                               <DisclosureTransition>
-                              <div v-if="expandedTools[item.id]" class="tool-detail">
+                              <div v-if="expandedTools[item.id]" class="tool-detail activity-detail">
                                 <div v-if="item.meta?.args" class="tool-section">
                                   <div class="tool-sec-label">参数</div>
                                   <pre>{{ formatJson(item.meta.args) }}</pre>
@@ -844,14 +829,14 @@
                       }}</span>
                     </div>
                     <div
-                      class="log-card"
+                      class="log-card activity-group"
                       :class="{
                         open: isLogExpanded(block.message.id),
                         expandable: logCanExpand(block.message),
                       }"
                     >
                       <div
-                        class="log-card-head"
+                        class="log-card-head activity-trigger"
                         role="button"
                         :tabindex="logCanExpand(block.message) ? 0 : -1"
                         :aria-expanded="
@@ -861,6 +846,7 @@
                         @keydown.enter.prevent="onLogCardActivate(block.message, $event)"
                         @keydown.space.prevent="onLogCardActivate(block.message, $event)"
                       >
+                        <StatusIcon :kind="logToneClass(block.message) === 'tone-error' ? 'error' : 'log'" />
                         <span class="log-kind-chip">{{ logKindText(block.message) }}</span>
                         <span
                           class="log-card-text"
@@ -900,8 +886,8 @@
                         formatRelative(block.message.createdAt)
                       }}</span>
                     </div>
-                    <div class="tool-card" :class="{ open: expandedTools[block.message.id] }">
-                      <button type="button" class="tool-head" @click="toggleTool(block.message.id)">
+                    <div class="tool-card activity-group" :class="{ open: expandedTools[block.message.id] }">
+                      <button type="button" class="tool-head activity-trigger" @click="toggleTool(block.message.id)">
                         <span class="tool-status" :class="effectiveToolStatus(block.message)">
                           <StatusIcon :kind="effectiveToolStatus(block.message) === 'aborted' ? 'stopped' : effectiveToolStatus(block.message) === 'running' ? 'running' : effectiveToolStatus(block.message) === 'error' ? 'error' : 'success'" />
                         </span>
@@ -996,7 +982,7 @@
                       </div>
                       <ToolCatalogList :message="block.message" />
                       <DisclosureTransition>
-                      <div v-if="expandedTools[block.message.id]" class="tool-detail">
+                      <div v-if="expandedTools[block.message.id]" class="tool-detail activity-detail">
                         <div v-if="block.message.meta?.args" class="tool-section">
                           <div class="tool-sec-label">参数</div>
                           <pre>{{ formatJson(block.message.meta.args) }}</pre>
@@ -1044,25 +1030,22 @@
                     <template v-if="block.message.role === 'assistant' || block.message.role === 'user'">
                       <div
                         v-if="block.message.role === 'assistant' && messageReasoning(block.message)"
-                        class="msg-reasoning"
+                        class="msg-reasoning activity-group"
                         :class="{ open: isReasoningExpanded(block.message.id) }"
                       >
                         <button
                           type="button"
-                          class="msg-reasoning-toggle"
+                          class="msg-reasoning-toggle activity-trigger"
                           :aria-expanded="isReasoningExpanded(block.message.id)"
                           @click="toggleReasoning(block.message.id)"
                         >
-                          <font-awesome-icon
-                            class="msg-reasoning-chevron"
-                            icon="chevron-right"
-                          />
-                          <span>思考</span>
+                          <StatusIcon kind="thought" /><span>思考过程</span>
+                          <font-awesome-icon class="msg-reasoning-chevron" icon="chevron-right" />
                         </button>
                         <DisclosureTransition>
                         <div
                           v-if="isReasoningExpanded(block.message.id)"
-                          class="msg-reasoning-body"
+                          class="msg-reasoning-body activity-detail"
                         >
                           {{ messageReasoning(block.message) }}
                         </div>
@@ -1164,29 +1147,27 @@
                   </div>
                   <span class="tool-dl-label">{{ liveDownloadBar.label }}</span>
                 </div>
-                <div v-if="liveReasoningText" class="thinking-reason">
+                <div v-if="liveReasoningText" class="thinking-reason activity-group">
                   <button
                     type="button"
-                    class="thinking-reason-toggle"
+                    class="thinking-reason-toggle activity-trigger"
                     :aria-expanded="liveReasoningOpen"
                     @click="toggleLiveReasoning"
                   >
-                    <font-awesome-icon
-                      class="thinking-reason-chevron"
-                      icon="chevron-right"
-                    />
+                    <StatusIcon kind="thought" />
                     <span class="thinking-reason-title">
-                      思考
+                      思考中
                       <span v-if="liveReasoningRoundLabel" class="thinking-reason-round">{{
                         liveReasoningRoundLabel
                       }}</span>
                     </span>
+                    <font-awesome-icon class="thinking-reason-chevron" icon="chevron-right" />
                   </button>
                   <DisclosureTransition>
                   <div
                     v-if="liveReasoningOpen"
                     ref="liveReasoningBodyEl"
-                    class="thinking-reason-body"
+                    class="thinking-reason-body activity-detail"
                   >
                     {{ liveReasoningText }}
                   </div>
@@ -1326,6 +1307,7 @@
               />
             </span>
           </button>
+          <MessageQueue :key="activeId || ''" :entries="active?.queuedMessages || []" :paused="active?.queuePaused === true" :busy="queueBusy" :max-chars="maxComposerChars" @edit="(id,content)=>changeQueue('edit',id,content)" @remove="changeQueue('remove',$event)" @insert="changeQueue('insert',$event)" @resume="changeQueue('resume')" />
           <div v-if="contextRefs.length" class="chip-row">
             <span v-for="r in contextRefs" :key="refKey(r)" class="chip editable" :class="r.kind">
               <span class="chip-text">{{ chipLabel(r) }}</span>
@@ -1351,7 +1333,7 @@
                 flat
                 bg-color="transparent"
                 class="composer-input"
-                :placeholder="agentRunning ? 'Agent 运行中… 按 Esc 可停止' : '描述任务，或拖入 Session / 窗口…'"
+                :placeholder="agentRunning ? (runningMessageMode === 'insert' ? '补充想法，插入当前任务…' : '继续输入，加入待发送队列…') : '描述任务，或拖入 Session / 窗口…'"
                 :disabled="false"
                 :maxlength="maxComposerChars"
                 @keydown="onComposerKeydown"
@@ -1538,19 +1520,18 @@
                 </v-menu>
 
                 <button
-                  v-if="!agentRunning"
                   type="button"
                   class="composer-send"
                   :disabled="!canSend || sending"
                   :aria-busy="sending"
-                  title="发送"
-                  aria-label="发送"
+                  :title="agentRunning ? (runningMessageMode === 'insert' ? '插入当前任务' : '加入队列') : '发送'"
+                  :aria-label="agentRunning ? (runningMessageMode === 'insert' ? '插入当前任务' : '加入队列') : '发送'"
                   @click="send"
                 >
-                  <font-awesome-icon icon="arrow-up" />
+                  <font-awesome-icon :icon="agentRunning && runningMessageMode === 'queue' ? 'list-ul' : 'arrow-up'" />
                 </button>
                 <button
-                  v-else
+                  v-if="agentRunning"
                   type="button"
                   class="composer-send stop"
                   title="停止"
@@ -1887,7 +1868,10 @@ import { normalizeProvider, resolveModelName, resolveProvider } from '@shared/mo
 import ChatMarkdown from '@/components/ChatMarkdown.vue'
 import SettingsPage from './SettingsPage.vue'
 import { useSidebarLayout } from '@/composables/useSidebarLayout'
-import SidebarRailGroups from '@/components/sidebar/SidebarRailGroups.vue'
+import SidebarNavigation from '@/components/sidebar/SidebarNavigation.vue'
+import GlobalResourcesPanel from '@/components/sidebar/GlobalResourcesPanel.vue'
+import ChatResourcesMenu from '@/components/ChatResourcesMenu.vue'
+import MessageQueue from '@/components/MessageQueue.vue'
 import DocsDialog from '@/components/DocsDialog.vue'
 import SkillReviewHost from '@/components/skills/SkillReviewHost.vue'
 import CatalogItemCard from '@/components/store/CatalogItemCard.vue'
@@ -1895,13 +1879,11 @@ import ToolCatalogList from '@/components/store/ToolCatalogList.vue'
 import { useStoreUi } from '@/composables/useStoreUi'
 import { storeErrorText } from '@shared/store'
 import BrowserDownloadsMenu from '@/components/BrowserDownloadsMenu.vue'
-import WorkspaceFilesPanel from '@/components/sidebar/WorkspaceFilesPanel.vue'
 import FilePreviewPanel from '@/components/FilePreviewPanel.vue'
 import CreatorWorkspace from '@/components/CreatorWorkspace.vue'
 import type { CreatorKind } from '@shared/creators'
 import SidebarDock from '@/components/sidebar/SidebarDock.vue'
 import { useSidebarDock } from '@/composables/useSidebarDock'
-import BrowserResourcesPanel from '@/components/sidebar/BrowserResourcesPanel.vue'
 import SidebarContextMenu from '@/components/sidebar/SidebarContextMenu.vue'
 import InChatAskCard from '@/components/chat/InChatAskCard.vue'
 import InChatPermCard from '@/components/chat/InChatPermCard.vue'
@@ -1959,7 +1941,7 @@ async function applyExecutionMode(mode: 'auto' | 'chat' | 'agent') {
   } catch (error) { showToast(error instanceof Error ? error.message : '切换模式失败') }
 }
 function onAppShortcut(event: KeyboardEvent) {
-  if (event.isComposing || settingsOpen.value || docsOpen.value || document.querySelector('.v-dialog.v-overlay--active')) return
+  if (event.defaultPrevented || event.isComposing || settingsOpen.value || docsOpen.value || document.querySelector('.v-dialog.v-overlay--active,.v-menu.v-overlay--active')) return
   const key = event.key.toLowerCase()
   if (event.ctrlKey || event.metaKey) {
     if (key === 'k') { event.preventDefault(); openChatSearch() }
@@ -2298,9 +2280,9 @@ function setPreviewWidth(width: number) {
   previewWidth.value = width
   try { localStorage.setItem('navora.preview.width', String(width)) } catch { /* optional persistence */ }
 }
-function openFilePreview(path: string) {
-  if (!activeId.value) return
-  previewSelection.value = { chatId: activeId.value, path }
+function openFilePreview(path: string, chatId = activeId.value) {
+  if (!chatId) return
+  previewSelection.value = { chatId, path }
   if (isMobileLayout.value) closeMobileSidebar()
 }
 watch(activeId, () => { previewSelection.value = null })
@@ -2324,23 +2306,12 @@ const settingsTab = ref('basic')
 const settingsOpen = ref(false)
 watch(settingsOpen, open => { if (open) creatorKind.value = null })
 const { layout: sidebarLayout, style: sidebarStyle, resizing: sidebarResizing, beginResize: beginSidebarResize, resizeKey: sidebarResizeKey } = useSidebarLayout()
-const { layout: dockLayout, panels: sidebarPanels, visible: sidebarVisible, set: setDockLayout, rail:sidebarRail, activateGroup,mergeGroups,splitPanel:splitSidebarPanel,splitGroup:splitSidebarGroup,close:closeSidebar } = useSidebarDock()
-const railDragging=ref('')
-const dockDraggingPanels=ref<string[]>([])
-const detachingPanel=computed(()=>{
-  if(dockDraggingPanels.value.length!==1)return ''
-  const id=dockDraggingPanels.value[0]!
-  return sidebarPanels.value.some(panel=>panel.id===id)&&sidebarRail.value.groups.some(group=>group.panels.includes(id)&&group.panels.length>1)?id:''
-})
-function overDetachRail(event:DragEvent){if(detachingPanel.value){event.preventDefault();if(event.dataTransfer)event.dataTransfer.dropEffect='move'}}
-function dropDetachRail(event:DragEvent){if(detachingPanel.value){event.preventDefault();splitSidebarPanel(detachingPanel.value);dockDraggingPanels.value=[]}}
+const { panels: sidebarPanels, visible: sidebarVisible, rail: sidebarRail, activate: activateSidebar, close: closeSidebar } = useSidebarDock()
+const loadedResourcePanels=ref(new Set<string>())
+watch(()=>sidebarRail.value.active,id=>{if(id)loadedResourcePanels.value=new Set([...loadedResourcePanels.value,id])},{immediate:true})
 const allSidebarHidden = computed(() => sidebarPanels.value.every(panel => !sidebarVisible.value[panel.id]))
-const sidebarCombined = computed(() => sidebarPanels.value.filter(panel => sidebarVisible.value[panel.id]).length > 1)
 watch(()=>sidebarVisible.value.chats,visible=>{if(!visible)exitChatBatchMode()})
-function toggleSidebarGroup(id:string){const force=settingsOpen.value||!!creatorKind.value;settingsOpen.value=false;creatorKind.value=null;exitChatBatchMode();activateGroup(id,!force)}
-function mergeSidebarGroups(source:string,target:string){settingsOpen.value=false;creatorKind.value=null;exitChatBatchMode();mergeGroups(source,target)}
-function overSidebarRail(event:DragEvent){if(railDragging.value&&sidebarRail.value.active&&railDragging.value!==sidebarRail.value.active){event.preventDefault();if(event.dataTransfer)event.dataTransfer.dropEffect='move'}}
-function dropSidebarRail(event:DragEvent){if(railDragging.value&&sidebarRail.value.active&&railDragging.value!==sidebarRail.value.active){event.preventDefault();mergeSidebarGroups(railDragging.value,sidebarRail.value.active);railDragging.value=''}}
+function toggleSidebarGroup(id:string){const force=settingsOpen.value||!!creatorKind.value;settingsOpen.value=false;creatorKind.value=null;exitChatBatchMode();activateSidebar(id,!force)}
 const docsOpen = ref(false)
 const mobileSidebarOpen = ref(false)
 const chatSearchOpen = ref(false)
@@ -2735,6 +2706,7 @@ async function loadUiPrefs() {
 
 function applyUiPrefs(cfg: AppConfig | null | undefined) {
   if (!cfg) return
+  runningMessageMode.value = cfg.app?.running_message_mode === 'insert' ? 'insert' : 'queue'
   showFollowupSuggestions.value = cfg.app?.show_followup_suggestions === true
   showReadPages.value = cfg.app?.show_read_pages !== false
   showRunLogs.value = cfg.app?.show_run_logs !== false
@@ -2768,6 +2740,17 @@ async function refreshProviderKeyFlags() {
   providerKeyOk.value = next
 }
 
+const runningMessageMode = ref<'queue'|'insert'>('queue')
+const queueBusy=ref(false)
+async function changeQueue(action:'edit'|'remove'|'insert'|'resume',id='',content='') {
+  const chatId=activeId.value,api=window.navora?.agent
+  if(!chatId||!api||queueBusy.value)return
+  queueBusy.value=true
+  try{
+    const result=await (action==='edit'?api.queueEdit(chatId,id,content):action==='remove'?api.queueRemove(chatId,id):action==='insert'?api.queueInsert(chatId,id):api.queueResume(chatId))
+    if(result&&active.value?.id===chatId)active.value={...active.value,queuedMessages:result.queuedMessages,queuePaused:result.queuePaused}
+  }catch{showToast('队列操作失败，请重试','error')}finally{queueBusy.value=false}
+}
 const canSend = computed(() => Boolean(draft.value.trim() || contextRefs.value.length))
 const draftLen = computed(() => draft.value.length)
 const draftNearLimit = computed(() => draftLen.value >= maxComposerChars.value * 0.9)
@@ -4343,7 +4326,7 @@ function onComposerKeydown(e: KeyboardEvent) {
   }
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault()
-    if (!agentRunning.value) void send()
+    void send()
   }
 }
 
@@ -5088,13 +5071,14 @@ async function openRemoteWindow(windowId: string) {
 async function send() {
   const text = draft.value.trim()
   const refs = plainContextRefs(contextRefs.value)
-  if ((!text && !refs.length) || !activeId.value || !window.navora || agentRunning.value || sending.value) {
+  if ((!text && !refs.length) || !activeId.value || !window.navora || sending.value) {
     return
   }
   if (text.length > maxComposerChars.value) {
     showToast(`输入超过上限（${maxComposerChars.value} 字）`, 'warning')
     return
   }
+  const wasRunning=agentRunning.value
   sending.value = true
   const chatId = activeId.value
   applyDraftLocally('', Date.now())
@@ -5104,13 +5088,13 @@ async function send() {
   if (chatId) clearFollowups(chatId)
   clearChatError(chatId)
   try {
-    active.value = await window.navora.agent.run(chatId, {
-      content: text,
-      refs,
-    })
+    const sent = await window.navora.agent.submit(chatId, {content: text, refs}, runningMessageMode.value)
+    if(activeId.value !== chatId)return
+    active.value = sent
     const running = await window.navora.agent.isRunning(chatId)
     setRunning(chatId, running)
-    if (running) {
+    if(activeId.value !== chatId)return
+    if (running && !wasRunning) {
       phase.value = 'thinking'
       phaseDetail.value = '正在理解任务…'
     }
@@ -5118,10 +5102,13 @@ async function send() {
     await scrollMessages(true)
   } catch (e) {
     console.error(e)
-    applyDraftLocally(text, Date.now())
-    scheduleDraftSave()
-    contextRefs.value = refs
-    if (chatId) setRunning(chatId, false)
+    if(activeId.value===chatId){
+      applyDraftLocally(clampDraftText(draft.value ? text+'\n\n'+draft.value : text), Date.now())
+      scheduleDraftSave()
+      contextRefs.value = [...refs,...contextRefs.value.filter(ref=>!refs.some(saved=>refKey(saved)===refKey(ref)))]
+    }else{await window.navora.chats.setDraft(chatId,text).catch(()=>{})}
+    const stillRunning=await window.navora.agent.isRunning(chatId).catch(()=>wasRunning)
+    setRunning(chatId,stillRunning)
     const raw = e instanceof Error ? e.message : '发送失败，请重试'
     if (chatId) rememberChatError(chatId, raw)
     const formatted = formatAgentError(raw)
@@ -5286,11 +5273,15 @@ function closeAskUi(id?: string) {
   askReq.value = null
 }
 
-watch(activeId, async (id) => {
-  if (id) {
-    tree.value = (await window.navora?.browser.tree(id)) || []
-    agentRunning.value = (await window.navora?.agent.isRunning(id)) || false
-  }
+watch(activeId, async (id, _previous, onCleanup) => {
+  let stale=false
+  onCleanup(()=>{stale=true})
+  tree.value=[]
+  if (!id) return
+  const [nextTree,running]=await Promise.all([window.navora?.browser.tree(id),window.navora?.agent.isRunning(id)])
+  if(stale)return
+  tree.value=nextTree||[]
+  agentRunning.value=running||false
 })
 
 watch(settingsOpen, async (open, wasOpen) => {

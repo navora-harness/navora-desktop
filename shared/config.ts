@@ -162,6 +162,7 @@ export type AppConfig = {
     show_main_on_start: boolean
     /** Show suggested follow-up prompts after an Agent reply finishes */
     show_followup_suggestions: boolean
+    running_message_mode: 'queue' | 'insert'
     /** Use AI to generate a short chat title after the first successful reply */
     ai_generate_chat_title: boolean
     /** Show “已阅读 N 个网页” summary + dialog for pages whose content was read */
@@ -396,6 +397,7 @@ export function createDefaultConfig(): AppConfig {
       close_to_tray: true,
       show_main_on_start: true,
       show_followup_suggestions: false,
+      running_message_mode: 'queue',
       ai_generate_chat_title: true,
       show_read_pages: true,
       show_run_logs: true,

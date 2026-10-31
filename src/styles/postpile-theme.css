@@ -196,14 +196,6 @@
 .navora-app .activity-rail .sidebar-icon-btn::before { content:''; position:absolute; left:-5px; width:2px; height:12px; border-radius:2px; background:#6b87a9; opacity:0; transition:opacity 150ms ease; pointer-events:none; }
 .navora-app .activity-rail .sidebar-icon-btn.selected::before { opacity:1; }
 .navora-app .sidebar .sidebar-icon-btn.selected:hover { background:#e5eaf1; border-color:#dce1e9; }
-.navora-app .sidebar .rail-group-button { --rail-icon-surface:#f7f7f8; }
-.navora-app .sidebar .rail-group-button:hover { --rail-icon-surface:#e7e9ee; }
-.navora-app .sidebar .rail-group-button.selected { --rail-icon-surface:#edf0f5; }
-.navora-app .sidebar .rail-group-button.selected:hover { --rail-icon-surface:#e5eaf1; }
-.navora-app .sidebar .rail-drop-target .rail-group-button { --rail-icon-surface:#e2edf7!important; }
-.navora-app .sidebar .rail-group-button > .rail-composite-icon { width:24px; height:24px; overflow:visible; }
-.navora-app .sidebar :is(.dock-tab,.dock-menu-button,.rail-group-button)[draggable="true"] { cursor:default; }
-.navora-app .shell .sidebar:has(.dock-dragging,.rail-drag-source),.navora-app .shell .sidebar:has(.dock-dragging,.rail-drag-source) * { cursor:grabbing; }
 .navora-app .sidebar .icon-btn { border: 1px solid transparent; border-radius: 8px; transition: background-color 150ms ease, border-color 150ms ease; }
 .navora-app .sidebar .icon-btn:hover { background: #e7e9ee; border-color: #dce0e7; }
 .navora-app .sidebar :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn):active { transform: scale(.94); }
@@ -410,7 +402,6 @@
 .navora-app .sidebar-chat-face.resources-only :is(.sidebar-workspace-pane,.sidebar-browser-pane):has(.is-collapsed) { flex: 0 0 36px; }
 .navora-app .sidebar :is(.sidebar-workspace-pane,.sidebar-browser-pane) { transition: height 200ms var(--navora-ease), flex-grow 200ms var(--navora-ease), flex-basis 200ms var(--navora-ease); overflow: clip; }
 .navora-app .sidebar-resizing :is(.sidebar-workspace-pane,.sidebar-browser-pane) { transition: none; }
-.navora-app .sidebar-dock:not(:has(.sidebar-workspace-pane:not([style*="display: none"]) .sidebar-panel:not(.is-collapsed),.sidebar-browser-pane:not([style*="display: none"]) .sidebar-panel:not(.is-collapsed))) { flex: 0 0 auto; }
 .navora-app .res-chevron { transition: transform 180ms var(--navora-ease); }
 .navora-app .is-collapsed .res-chevron { transform: rotate(-90deg); }
 .resource-body-enter-active { transition: opacity 200ms ease, transform 200ms var(--navora-ease); }

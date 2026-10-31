@@ -85,6 +85,8 @@ export type ChatKind = 'main' | 'sub'
 export type SubChatSpawnStatus = 'running' | 'done' | 'failed' | 'cancelled'
 
 export type ChatSession = {
+  queuedMessages?: QueuedMessage[]
+  queuePaused?: boolean
   id: string
   title: string
   createdAt: number
@@ -135,6 +137,8 @@ export type ChatSession = {
    */
   pendingAsk?: AgentAskRequest
 }
+
+export type QueuedMessage = {id:string;content:string;refs?:BrowserContextRef[];createdAt:number;error?:string}
 
 export type BrowserTreeWindow = {
   windowId: string

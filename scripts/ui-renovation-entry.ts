@@ -22,6 +22,8 @@ fs.mkdirSync(path.join(root,'chats'),{recursive:true})
 const workspaceFixture = path.join(root, 'workspace', 'chat_renovation119', 'folder')
 fs.mkdirSync(workspaceFixture, {recursive:true})
 fs.writeFileSync(path.join(workspaceFixture, 'note.txt'), 'Keyboard navigation fixture')
+const otherWorkspace=path.join(root,'workspace','chat_renovation118')
+fs.mkdirSync(otherWorkspace,{recursive:true});fs.writeFileSync(path.join(otherWorkspace,'other-only.txt'),'From another conversation')
 fs.writeFileSync(path.join(path.dirname(workspaceFixture), 'preview.md'), '# 文件预览\n\n**Markdown** 内容\n\n<script>window.__previewExecuted=true</script>')
 fs.writeFileSync(path.join(path.dirname(workspaceFixture), 'binary.bin'), Buffer.from([1,0,2]))
 fs.writeFileSync(path.join(path.dirname(workspaceFixture), 'image.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aT1sAAAAASUVORK5CYII=', 'base64'))
@@ -73,11 +75,19 @@ app.on('browser-window-created', (_,win) => {
     const selectCloud = () => click('.provider-list-item:last-child')
     const secrets = new SecretsStore(root)
     let modelRequests = 0
+    const queuePrompts:string[]=[]
+    let releaseQueueFirst:(()=>void)|undefined
     const server = createServer(async (req,res) => {
       res.setHeader('Content-Type','application/json')
       if (req.url === '/v1/models') { res.end(JSON.stringify({data:[{id:'qwen38-turbo-q6'}]})); return }
       let body = ''; for await (const part of req) body += part
       const request = JSON.parse(body)
+      const lastUser=request.messages?.filter((message:{role:string})=>message.role==='user').at(-1)?.content
+      if(typeof lastUser==='string' && lastUser.startsWith('UI_QUEUE_')){
+        queuePrompts.push(lastUser)
+        if(lastUser==='UI_QUEUE_FIRST')await new Promise<void>(resolve=>{releaseQueueFirst=resolve})
+        res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'完成：'+lastUser,reasoning_content:'这是隔离测试中的思考内容。'},finish_reason:'stop'}]}));return
+      }
       modelRequests++
       assert.equal(request.model,'qwen38-turbo-q6')
       assert.equal(request.reasoning_effort,'low')
@@ -195,89 +205,37 @@ app.on('browser-window-created', (_,win) => {
       await capture('log-disclosure')
       await js('(async()=>{const cfg=await window.navora.config.get();await window.navora.config.save({app:{...cfg.app,collapse_tool_runs:true}})})()')
       await wait(150)
-      // Rail entries are mutually exclusive; dragging merges their ownership.
-      const railDrag = async (source:string,target:string,pane=false) => {
-        await js(`(()=>{const button=document.querySelector(${JSON.stringify(source)}),dt=new DataTransfer();button.dispatchEvent(new DragEvent('dragstart',{dataTransfer:dt,bubbles:true}));const destination=document.querySelector(${JSON.stringify(target)})${pane?'':".closest('.rail-group-entry')"};destination.dispatchEvent(new DragEvent('dragover',{dataTransfer:dt,bubbles:true,cancelable:true}));destination.dispatchEvent(new DragEvent('drop',{dataTransfer:dt,bubbles:true,cancelable:true}));})()`)
-        await wait(350)
-      }
-      const checkCompositeBounds = async () => assert.equal(await js(`(()=>{
-        const icon=document.querySelector('.rail-composite-icon'),bounds=icon.getBoundingClientRect();
-        return [...icon.querySelectorAll('path')].every(path=>{const r=path.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=bounds.left-.5&&r.top>=bounds.top-.5&&r.right<=bounds.right+.5&&r.bottom<=bounds.bottom+.5});
-      })()`),true,'Combined member glyphs stay within their own icon bounds')
+      // Local popovers and global management use distinct owners.
+      await click('[data-chat-resource="files"]')
+      assert.equal(await js('document.querySelector(".chat-resource-popup").textContent.includes("other-only.txt")'),false,'Current files exclude other conversations')
+      assert.equal(await js('document.querySelector(".chat-resource-popup .res-head").checkVisibility()'),true,'Local file controls are visible')
+      await capture('current-chat-files')
+      await click('.chat-resource-popup .tree-row[title="preview.md"]')
+      assert.equal(await js('document.querySelector(".preview-markdown h1")?.textContent'),'文件预览')
+      await click('[aria-label="关闭文件预览"]')
       await click('[data-panel="workspace"]')
-      assert.equal(await js('document.querySelector(".workspace-panel").checkVisibility()&&!document.querySelector(".chat-list").checkVisibility()'),true,'Opening a rail entry closes the previous entry')
-      assert.equal(await js('document.querySelectorAll(".dock-collapse").length'),0,'Independent sidebar panels have no collapse control')
-      const railPoint=await js('(()=>{const r=document.querySelector("[data-panel=workspace]").getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()')
-      win.webContents.sendInputEvent({type:'mouseMove',...railPoint})
-      assert.equal(await js('getComputedStyle(document.querySelector("[data-panel=workspace]")).cursor'),'default','Hovering a rail item keeps the ordinary cursor')
-      win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...railPoint})
-      assert.equal(await js('getComputedStyle(document.querySelector("[data-panel=workspace]")).cursor'),'default','Pressing without dragging does not show a grab cursor')
-      win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...railPoint});await wait(100)
-      await click('[data-panel="chats"]')
-      await js("window.__workspaceNode=document.querySelector('.workspace-panel');window.__chatList=document.querySelector('.chat-list')")
-      await railDrag('[data-panel="workspace"]','[data-panel="chats"]')
-      assert.equal(await js('document.querySelectorAll(".rail-group-button").length'),2,'Combined members share one icon')
-      assert.equal(await js('document.querySelector(".workspace-panel").checkVisibility()&&document.querySelector(".chat-list").checkVisibility()'),true,'Combined panes open together')
-      assert.equal(await js('[...document.querySelectorAll(".dock-collapse")].filter(el=>el.checkVisibility()).length'),2,'Combination members retain their collapse controls')
-      await checkCompositeBounds()
-      await capture('rail-combined-two')
-      await railDrag('[data-panel="browser"]','.sidebar-dock',true)
-      assert.equal(await js('!!document.querySelector(".rail-drag-hint")'),false,'Dropping into a pane clears the drag hint')
-      assert.equal(await js('document.querySelectorAll(".rail-group-button").length'),1,'Dragging into the open sidebar joins its group')
-      assert.equal(await js('window.__workspaceNode===document.querySelector(".workspace-panel")&&window.__chatList===document.querySelector(".chat-list")'),true,'Merging retains mounted pane state')
-      await click('.rail-group-button')
-      assert.equal(await js('document.querySelectorAll(".rail-group-button[aria-pressed=true]").length'),0)
-      assert.equal(await js('document.querySelector(".sidebar").getBoundingClientRect().width'),52,'Clicking the selected combination closes every member')
-      await click('.rail-group-button')
-      assert.equal(await js('document.querySelector(".workspace-panel").checkVisibility()&&document.querySelector(".browser-panel").checkVisibility()&&document.querySelector(".chat-list").checkVisibility()'),true)
-      const combinedHeight=await js('document.querySelector(".dock-group").getBoundingClientRect().height')
-      await js('document.querySelector(".dock-divider").dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown",bubbles:true}))')
-      await wait(120)
-      assert.ok(await js('document.querySelector(".dock-group").getBoundingClientRect().height')>combinedHeight,'Combined panes retain adjustable heights')
-      await click('[data-group="group-chats"] .dock-menu-button')
-      await js('[...document.querySelectorAll(".dock-menu button")].find(el=>el.checkVisibility()&&el.textContent==="下移此组").click()');await wait(120)
-      assert.equal(await js('[...document.querySelectorAll(".dock-group")].filter(el=>el.checkVisibility())[0].dataset.group'),'group-workspace','Reordering skips hidden groups')
-      await click('[data-group="group-chats"] .dock-menu-button')
-      await js('[...document.querySelectorAll(".dock-menu button")].find(el=>el.checkVisibility()&&el.textContent==="上移此组").click()');await wait(120)
-      await checkCompositeBounds()
-      await capture('rail-combined-three')
-      // A panel title can be detached directly into the activity rail.
-      await click('[data-group="group-workspace"] .dock-collapse')
-      assert.equal(await js('document.querySelector(".workspace-panel").checkVisibility()'),false,'Combination members still collapse')
-      const beginTitleDrag = async () => {
-        assert.equal(await js('getComputedStyle(document.querySelector("#dock-tab-workspace")).cursor'),'default','A title has the ordinary cursor before dragging')
-        await js('(()=>{window.__titleDragTransfer=new DataTransfer();document.querySelector("#dock-tab-workspace").dispatchEvent(new DragEvent("dragstart",{dataTransfer:window.__titleDragTransfer,bubbles:true}))})()')
-        await wait(80)
-        assert.equal(await js('getComputedStyle(document.querySelector("#dock-tab-workspace")).cursor'),'grabbing','The actual drag lifecycle enables the grab cursor')
-      }
-      await beginTitleDrag()
-      assert.equal(await js('!!document.querySelector(".rail-detach-target")'),true,'Title drags expose a detach target')
-      await js('document.querySelector("#dock-tab-workspace").dispatchEvent(new DragEvent("dragend",{bubbles:true}))');await wait(80)
-      assert.equal(await js('!!document.querySelector(".rail-detach-target")'),false,'Canceling a title drag clears its target')
-      assert.equal(await js('getComputedStyle(document.querySelector("#dock-tab-workspace")).cursor'),'default','Canceling restores the ordinary cursor')
-      assert.equal(await js('document.querySelectorAll(".rail-group-button").length'),1,'Canceling does not change the combination')
-      await beginTitleDrag()
-      await capture('sidebar-title-detach-target')
-      await js('(()=>{const rail=document.querySelector(".activity-rail"),dt=window.__titleDragTransfer;const over=new DragEvent("dragover",{dataTransfer:dt,bubbles:true,cancelable:true});rail.dispatchEvent(over);if(!over.defaultPrevented)throw Error("Title drag was not accepted");rail.dispatchEvent(new DragEvent("drop",{dataTransfer:dt,bubbles:true,cancelable:true}))})()')
-      await wait(250)
-      assert.equal(await js('document.querySelectorAll(".rail-group-button").length'),2,'Dropping a title restores one independent icon')
-      assert.equal(await js('document.querySelector(".chat-list").checkVisibility()&&document.querySelector(".browser-panel").checkVisibility()&&!document.querySelector(".workspace-panel").checkVisibility()'),true,'The remaining combination stays open')
-      assert.equal(await js('document.querySelectorAll(".rail-group-button[aria-pressed=true]").length'),1,'Detaching preserves exclusive selection')
-      assert.equal(await js('window.__workspaceNode===document.querySelector(".workspace-panel")'),true,'Detaching keeps mounted file-tree state')
-      assert.equal(await js('!!document.querySelector(".rail-detach-target,.rail-drag-hint,.dock-drop-zones")'),false,'Dropping clears all drag feedback')
-      await click('[data-panel="workspace"]')
-      assert.equal(await js('document.querySelector(".workspace-panel").checkVisibility()&&!document.querySelector(".chat-list").checkVisibility()'),true,'The detached icon opens independently')
-      assert.equal(await js('document.querySelectorAll(".dock-collapse").length'),0,'A detached panel expands without an obsolete collapse control')
-      await capture('sidebar-title-detached')
-      await wait(180);await win.webContents.reload();await wait(650)
-      assert.equal(await js('document.querySelectorAll(".rail-group-button").length'),2,'Detached membership survives restart')
-      assert.equal(await js('document.querySelector("[data-panel=workspace]").getAttribute("aria-pressed")'),'true')
-      await railDrag('[data-panel="workspace"]','.rail-group-button:not([data-panel])')
-      await wait(180);await win.webContents.reload();await wait(650)
-      assert.equal(await js('document.querySelectorAll(".rail-group-button").length'),1,'Combination membership survives restart')
-      await js('document.querySelector(".rail-group-button").dispatchEvent(new KeyboardEvent("keydown",{key:"F10",shiftKey:true,bubbles:true}))')
-      await wait(120);await js('[...document.querySelectorAll(".rail-group-menu button")].find(el=>el.textContent==="全部拆开").click()');await wait(180)
-      assert.equal(await js('document.querySelectorAll(".rail-group-button").length'),3,'Splitting restores independent icons')
+      await click('[data-owner-id="chat_renovation118"] .resource-owner-toggle')
+      await click('.global-resources .tree-row[title="other-only.txt"]')
+      assert.equal(await js('document.querySelector(".preview-code")?.textContent'),'From another conversation','Global preview carries the resource owner, not the active chat')
+      await click('[aria-label="关闭文件预览"]')
+      await capture('all-chat-files')
+      await js('(async()=>{window.__localSession=await window.navora.browser.createSession("chat_renovation119",{persist:false});window.__otherSession=await window.navora.browser.createSession("chat_renovation118",{persist:false});await window.navora.browser.createWindow(window.__otherSession.sessionId,{url:"about:blank",show:false})})()')
+      await click('[data-chat-resource="browser"]')
+      assert.equal(await js('document.querySelectorAll(".chat-resource-popup .tree-sess").length'),1,'Current browser popover excludes unrelated sessions')
+      await capture('current-chat-browser')
+      await click('[aria-label="关闭资源面板"]')
+      await click('[data-panel="browser"]')
+      assert.equal(await js('document.querySelectorAll("[data-resource-kind=browser] .resource-owner").length'),2,'Global browser shows owners from every chat')
+      assert.equal(await js('(async()=>{const sessions=await window.navora.browser.treeAll();return new Set(sessions.map(s=>s.sessionId)).size===sessions.length})()'),true,'All-tree snapshot never duplicates sessions')
+      await capture('all-chat-browser')
+      assert.equal(await js('document.querySelectorAll(".rail-panel-button[aria-pressed=true]").length'),1,'Only one global sidebar is open')
+      assert.equal(await js('document.querySelectorAll(".rail-panel-groups [draggable=true],.dock-header [draggable=true],.dock-collapse,.dock-divider,.rail-composite-icon").length'),0,'Grouping, dragging and collapse controls are removed')
+      await click('[data-panel="browser"]')
+      assert.equal(await js('document.querySelector(".sidebar").getBoundingClientRect().width'),52,'Closing the selected sidebar leaves only the icon rail')
+      await js('localStorage.setItem("navora.sidebar.rail",JSON.stringify({version:1,active:"old-combination",groups:[{id:"old-combination",panels:["chats","workspace","browser"]}]}))')
+      await win.webContents.reload();await wait(400)
+      assert.equal(await js('document.querySelectorAll(".rail-panel-button").length'),3,'Legacy combinations become independent entries')
+      assert.equal(await js('document.querySelectorAll(".rail-panel-button[aria-pressed=true]").length'),1)
       await click('.chat-batch-trigger')
       assert.equal(await js('document.querySelector(".batch-delete-btn").disabled'),true,'Batch actions start disabled')
       await click('.chat-item-main')
@@ -291,6 +249,12 @@ app.on('browser-window-created', (_,win) => {
       await wait(350)
       const jumpError = await js(`(()=>{const box=document.querySelector('.messages'),row=box.querySelector('[data-msg-id="u70"]');return Math.abs(row.getBoundingClientRect().top-box.getBoundingClientRect().top)})()`)
       assert.ok(jumpError < 5,'Long conversation jumps stay aligned after deferred painting: '+jumpError)
+      const outlinePoint=await js('(()=>{const r=document.querySelector(".outline-step.current").getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()')
+      win.webContents.sendInputEvent({type:'mouseMove',...outlinePoint});await wait(220)
+      assert.equal(await js('!!document.querySelector(".outline-preview")'),true,'Jump rail exposes an animated preview')
+      await capture('conversation-jump-preview')
+      win.webContents.sendInputEvent({type:'mouseMove',x:500,y:450});for(let n=0;n<12;n++){await wait(80);if(!await js('!!document.querySelector(".outline-preview")'))break}
+      assert.equal(await js('!!document.querySelector(".outline-preview")'),false,'Jump previews leave without blocking conversation controls')
       // Stress interrupted transitions, then verify both visibility and pointer exclusion.
       await click('[data-panel="workspace"]')
       const samples: Array<{p95:number;inputP95:number;samples:number}> = []
@@ -298,7 +262,7 @@ app.on('browser-window-created', (_,win) => {
         samples.push(await js(`(async()=>{
           const frames=[],responses=[]; let last=performance.now(),running=true;
           const frame=now=>{frames.push(now-last);last=now;if(running)requestAnimationFrame(frame)};requestAnimationFrame(frame);
-          const b=document.querySelector('[aria-label="显示/隐藏工作区"]');
+          const b=document.querySelector('[data-panel="workspace"]');
           for(let i=0;i<20;i++){const start=performance.now();b.click();await Promise.resolve();responses.push(performance.now()-start);await new Promise(r=>setTimeout(r,35))}
           await new Promise(r=>setTimeout(r,400));running=false;
           const values=frames.slice(3).sort((a,b)=>a-b);responses.sort((a,b)=>a-b);
@@ -307,14 +271,14 @@ app.on('browser-window-created', (_,win) => {
       }
       // Replicate the fixed scene three times so one scheduler pause cannot dominate a short sample.
       const frameMetrics = { medianP95:samples.map(s=>s.p95).sort((a,b)=>a-b)[1]!, medianInputP95:samples.map(s=>s.inputP95).sort((a,b)=>a-b)[1]!, samples }
-      assert.equal(await js(`(()=>{const b=document.querySelector('[aria-label="显示/隐藏工作区"]'),pane=document.querySelector('.sidebar-workspace-pane');return b.getAttribute('aria-pressed')==='true' && pane.checkVisibility() && !pane.inert})()`),true,'Interrupted toggles settle on the intended visible state')
+      assert.equal(await js(`(()=>{const b=document.querySelector('[data-panel="workspace"]'),pane=document.querySelector('#dock-pane-workspace');return b.getAttribute('aria-pressed')==='true' && pane.checkVisibility() && !pane.inert})()`),true,'Interrupted toggles settle on the intended visible state')
       if (!reduced) assert.ok(frameMetrics.medianP95 <= 32,'Animated long-list median frame p95 stays within 32 ms: '+JSON.stringify(frameMetrics))
       else {
         assert.ok(frameMetrics.medianInputP95 <= 32,'Reduced-motion input updates stay within 32 ms: '+JSON.stringify(frameMetrics))
         assert.equal(await js("document.getAnimations().filter(a=>a.playState==='running').length"),0,'Reduced motion has no running effects')
       }
-      await click('[aria-label="显示/隐藏工作区"]'); await wait(350)
-      assert.equal(await js('document.querySelector(".sidebar-workspace-pane").checkVisibility()'),false,'Hidden pane leaves no intermediate layer')
+      await click('[data-panel="workspace"]'); await wait(350)
+      assert.equal(await js('document.querySelector("#dock-pane-workspace").checkVisibility()'),false,'Hidden pane leaves no intermediate layer')
       await capture('sidebar-interrupted')
       // Narrow settings use their own header; chat header returns on exit.
       for (const width of [1280,960,720,390]) {
@@ -331,8 +295,36 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js(`(()=>{const preview=document.querySelector('.file-preview').getBoundingClientRect(),caption=document.querySelector('.mobile-topbar').getBoundingClientRect();return preview.top>=caption.bottom-1})()`),true,'Narrow preview stays below the caption and chat header')
       await capture('file-preview-narrow')
       await click('[aria-label="关闭文件预览"]')
+      win.setContentSize(1440,900);await wait(200)
+      await js('window.navora.agent.submit("chat_renovation119",{content:"UI_QUEUE_FIRST"},"queue")')
+      for(let n=0;n<50&&!releaseQueueFirst;n++)await wait(30)
+      assert.ok(releaseQueueFirst,'Agent request is in flight')
+      await input('.composer-input textarea','UI_QUEUE_SECOND')
+      await click('[aria-label="加入队列"]')
+      await js('window.navora.agent.submit("chat_renovation119",{content:"UI_QUEUE_DELETE"},"queue")');await wait(100)
+      await click('.message-queue li:last-child [aria-label="删除队列消息"]')
+      await click('.message-queue li:first-child [aria-label="编辑队列消息"]')
+      await js('document.querySelector(".message-queue textarea").focus()')
+      win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});await wait(100)
+      assert.equal(await js('window.navora.agent.isRunning("chat_renovation119")'),true,'Escape in the queue editor never stops the active task')
+      await click('.message-queue li:first-child [aria-label="编辑队列消息"]')
+      await input('.message-queue textarea','UI_QUEUE_SECOND_EDITED')
+      await js('[...document.querySelectorAll(".queue-edit-actions button")].find(button=>button.textContent==="保存").click()');await wait(120)
+      await js('window.navora.agent.submit("chat_renovation119",{content:"UI_QUEUE_STEER"},"queue")');await wait(100)
+      await click('.message-queue li:last-child [aria-label="直接插入队列消息"]')
+      const persistedQueue=JSON.parse(fs.readFileSync(path.join(root,'chats','chat_renovation119.json'),'utf8')).queuedMessages
+      assert.deepEqual(persistedQueue.map((entry:{content:string})=>entry.content),['UI_QUEUE_SECOND_EDITED'],'The main process persists only unsent work')
+      assert.equal(await js('Math.abs(document.querySelector(".message-queue").getBoundingClientRect().width-document.querySelector(".composer-box").getBoundingClientRect().width)<1'),true,'Queue aligns with the composer width')
+      await capture('conversation-message-queue')
+      releaseQueueFirst!()
+      for(let n=0;n<150;n++){if(await js('(async()=>{const c=await window.navora.chats.get("chat_renovation119");return !await window.navora.agent.isRunning(c.id)&&!c.queuedMessages?.length})()'))break;await wait(40)}
+      assert.deepEqual(queuePrompts,['UI_QUEUE_FIRST','UI_QUEUE_STEER','UI_QUEUE_SECOND_EDITED'],'Insertion reaches the active model context before the queued task starts')
+      const sentUsers=await js('(async()=>{const c=await window.navora.chats.get("chat_renovation119");return c.messages.filter(m=>m.role==="user"&&m.content.startsWith("UI_QUEUE_")).map(m=>m.content)})()')
+      assert.deepEqual(sentUsers,['UI_QUEUE_FIRST','UI_QUEUE_STEER','UI_QUEUE_SECOND_EDITED'],'Each user message is recorded once and deleted work is never executed')
+      assert.equal(await js('!!document.querySelector(".message-queue")'),false,'The empty queue disappears')
+      await capture('conversation-unified-activity')
       assert.deepEqual(errors,[],'No renderer errors')
-      fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reduced,frameMetrics,modelRequests,checks:['provider-drafts','reopen-draft','tier-rename','preview-race','separate-probes','permission-search','visible-empty-states','workspace-keyboard','file-preview','file-preview-source-safety','file-preview-width','compact-chat-rows','dock-three-panels','dock-state-retention','dock-splitting','dock-keyboard','dock-persistence','long-conversation-jump','zoom-layout','interrupted-motion','single-mobile-header']},null,2))
+      fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reduced,frameMetrics,modelRequests,checks:['provider-drafts','reopen-draft','tier-rename','preview-race','separate-probes','permission-search','visible-empty-states','workspace-keyboard','file-preview','file-preview-source-safety','file-preview-width','compact-chat-rows','current-resource-popovers','all-chat-files','all-browser-owners','single-sidebar','old-group-migration','message-queue-edit-delete-insert','main-process-queue-persistence','active-context-insertion','long-conversation-jump','zoom-layout','interrupted-motion','single-mobile-header']},null,2))
       console.log(JSON.stringify({ok:true,reduced,frameMetrics,modelRequests}))
       server.close(); app.exit(0)
     } catch(error) { console.error(error); await capture('failure'); server.close(); app.exit(1) }
