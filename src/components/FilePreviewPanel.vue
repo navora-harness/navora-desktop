@@ -6,20 +6,21 @@
       <div v-if="!tabbed" class="preview-name" :title="path">{{ name }}</div>
       <span v-if="tabbed" class="preview-name">{{ data?.kind==='image'?'图片':data?.kind==='markdown'?'Markdown':data?.kind==='text'?'文本':'文件' }}</span>
       <select v-if="data?.kind==='image'" v-model="imageZoom" class="preview-zoom" aria-label="图片缩放"><option value="fit">适应窗口</option><option value="50">50%</option><option value="100">100%</option><option value="150">150%</option><option value="200">200%</option></select>
-      <button type="button" title="刷新预览" aria-label="刷新预览" :disabled="loading" @click="load"><font-awesome-icon icon="arrow-rotate-right" /></button>
+      <button type="button" title="刷新预览" aria-label="刷新预览" :disabled="loading" @click="load(true)"><font-awesome-icon icon="arrow-rotate-right" /></button>
       <button type="button" title="在系统中打开" aria-label="在系统中打开" @click="systemOpen"><font-awesome-icon icon="arrow-up-right-from-square" /></button>
       <button v-if="!tabbed" ref="closeButton" type="button" title="关闭预览" aria-label="关闭文件预览" @click="emit('close')"><font-awesome-icon icon="xmark" /></button>
     </header>
     <div v-if="data?.ok" class="preview-tools">
       <span>{{ formatSize(data.size || 0) }}</span>
+      <span v-if="loading" role="status">更新中…</span>
       <span v-if="data.truncated">仅显示前 256 KB</span>
       <span class="preview-spacer" />
       <button v-if="data.kind === 'markdown'" type="button" :aria-pressed="!source" @click="source = !source">{{ source ? '预览' : '源码' }}</button>
       <button v-if="data.content !== undefined" type="button" @click="copy">{{ copied ? '已复制' : '复制' }}</button>
     </div>
     <div class="preview-content" :aria-busy="loading">
-      <div v-if="loading" class="preview-empty" role="status">正在读取…</div>
-      <div v-else-if="error" class="preview-empty" role="alert"><span>{{ error }}</span><button type="button" @click="load">重试</button></div>
+      <div v-if="loading && !data" class="preview-empty" role="status">正在读取…</div>
+      <div v-else-if="error" class="preview-empty" role="alert"><span>{{ error }}</span><button type="button" @click="load()">重试</button></div>
       <template v-else-if="data">
         <div v-if="data.kind === 'image'" class="preview-image" :class="imageZoom==='fit'?'fit':'zoomed'"><img :style="imageZoom==='fit'?{}:{width:`${imageNaturalWidth*Number(imageZoom)/100}px`,maxWidth:'none'}" @load="imageNaturalWidth=($event.target as HTMLImageElement).naturalWidth" :src="`data:${data.mime};base64,${data.base64}`" :alt="name" @error="error = '无法显示此图片'" /></div>
         <div v-else-if="data.kind === 'markdown' && !source" class="preview-markdown" v-html="markdown" @click="onLink" />
@@ -57,11 +58,11 @@ let reloadTimer: ReturnType<typeof setTimeout> | undefined
 let stopResize: (() => void) | undefined
 let unsubscribe: (() => void) | undefined
 
-async function load() {
+async function load(preserve=false) {
   const seq = ++sequence
   loading.value = true
   error.value = ''
-  data.value = null
+  if(!preserve)data.value = null
   const chatId = props.chatId, path = props.path
   try {
     const result = await window.navora!.workspace.preview(chatId, path)
@@ -70,6 +71,7 @@ async function load() {
     data.value = result
   } catch (err) {
     if (disposed || seq !== sequence) return
+    data.value=null
     const message = String(err)
     error.value = /ENOENT|not_found/.test(message) ? '文件已移走或删除' : /outside_workspace/.test(message) ? '文件不在当前工作区内' : '无法读取此文件'
   } finally { if (!disposed && seq === sequence) loading.value = false }
@@ -97,7 +99,9 @@ function onLink(event: MouseEvent) {
   event.preventDefault()
   const url = anchor.getAttribute('href') || ''
   if (/^https?:\/\//i.test(url)) void window.navora?.app.openExternal(url)
-  else { const path=workspaceLinkPath(url); if(path)emit('openFile',path) }
+  else if(url.startsWith('#')){
+    try{(event.currentTarget as Element).querySelector(`#${CSS.escape(decodeURIComponent(url.slice(1)))}`)?.scrollIntoView({block:'nearest'})}catch{/* Unknown anchors stay in this document. */}
+  }else { const path=workspaceLinkPath(url,props.path); if(path)emit('openFile',path);else emit('notify','无法打开此文件链接') }
 }
 function formatSize(bytes: number) { return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB` }
 function clampWidth(value: number) { emit('resize', Math.max(280, Math.min(maximum.value, value))) }
@@ -143,11 +147,11 @@ onMounted(() => {
     if (event.chatId !== props.chatId) return
     if (!active) { dirty=true; return }
     clearTimeout(reloadTimer)
-    reloadTimer = setTimeout(() => { void load() }, 200)
+    reloadTimer = setTimeout(() => { void load(true) }, 200)
   })
 })
 onDeactivated(()=>{active=false})
-onActivated(()=>{active=true;if(dirty){dirty=false;void load()}})
+onActivated(()=>{active=true;if(dirty){dirty=false;void load(true)}})
 onBeforeUnmount(() => { disposed = true; sequence++; stopResize?.(); unsubscribe?.(); clearTimeout(reloadTimer); clearTimeout(copiedTimer); window.removeEventListener('resize', onResize); window.removeEventListener('keydown', onKey, true) })
 </script>
 

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { AppConfig } from '../../shared/config'
 import type { WorkspacePreview } from '../../shared/workspace-preview'
+import {resourceKind,type WorkspaceResourceSnapshot} from '../../shared/workspace-resources'
 
 /** True if `child` is `parent` or a path under it (sep-safe). */
 export function isPathInsideOrEqual(parent: string, child: string): boolean {
@@ -130,14 +131,20 @@ export class WorkspaceFiles {
     }
   }
 
-  /** Index existing workspaces without creating empty directories or following links. */
-  async containsFiles(chatId:string):Promise<boolean> {
+  private async existingRoot(chatId:string):Promise<string|null> {
     const override=this.getChatWorkspaceRoot?.(chatId)?.trim()
     const custom=this.getConfig().files.custom_root?.trim()
     const candidate=override&&this.isAllowedWorkspaceRoot(override)?path.resolve(override)
       :path.resolve(custom||path.resolve(this.dataRoot,this.getConfig().files.root_dirname||'workspace'),sanitizeSeg(chatId))
-    try{await fsp.access(candidate)}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return false;throw error}
-    const root=await this.resolveExisting(chatId,'.'),pending=[root]
+    try{await fsp.access(candidate)}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error}
+    return this.resolveExisting(chatId,'.')
+  }
+
+  /** Index existing workspaces without creating empty directories or following links. */
+  async containsFiles(chatId:string):Promise<boolean> {
+    const root=await this.existingRoot(chatId)
+    if(!root)return false
+    const pending=[root]
     while(pending.length){
       const current=await this.resolveExisting(chatId,path.relative(root,pending.pop()!)||'.')
       const entries=await fsp.readdir(current,{withFileTypes:true})
@@ -148,6 +155,46 @@ export class WorkspaceFiles {
       }
     }
     return false
+  }
+
+  /** Bounded metadata only: every visited directory stays inside the owner's workspace. */
+  async resources(chatId:string):Promise<WorkspaceResourceSnapshot> {
+    const root=await this.existingRoot(chatId)
+    const result:WorkspaceResourceSnapshot={ok:true,entries:[],truncated:false,unavailable:0}
+    if(!root)return result
+    const realRoot=await fsp.realpath(root)
+    const limit=Math.max(1,Math.min(2000,this.getConfig().files.max_list_entries||500))
+    const budget=Math.max(128,limit*4),pending=['.']
+    let visited=0
+    for(let index=0;index<pending.length;index++){
+      if(visited>=budget||result.entries.length>=limit){result.truncated=true;break}
+      const relative=pending[index]!
+      try{
+        const directory=await this.resolveExisting(chatId,relative)
+        const stream=await fsp.opendir(directory)
+        for await(const entry of stream){
+          if(visited++>=budget||result.entries.length>=limit){result.truncated=true;break}
+          if(entry.isSymbolicLink())continue
+          const child=relative==='.'?entry.name:`${relative}/${entry.name}`
+          if(entry.isDirectory()){pending.push(child);continue}
+          if(!entry.isFile())continue
+          try{
+            const absolute=path.resolve(root,child)
+            if(!isPathInsideOrEqual(root,absolute))throw Error('path_outside_workspace')
+            const real=await fsp.realpath(absolute)
+            if(!isPathInsideOrEqual(realRoot,real))throw Error('path_outside_workspace')
+            const stat=await fsp.lstat(absolute)
+            if(!stat.isFile()||stat.isSymbolicLink())continue
+            result.entries.push({id:JSON.stringify([chatId,child]),ownerChatId:chatId,path:child,name:entry.name,kind:resourceKind(child),size:stat.size,mtimeMs:stat.mtimeMs,revision:`${stat.mtimeMs}:${stat.size}`})
+          }catch(error){if(!/ENOENT/.test(String(error)))result.unavailable++}
+        }
+      }catch(error){
+        if(relative==='.')throw error
+        if(!/ENOENT/.test(String(error)))result.unavailable++
+      }
+    }
+    result.entries.sort((a,b)=>b.mtimeMs-a.mtimeMs||a.path.localeCompare(b.path))
+    return result
   }
 
   /** Resolve a relative workspace path; throws if escapes sandbox. */

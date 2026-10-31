@@ -112,3 +112,30 @@ test('concatenation enforces the write limit without replacing the destination',
   assert.equal((await files.readText('chat', 'dest.txt')).content, 'keep')
   assert.equal((await fs.readdir(root)).some((name) => name.endsWith('.tmp')), false)
 })
+
+
+test('resource snapshots preserve nested owner metadata, versions, missing roots and link boundaries',async t=>{
+  const {base,files,root}=await fixture(t)
+  assert.deepEqual((await files.resources('missing')).entries,[])
+  await assert.rejects(fs.access(path.join(base,'workspace','missing')))
+  await fs.mkdir(path.join(root,'nested'));await fs.writeFile(path.join(root,'nested','report.md'),'first')
+  const outside=path.join(base,'elsewhere');await fs.mkdir(outside);await fs.writeFile(path.join(outside,'private.txt'),'private')
+  await fs.symlink(outside,path.join(root,'link'),process.platform==='win32'?'junction':'dir')
+  const first=await files.resources('chat'),entry=first.entries[0]!
+  assert.equal(first.entries.length,1);assert.equal(entry.path,'nested/report.md');assert.equal(entry.ownerChatId,'chat');assert.equal(entry.kind,'document')
+  await fs.writeFile(path.join(root,'nested','report.md'),'second version')
+  const second=(await files.resources('chat')).entries[0]!
+  assert.equal(second.id,entry.id);assert.notEqual(second.revision,entry.revision)
+  await fs.rm(path.join(root,'nested','report.md'));assert.equal((await files.resources('chat')).entries.length,0)
+})
+test('resource snapshot limits and inaccessible subdirectories are explicit instead of false emptiness',async t=>{
+  const {base,root}=await fixture(t)
+  for(let i=0;i<4;i++)await fs.writeFile(path.join(root,`${i}.txt`),'file')
+  const bounded=new WorkspaceFiles(base,()=>({files:{root_dirname:'workspace',max_list_entries:2}}) as AppConfig)
+  const result=await bounded.resources('chat');assert.equal(result.entries.length,2);assert.equal(result.truncated,true)
+  await fs.mkdir(path.join(root,'locked'))
+  const resolve=bounded.resolveExisting.bind(bounded)
+  bounded.resolveExisting=async(id,relative)=>{if(relative==='locked')throw Error('EACCES');return resolve(id,relative)}
+  for(let i=1;i<4;i++)await fs.rm(path.join(root,`${i}.txt`))
+  const partial=await bounded.resources('chat');assert.equal(partial.entries.length,1);assert.equal(partial.unavailable,1)
+})

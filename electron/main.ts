@@ -15,6 +15,7 @@ import { BrowserRegistry } from './modules/browser-registry'
 import { BrowserNetworkManager } from './modules/browser-network'
 import { WorkspaceFiles } from './modules/workspace-files'
 import {WorkspaceResourceIndex} from './modules/workspace-resource-index'
+import {associateResourceEvidence} from '../shared/workspace-resources'
 import { FileDownloadService } from './modules/file-download'
 import { BrowserDownloadList } from './modules/browser-download-list'
 import { ToolDownloadList } from '../shared/tool-downloads'
@@ -1430,7 +1431,12 @@ function registerIpc(): void {
     }
   })
 
-  workspaceResourceIndex=new WorkspaceResourceIndex(id=>files.containsFiles(id))
+  workspaceResourceIndex=new WorkspaceResourceIndex(id=>files.containsFiles(id),id=>files.resources(id))
+  rpcHandle('navora:workspace.resources',async(_e,chatId:string,refresh?:boolean)=>{
+    if(!chatId||!chats.get(chatId))return {ok:false,entries:[],truncated:false,unavailable:0,error:'chat_not_found'}
+    try{const result=await workspaceResourceIndex!.resources(chatId,refresh===true);return {...result,entries:associateResourceEvidence(result.entries,chats.get(chatId)?.messages||[])}}
+    catch{return {ok:false,entries:[],truncated:false,unavailable:1,error:'resource_index_failed'}}
+  })
   rpcHandle('navora:workspace.hasFiles',(_e,chatId:string)=>files.containsFiles(chatId))
   rpcHandle('navora:workspace.owners',(_e,refresh?:boolean)=>workspaceResourceIndex!.owners(chats.list().map(chat=>chat.id),refresh===true))
 

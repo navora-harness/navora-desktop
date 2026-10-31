@@ -5,7 +5,7 @@ import {browserResourceIds,ResourceAutoOpen} from '@shared/conversation-resource
 export type ResourceTab='overview'|'files'|'browser'|'outputs'
 export function useConversationResources(chatId:Ref<string|null>,tree:Ref<BrowserTreeSession[]>){
   const open=ref(false),tab=ref<ResourceTab>('overview'),files=ref<string[]>([])
-  const discovery=new ResourceAutoOpen(),revisions=new Map<string,number>()
+  const discovery=new ResourceAutoOpen()
   let generation=0,timer:ReturnType<typeof setTimeout>|undefined,unsubscribe:(()=>void)|undefined
   const browserIds=computed(()=>browserResourceIds(tree.value))
   function discover(){
@@ -17,10 +17,11 @@ export function useConversationResources(chatId:Ref<string|null>,tree:Ref<Browse
     const id=chatId.value,seq=++generation
     if(!id)return
     try{
-      const hasFiles=await window.navora!.workspace.hasFiles(id)
+      const resources=await window.navora!.workspace.resources(id)
+      if(!resources.ok)return
       if(seq!==generation||id!==chatId.value)return
-      // Main-process changes include deep writes; browser loading never changes this revision.
-      files.value=hasFiles?[`file:${id}:${revisions.get(id)||0}`]:[]
+      // Existing files keep their identity across writes, refreshes and browser loading.
+      files.value=resources.entries.map(entry=>`file:${entry.id}`)
       discover()
     }catch{/* The file panel owns its retry/error state. */}
   }
@@ -28,7 +29,7 @@ export function useConversationResources(chatId:Ref<string|null>,tree:Ref<Browse
   function close(){open.value=false}
   watch(chatId,()=>{generation++;clearTimeout(timer);files.value=[];open.value=false;tab.value='overview';void refresh()},{immediate:true,flush:'sync'})
   watch(browserIds,discover)
-  onMounted(()=>{unsubscribe=window.navora?.workspace.onChanged(event=>{if(event.chatId!==chatId.value)return;revisions.set(event.chatId,(revisions.get(event.chatId)||0)+1);clearTimeout(timer);timer=setTimeout(()=>void refresh(),120)})})
+  onMounted(()=>{unsubscribe=window.navora?.workspace.onChanged(event=>{if(event.chatId!==chatId.value)return;clearTimeout(timer);timer=setTimeout(()=>void refresh(),120)})})
   onBeforeUnmount(()=>{generation++;clearTimeout(timer);unsubscribe?.()})
   return {open,tab,show,close,refresh}
 }

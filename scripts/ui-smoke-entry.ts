@@ -247,9 +247,9 @@ app.on('browser-window-created',(_event,win) => {
         assert.ok(settingsHeader.backWidth<=32 && settingsHeader.backLeft<settingsHeader.titleLeft && !settingsHeader.hasCloseInActions,'Back is compact and sits beside the title')
         assert.equal(settingsHeader.saveHeight,28,'Apply has a compact fixed height')
         assert.ok(settingsHeader.saveRight<=settingsHeader.viewport-145,'Apply leaves a gap before native window controls')
-        const settingsBody = await win.webContents.executeJavaScript(`(()=>{const page=document.querySelector('.settings-workspace'),shell=page.querySelector(':scope>.shell'),panel=page.querySelector('.panel'),section=page.querySelector('.section');return {page:page.getBoundingClientRect().toJSON(),shell:shell.getBoundingClientRect().toJSON(),panel:panel.getBoundingClientRect().toJSON(),section:section.getBoundingClientRect().toJSON(),rows:getComputedStyle(shell).gridTemplateRows}})()`)
+        const settingsBody = await win.webContents.executeJavaScript(`(()=>{const page=document.querySelector('.settings-workspace'),shell=page.querySelector(':scope>.shell'),panel=page.querySelector('.panel'),section=page.querySelector('.section');return {viewportHeight:innerHeight,page:page.getBoundingClientRect().toJSON(),shell:shell.getBoundingClientRect().toJSON(),panel:panel.getBoundingClientRect().toJSON(),section:section.getBoundingClientRect().toJSON(),rows:getComputedStyle(shell).gridTemplateRows}})()`)
         assert.ok(Math.abs(settingsBody.panel.bottom-settingsBody.page.bottom)<2,'Settings content fills the workspace: '+JSON.stringify(settingsBody))
-        assert.ok(Math.abs(settingsBody.page.bottom-900)<2,'Settings replaces the full chat grid rather than its first auto row: '+JSON.stringify(settingsBody))
+        assert.ok(Math.abs(settingsBody.page.bottom-settingsBody.viewportHeight)<2,'Settings replaces the full chat grid rather than its first auto row: '+JSON.stringify(settingsBody))
         assert.ok(settingsBody.section.width<=760,'Basic preferences use a readable column')
         await capture('navora-settings.png')
         for(const label of ['模型','浏览器','工作区','技能','插件','远程访问','权限','询问/决策','子对话','关于','基本']) {

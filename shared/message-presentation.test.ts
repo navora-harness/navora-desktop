@@ -47,3 +47,13 @@ test('expanded-tool and hidden-log preferences retain progress and terminal fail
   const last=blocks.at(-1)!
   assert.equal(last.type==='log' && last.message.id,'failure')
 })
+
+
+test('turn stopping and round limits remain visible when routine logs are disabled',()=>{
+  for(const kind of ['agent_stop','round_limit']){
+    const blocks=transcriptBlocks([message('u','user'),message('end','log',{kind})],{collapseTools:true,collapseLogs:true,showLogs:false})
+    assert.equal(blocks.at(-1)!.type,'run')
+    const last=blocks.at(-1)!
+    assert.equal(last.type==='run'&&last.items[0]!.meta?.kind,kind)
+  }
+})

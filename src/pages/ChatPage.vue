@@ -1536,9 +1536,9 @@
         </div>
       </div>
       <Transition name="resource-card">
-        <ConversationResourcesCard v-if="resourceOpen && activeId && !settingsOpen && !creatorKind" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :overlay="resourceOverlay" :available-width="resourceAvailableWidth" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="jumpToMessage" @open-media="(p) => openLightbox(p.src,p.alt)" />
+        <ConversationResourcesCard v-if="resourceOpen && activeId && !settingsOpen && !creatorKind" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :overlay="resourceOverlay" :available-width="resourceAvailableWidth" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="locateResourceMessage({chatId:activeId!,messageId:$event})" @open-media="(p) => openLightbox(p.src,p.alt)" />
       </Transition>
-      <Transition name="file-workspace"><FileWorkspace v-if="fileWorkspaceVisible" :tabs="fileTabsState.tabs" :active="activeFileTab" :viewer-chat-id="activeId || ''" :width="fileWorkspaceWidth" :maximum="fileWorkspaceMaximum" :overlay="fileWorkspaceOverlay" :owner-label="treeOwnerLabel" @select="selectFileTab" @close="closeFileTab" @hide="hideFileWorkspace" @open-file="openFilePreview($event.path,$event.chatId)" @resize="resizeFileWorkspace" @notify="onPanelNotify" /></Transition>
+      <Transition name="file-workspace"><FileWorkspace v-if="fileWorkspaceVisible" :tabs="fileTabsState.tabs" :active="activeFileTab" :viewer-chat-id="activeId || ''" :width="fileWorkspaceWidth" :maximum="fileWorkspaceMaximum" :overlay="fileWorkspaceOverlay" :owner-label="treeOwnerLabel" @select="selectFileTab" @close="closeFileTab" @hide="hideFileWorkspace" @open-file="openFilePreview($event.path,$event.chatId)" @locate="locateResourceMessage" @resize="resizeFileWorkspace" @notify="onPanelNotify" /></Transition>
     </main>
 
     <v-dialog
@@ -1807,7 +1807,7 @@
       </div>
     </Teleport>
 
-    <DocsDialog v-model="docsOpen" />
+    <DocsDialog v-if="docsOpen" v-model="docsOpen" />
     <SkillReviewHost />
 
     <v-snackbar v-model="toast.show" :color="toast.color" timeout="2800" location="bottom">
@@ -1851,13 +1851,14 @@ import {
 } from '@shared/followups'
 import { normalizeProvider, resolveModelName, resolveProvider } from '@shared/model-providers'
 import ChatMarkdown from '@/components/ChatMarkdown.vue'
-import SettingsPage from './SettingsPage.vue'
+import {lazyPanel} from '@/utils/lazy-panel'
+const SettingsPage=lazyPanel(()=>import('./SettingsPage.vue'),'设置')
 import { useSidebarLayout } from '@/composables/useSidebarLayout'
 import SidebarNavigation from '@/components/sidebar/SidebarNavigation.vue'
 import GlobalResourcesPanel from '@/components/sidebar/GlobalResourcesPanel.vue'
 import ChatResourcesMenu from '@/components/ChatResourcesMenu.vue'
 import MessageQueue from '@/components/MessageQueue.vue'
-import DocsDialog from '@/components/DocsDialog.vue'
+const DocsDialog=lazyPanel(()=>import('@/components/DocsDialog.vue'),'帮助',true)
 import SkillReviewHost from '@/components/skills/SkillReviewHost.vue'
 import CatalogItemCard from '@/components/store/CatalogItemCard.vue'
 import ToolCatalogList from '@/components/store/ToolCatalogList.vue'
@@ -1870,7 +1871,7 @@ import {useResourceCardLayout} from '@/composables/useResourceCardLayout'
 import {useFileTabs} from '@/composables/useFileTabs'
 import {useFileWorkspaceLayout} from '@/composables/useFileWorkspaceLayout'
 import FileWorkspace from '@/components/FileWorkspace.vue'
-import CreatorWorkspace from '@/components/CreatorWorkspace.vue'
+const CreatorWorkspace=lazyPanel(()=>import('@/components/CreatorWorkspace.vue'),'创建器')
 import type { CreatorKind } from '@shared/creators'
 import SidebarDock from '@/components/sidebar/SidebarDock.vue'
 import { useSidebarDock } from '@/composables/useSidebarDock'
@@ -2266,7 +2267,7 @@ const sidebarMoreOpen = ref(false)
 const {open:resourceOpen,tab:resourceTab,show:showResources,close:hideResources} = useConversationResources(activeId,tree)
 function closeResources(){hideResources()}
 function toggleResources(){if(resourceOpen.value)closeResources();else showResources('overview')}
-const {current:fileTabsState,active:activeFileTab,open:openFileTab,select:selectFileTab,close:closeFileTab,hide:hideFileWorkspace,toggle:toggleFileWorkspace}=useFileTabs(activeId)
+const {current:fileTabsState,active:activeFileTab,open:openFileTab,select:selectFileTab,close:closeFileTab,hide:hideFileWorkspace,toggle:toggleFileWorkspace,removeOwner:removeFileOwner}=useFileTabs(activeId)
 const fileWorkspaceVisible=computed(()=>fileTabsState.value.open&&fileTabsState.value.tabs.length>0&&!settingsOpen.value&&!creatorKind.value)
 const previewWidth = ref(400)
 const mainElement=ref<HTMLElement|null>(null)
@@ -4589,6 +4590,7 @@ function cancelDeleteChat() {
 }
 
 function cleanupAfterChatDeleted(id: string) {
+  removeFileOwner(id)
   if (activeId.value === id) {
     activeId.value = null
     active.value = null
@@ -4942,7 +4944,17 @@ async function copyReply(message: ChatMessage) {
 
 let messageJump = 0
 let jumpFocusAnimation: Animation | null = null
+async function locateResourceMessage(payload:{chatId:string;messageId:string}){
+  if(activeId.value!==payload.chatId)await selectChat(payload.chatId)
+  if(resourceOverlay.value)closeResources()
+  if(fileWorkspaceOverlay.value)hideFileWorkspace()
+  await nextTick()
+  await jumpToMessage(payload.messageId)
+}
 async function jumpToMessage(id: string) {
+  const folded=messageBlocks.value.find(block=>block.type==='run'&&block.items.some(message=>message.id===id))
+  if(folded){expandedRuns.value={...expandedRuns.value,[folded.key]:true};await nextTick()}
+
   const box = msgBox.value
   const element = box?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`)
   if (!box || !element) return
