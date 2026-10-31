@@ -7,6 +7,8 @@ import { executeAgentTool, type ToolExecContext } from '../electron/modules/brow
 import { createDefaultConfig } from '../shared/config'
 import { PluginStore } from '../electron/modules/plugin-store'
 import { ChatStore } from '../electron/modules/chat-store'
+import { AgentRuntime } from '../electron/modules/agent-runtime'
+import { BrowserRegistry } from '../electron/modules/browser-registry'
 import { createPluginHostApi } from '../electron/modules/plugin-host'
 import type { PageSnapshot } from '../shared/page-index'
 
@@ -58,6 +60,41 @@ const call = async (name: string, args: Record<string, unknown> = {}) => {
 }
 
 try {
+  // Terminal status must not destroy a retained page or login. Exercise the real
+  // finalizer and registry, then explicitly release through the Agent tools.
+  const lifetimeRegistry = new BrowserRegistry(() => config)
+  const lifetimeRuntime = new AgentRuntime({
+    chats: titleChats, registry: lifetimeRegistry, getConfig: () => config, emit: () => {},
+  } as unknown as ConstructorParameters<typeof AgentRuntime>[0])
+  const parentSession = lifetimeRegistry.createSession(titleChat.id)
+  lifetimeRegistry.createWindow(parentSession.sessionId, { show: false })
+  const owners = [titleChat.id]
+  try {
+    for (const status of ['done', 'failed', 'cancelled'] as const) {
+      const child = titleChats.create('Browser lifetime fixture', { kind: 'sub', parentChatId: titleChat.id })
+      owners.push(child.id)
+      const session = lifetimeRegistry.createSession(child.id)
+      const page = lifetimeRegistry.createWindow(session.sessionId, { show: false })
+      const wc = lifetimeRegistry.assertWindowOwned(child.id, page.windowId).win.webContents
+      if (wc.isLoadingMainFrame()) await new Promise<void>(resolve => wc.once('did-finish-load', () => resolve()))
+      const ses = lifetimeRegistry.assertSessionOwned(child.id, session.sessionId).ses
+      await ses.cookies.set({ url: 'https://example.com', name: 'lifetime-fixture', value: 'retained' })
+      ;(lifetimeRuntime as unknown as { finalizeSubchat(id: string, status: string): void }).finalizeSubchat(child.id, status)
+      assert.equal(titleChats.get(child.id)?.spawnStatus, status)
+      assert.equal(lifetimeRegistry.getTree(child.id)[0]?.windows.length, 1, status + ' keeps the browser until Agent release')
+      assert.equal((await ses.cookies.get({ name: 'lifetime-fixture' }))[0]?.value, 'retained', status + ' retains session state')
+      const toolContext = { ...context, chatId: child.id, registry: lifetimeRegistry, network: { disposeSession() {} } } as unknown as ToolExecContext
+      await executeAgentTool('browser_window_close', { windowId: page.windowId }, toolContext)
+      assert.equal(lifetimeRegistry.getTree(child.id)[0]?.windows.length, 0, 'Agent can release a page separately')
+      assert.equal((await ses.cookies.get({ name: 'lifetime-fixture' })).length, 1, 'Window release keeps the reusable Session')
+      await executeAgentTool('browser_session_close', { sessionId: session.sessionId }, toolContext)
+      assert.equal(lifetimeRegistry.getTree(child.id).length, 0, 'Agent can explicitly release the entire Session')
+      assert.equal((await ses.cookies.get({ name: 'lifetime-fixture' })).length, 0, 'Explicit Session release clears its data')
+      assert.equal(lifetimeRegistry.getTree(titleChat.id)[0]?.windows.length, 1, 'Releasing a child does not affect its parent')
+    }
+  } finally {
+    for (const id of owners) await lifetimeRegistry.clearChat(id)
+  }
   crossFrameServer = http.createServer((_request,response) => {
     response.setHeader('Content-Type','text/html; charset=utf-8')
     response.end(`<button id="frame-action" onclick="parent.postMessage({type:'frame-click',trusted:event.isTrusted},'*')">Frame action</button>`)
@@ -222,7 +259,7 @@ try {
   assert.equal(win.webContents.getTitle(),'Native document')
   assert.equal(win.webContents.debugger.isAttached(),false)
   console.log(JSON.stringify({ok:true,electron:process.versions.electron,capabilities:capabilities.value,
-    checks:['title-provenance-manual-rename','weather-permissions','cancelled-navigation-soft-wait','wait-deadline-listener-cleanup','snapshot','cache','trusted-click','typed-input','open-shadow','closed-shadow-query','cross-origin-frame-query-click','no-arbitrary-frame-click','native-file-input-navigation','native-dialog','native-document-response','semantic-stale-ref','navigation-stale-ref','plugin-load-execute','plugin-permissions','no-debugger'],
+    checks:['agent-controlled-browser-lifetime','terminal-subchat-retains-page-and-cookie','explicit-window-and-session-release','title-provenance-manual-rename','weather-permissions','cancelled-navigation-soft-wait','wait-deadline-listener-cleanup','snapshot','cache','trusted-click','typed-input','open-shadow','closed-shadow-query','cross-origin-frame-query-click','no-arbitrary-frame-click','native-file-input-navigation','native-dialog','native-document-response','semantic-stale-ref','navigation-stale-ref','plugin-load-execute','plugin-permissions','no-debugger'],
     captureMs:snapshot.captureMs,permissionChecks,benchmark}))
 } catch(error) {
   console.error(error)

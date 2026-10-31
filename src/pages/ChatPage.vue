@@ -467,7 +467,6 @@
       </Transition>
       <Transition name="sidebar-flip">
         <div v-show="settingsOpen && !isMobileLayout" class="sidebar-settings-face">
-          <button type="button" class="settings-return" @click="settingsOpen = false"><font-awesome-icon icon="arrow-left" /> 返回对话</button>
           <div class="settings-sidebar-heading">设置</div>
           <div id="settings-sidebar-nav" />
         </div>

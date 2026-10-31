@@ -119,7 +119,7 @@ Renderer (Vue)
 
 - `agent_spawn_subchat`：子对话看不到父全文；需把 URL/sitekey 写入 `context`
 - 宿主会尝试从父对话近期消息补全 http(s) URL 与 Turnstile sitekey
-- 子对话结束清理其创建的浏览器资源
+- 浏览器释放由 Agent 按任务判断，子对话结束不会自动销毁窗口或登录状态；Agent 可分别关闭窗口或释放整个 Session，用户也可手动关闭
 
 ### 3.8 远程
 
