@@ -2,7 +2,7 @@
   <div class="sidebar-panel workspace-panel" :class="{ 'is-collapsed': collapsed }">
     <div class="res-head">
       <button type="button" class="res-label-btn" :aria-expanded="!collapsed" aria-label="折叠或展开工作区" @click="collapsed = !collapsed">
-        <font-awesome-icon :icon="collapsed ? 'chevron-right' : 'chevron-down'" class="res-chevron" />
+        <font-awesome-icon icon="chevron-down" class="res-chevron" />
         <span class="res-label">工作区</span>
       </button>
       <span class="res-head-actions">
@@ -26,7 +26,8 @@
         </button>
       </span>
     </div>
-    <div v-if="!collapsed" class="res-body" data-ctx-menu="workspace" @contextmenu="onRootMenu">
+    <Transition name="resource-body">
+    <div v-show="!collapsed" class="res-body" data-ctx-menu="workspace" @contextmenu="onRootMenu">
       <div v-if="rootLabel" class="ws-root" :title="absoluteRoot">{{ rootLabel }}</div>
       <div v-if="!chatId" class="res-empty">选择对话后查看文件</div>
       <div v-else-if="loadError" class="res-empty res-error">{{ loadError }}</div>
@@ -47,6 +48,7 @@
         <div v-if="truncated" class="res-empty">已达列出上限</div>
       </div>
     </div>
+    </Transition>
 
     <SidebarContextMenu ref="menu">
       <template v-if="menuEntry">

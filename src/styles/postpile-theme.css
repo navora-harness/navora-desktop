@@ -181,7 +181,7 @@
 /* The rail and resize handles are outside scrolling panes. Their hit areas never
    participate in popup transforms or move adjacent content during feedback. */
 .navora-app .shell .sidebar { position: relative; padding-left: 54px; padding-right: 10px; }
-.navora-app .sidebar .activity-rail { position: absolute; inset: 0 auto 8px 6px; width: 38px; display: flex; flex-direction: column; justify-content: space-between; border-right: 1px solid #e4e6ea; padding-right: 5px; z-index: 3; }
+.navora-app .sidebar .activity-rail { position: absolute; inset: 0 auto 8px 10px; width: 32px; display: flex; flex-direction: column; justify-content: space-between; border: 0; padding: 0; z-index: 3; }
 .activity-rail-sections, .navora-app .activity-rail .sidebar-foot-actions, .navora-app .activity-rail .sidebar-foot-end { display: flex; flex-direction: column; gap: 8px; }
 .navora-app .activity-rail .sidebar-foot { border: 0; margin: 0; padding: 0; }
 .navora-app .sidebar :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn), .navora-app .mobile-topbar-btn {
@@ -307,8 +307,10 @@
 .navora-app .shell.platform-mac .activity-rail { top: 40px; }
 .navora-app .shell.platform-mac .sidebar-content-stack { padding-top: 40px; }
 .navora-app .shell.sidebar-collapsed:has(> .sidebar) { grid-template-columns: 52px minmax(0,1fr); }
-.navora-app .shell.sidebar-collapsed > aside.sidebar { width: 52px; padding-left: 0; padding-right: 0; }
-.navora-app .shell.sidebar-collapsed .sidebar-content-stack { display: none; }
+.navora-app .shell.sidebar-collapsed:not(.mobile-layout) > aside.sidebar { width: 100%; padding-left: 0; padding-right: 0; }
+.navora-app .shell.sidebar-collapsed.mobile-layout > aside.sidebar { width: 52px; padding-left: 0; padding-right: 0; }
+.navora-app .shell.mobile-layout > aside.sidebar { transition: transform 220ms var(--navora-ease), width 220ms var(--navora-ease); }
+.navora-app .shell.sidebar-collapsed .sidebar-content-stack { opacity: 0; visibility: hidden; pointer-events: none; transform: translateX(-8px); }
 
 /* Resources are bounded cards with fixed headers and one scrolling body. */
 .navora-app .sidebar .sidebar-panel { margin: 0; padding: 0; border: 1px solid #e2e5eb; border-radius: 9px; background: #fbfbfc; overflow: hidden; }
@@ -334,6 +336,7 @@
 
 /* A completed action is a small disclosure; the answer remains the focal point. */
 .navora-app .main .run-card:not(.open):not(.live):not(.error):not(.aborted) { width: max-content; max-width: 100%; background: transparent; border-color: transparent; }
+.navora-app .main .run-card:not(.open):not(.live):not(.error):not(.aborted):has(> .run-card-body) { width: 100%; background: #f8f9fb; border-color: #e0e5ec; }
 .navora-app .main .run-card:not(.open):not(.live):not(.error):not(.aborted) .run-card-head { min-height: 28px; padding: 4px 5px; gap: 7px; color: #687383; font-size: 12px; font-weight: 400; }
 .navora-app .main .run-card:not(.open):not(.live):not(.error):not(.aborted):hover { background: #f5f6f8; border-color: #e4e7ed; }
 .navora-app .main .run-status { background: transparent; }
@@ -357,6 +360,56 @@
   .navora-app .main .messages { padding-top: 12px; gap: 14px; }
   .navora-app .main .msg.assistant .msg-body { font-size: 14px; }
 }
+/* Local motion follows Postpile's easing. Only explicit layout interactions
+   resize the rail/dock; direct dragging stays one-to-one with the pointer. */
+.navora-app .shell:has(> .sidebar):not(.mobile-layout) { transition: grid-template-columns 220ms var(--navora-ease); }
+.navora-app .shell.sidebar-resizing:has(> .sidebar) { transition: none; }
+.navora-app .sidebar { overflow: clip; }
+.navora-app .sidebar-content-stack { transition: opacity 160ms ease, transform 220ms var(--navora-ease), visibility 0s; }
+.navora-app .sidebar-collapsed .sidebar-content-stack { transition: opacity 120ms ease, transform 180ms var(--navora-ease), visibility 0s 180ms; }
+.navora-app .sidebar-chat-face.resources-only .sidebar-dock { flex: 1; }
+.navora-app .sidebar-chat-face.resources-only .sidebar-workspace-pane { flex: var(--workspace-weight,1) 1 0px; }
+.navora-app .sidebar-chat-face.resources-only .sidebar-browser-pane { flex: var(--browser-weight,1) 1 0px; }
+.navora-app .sidebar-chat-face.resources-only :is(.sidebar-workspace-pane,.sidebar-browser-pane):has(.is-collapsed) { flex: 0 0 36px; }
+.navora-app .sidebar :is(.sidebar-workspace-pane,.sidebar-browser-pane) { transition: height 200ms var(--navora-ease), flex-grow 200ms var(--navora-ease), flex-basis 200ms var(--navora-ease); overflow: clip; }
+.navora-app .sidebar-resizing :is(.sidebar-workspace-pane,.sidebar-browser-pane) { transition: none; }
+.navora-app .sidebar-dock:not(:has(.sidebar-workspace-pane:not([style*="display: none"]) .sidebar-panel:not(.is-collapsed),.sidebar-browser-pane:not([style*="display: none"]) .sidebar-panel:not(.is-collapsed))) { flex: 0 0 auto; }
+.navora-app .res-chevron { transition: transform 180ms var(--navora-ease); }
+.navora-app .is-collapsed .res-chevron { transform: rotate(-90deg); }
+.resource-body-enter-active { transition: opacity 200ms ease, transform 200ms var(--navora-ease); }
+.resource-body-leave-active { transition: opacity 100ms ease; pointer-events: none; }
+.resource-body-enter-from { opacity: 0; transform: translateY(-4px); }
+.resource-body-leave-to { opacity: 0; }
+.navora-app .sidebar .sidebar-pane-enter-active { transition: opacity 180ms ease, transform 180ms var(--navora-ease), height 200ms var(--navora-ease), flex-grow 200ms var(--navora-ease), flex-basis 200ms var(--navora-ease); }
+.navora-app .sidebar .sidebar-pane-leave-active { transition: opacity 120ms ease; pointer-events: none; }
+.sidebar-pane-enter-from { opacity: 0; transform: translateX(-5px); }
+.sidebar-pane-leave-to { opacity: 0; }
+.sidebar-backdrop-enter-active,.sidebar-backdrop-leave-active { transition: opacity 180ms ease; }
+.sidebar-backdrop-enter-from,.sidebar-backdrop-leave-to { opacity: 0; }
+.navora-app .settings-workspace { animation: navora-activity-enter 220ms var(--navora-ease); }
+.navora-app .settings-workspace .section { animation: navora-activity-enter 180ms var(--navora-ease); }
+.navora-app .main .msg-empty { animation: navora-activity-enter 240ms var(--navora-ease); }
+.navora-app .main .jump-bottom { animation: navora-activity-enter 160ms var(--navora-ease); }
+.navora-app .main :is(.run-card-head,.tool-head,.msg-reasoning-toggle,.thinking-reason-toggle) svg { transition: transform 180ms var(--navora-ease); }
+.navora-app .main :is(.run-card.open > .run-card-head .run-card-chevron,.tool-card.open > .tool-head .tool-chevron,.msg-reasoning.open .msg-reasoning-chevron,.log-card.open .log-card-chevron) svg { transform: rotate(90deg); }
+.navora-app .main .msg-reasoning.open .msg-reasoning-chevron { transform: rotate(90deg); }
+.navora-app .thinking-reason-toggle[aria-expanded="true"] .thinking-reason-chevron { transform: rotate(90deg); }
+.navora-app :is(.reply-copy-btn,.read-pages-bar,.settings-return,.settings-close,.suggest-chip,.composer-expand,.composer-send,.settings-navigation .nav-item) { transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, transform 180ms var(--navora-ease); }
+.navora-app :is(.reply-copy-btn,.settings-close,.composer-expand,.composer-send):active { transform: scale(.94); }
+.navora-app .message-display-card .log-fold-setting { margin-top: 8px; border-radius: 8px; background: #f7f8fa; }
+.navora-app .main .settings-workspace .message-display-card .log-fold-row { min-height: 40px; padding: 6px 12px; gap: 12px; }
+.navora-app .message-display-card .log-fold-row .switch-title { font-size: 12px; font-weight: 500; color: #505965; }
+.navora-app .message-display-card .setting-status { font-size: 11px; line-height: 20px; color: #657181; text-align: right; }
+/* Postpile form treatment with the native Vuetify keyboard/checked semantics. */
+.navora-app .v-switch.v-switch--inset .v-switch__track { min-width: 36px; height: 20px; background: #c8cdd5; opacity: 1; border-radius: 99px; transition: background-color 200ms ease; }
+.navora-app .v-switch.v-switch--inset .v-switch__thumb { width: 14px; height: 14px; background: #fff; color: #fff; transform: none; box-shadow: 0 1px 3px #18283826; }
+.navora-app .v-switch.v-switch--inset .v-selection-control--dirty .v-switch__track { background: #438da2; }
+.navora-app .v-switch .v-selection-control__input { transform: translateX(-8px); transition: transform 220ms var(--navora-ease); }
+.navora-app .v-switch .v-selection-control--dirty .v-selection-control__input { transform: translateX(8px); }
+.navora-app .v-switch:dir(rtl) .v-selection-control__input { transform: translateX(8px); }
+.navora-app .v-switch:dir(rtl) .v-selection-control--dirty .v-selection-control__input { transform: translateX(-8px); }
+.navora-app .v-switch .v-selection-control__input:has(input:focus-visible) { outline: 2px solid #438da2; outline-offset: 2px; }
+.navora-app .settings-page .v-field__outline { transition: color 180ms ease, opacity 180ms ease; }
 @keyframes navora-activity-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 @media(prefers-reduced-motion:reduce) {
   .navora-app *, .v-overlay *, .navora-app *::before, .navora-app *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }

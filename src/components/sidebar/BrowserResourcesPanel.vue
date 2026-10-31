@@ -2,7 +2,7 @@
   <div class="sidebar-panel browser-panel" :class="{ 'is-collapsed': collapsed }">
     <div class="res-head">
       <button type="button" class="res-label-btn" :aria-expanded="!collapsed" aria-label="折叠或展开浏览器资源" @click="collapsed = !collapsed">
-        <font-awesome-icon :icon="collapsed ? 'chevron-right' : 'chevron-down'" class="res-chevron" />
+        <font-awesome-icon icon="chevron-down" class="res-chevron" />
         <span class="res-label">浏览器资源</span>
       </button>
       <div class="res-head-actions">
@@ -19,7 +19,8 @@
       </button>
       </div>
     </div>
-    <div v-if="!collapsed" class="res-body" data-ctx-menu="browser">
+    <Transition name="resource-body">
+    <div v-show="!collapsed" class="res-body" data-ctx-menu="browser">
       <div v-if="!chatId" class="res-empty">选择对话后使用浏览器</div>
       <div v-else-if="!tree.length" class="res-empty">暂无浏览器窗口</div>
       <div v-else class="res-tree">
@@ -82,6 +83,7 @@
         </div>
       </div>
     </div>
+    </Transition>
 
     <SidebarContextMenu ref="sessMenu">
       <button type="button" class="sidebar-more-item" role="menuitem" @click="emit('add-ref', sessionRef(menuSession!))">
