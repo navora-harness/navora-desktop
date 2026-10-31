@@ -341,8 +341,8 @@ function onClick(e: MouseEvent) {
 .msg-body-footer {
   margin-top: 10px;
   display: flex;
-  justify-content: flex-end;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
 }
 @keyframes md-shimmer {
   to {

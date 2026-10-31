@@ -87,3 +87,19 @@ test('execution summaries count logs and attempted calls without claiming all at
   assert.match(executionSummary([message('limit','log',{kind:'round_limit'})]),/^已达轮次上限/)
   assert.equal(executionSummary([message('thought','assistant')]),'执行记录')
 })
+
+test('persisted run identities keep late events in their run across inserted turns and unprompted retries',()=>{
+  const all=[message('u1','user'),message('t1','tool',{runId:'first',runSequence:0}),
+    message('a1','assistant',{runId:'first',runSequence:1,phase:'final'}),
+    message('u2','user'),message('t2','tool',{runId:'second',runSequence:0}),
+    message('late','log',{runId:'first',runSequence:2}),
+    message('a2','assistant',{runId:'second',runSequence:1,phase:'final'}),
+    message('retry','log',{runId:'third',runSequence:0}),message('t3','tool',{runId:'third',runSequence:1}),
+    message('a3','assistant',{runId:'third',runSequence:2,phase:'final'})]
+  const blocks=transcriptBlocks(all,options)
+  assert.deepEqual(blocks.filter(block=>block.type==='run').map(block=>block.items.map(item=>item.id)),[['t1','late'],['t2'],['retry','t3']])
+  assert.deepEqual(blocks.flatMap(block=>block.type==='chat'?[block.message.id]:[]),['u1','a1','u2','a2','a3'])
+  assert.equal(all[5]!.meta?.runId,'first')
+  const legacy=[message('old-answer','assistant'),message('new-tool','tool',{runId:'new'}),message('new-answer','assistant',{runId:'new',phase:'final'})]
+  assert.deepEqual(finalOutputs(legacy).map(message=>message.id),['old-answer','new-answer'],'A tagged retry does not turn an old untagged answer into progress')
+})
