@@ -1512,9 +1512,11 @@ export class AgentRuntime {
       content:
         `当前 Chat 浏览器资源：Session ${sessionCount} 个，窗口 ${windowCount} 个。\n` +
         `${JSON.stringify(tree, null, 0)}\n` +
-        (sessionCount > 0
+        (windowCount > 0
           ? '已有资源：禁止再 browser_open；用已有 windowId navigate/get。'
-          : '尚无资源：需要浏览时最多 browser_open 一次，并尽量带最终目标 URL。') +
+          : sessionCount > 0
+            ? '已有 Session，当前没有窗口：需要页面时用 browser_window_create(sessionId)，不要重新 browser_open；纯请求可复用该 Session。'
+            : '尚无资源：需要浏览时最多 browser_open 一次，并尽量带最终目标 URL。') +
         ' 查版本/新闻等：优先官网；百度最多搜一次并立刻作答。',
     })
 
@@ -1855,11 +1857,9 @@ export class AgentRuntime {
       }
     }
 
-    // Sub-chats own isolated browser resources — drop them when the child finishes
-    // so parent chats are not left with leftover Sessions/windows.
-    void this.registry.clearChat(subChatId).catch((e) => {
-      console.warn('[subchat] clear browser resources failed', subChatId, e)
-    })
+    // Terminal status is not a browser-lifetime signal. The Agent explicitly
+    // closes resources it no longer needs; retained pages remain available for
+    // inspection, login, downloads and follow-up work, including failed runs.
   }
 
   private waitForSubchat(

@@ -2,18 +2,28 @@
   <div class="settings-page" :class="{ 'is-embedded': embedded, 'is-mobile': mobile, 'external-navigation': !!navigationTarget }">
     <header class="top">
       <div class="top-left">
+        <button
+          v-if="embedded"
+          type="button"
+          class="settings-close settings-back"
+          aria-label="关闭设置"
+          title="返回对话"
+          :disabled="saving"
+          @click="emit('close')"
+        ><font-awesome-icon icon="arrow-left" /></button>
         <v-btn v-if="!embedded" variant="text" class="back-btn" @click="$router.push('/')">
           <font-awesome-icon icon="arrow-left" class="mr-2" />
           返回
         </v-btn>
         <div class="top-titles">
-          <h1>设置</h1>
+          <h1 id="settings-page-title">{{ navigationTarget ? activeSettingsTitle : '设置' }}</h1>
           <p v-if="!mobile" class="top-sub">Navora 应用与 Agent 偏好</p>
         </div>
       </div>
       <div class="top-actions">
         <v-btn
           color="primary"
+          variant="tonal"
           class="save-btn"
           size="small"
           :loading="saving && !savingAndExit"
@@ -34,17 +44,6 @@
         >
           应用并退出
         </v-btn>
-        <v-btn
-          v-if="embedded"
-          variant="text"
-          icon
-          class="close-btn settings-close"
-          aria-label="关闭设置"
-          :disabled="saving"
-          @click="emit('close')"
-        >
-          <font-awesome-icon icon="xmark" />
-        </v-btn>
       </div>
     </header>
 
@@ -58,14 +57,18 @@
             type="button"
             class="nav-item"
             :class="{ active: tab === item.value }"
+            :aria-current="tab === item.value ? 'page' : undefined"
+            aria-controls="settings-content"
             @click="selectTab(item.value)"
           >
+            <font-awesome-icon :icon="item.icon" class="settings-nav-icon" />
             <span class="nav-label">{{ item.title }}</span>
             <span v-if="!mobile" class="nav-desc">{{ item.desc }}</span>
           </button>
         </div>
         <div class="nav-foot">
           <button type="button" class="nav-item nav-guide" @click="openOnboarding">
+            <font-awesome-icon icon="circle-question" class="settings-nav-icon" />
             <span class="nav-label">开始引导</span>
             <span v-if="!mobile" class="nav-desc">模型 · 工作区 · 权限 · 远程</span>
           </button>
@@ -74,7 +77,7 @@
       </Teleport>
 
       <div class="panel">
-        <div ref="contentEl" class="content">
+        <div id="settings-content" ref="contentEl" class="content" role="region" aria-labelledby="settings-page-title">
           <!-- 基本 -->
           <section v-if="tab === 'basic'" class="section">
             <header class="section-head">
@@ -258,7 +261,7 @@
                       @click="selectProvider(p.id)"
                     >
                       <div class="provider-list-main">
-                        <span class="provider-list-label">{{ p.label || p.id }}</span>
+                        <span class="provider-list-label" :title="p.label || p.id">{{ p.label || p.id }}</span>
                         <span class="provider-list-model">{{
                           (p.models && p.models.length > 1
                             ? `${p.model} 等 ${p.models.length} 个`
@@ -1752,18 +1755,19 @@ const remoteStatus = ref<{
 } | null>(null)
 
 const navItems = [
-  { value: 'basic', title: '基本', desc: '窗口 · 对话 · 展示' },
-  { value: 'model', title: '模型', desc: 'LLM 接入' },
-  { value: 'browser', title: '浏览器', desc: 'UA 与超时' },
-  { value: 'workspace', title: '工作区', desc: '文件目录' },
-  { value: 'skills', title: '技能', desc: '创建 · 导入' },
-  { value: 'plugins', title: '插件', desc: '可选工具包' },
-  { value: 'remote', title: '远程访问', desc: '全功能控制' },
-  { value: 'permissions', title: '权限', desc: 'Agent 能力' },
-  { value: 'fork', title: '询问/决策', desc: '选项确认' },
-  { value: 'subchat', title: '子对话', desc: '并行子任务' },
-  { value: 'about', title: '关于', desc: '版本信息' },
+  { value: 'basic', title: '基本', icon: 'sliders', desc: '窗口 · 对话 · 展示' },
+  { value: 'model', title: '模型', icon: 'microchip', desc: 'LLM 接入' },
+  { value: 'browser', title: '浏览器', icon: 'window-maximize', desc: 'UA 与超时' },
+  { value: 'workspace', title: '工作区', icon: 'folder-open', desc: '文件目录' },
+  { value: 'skills', title: '技能', icon: 'book', desc: '创建 · 导入' },
+  { value: 'plugins', title: '插件', icon: 'puzzle-piece', desc: '可选工具包' },
+  { value: 'remote', title: '远程访问', icon: 'key', desc: '全功能控制' },
+  { value: 'permissions', title: '权限', icon: 'shield-halved', desc: 'Agent 能力' },
+  { value: 'fork', title: '询问/决策', icon: 'circle-question', desc: '选项确认' },
+  { value: 'subchat', title: '子对话', icon: 'sitemap', desc: '并行子任务' },
+  { value: 'about', title: '关于', icon: 'circle-exclamation', desc: '版本信息' },
 ]
+const activeSettingsTitle = computed(() => navItems.find(item => item.value === tab.value)?.title || '设置')
 
 const skillsList = ref<SkillRecord[]>([])
 const proposals = ref<SkillProposal[]>([])

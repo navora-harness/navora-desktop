@@ -221,14 +221,15 @@
 .navora-app .main .thinking-reason { margin-top: 6px; }
 .navora-app .main .composer-input .v-field__input { min-height: 48px; padding-top: 9px; padding-bottom: 8px; }
 .navora-app .shell > .main > .settings-workspace { flex: 1; min-height: 0; height: auto; max-height: none; width: 100%; border: 0; border-radius: 0; box-shadow: none; background: #fff; }
+.navora-app .shell:not(.mobile-layout) > .main:has(> .settings-workspace) { grid-template-rows: minmax(0,1fr); }
 .navora-app .shell.frameless > .main > .settings-workspace { margin-top: 40px; }
-.navora-app .main .settings-workspace > .top { padding: 14px 24px; border-bottom: 1px solid #eceef2; background: #fff; }
-.navora-app .main .settings-workspace > .shell { width: 100%; height: auto; flex: 1; min-height: 0; grid-template-columns: 160px minmax(0,1fr); background: #fff; }
-.navora-app .main .settings-workspace .panel { border: 0; border-radius: 0; }
+.navora-app .main .settings-workspace > .top { min-height: 44px; height: 44px; padding: 6px 24px; gap: 12px; border-bottom: 1px solid #eceef2; background: #fff; }
+.navora-app .main .settings-workspace > .shell { width: 100%; height: auto; flex: 1; min-height: 0; grid-template-columns: 160px minmax(0,1fr); grid-template-rows: minmax(0,1fr); background: #fafbfc; }
+.navora-app .main .settings-workspace .panel { border: 0; border-radius: 0; background: #fafbfc; }
 .navora-app .main .settings-workspace .content { padding: 18px 28px; }
 .navora-app .main .settings-workspace .section { max-width: 1000px; margin-inline: auto; }
 .navora-app .main .settings-workspace .nav { background: #fafafa; border: 0; border-radius: 8px; }
-.navora-app .main .settings-workspace.is-mobile > .shell { grid-template-columns: 1fr; }
+.navora-app .main .settings-workspace.is-mobile > .shell { grid-template-columns: 1fr; grid-template-rows: auto minmax(0,1fr); }
 .navora-app .main .settings-workspace.is-mobile .content { padding: 12px; }
 .navora-app .main .settings-workspace.is-mobile { margin-top: 0 !important; }
 .navora-app .main .settings-workspace .nav-item:hover { background: #e9ecf1; }
@@ -240,18 +241,23 @@
 .sidebar-flip-leave-to { transform: rotateY(-14deg) translateX(-4px); opacity: 0; }
 .settings-return { display: flex; align-items: center; gap: 9px; min-height: 36px; padding: 6px 9px; margin: 8px 0; color: #505965; border: 1px solid transparent; border-radius: 8px; text-align: left; font-size: 13px; }
 .settings-return:hover { background: #e7e9ee; border-color: #dce0e7; }
-.settings-sidebar-heading { font-size: 20px; font-weight: 600; padding: 10px; }
+.settings-sidebar-heading { display: flex; align-items: center; height: 44px; min-height: 44px; margin-bottom: 6px; font-size: 13px; font-weight: 600; padding: 0 10px; }
 #settings-sidebar-nav { flex: 1; min-height: 0; display: flex; }
 .navora-app .sidebar .settings-navigation { flex: 1; min-height: 0; padding: 6px 0; background: transparent; border: 0; border-radius: 0; }
 .navora-app .sidebar .settings-navigation .nav-desc { display: none; }
-.navora-app .sidebar .settings-navigation .nav-item { min-height: 36px; padding: 9px 10px; }
+.navora-app .sidebar .settings-navigation .nav-item { display: grid; grid-template-columns: 16px minmax(0,1fr); align-items: center; column-gap: 10px; min-height: 36px; padding: 9px 10px; }
+.settings-nav-icon { width: 14px; height: 14px; color: #687586; }
+.navora-app .settings-navigation .nav-item.active .settings-nav-icon { color: #345278; }
+.navora-app .settings-navigation .nav-item:focus-visible { outline-offset: -2px; }
 .navora-app .sidebar .settings-navigation .nav-label { font-size: 13px; color: #505965; font-weight: 500; }
 .navora-app .sidebar .settings-navigation .nav-item.active { background: #e4e9f2; }
 .navora-app .sidebar .settings-navigation .nav-item.active .nav-label { color: #294d83; }
 .navora-app .sidebar .settings-navigation .nav-item:hover { background: #e7e9ee; }
 .navora-app .shell > .main > .settings-workspace.external-navigation > .shell { grid-template-columns: minmax(0,1fr); padding: 0 !important; }
-.navora-app .shell > .main > .settings-workspace.external-navigation .content { padding: 24px 40px; }
-.navora-app .shell > .main > .settings-workspace.external-navigation .section { max-width: 980px; }
+.navora-app .shell > .main > .settings-workspace.external-navigation .content { padding: 24px 32px 40px; scrollbar-gutter: stable; }
+.navora-app .shell > .main > .settings-workspace.external-navigation .section { max-width: 940px; }
+.navora-app .shell > .main > .settings-workspace.external-navigation .section:has(> .message-display-card) { max-width: 760px; }
+.navora-app .settings-workspace.external-navigation .section-head { display: none; }
 /* One desktop toolbar shares the native caption row. Reserve the system controls
    explicitly; interactive controls sit above the draggable background. */
 .navora-app .shell.frameless:not(.mobile-layout) > .main > .main-top { min-height: 44px; padding: 6px 154px 6px 24px; gap: 18px; position: relative; z-index: 5; -webkit-app-region: drag; }
@@ -259,10 +265,21 @@
 .navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace { margin-top: 0; }
 .navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace > .top { min-height: 44px; padding: 6px 154px 6px 24px; position: relative; z-index: 5; -webkit-app-region: drag; }
 .navora-app .settings-workspace > .top button { -webkit-app-region: no-drag; }
-.navora-app .settings-workspace > .top h1 { font-size: 16px; font-weight: 600; }
+.navora-app .settings-workspace > .top h1 { font-size: 14px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.navora-app .settings-workspace > .top .top-left { gap: 10px; }
+.navora-app .settings-workspace > .top .top-titles { min-width: 0; }
 .navora-app .settings-workspace > .top .top-actions { gap: 6px; }
-.navora-app .settings-workspace > .top .settings-close { width: 30px; height: 30px; border-radius: 8px; color: #505965; }
-.navora-app .settings-workspace > .top .settings-close:hover { background: #e7e9ee; }
+.navora-app .settings-workspace > .top .settings-close { display: inline-grid; place-items: center; width: 30px; min-width: 30px; height: 30px; padding: 0; border: 1px solid transparent; border-radius: 8px; color: #505965; background: transparent; cursor: pointer; flex-shrink: 0; }
+.navora-app .settings-workspace > .top .settings-close svg { width: 14px; height: 14px; }
+.navora-app .settings-workspace > .top .settings-close:hover:not(:disabled) { background: #e7e9ee; border-color: #dce1e8; }
+.navora-app .settings-workspace > .top .settings-close:disabled { opacity: .4; cursor: default; }
+.navora-app .settings-workspace > .top .save-btn { min-width: 58px; height: 28px; padding-inline: 12px !important; font-size: 12px; font-weight: 500; letter-spacing: 0; border-radius: 8px; }
+.navora-app .settings-workspace .switch-row > div:first-child { min-width: 0; }
+.navora-app .settings-workspace .switch-title { font-size: 13px; font-weight: 450; line-height: 1.6; }
+.navora-app .settings-workspace.is-mobile .settings-nav-icon { display: none; }
+.navora-app .settings-workspace.is-mobile > .top { min-height: 48px; height: 48px; padding-inline: 12px; }
+.navora-app .settings-workspace.is-mobile .settings-close { width: 32px; min-width: 32px; height: 32px; }
+.navora-app .settings-workspace.is-mobile .nav-item { flex-direction: row; }
 .navora-app .main .messages { padding-top: 20px; padding-bottom: 24px; gap: 18px; }
 .navora-app .main :is(.msg,.thinking-row,.retry-bar,.followup-block) { width: min(780px,100%); }
 .navora-app .main .composer-box { max-width: 780px; margin-inline: auto; border-radius: 18px; }
@@ -282,6 +299,9 @@
 .navora-app .main .settings-workspace .switch-row { min-height: 42px; padding: 5px 0; }
 .navora-app .main .settings-workspace .form-grid { gap: 12px; }
 .navora-app .main .settings-workspace .provider-layout { grid-template-columns: 180px minmax(0,1fr); }
+.navora-app .settings-workspace .provider-list-item { display: grid; grid-template-columns: minmax(0,1fr); gap: 6px; }
+.navora-app .settings-workspace .provider-list-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.navora-app .settings-workspace .provider-list-meta { flex-direction: row; justify-content: flex-start; flex-wrap: wrap; }
 .navora-app .main .settings-workspace.is-mobile .provider-layout { grid-template-columns: 1fr; }
 .navora-app .shell.platform-mac:not(.mobile-layout) > .main > .main-top,
 .navora-app .shell.platform-mac:not(.mobile-layout) > .main > .settings-workspace > .top { padding-right: 24px; }

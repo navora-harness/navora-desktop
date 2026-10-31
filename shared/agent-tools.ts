@@ -88,7 +88,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'agent_spawn_subchat',
       description:
-        'Spawn an async parallel sub-conversation (isolated Agent run) for a focused sub-task. Returns immediately with subChatId while the child runs in the background. Use for parallel research, long tool chains, or noisy browsing that should not pollute the parent timeline. Pass a concise goal + the context the child needs (do NOT dump full parent history). CRITICAL: the child cannot see parent messages — always put every required URL, sitekey, id, path, and constraint into goal and/or context (e.g. Turnstile needs the real page URL, never invent example.com). When the sub-chat finishes (done/failed/cancelled), it automatically closes browser Sessions/windows it created. After spawning one or more children, call agent_await_subchats to collect results. Sub-chats cannot spawn further children. Concurrent children per parent are capped by Settings → 子对话 (default 4; parent itself is not counted).',
+        'Spawn an async parallel sub-conversation (isolated Agent run) for a focused sub-task. Returns immediately with subChatId while the child runs in the background. Use for parallel research, long tool chains, or noisy browsing that should not pollute the parent timeline. Pass a concise goal + the context the child needs (do NOT dump full parent history). CRITICAL: the child cannot see parent messages — always put every required URL, sitekey, id, path, and constraint into goal and/or context (e.g. Turnstile needs the real page URL, never invent example.com). Sub-chat browser resources remain available after done/failed/cancelled; each Agent decides when to explicitly release unneeded windows or Sessions. After spawning one or more children, call agent_await_subchats to collect results. Sub-chats cannot spawn further children. Concurrent children per parent are capped by Settings → 子对话 (default 4; parent itself is not counted).',
       parameters: {
         type: 'object',
         properties: {
@@ -272,7 +272,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'browser_session_close',
-      description: 'Close a Session and destroy all its windows; clear session data.',
+      description: 'Explicitly release a Session when the Agent judges it is no longer needed. Destroys all its windows and clears cookies/storage. Prefer browser_window_close if only the page is no longer needed; keep the Session for reuse. Do not clear login, active downloads or user-requested retained state.',
       parameters: {
         type: 'object',
         properties: { sessionId: { type: 'string' } },
@@ -442,7 +442,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'browser_window_close',
-      description: 'Destroy a browser window.',
+      description: 'Release a browser window when the Agent judges the page is no longer needed. Keeps its Session for reuse. Preserve pages needed for follow-up, login, active downloads or user inspection; completion alone does not require closing.',
       parameters: {
         type: 'object',
         properties: { windowId: { type: 'string' } },

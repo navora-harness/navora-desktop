@@ -250,8 +250,14 @@ app.on('browser-window-created',(_event,win) => {
         assert.equal(await win.webContents.executeJavaScript(`!document.querySelector('.settings-workspace') && document.querySelector('[aria-label="显示/隐藏工作区"]').getAttribute('aria-pressed')==='true' && document.querySelector('.workspace-panel').checkVisibility()`),true,'Selecting a hidden panel from settings opens that panel on the first click')
         await click('[aria-label="显示/隐藏工作区"]')
         await win.webContents.executeJavaScript(`(async()=>{const b=document.querySelector('[aria-label="显示/隐藏工作区"]');for(let i=0;i<4;i++){b.click();await new Promise(r=>setTimeout(r,25))}})()`)
-        await wait(300)
-        assert.equal(await win.webContents.executeJavaScript(`Math.round(document.querySelector('aside.sidebar').getBoundingClientRect().width)===52 && !document.querySelector('.sidebar-workspace-pane').checkVisibility()`),true,'Interrupted sidebar toggles settle at the intended collapsed state')
+        let sidebarSettled = false
+        for(let i=0;i<20;i++) {
+          sidebarSettled = await win.webContents.executeJavaScript(`Math.round(document.querySelector('aside.sidebar').getBoundingClientRect().width)===52 && !document.querySelector('.sidebar-workspace-pane').checkVisibility()`)
+          if(sidebarSettled) break
+          await wait(40)
+        }
+        const sidebarEnd = await win.webContents.executeJavaScript(`(()=>{const pane=document.querySelector('.sidebar-workspace-pane'),side=document.querySelector('aside.sidebar'),button=document.querySelector('[aria-label="显示/隐藏工作区"]');return {width:side.getBoundingClientRect().width,pane:pane.getAttribute('style'),visible:pane.checkVisibility(),pressed:button.getAttribute('aria-pressed'),shell:side.parentElement.className,classes:pane.className,animations:document.getAnimations().map(a=>({target:a.effect?.target?.className,state:a.playState}))}})()`)
+        assert.equal(sidebarSettled,true,'Interrupted sidebar toggles settle at the intended collapsed state: '+JSON.stringify(sidebarEnd))
         for(const label of ['对话列表','工作区','浏览器资源']) await click(`[aria-label="显示/隐藏${label}"]`)
         assert.equal(await win.webContents.executeJavaScript(`!!document.querySelector('.sidebar-settings-btn')`),true)
         await win.webContents.executeJavaScript(`document.querySelector('.sidebar-settings-btn').click()`)
@@ -260,6 +266,16 @@ app.on('browser-window-created',(_event,win) => {
         await wait(700)
         assert.equal(await win.webContents.executeJavaScript(`!!document.querySelector('.settings-workspace') && !document.querySelector('.settings-dialog-content')`),true)
         assert.equal(await win.webContents.executeJavaScript(`!!document.querySelector('aside.sidebar .settings-navigation') && !document.querySelector('.settings-workspace .settings-navigation')`),true,'Settings categories replace sidebar content')
+        const settingsHeader = await win.webContents.executeJavaScript(`(()=>{const top=document.querySelector('.settings-workspace>.top'),back=top.querySelector('.settings-close'),save=top.querySelector('.save-btn'),title=top.querySelector('h1');return {height:top.getBoundingClientRect().height,backWidth:back.getBoundingClientRect().width,backLeft:back.getBoundingClientRect().left,titleLeft:title.getBoundingClientRect().left,backIcon:back.querySelector('svg').getAttribute('data-icon'),saveHeight:save.getBoundingClientRect().height,saveRight:save.getBoundingClientRect().right,viewport:innerWidth,hasCloseInActions:!!top.querySelector('.top-actions .settings-close')}})()`)
+        assert.equal(settingsHeader.height,44,'Settings and chat share the compact native caption row')
+        assert.equal(settingsHeader.backIcon,'arrow-left','Settings uses a back action, distinct from native window close')
+        assert.ok(settingsHeader.backWidth<=32 && settingsHeader.backLeft<settingsHeader.titleLeft && !settingsHeader.hasCloseInActions,'Back is compact and sits beside the title')
+        assert.equal(settingsHeader.saveHeight,28,'Apply has a compact fixed height')
+        assert.ok(settingsHeader.saveRight<=settingsHeader.viewport-145,'Apply leaves a gap before native window controls')
+        const settingsBody = await win.webContents.executeJavaScript(`(()=>{const page=document.querySelector('.settings-workspace'),shell=page.querySelector(':scope>.shell'),panel=page.querySelector('.panel'),section=page.querySelector('.section');return {page:page.getBoundingClientRect().toJSON(),shell:shell.getBoundingClientRect().toJSON(),panel:panel.getBoundingClientRect().toJSON(),section:section.getBoundingClientRect().toJSON(),rows:getComputedStyle(shell).gridTemplateRows}})()`)
+        assert.ok(Math.abs(settingsBody.panel.bottom-settingsBody.page.bottom)<2,'Settings content fills the workspace: '+JSON.stringify(settingsBody))
+        assert.ok(Math.abs(settingsBody.page.bottom-900)<2,'Settings replaces the full chat grid rather than its first auto row: '+JSON.stringify(settingsBody))
+        assert.ok(settingsBody.section.width<=760,'Basic preferences use a readable column')
         await capture('navora-settings.png')
         for(const label of ['模型','浏览器','工作区','技能','插件','远程访问','权限','询问/决策','子对话','关于','基本']) {
           await win.webContents.executeJavaScript(`[...document.querySelectorAll('.settings-navigation .nav-label')].find(el=>el.textContent.trim()===${JSON.stringify(label)}).closest('button').click()`)
@@ -268,6 +284,8 @@ app.on('browser-window-created',(_event,win) => {
           assert.equal(layout.sections,1,'Only the active settings page is mounted: '+label)
           assert.ok(layout.scroll <= layout.width + 2,'Settings panel does not overflow: '+label)
           assert.ok(layout.right <= layout.viewport,'Settings panel stays in viewport: '+label)
+          assert.equal(await win.webContents.executeJavaScript(`document.querySelector('.settings-workspace .top h1').textContent.trim()`),label,'Caption reflects the selected settings category')
+          assert.equal(await win.webContents.executeJavaScript(`document.querySelector('.settings-navigation [aria-current="page"] .nav-label').textContent.trim()`),label,'Settings navigation exposes the current category')
           await assertIconContrast()
           if(label==='模型') {
             assert.equal(await win.webContents.executeJavaScript(`document.querySelectorAll('.reasoning-row').length`),5)
