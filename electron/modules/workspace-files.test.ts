@@ -19,6 +19,20 @@ async function fixture(t: TestContext, maxBytes = 1000) {
   return { base, files, root: files.chatRoot('chat') }
 }
 
+test('resource indexing finds nested files, ignores empty folders and never creates missing roots',async t=>{
+  const {base,files,root}=await fixture(t)
+  assert.equal(await files.containsFiles('missing'),false)
+  await assert.rejects(fs.access(path.join(base,'workspace','missing')))
+  await fs.mkdir(path.join(root,'empty','nested'),{recursive:true})
+  assert.equal(await files.containsFiles('chat'),false)
+  await fs.writeFile(path.join(root,'empty','nested','note.txt'),'found')
+  assert.equal(await files.containsFiles('chat'),true)
+  await fs.rm(path.join(root,'empty'),{recursive:true})
+  const outside=path.join(base,'outside');await fs.mkdir(outside);await fs.writeFile(path.join(outside,'private.txt'),'private')
+  await fs.symlink(outside,path.join(root,'link'),process.platform==='win32'?'junction':'dir')
+  assert.equal(await files.containsFiles('chat'),false)
+})
+
 test('blocks reads and writes through a junction outside the workspace', async (t) => {
   const { base, files, root } = await fixture(t)
   const outside = path.join(base, 'outside')

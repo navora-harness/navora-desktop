@@ -265,6 +265,8 @@ const api = {
       ipcRenderer.invoke('navora:remote.openWindow', windowId),
   },
   workspace: {
+    hasFiles:(chatId:string):Promise<boolean>=>ipcRenderer.invoke('navora:workspace.hasFiles',chatId),
+    owners:(refresh=false):Promise<{chatIds:string[];unavailable:number}>=>ipcRenderer.invoke('navora:workspace.owners',refresh),
     preview: (chatId: string, relPath: string): Promise<import('../shared/workspace-preview').WorkspacePreview> =>
       ipcRenderer.invoke('navora:workspace.preview', chatId, relPath),
     pickDirectory: (): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }> =>

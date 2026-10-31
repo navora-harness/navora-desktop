@@ -540,9 +540,6 @@
 .navora-app .sidebar .chat-date-label { padding-block:5px 3px; font-size:10px; }
 .navora-app .sidebar .chat-status-icon { width:24px; height:24px; }
 .navora-app .sidebar .subchat-row { min-height:29px; }
-@media(min-width:1101px) {
-  .navora-app .main.file-preview-open > .messages-wrap,.navora-app .main.file-preview-open > .composer { margin-right:var(--preview-width); }
-}
 .navora-app .shell.mobile-layout .file-preview { top:48px; width:100%; }
 
 /* Dock groups own geometry; panel state survives tab and group changes. */

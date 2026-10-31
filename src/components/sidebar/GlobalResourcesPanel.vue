@@ -3,13 +3,14 @@
     <div class="global-resource-filter">
       <font-awesome-icon icon="magnifying-glass" />
       <input v-model="query" :aria-label="kind === 'files' ? '搜索文件所属对话' : '搜索浏览器资源'" placeholder="搜索对话" />
-      <button v-if="kind === 'browser'" class="resource-action" type="button" title="刷新全部浏览器" aria-label="刷新全部浏览器" :disabled="loading" @click="reload"><font-awesome-icon icon="arrow-rotate-right" /></button>
+      <button class="resource-action" type="button" title="刷新资源" aria-label="刷新全部资源" :disabled="loading" @click="reload(true)"><font-awesome-icon icon="arrow-rotate-right" /></button>
     </div>
     <div class="global-resource-scope">全部对话 <span>{{ owners.length }}</span></div>
-    <div v-if="error" class="global-resource-empty">{{ error }} <button type="button" @click="reload">重试</button></div>
+    <div v-if="error" class="global-resource-empty">{{ error }} <button type="button" @click="reload()">重试</button></div>
     <div v-else-if="loading && !owners.length" class="global-resource-empty">正在加载…</div>
-    <div v-else-if="!owners.length" class="global-resource-empty">{{ query ? '没有匹配的资源' : kind === 'files' ? '暂无对话文件夹' : '暂无浏览器资源' }}</div>
+    <div v-else-if="!owners.length" class="global-resource-empty">{{ query ? '没有匹配的资源' : kind === 'files' ? '暂无文件' : '暂无浏览器资源' }}</div>
     <div v-else class="global-resource-list">
+      <div v-if="unavailable" class="global-resource-empty">部分文件夹暂不可读</div>
       <section v-for="owner in owners" :key="owner.id" class="resource-owner" :class="{expanded: expanded === owner.id}" :data-owner-id="owner.id">
         <div class="resource-owner-head">
           <button type="button" class="resource-owner-toggle" :aria-expanded="expanded === owner.id" @click="expanded = expanded === owner.id ? '' : owner.id">
@@ -36,25 +37,27 @@ import BrowserResourcesPanel from './BrowserResourcesPanel.vue'
 const props=defineProps<{kind:'files'|'browser';active?:boolean;chats:ChatSession[];activeChatId:string;isRemote:boolean;ownerLabel:(id:string)=>string;dndMime:string}>()
 const emit=defineEmits<{notify:[text:string,color?:string];preview:[selection:{chatId:string;path:string}];selectChat:[id:string];addRef:[ref:BrowserContextRef];askCloseSession:[session:BrowserTreeSession];remoteView:[id:string]}>()
 const query=ref(''),expanded=ref(props.activeChatId),sessions=ref<BrowserTreeSession[]>([]),loading=ref(false),error=ref('')
+const fileOwners=ref(new Set<string>()),unavailable=ref(0)
 const sessionsOf=(id:string)=>sessions.value.filter(session=>session.chatId===id)
 const owners=computed(()=>{
   const needle=query.value.trim().toLocaleLowerCase()
-  return props.chats.filter(chat=>props.kind==='files'||sessionsOf(chat.id).length)
+  return props.chats.filter(chat=>props.kind==='files'?fileOwners.value.has(chat.id):sessionsOf(chat.id).length)
     .filter(chat=>!needle||chat.title.toLocaleLowerCase().includes(needle)||(props.kind==='browser'&&sessionsOf(chat.id).some(s=>s.windows.some(w=>(w.title+' '+w.url).toLocaleLowerCase().includes(needle)))))
 })
 function notify(text:string,color?:string){emit('notify',text,color)}
 let disposed=false,again=false,timer:ReturnType<typeof setTimeout>|undefined,unsubscribe:(()=>void)|undefined
-async function reload(){
-  if(props.kind!=='browser'||props.active===false)return
+async function reload(force=false){
+  if(props.active===false)return
   if(loading.value){again=true;return}
   loading.value=true;error.value=''
-  try{const result=await window.navora!.browser.treeAll();if(!disposed)sessions.value=result}
-  catch{if(!disposed)error.value='加载浏览器失败'}
+  try{if(props.kind==='files'){const result=await window.navora!.workspace.owners(force===true);if(!disposed){fileOwners.value=new Set(result.chatIds);unavailable.value=result.unavailable}}else{const result=await window.navora!.browser.treeAll();if(!disposed)sessions.value=result}}
+  catch{if(!disposed)error.value='加载资源失败'}
   finally{loading.value=false;if(again&&!disposed){again=false;void reload()}}
 }
 watch(()=>props.active,active=>{if(active)void reload()})
 watch(owners,list=>{if(!list.some(owner=>owner.id===expanded.value))expanded.value=list[0]?.id||''})
-onMounted(()=>{void reload();if(props.kind==='browser')unsubscribe=window.navora?.browser.onTreeUpdated(()=>{clearTimeout(timer);timer=setTimeout(()=>void reload(),100)})})
+watch(()=>props.chats.map(chat=>chat.id).join(','),()=>{void reload()})
+onMounted(()=>{void reload();const changed=()=>{clearTimeout(timer);timer=setTimeout(()=>void reload(),120)};unsubscribe=props.kind==='browser'?window.navora?.browser.onTreeUpdated(changed):window.navora?.workspace.onChanged(changed)})
 onBeforeUnmount(()=>{disposed=true;clearTimeout(timer);unsubscribe?.()})
 </script>
 <style scoped>

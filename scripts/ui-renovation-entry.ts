@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import assert from 'node:assert/strict'
@@ -50,6 +50,8 @@ for(let i=0;i<120;i++) {
 app.setPath('userData',root)
 BrowserWindow.prototype.show = function () {}
 BrowserWindow.prototype.focus = function () {}
+const openedPaths:string[]=[]
+shell.openPath=async target=>{openedPaths.push(target);return ''}
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve,ms))
 let started = false
 app.on('browser-window-created', (_,win) => {
@@ -169,7 +171,7 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('document.querySelector(".preview-code")?.textContent'), 'Keyboard navigation fixture')
       await capture('file-preview-text')
       const oldWidth = await js('document.querySelector(".file-preview").getBoundingClientRect().width')
-      await js("document.querySelector('.preview-resizer').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}))")
+      await js("document.querySelector('.resource-card-resizer').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}))")
       await wait(80)
       assert.equal(await js('document.querySelector(".file-preview").getBoundingClientRect().width'),oldWidth+20)
       await click('.tree-row[title="preview.md"]')
@@ -205,25 +207,49 @@ app.on('browser-window-created', (_,win) => {
       await capture('log-disclosure')
       await js('(async()=>{const cfg=await window.navora.config.get();await window.navora.config.save({app:{...cfg.app,collapse_tool_runs:true}})})()')
       await wait(150)
-      // Local popovers and global management use distinct owners.
+      // Native folder opening, current-chat resources and global management retain distinct owners.
       await click('[data-chat-resource="files"]')
-      assert.equal(await js('document.querySelector(".chat-resource-popup").textContent.includes("other-only.txt")'),false,'Current files exclude other conversations')
-      assert.equal(await js('document.querySelector(".chat-resource-popup .res-head").checkVisibility()'),true,'Local file controls are visible')
+      assert.equal(openedPaths.at(-1),path.dirname(workspaceFixture),'Explorer opens the actual current chat folder, not its parent')
+      assert.equal(await js('!!document.querySelector(".chat-resource-popup")'),false,'Explorer never opens a file menu')
+      if(await js('!!document.querySelector(".conversation-resource-card")'))await click('[aria-label="关闭资源面板"]')
+      await click('[data-chat-resource="resources"]')
+      await click('[data-resource-tab="files"]')
+      assert.equal(await js('document.querySelector(".conversation-resource-card").textContent.includes("other-only.txt")'),false,'Current files exclude other conversations')
+      assert.equal(await js('document.querySelector(".conversation-resource-card .res-head").checkVisibility()'),true,'Local file controls are visible')
       await capture('current-chat-files')
-      await click('.chat-resource-popup .tree-row[title="preview.md"]')
+      await click('.conversation-resource-card .tree-row[title="preview.md"]')
       assert.equal(await js('document.querySelector(".preview-markdown h1")?.textContent'),'文件预览')
       await click('[aria-label="关闭文件预览"]')
+      await click('[data-resource-tab="outputs"]')
+      assert.ok(await js('document.querySelectorAll(".resource-output-row").length')>0,'Conversation outputs are available in the resource card')
+      await click('.resource-output-row:first-child')
+      assert.equal(await js('!!document.querySelector(".resource-outputs .msg-md-content")'),true,'Output details reuse the safe message renderer')
+      await capture('current-chat-outputs')
       await click('[data-panel="workspace"]')
+      assert.equal(await js('document.querySelectorAll("[data-resource-kind=files] .resource-owner").length'),2,'Global files hide every empty chat')
       await click('[data-owner-id="chat_renovation118"] .resource-owner-toggle')
       await click('.global-resources .tree-row[title="other-only.txt"]')
       assert.equal(await js('document.querySelector(".preview-code")?.textContent'),'From another conversation','Global preview carries the resource owner, not the active chat')
       await click('[aria-label="关闭文件预览"]')
       await capture('all-chat-files')
+      await click('[aria-label="关闭资源面板"]')
+      fs.mkdirSync(path.join(workspaceFixture,'deep'),{recursive:true});fs.writeFileSync(path.join(workspaceFixture,'deep','new.txt'),'New nested output')
+      await js('window.navora.workspace.setChatRoot("chat_renovation119",null)');await wait(300)
+      assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),true,'Deep file changes automatically reveal resources')
+      await click('[aria-label="关闭资源面板"]')
+      await js('window.navora.workspace.delete("chat_renovation118","other-only.txt")');await wait(300)
+      assert.equal(await js('document.querySelectorAll("[data-resource-kind=files] .resource-owner").length'),1,'Deleting the last file removes its conversation from global files')
       await js('(async()=>{window.__localSession=await window.navora.browser.createSession("chat_renovation119",{persist:false});window.__otherSession=await window.navora.browser.createSession("chat_renovation118",{persist:false});await window.navora.browser.createWindow(window.__otherSession.sessionId,{url:"about:blank",show:false})})()')
-      await click('[data-chat-resource="browser"]')
-      assert.equal(await js('document.querySelectorAll(".chat-resource-popup .tree-sess").length'),1,'Current browser popover excludes unrelated sessions')
+      assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),false,'Another conversation cannot auto-open current resources')
+      await js('(async()=>{await window.navora.browser.createWindow(window.__localSession.sessionId,{url:"about:blank",show:false})})()');await wait(220)
+      assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),true,'A new current-chat browser window automatically opens resources')
+      assert.equal(await js('document.querySelector("[data-resource-tab=browser]").getAttribute("aria-pressed")'),'true','New browser discovery selects its resource type')
+      await click('[data-resource-tab="browser"]')
+      assert.equal(await js('document.querySelectorAll(".conversation-resource-card .tree-sess").length'),1,'Current browser card excludes unrelated sessions')
       await capture('current-chat-browser')
       await click('[aria-label="关闭资源面板"]')
+      await js('(async()=>{const tree=await window.navora.browser.tree("chat_renovation119");await window.navora.browser.setVisible(tree[0].windows[0].windowId,true)})()');await wait(160)
+      assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),false,'Visibility changes respect manual dismissal')
       await click('[data-panel="browser"]')
       assert.equal(await js('document.querySelectorAll("[data-resource-kind=browser] .resource-owner").length'),2,'Global browser shows owners from every chat')
       assert.equal(await js('(async()=>{const sessions=await window.navora.browser.treeAll();return new Set(sessions.map(s=>s.sessionId)).size===sessions.length})()'),true,'All-tree snapshot never duplicates sessions')
@@ -324,7 +350,7 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('!!document.querySelector(".message-queue")'),false,'The empty queue disappears')
       await capture('conversation-unified-activity')
       assert.deepEqual(errors,[],'No renderer errors')
-      fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reduced,frameMetrics,modelRequests,checks:['provider-drafts','reopen-draft','tier-rename','preview-race','separate-probes','permission-search','visible-empty-states','workspace-keyboard','file-preview','file-preview-source-safety','file-preview-width','compact-chat-rows','current-resource-popovers','all-chat-files','all-browser-owners','single-sidebar','old-group-migration','message-queue-edit-delete-insert','main-process-queue-persistence','active-context-insertion','long-conversation-jump','zoom-layout','interrupted-motion','single-mobile-header']},null,2))
+      fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reduced,frameMetrics,modelRequests,checks:['provider-drafts','reopen-draft','tier-rename','preview-race','separate-probes','permission-search','visible-empty-states','workspace-keyboard','file-preview','file-preview-source-safety','file-preview-width','compact-chat-rows','native-explorer-current-path','floating-resource-files-browser-outputs','resource-auto-open-dismissal','all-chat-files','all-browser-owners','single-sidebar','old-group-migration','message-queue-edit-delete-insert','main-process-queue-persistence','active-context-insertion','long-conversation-jump','zoom-layout','interrupted-motion','single-mobile-header']},null,2))
       console.log(JSON.stringify({ok:true,reduced,frameMetrics,modelRequests}))
       server.close(); app.exit(0)
     } catch(error) { console.error(error); await capture('failure'); server.close(); app.exit(1) }

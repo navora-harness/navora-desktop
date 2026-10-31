@@ -507,7 +507,7 @@
       <div v-if="!isMobileLayout && (!allSidebarHidden || settingsOpen || creatorKind)" class="sidebar-divider vertical" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarLayout.width" aria-valuemin="250" aria-valuemax="560" tabindex="0" @pointerdown="beginSidebarResize($event, 'width')" @keydown="sidebarResizeKey($event, 'width')" />
     </aside>
 
-    <main class="main" :class="{ 'file-preview-open': previewSelection && !settingsOpen && !creatorKind }" :style="{ '--preview-width': `${previewWidth}px` }">
+    <main class="main" :class="{ 'resource-card-open': resourceOpen && !settingsOpen && !creatorKind }" :style="{ '--preview-width': `${previewWidth}px` }">
       <div v-if="showDesktopChrome && ((!settingsOpen && !creatorKind) || isMobileLayout)" class="win-drag-main" aria-hidden="true" />
       <header v-if="isMobileLayout && !settingsOpen && !creatorKind" class="mobile-topbar">
         <button
@@ -549,7 +549,7 @@
           </div>
         </div>
         <div class="mobile-topbar-actions">
-          <ChatResourcesMenu ref="browserResources" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @notify="onPanelNotify" @preview="openFilePreview" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" />
+          <ChatResourcesMenu ref="browserResources" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :open="resourceOpen" @notify="onPanelNotify" @toggle-resources="toggleResources" @show-browser="showResources('browser')" />
           <button
             v-if="isWebRemote()"
             type="button"
@@ -617,7 +617,7 @@
             <span class="agent-elapsed">{{ elapsedLabel }}</span>
             <button type="button" class="quick-stop-btn" title="停止任务（Esc）" aria-label="停止任务" @click="stopAgent"><StatusIcon kind="stopped" />停止</button>
           </div>
-          <ChatResourcesMenu v-if="!isMobileLayout" ref="browserResources" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @notify="onPanelNotify" @preview="openFilePreview" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" />
+          <ChatResourcesMenu v-if="!isMobileLayout" ref="browserResources" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :open="resourceOpen" @notify="onPanelNotify" @toggle-resources="toggleResources" @show-browser="showResources('browser')" />
         </header>
 
         <div class="messages-wrap">
@@ -1554,7 +1554,9 @@
           </v-btn>
         </div>
       </div>
-      <FilePreviewPanel v-if="previewSelection && !settingsOpen && !creatorKind" :chat-id="previewSelection.chatId" :path="previewSelection.path" :width="previewWidth" @close="previewSelection = null" @resize="setPreviewWidth" @notify="onPanelNotify" />
+      <Transition name="resource-card">
+        <ConversationResourcesCard v-if="resourceOpen && activeId && !settingsOpen && !creatorKind" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :preview="previewSelection" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @clear-preview="previewSelection=null" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="jumpToMessage" @open-media="(p) => openLightbox(p.src,p.alt)" />
+      </Transition>
     </main>
 
     <v-dialog
@@ -1879,7 +1881,8 @@ import ToolCatalogList from '@/components/store/ToolCatalogList.vue'
 import { useStoreUi } from '@/composables/useStoreUi'
 import { storeErrorText } from '@shared/store'
 import BrowserDownloadsMenu from '@/components/BrowserDownloadsMenu.vue'
-import FilePreviewPanel from '@/components/FilePreviewPanel.vue'
+import ConversationResourcesCard from '@/components/ConversationResourcesCard.vue'
+import {useConversationResources} from '@/composables/useConversationResources'
 import CreatorWorkspace from '@/components/CreatorWorkspace.vue'
 import type { CreatorKind } from '@shared/creators'
 import SidebarDock from '@/components/sidebar/SidebarDock.vue'
@@ -2273,6 +2276,9 @@ const quitDialog = ref(false)
 const quitting = ref(false)
 const exportingChat = ref(false)
 const sidebarMoreOpen = ref(false)
+const {open:resourceOpen,tab:resourceTab,show:showResources,close:hideResources} = useConversationResources(activeId,tree)
+function closeResources(){hideResources();previewSelection.value=null}
+function toggleResources(){if(resourceOpen.value)closeResources();else showResources()}
 const previewSelection = ref<{ chatId: string; path: string } | null>(null)
 const previewWidth = ref(400)
 try { const saved = Number(localStorage.getItem('navora.preview.width')); if (saved >= 280 && saved <= 800) previewWidth.value = saved } catch { /* optional persistence */ }
@@ -2283,6 +2289,7 @@ function setPreviewWidth(width: number) {
 function openFilePreview(path: string, chatId = activeId.value) {
   if (!chatId) return
   previewSelection.value = { chatId, path }
+  showResources('files')
   if (isMobileLayout.value) closeMobileSidebar()
 }
 watch(activeId, () => { previewSelection.value = null })

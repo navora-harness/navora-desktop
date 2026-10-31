@@ -14,6 +14,7 @@ import { ChatStore } from './modules/chat-store'
 import { BrowserRegistry } from './modules/browser-registry'
 import { BrowserNetworkManager } from './modules/browser-network'
 import { WorkspaceFiles } from './modules/workspace-files'
+import {WorkspaceResourceIndex} from './modules/workspace-resource-index'
 import { FileDownloadService } from './modules/file-download'
 import { BrowserDownloadList } from './modules/browser-download-list'
 import { ToolDownloadList } from '../shared/tool-downloads'
@@ -101,6 +102,7 @@ let config!: ConfigService
 let chats!: ChatStore
 let registry!: BrowserRegistry
 let network!: BrowserNetworkManager
+let workspaceResourceIndex:WorkspaceResourceIndex|undefined
 let files!: WorkspaceFiles
 let downloads!: FileDownloadService
 let browserDownloads!: BrowserDownloadList
@@ -349,6 +351,7 @@ let downloadsPushTimer: ReturnType<typeof setTimeout> | null = null
 const workspaceChangedPending = new Set<string>()
 let workspacePushTimer: ReturnType<typeof setTimeout> | null = null
 function pushWorkspaceChanged(chatId: string): void {
+  workspaceResourceIndex?.invalidate(chatId)
   const id = String(chatId || '').trim()
   if (!id) return
   workspaceChangedPending.add(id)
@@ -1426,6 +1429,10 @@ function registerIpc(): void {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
   })
+
+  workspaceResourceIndex=new WorkspaceResourceIndex(id=>files.containsFiles(id))
+  rpcHandle('navora:workspace.hasFiles',(_e,chatId:string)=>files.containsFiles(chatId))
+  rpcHandle('navora:workspace.owners',(_e,refresh?:boolean)=>workspaceResourceIndex!.owners(chats.list().map(chat=>chat.id),refresh===true))
 
   rpcHandle('navora:workspace.delete', async (_e, chatId: string, relPath: string) => {
     if (!chatId) throw new Error('chatId_required')

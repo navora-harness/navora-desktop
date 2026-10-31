@@ -1,6 +1,6 @@
 <template>
-  <aside class="file-preview" aria-label="文件预览" :style="{ '--preview-width': `${width}px` }">
-    <div class="preview-resizer" role="separator" aria-label="调整文件预览宽度" aria-orientation="vertical" :aria-valuenow="width" aria-valuemin="280" aria-valuemax="maximum" tabindex="0" @pointerdown="beginResize" @keydown="resizeKey" />
+  <aside class="file-preview" :class="{embedded}" aria-label="文件预览" :style="{ '--preview-width': `${width}px` }">
+    <div v-if="!embedded" class="preview-resizer" role="separator" aria-label="调整文件预览宽度" aria-orientation="vertical" :aria-valuenow="width" aria-valuemin="280" aria-valuemax="maximum" tabindex="0" @pointerdown="beginResize" @keydown="resizeKey" />
     <header class="preview-head">
       <font-awesome-icon icon="file" />
       <div class="preview-name" :title="path">{{ name }}</div>
@@ -34,7 +34,7 @@ import DOMPurify from 'dompurify'
 import { renderMarkdown } from '@/utils/markdown'
 import type { WorkspacePreview } from '../../shared/workspace-preview'
 
-const props = defineProps<{ chatId: string; path: string; width: number }>()
+const props = defineProps<{ chatId: string; path: string; width: number; embedded?: boolean }>()
 const emit = defineEmits<{ close: []; resize: [width: number]; notify: [text: string, color?: string] }>()
 const data = ref<WorkspacePreview | null>(null)
 const loading = ref(false)
@@ -95,7 +95,7 @@ function onLink(event: MouseEvent) {
 }
 function formatSize(bytes: number) { return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB` }
 function clampWidth(value: number) { emit('resize', Math.max(280, Math.min(maximum.value, value))) }
-function onResize() { maximum.value = Math.max(280, Math.min(800, innerWidth - 360)); if (props.width > maximum.value) clampWidth(props.width) }
+function onResize() { if (props.embedded) return; maximum.value = Math.max(280, Math.min(800, innerWidth - 360)); if (props.width > maximum.value) clampWidth(props.width) }
 function resizeKey(event: KeyboardEvent) {
   if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
   event.preventDefault()
@@ -144,6 +144,7 @@ onBeforeUnmount(() => { disposed = true; sequence++; stopResize?.(); unsubscribe
 
 <style scoped>
 .file-preview { position:absolute; inset:44px 0 0 auto; width:var(--preview-width); max-width:100%; display:flex; flex-direction:column; background:#fff; border-left:1px solid #e5e8ee; z-index:5; min-height:0; contain:layout style paint; animation:preview-enter 180ms ease-out; }
+.file-preview.embedded { position:relative; inset:auto; width:100%; max-width:100%; flex:1; border:0; border-radius:0 0 12px 12px; overflow:hidden; box-shadow:none; animation:none; }
 .preview-head { min-height:44px; display:flex; align-items:center; gap:6px; padding:6px 10px; border-bottom:1px solid #eceef2; color:#596475; }
 .preview-head > svg { width:14px; margin-right:3px; }
 .preview-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:600; }
