@@ -9,6 +9,7 @@ import type {
   SubChatSpawnStatus,
 } from '../../shared/types'
 import { ensureDir } from '../data-root'
+import { localChatTitle } from '../../shared/chat-title'
 
 /** Coalesce frequent chat writes (agent tool cards, drafts) off the main hot path. */
 const PERSIST_DEBOUNCE_MS = 100
@@ -37,6 +38,13 @@ export class ChatStore {
         const raw = fs.readFileSync(path.join(this.dir, name), 'utf8')
         const chat = JSON.parse(raw) as ChatSession
         if (chat?.id) {
+          // Only migrate unmistakable unlocked first-message titles. Legacy
+          // locked/renamed titles have no provenance and must be preserved.
+          const firstAsk = chat.messages?.find(m => m.role === 'user')?.content || ''
+          if (!chat.titleSource && !chat.titleGenerated && firstAsk &&
+              [firstAsk.trim().replace(/\s+/g, ' ').slice(0, 80), localChatTitle(firstAsk)].includes(chat.title)) {
+            chat.titleSource = 'auto'
+          }
           // Timed asks cannot be resumed after restart; drop them.
           if (chat.pendingAsk && !(chat.pendingAsk.timeoutMs <= 0 && chat.pendingAsk.kind === 'user_choice')) {
             delete chat.pendingAsk
@@ -292,16 +300,14 @@ export class ChatStore {
     if (!chat || chat.titleGenerated || (chat.title !== '新对话' && chat.title !== '新 Chat')) return null
     const userTurns = chat.messages.filter((m) => m.role === 'user').length
     if (userTurns !== 1) return null
-    let t = (userText || '').trim().replace(/\s+/g, ' ')
+    let t = localChatTitle(userText)
     if (!t) {
       const first = chat.messages.find((m) => m.role === 'user')
-      t = (first?.content || '').trim().replace(/\s+/g, ' ')
+      t = localChatTitle(first?.content || '')
     }
     if (!t) return null
-    t = t.split(/\r?\n/)[0]?.trim() || t
-    // Keep longer text; sidebar truncates with CSS ellipsis.
-    if (t.length > 80) t = t.slice(0, 80)
     this.setTitle(chatId, t)
+    chat.titleSource = 'auto'
     return t
   }
 
@@ -422,12 +428,15 @@ export class ChatStore {
   ): ChatSession | null {
     const chat = this.chats.get(chatId)
     if (!chat) return null
+    if (opts?.fromAi && chat.titleSource === 'user') return chat
     const cleaned = title.trim().replace(/\s+/g, ' ').slice(0, 80)
     // Empty title = no change (keep current).
     if (!cleaned) return chat
     chat.title = cleaned
-    // User rename and AI polish both lock out further auto-title.
+    // Optional model polish runs once; manual names also block topic refresh.
     if (opts?.fromAi || opts?.fromUser) chat.titleGenerated = true
+    if (opts?.fromUser) chat.titleSource = 'user'
+    else if (opts?.fromAi) chat.titleSource = 'auto'
     chat.updatedAt = Date.now()
     this.persist(chat, 'defer')
     return chat

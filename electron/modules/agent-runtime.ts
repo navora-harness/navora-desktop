@@ -75,6 +75,7 @@ import type { WorkspaceShell } from './workspace-shell'
 import { executeAgentTool } from './browser-tools'
 import { OpenAICompatibleClient, resolveLlmTimeoutMs } from './llm/openai-compatible'
 import { formatCurrentWeather } from './weather'
+import { localChatTitle, canRefreshAutoTitle } from '../../shared/chat-title'
 
 export type { AgentEvent }
 
@@ -648,15 +649,16 @@ export class AgentRuntime {
       let toolCallsThisRun = 0
       const sourceBag = new Map<string, AnswerSource>()
       const runReasoningParts: string[] = []
+      this.maybeSetProvisionalTitle(chatId, opts.userText)
       let weatherReady = false
       let directWeatherReply: string | null = null
       const weatherRequest = weatherTask ? directWeatherRequest(opts.userText) : null
 
       // An unambiguous local-weather request needs no model planning round.
       // Use the normal tool executor: permissions, cancellation and visible logs
-      // still apply, and enabled plugins retain their own planning path.
-      if (weatherRequest &&
-          !this.plugins.enabledToolsForChat(this.chats.resolvePluginScopeChatId(chatId)).length) {
+      // still apply. Explicit plugin requests and compound tasks are excluded
+      // by directWeatherRequest; unrelated enabled plugins do not add latency.
+      if (weatherRequest) {
         const call: ToolCall = { id: `weather_${Date.now()}`, type: 'function', function: { name: 'weather_get', arguments: JSON.stringify(weatherRequest) } }
         const result = await this.runTool(chatId, call, ctrl.signal)
         toolCallsThisRun++
@@ -673,10 +675,6 @@ export class AgentRuntime {
               : '天气数据源暂不可用，未取得有效天气数据。请稍后重试。'
         }
       }
-
-      // Instant provisional title from first ask; AI polish runs after the agent finishes
-      // (avoids racing the main LLM call — many providers reject concurrent requests).
-      this.maybeSetProvisionalTitle(chatId, opts.userText)
 
       while (true) {
         if (ctrl.signal.aborted) throw new Error('aborted')
@@ -1273,7 +1271,14 @@ export class AgentRuntime {
 
   /** Instant title from a short slice of the first user message (not marked as AI). */
   private maybeSetProvisionalTitle(chatId: string, userText: string): void {
-    const polished = polishLocalTitle(userText)
+    const polished = localChatTitle(userText)
+    const chat = this.chats.get(chatId)
+    if (chat?.titleSource === 'auto' && this.getConfig().app.ai_generate_chat_title &&
+        chat.messages.filter(m => m.role === 'user').length > 1 && canRefreshAutoTitle(userText) && polished && polished !== chat.title) {
+      this.chats.setTitle(chatId, polished, { fromAi: true })
+      this.emit({ type: 'title', chatId, title: polished, fromAi: true })
+      return
+    }
     const slice = this.chats.setProvisionalTitleFromFirstUser(chatId, polished || userText)
     if (!slice) return
     this.emit({ type: 'title', chatId, title: slice, fromAi: false })
@@ -1302,6 +1307,8 @@ export class AgentRuntime {
       }
 
       if (!this.chats.tryLockTitle(chatId)) return
+      const requestedTitle = chat.title
+      const requestedTurns = chat.messages.filter(m => m.role === 'user').length
 
       let title: string | null = null
       try {
@@ -1311,10 +1318,11 @@ export class AgentRuntime {
       }
       if (signal?.aborted) return
       if (!title) {
-        title = polishLocalTitle(prompt)
+        title = localChatTitle(prompt) || polishLocalTitle(prompt)
         if (title) console.warn('[title] fallback to local polish:', title)
       }
-      if (!title || !this.chats.get(chatId)) return
+      const current = this.chats.get(chatId)
+      if (!title || !current || current.titleSource === 'user' || current.title !== requestedTitle || current.messages.filter(m => m.role === 'user').length !== requestedTurns) return
       this.chats.setTitle(chatId, title, { fromAi: true })
       this.emit({ type: 'title', chatId, title, fromAi: true })
     } catch (e) {
@@ -1330,17 +1338,7 @@ export class AgentRuntime {
     const messages = [
       {
         role: 'system' as const,
-        content: [
-          '你是会话侧栏标题生成器。把用户主任务压成一句简明标题，只输出标题正文一行。',
-          '要求：',
-          '1. 默认简体中文；任务全英文时可用英文，须完整单词。',
-          '2. 中文≤36字，英文≤72字符；可稍长以便读懂，勿写成整段。',
-          '3. 结构：动词/动作 + 对象；只抓主任务，忽略检查结果、路径、告知结果等收尾。',
-          '4. 专有名词照抄；URL 可改成站点名（如 economist.com→经济学人），不要输出完整 URL。',
-          '5. 禁止：标点结尾、思考/解释、「帮我/用户需要」开头、「Chat/对话/助手」。',
-          '6. 禁止元话语与自我反思：不要写「所以」「我决定」「用中文标题」「规则回顾」「标题是」；不要加引号。',
-          '7. 直接输出最终标题本身，例如：访问经济学人 Asia 并分析',
-        ].join('\n'),
+        content: '你是会话侧栏标题生成器。把用户主任务提炼为6～18字的中文主题，保留产品名、型号与动作；英文最多64字符且不截断单词。只输出一行标题，不要解释、引号、前缀或思考过程，不包含密钥、URL参数和验证步骤。',
       },
       {
         role: 'user' as const,
@@ -1348,11 +1346,9 @@ export class AgentRuntime {
       },
     ]
 
-    // mimo / reasoning models: small max_tokens leaves content empty (all spent on reasoning).
-    // Prefer a generous budget; fall back to no limit.
+    // Optional polish has a small idle budget; deterministic titles are already visible.
     const attempts: Array<{ maxTokens?: number; timeoutMs: number }> = [
-      { maxTokens: 1024, timeoutMs: 45000 },
-      { timeoutMs: 60000 },
+      { maxTokens: 1024, timeoutMs: 5000 },
     ]
 
     for (const attempt of attempts) {
@@ -1371,12 +1367,12 @@ export class AgentRuntime {
           continue
         }
         const fromContent = cleanChatTitle(rawContent)
-        if (fromContent && isUsableChatTitle(fromContent, userText)) return fromContent
+        if (fromContent && isUsableChatTitle(fromContent, userText)) return localChatTitle(fromContent)
         const fromReason = cleanChatTitle(extractTitleFromReasoning(reply.reasoningContent, userText))
-        if (fromReason && isUsableChatTitle(fromReason, userText)) return fromReason
+        if (fromReason && isUsableChatTitle(fromReason, userText)) return localChatTitle(fromReason)
         // Last resort: accept cleaned title even if weak, only when nothing better.
-        if (fromContent && !isMetaTitleLeak(fromContent)) return fromContent
-        if (fromReason && !isMetaTitleLeak(fromReason)) return fromReason
+        if (fromContent && !isMetaTitleLeak(fromContent)) return localChatTitle(fromContent)
+        if (fromReason && !isMetaTitleLeak(fromReason)) return localChatTitle(fromReason)
         console.warn(
           '[title] empty content',
           'finish=',

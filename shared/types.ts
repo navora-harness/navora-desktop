@@ -100,6 +100,8 @@ export type ChatSession = {
   devPluginLinks?: Array<{ id: string; path: string }>
   /** True after auto-title is locked (AI polish, fallback, skip, or user rename). */
   titleGenerated?: boolean
+  /** User titles are never replaced by automatic topic/title generation. */
+  titleSource?: 'auto' | 'user'
   /** Pinned chats stay at the top of the sidebar list. */
   pinned?: boolean
   /** When the chat was last pinned (sort key among pinned). */

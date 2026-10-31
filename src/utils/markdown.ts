@@ -7,6 +7,13 @@ marked.setOptions({
   breaks: true,
 })
 
+const renderer = new marked.Renderer()
+const renderTable = renderer.table
+renderer.table = function (token) {
+  return `<div class="md-table-scroll" role="region" aria-label="表格" tabindex="0">${renderTable.call(this, token)}</div>`
+}
+marked.use({ renderer })
+
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (node instanceof HTMLAnchorElement && node.hasAttribute('href')) {
     node.setAttribute('target', '_blank')
