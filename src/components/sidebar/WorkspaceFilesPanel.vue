@@ -314,7 +314,7 @@ async function confirmDelete() {
 
 function revealRoot() {
   if (!props.chatId) return
-  void openPath('.', 'reveal')
+  void openPath('.', 'open')
 }
 
 function onFocus() {

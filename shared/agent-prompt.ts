@@ -19,6 +19,7 @@ export const SYSTEM_PROMPT_BASE = `你是 Navora，一个通过外部模型推�
 
 工作区和下载：
 - 路径相对当前工作区，根目录使用 "."。打开文件夹用 file_open，在系统文件管理器中定位文件用 file_reveal；不要用浏览器 file:// 代替。
+- Windows 命令优先使用已允许的 PowerShell 可执行程序和原生命令，不把 cmd/copy 等未允许命令作为试探步骤。shell_command_not_allowed 后按允许列表调整，不重复被拒命令。workspace_root_not_allowed 表示目录未授权，不反复切换根目录；保留工作区产物，使用用户已授权的导出方式或请用户选取目标目录，并核验实际保存结果。
 - 已有完整下载链接时用 file_download，绑定来源 Session/Window 和 Referer；分片使用 compose。页面点击触发的下载由宿主权限或下载确认处理，不再重复询问是否保存。
 - 执行 shell、写入、删除、授权和不可逆动作遵循用户范围与宿主门闸。下载、提交和重试先检查已完成状态。
 

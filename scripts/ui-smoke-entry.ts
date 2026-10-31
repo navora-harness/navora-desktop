@@ -222,7 +222,7 @@ app.on('browser-window-created',(_event,win) => {
         assert.equal(await win.webContents.executeJavaScript(`Math.round(document.querySelector('aside.sidebar').getBoundingClientRect().width)`),52,'Closing settings restores rail mode')
         await click('.sidebar-settings-btn')
         await click('[data-panel="workspace"]')
-        assert.equal(await win.webContents.executeJavaScript(`!document.querySelector('.settings-workspace') && document.querySelector('[data-panel="workspace"]').getAttribute('aria-pressed')==='true' && document.querySelector('.workspace-panel').checkVisibility()`),true,'Selecting a hidden panel from settings opens that panel on the first click')
+        assert.equal(await win.webContents.executeJavaScript(`!document.querySelector('.settings-workspace') && document.querySelector('[data-panel="workspace"]').getAttribute('aria-pressed')==='true' && document.querySelector('[data-resource-kind=files]').checkVisibility()`),true,'Selecting a hidden panel from settings opens that panel on the first click')
         await click('[data-panel="workspace"]')
         await win.webContents.executeJavaScript(`(async()=>{const b=document.querySelector('[data-panel="workspace"]');for(let i=0;i<4;i++){b.click();await new Promise(r=>setTimeout(r,25))}})()`)
         let sidebarSettled = false

@@ -1,0 +1,78 @@
+<template>
+  <aside ref="card" class="conversation-resource-card" aria-label="当前对话资源面板" :style="{'--resource-width':`${width}px`}" @keydown.esc="onEscape">
+    <div class="resource-card-resizer" role="separator" aria-label="调整资源面板宽度" aria-orientation="vertical" :aria-valuenow="width" aria-valuemin="280" :aria-valuemax="maximum" tabindex="0" @pointerdown="beginResize" @keydown="resizeKey" />
+    <header class="resource-card-head"><div><h2>对话资源</h2><span :title="preview && preview.chatId!==chatId ? ownerLabel(preview.chatId) : title">{{ preview && preview.chatId!==chatId ? '来自：'+ownerLabel(preview.chatId) : title }}</span></div><button type="button" class="resource-icon-button" aria-label="关闭资源面板" title="关闭资源面板" @click="emit('close')"><font-awesome-icon icon="xmark" /></button></header>
+    <nav class="resource-card-tabs" aria-label="资源类型">
+      <button v-for="item in tabs" :key="item.id" type="button" :data-resource-tab="item.id" :aria-pressed="tab===item.id" @click="changeTab(item.id)">{{ item.label }}<span v-if="item.id==='browser' && windowCount">{{ windowCount }}</span><span v-if="item.id==='outputs' && outputs.length">{{ outputs.length }}</span></button>
+    </nav>
+    <FilePreviewPanel v-if="preview" embedded :chat-id="preview.chatId" :path="preview.path" :width="width" @close="emit('clearPreview')" @notify="notify" />
+    <div v-else-if="tab==='files'" class="resource-card-body resource-files">
+      <WorkspaceFilesPanel :key="chatId" embedded :chat-id="chatId" @notify="notify" @preview="emit('preview',$event.path)" />
+    </div>
+    <div v-else-if="tab==='browser'" class="resource-card-body resource-browser">
+      <BrowserResourcesPanel :key="chatId" embedded :chat-id="chatId" :tree="tree" :is-remote="isRemote" :owner-label="ownerLabel" :dnd-mime="dndMime" @notify="notify" @add-ref="emit('addRef',$event)" @ask-close-session="emit('askCloseSession',$event)" @remote-view="emit('remoteView',$event)" />
+    </div>
+    <div v-else class="resource-card-body resource-outputs">
+      <template v-if="selectedOutput">
+        <div class="resource-output-actions"><button type="button" @click="selectedOutputId=''">返回输出列表</button><button type="button" @click="emit('jump',selectedOutput.id)">定位到对话 <font-awesome-icon icon="arrow-up-right-from-square" /></button></div>
+        <ChatMarkdown :chat-id="chatId" :content="selectedOutput.content" @open-media="emit('openMedia',$event)" />
+      </template>
+      <template v-else>
+        <div v-if="!outputs.length" class="resource-empty">暂无输出</div>
+        <button v-for="(message,index) in outputs" :key="message.id" type="button" class="resource-output-row" @click="selectedOutputId=message.id"><font-awesome-icon icon="file-lines" /><span>{{ outputTitle(message.content) }}</span><small>{{ outputs.length-index }}</small><font-awesome-icon icon="chevron-right" /></button>
+      </template>
+    </div>
+  </aside>
+</template>
+<script setup lang="ts">
+import {computed,onBeforeUnmount,onMounted,ref,watch} from 'vue'
+import type {BrowserContextRef,BrowserTreeSession,ChatMessage} from '@shared/types'
+import type {ResourceTab} from '@/composables/useConversationResources'
+import WorkspaceFilesPanel from './sidebar/WorkspaceFilesPanel.vue'
+import BrowserResourcesPanel from './sidebar/BrowserResourcesPanel.vue'
+import FilePreviewPanel from './FilePreviewPanel.vue'
+import ChatMarkdown from './ChatMarkdown.vue'
+const props=defineProps<{chatId:string;title:string;messages:ChatMessage[];tree:BrowserTreeSession[];tab:ResourceTab;width:number;preview:{chatId:string;path:string}|null;isRemote:boolean;ownerLabel:(id:string)=>string;dndMime:string}>()
+const emit=defineEmits<{close:[];clearPreview:[];tab:[tab:ResourceTab];resize:[width:number];preview:[path:string];jump:[id:string];notify:[text:string,color?:string];addRef:[ref:BrowserContextRef];askCloseSession:[session:BrowserTreeSession];remoteView:[id:string];openMedia:[payload:{src:string;alt?:string}]}>()
+const tabs:Array<{id:ResourceTab;label:string}>=[{id:'files',label:'文件'},{id:'browser',label:'浏览器'},{id:'outputs',label:'输出'}]
+const outputs=computed(()=>props.messages.filter(message=>message.role==='assistant'&&message.content.trim()).slice().reverse())
+const windowCount=computed(()=>props.tree.reduce((count,session)=>count+session.windows.length,0))
+const selectedOutputId=ref(''),card=ref<HTMLElement|null>(null)
+const selectedOutput=computed(()=>outputs.value.find(message=>message.id===selectedOutputId.value))
+const maximum=ref(Math.max(280,Math.min(800,innerWidth-400)))
+let stopResize:(()=>void)|undefined,observer:ResizeObserver|undefined
+const notify=(text:string,color?:string)=>emit('notify',text,color)
+function outputTitle(content:string){return content.replace(/[#*_`>|]/g,'').trim().split('\n').find(Boolean)?.slice(0,100)||'对话输出'}
+function changeTab(tab:ResourceTab){emit('clearPreview');emit('tab',tab)}
+watch(()=>props.chatId,()=>{selectedOutputId.value=''})
+function onEscape(event:KeyboardEvent){if((event.target as Element).closest('input,textarea,[contenteditable=true]'))return;event.preventDefault();event.stopPropagation();if(props.preview)emit('clearPreview');else emit('close')}
+function resize(value:number){emit('resize',Math.max(280,Math.min(maximum.value,value)))}
+function onResize(){maximum.value=Math.max(280,Math.min(800,(card.value?.parentElement?.clientWidth||innerWidth)-504));if(innerWidth>=1280&&props.width>maximum.value)resize(props.width)}
+function resizeKey(event:KeyboardEvent){if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();resize(event.key==='Home'?400:event.key==='End'?maximum.value:props.width+(event.key==='ArrowLeft'?20:-20))}
+function beginResize(event:PointerEvent){
+  if(event.button!==0)return
+  event.preventDefault();stopResize?.()
+  const handle=event.currentTarget as HTMLElement,start=event.clientX,width=props.width
+  const move=(next:PointerEvent)=>resize(width+start-next.clientX)
+  const end=()=>{handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',end);handle.removeEventListener('pointercancel',end);handle.removeEventListener('lostpointercapture',end);if(handle.hasPointerCapture(event.pointerId))handle.releasePointerCapture(event.pointerId);stopResize=undefined}
+  handle.setPointerCapture(event.pointerId);handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);handle.addEventListener('lostpointercapture',end);stopResize=end
+}
+onMounted(()=>{onResize();observer=new ResizeObserver(onResize);if(card.value?.parentElement)observer.observe(card.value.parentElement);window.addEventListener('resize',onResize)})
+onBeforeUnmount(()=>{stopResize?.();observer?.disconnect();window.removeEventListener('resize',onResize)})
+</script>
+<style>
+.conversation-resource-card{position:absolute;inset:56px 12px 14px auto;width:var(--resource-width);max-width:calc(100% - 24px);display:flex;flex-direction:column;min-height:0;z-index:6;background:#fff;border:1px solid #d4dce6;border-radius:13px;box-shadow:0 6px 30px #243b5814;color:#46546a;font-size:12px;isolation:isolate;contain:layout style}
+.resource-card-head{display:flex;align-items:center;gap:8px;min-height:65px;padding:12px 14px 10px;flex-shrink:0}.resource-card-head>div{min-width:0;flex:1}.resource-card-head h2{font-size:13px;font-weight:600;margin:0 0 3px;color:#344156}.resource-card-head span{display:block;color:#7a8594;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.resource-icon-button{display:grid;place-items:center;width:28px;height:28px;flex-shrink:0;border:1px solid transparent;border-radius:7px;color:#657184;background:transparent}.resource-icon-button svg{width:14px;height:14px}.resource-icon-button:hover{background:#edf0f4;border-color:#dce2ea;color:#2c4666}
+.resource-card-tabs{display:flex;gap:3px;margin:0 12px 8px;padding:3px;background:#f0f2f5;border:1px solid #e0e5ec;border-radius:8px;flex-shrink:0}.resource-card-tabs button{display:flex;align-items:center;justify-content:center;gap:5px;flex:1;border:1px solid transparent;border-radius:5px;padding:5px 8px;color:#69768a;transition:background-color 140ms,color 140ms,border-color 140ms}.resource-card-tabs button:hover{color:#334b68;background:#e3e9f0}.resource-card-tabs button[aria-pressed=true]{background:#fff;border-color:#d7dfe8;color:#345b87;box-shadow:0 1px 2px #182b4610}.resource-card-tabs span{font-size:10px;color:#7e8b9d}
+.resource-card-body{flex:1;min-height:0;overflow:auto;padding:0 12px 12px;overscroll-behavior:contain;scrollbar-width:thin}.resource-card-body .sidebar-panel{margin:0;padding:0;border:0;min-height:0;display:flex;flex-direction:column;height:100%;background:transparent}.resource-card-body .res-head{display:flex;align-items:center;justify-content:flex-end;min-height:30px;padding:0;margin:0 0 5px}.resource-card-body .res-head-actions{display:flex;gap:2px}.resource-card-body .res-body{padding:0;overflow:auto;min-height:0;flex:1}.resource-card-body .res-tree{max-height:none;overflow:visible}.resource-card-body .res-empty,.resource-empty{color:#7c8a9b;min-height:130px;display:grid;place-items:center;font-size:12px}.resource-card-body .ws-root{color:#8390a2;font-size:10px;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.resource-card-body .icon-btn{display:inline-grid;place-items:center;width:27px;height:27px;padding:0;border:1px solid transparent;border-radius:6px;color:#64748b;background:transparent}.resource-card-body .icon-btn svg{width:12px;height:12px}.resource-card-body .icon-btn:hover{background:#edf0f4;border-color:#dce2ea;color:#2c4666}.resource-card-body .icon-btn:disabled{opacity:.4}.resource-card-body .tree-row{color:#52647a}.resource-card-body .tree-row:hover{background:#f0f3f7}.resource-card-body .tree-name{color:inherit}.resource-card-body .tree-meta{color:#8491a2}.resource-card-body .tree-actions{display:flex}
+.resource-output-row{display:flex;align-items:center;gap:8px;text-align:left;width:100%;min-height:40px;border-bottom:1px solid #e3e8ef;padding:9px 6px;color:#536277;transition:background-color 140ms}.resource-output-row:hover{background:#edf1f6;color:#2d4868}.resource-output-row>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.resource-output-row>svg{width:12px;height:12px;flex-shrink:0}.resource-output-row>small{color:#7c8a9a;font-size:10px}.resource-output-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:14px;padding:5px 0 10px;border-bottom:1px solid #dbe2ec}.resource-output-actions button{color:#496889;border-radius:5px;padding:4px}.resource-output-actions button:hover{background:#eef2f7}.resource-output-actions svg{width:10px;margin-left:3px}.navora-app .main .resource-outputs .msg-body{font-size:13px;line-height:1.75;border:0;border-radius:0;background:transparent;padding:0;box-shadow:none}
+.resource-card-resizer{position:absolute;inset:8px auto 8px -4px;width:8px;cursor:col-resize;touch-action:none;z-index:2;border-radius:4px}.resource-card-resizer:hover{background:#537ab929}.conversation-resource-card button:focus-visible,.resource-card-resizer:focus-visible{outline:2px solid #537ab9;outline-offset:-2px}
+.resource-card-enter-active,.resource-card-leave-active{transition:opacity 180ms ease,transform 180ms ease}.resource-card-enter-from,.resource-card-leave-to{opacity:0;transform:translateX(12px)}
+@media(min-width:1280px){.navora-app .main.resource-card-open>.messages-wrap,.navora-app .main.resource-card-open>.composer{margin-right:calc(var(--preview-width) + 24px)}}
+@media(max-width:1279px){.conversation-resource-card{width:min(var(--resource-width),calc(100% - 24px))}.resource-card-resizer{display:none}}
+.navora-app .shell.mobile-layout .conversation-resource-card{top:calc(56px + env(safe-area-inset-top,0px))}
+.navora-app .shell.frameless.mobile-layout .conversation-resource-card{top:calc(96px + env(safe-area-inset-top,0px))}
+.navora-app .shell.mobile-layout .conversation-resource-card .file-preview.embedded{top:auto;width:100%}
+@media(prefers-reduced-motion:reduce){.resource-card-enter-active,.resource-card-leave-active,.resource-card-tabs button,.resource-output-row{transition:none}}
+</style>

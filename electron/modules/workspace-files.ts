@@ -130,6 +130,26 @@ export class WorkspaceFiles {
     }
   }
 
+  /** Index existing workspaces without creating empty directories or following links. */
+  async containsFiles(chatId:string):Promise<boolean> {
+    const override=this.getChatWorkspaceRoot?.(chatId)?.trim()
+    const custom=this.getConfig().files.custom_root?.trim()
+    const candidate=override&&this.isAllowedWorkspaceRoot(override)?path.resolve(override)
+      :path.resolve(custom||path.resolve(this.dataRoot,this.getConfig().files.root_dirname||'workspace'),sanitizeSeg(chatId))
+    try{await fsp.access(candidate)}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return false;throw error}
+    const root=await this.resolveExisting(chatId,'.'),pending=[root]
+    while(pending.length){
+      const current=await this.resolveExisting(chatId,path.relative(root,pending.pop()!)||'.')
+      const entries=await fsp.readdir(current,{withFileTypes:true})
+      for(const entry of entries){
+        if(entry.isSymbolicLink())continue
+        if(entry.isFile())return true
+        if(entry.isDirectory())pending.push(path.join(current,entry.name))
+      }
+    }
+    return false
+  }
+
   /** Resolve a relative workspace path; throws if escapes sandbox. */
   resolve(chatId: string, relPath: string): string {
     const root = this.chatRoot(chatId)
