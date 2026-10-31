@@ -85,11 +85,11 @@ export class PermissionGate {
     capability: PermissionCapability,
   ): 'allow' | 'deny' | 'ask' {
     if (this.alwaysDeny.get(chatId)?.has(capability)) return 'deny'
-    if (this.alwaysAllow.get(chatId)?.has(capability)) return 'allow'
     const mode: PermissionMode = this.modesForChat(chatId)[capability] || 'ask'
     if (mode === 'deny') return 'deny'
+    if (this.alwaysAllow.get(chatId)?.has(capability)) return 'allow'
     if (mode === 'allow') return 'allow'
-    if (mode === 'ask_chat' && this.chatAllow.get(chatId)?.has(capability)) return 'allow'
+    if ((mode === 'ask' || mode === 'ask_chat') && this.chatAllow.get(chatId)?.has(capability)) return 'allow'
     // allow_notify / ask / ask_chat → go through request handler
     return 'ask'
   }
@@ -102,10 +102,9 @@ export class PermissionGate {
   ): Promise<{ ok: boolean; reason?: string }> {
     if (signal?.aborted) return { ok: false, reason: 'aborted' }
     if (this.alwaysDeny.get(chatId)?.has(capability)) return { ok: false, reason: 'always_deny' }
-    if (this.alwaysAllow.get(chatId)?.has(capability)) return { ok: true }
-
-    let mode: PermissionMode = this.modesForChat(chatId)[capability] || 'ask'
+    const mode: PermissionMode = this.modesForChat(chatId)[capability] || 'ask'
     if (mode === 'deny') return { ok: false, reason: 'denied_by_config' }
+    if (this.alwaysAllow.get(chatId)?.has(capability)) return { ok: true }
     if (mode === 'allow') return { ok: true }
     if (mode === 'allow_notify') {
       this.onNotify?.(chatId, capability, detail)
@@ -113,7 +112,7 @@ export class PermissionGate {
     }
 
     const chatSet = this.chatAllow.get(chatId)
-    if (mode === 'ask_chat' && chatSet?.has(capability)) return { ok: true }
+    if (chatSet?.has(capability)) return { ok: true }
 
     const cfg = this.getConfig().permissions
     const id = `perm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
@@ -125,10 +124,18 @@ export class PermissionGate {
       timeoutMs: cfg.confirm_timeout_ms || 120000,
     }
 
-    const decision = await Promise.race([
-      this.askFn(req),
-      abortDecision(signal),
-    ])
+    let abort: (() => void) | undefined
+    const aborted = new Promise<PermissionDecision>((resolve) => {
+      abort = () => resolve('deny')
+      signal?.addEventListener('abort', abort, { once: true })
+    })
+    let decision: PermissionDecision
+    try {
+      decision = await Promise.race([this.askFn(req), aborted])
+    } finally {
+      if (abort) signal?.removeEventListener('abort', abort)
+    }
+    if (signal?.aborted) return { ok: false, reason: 'aborted' }
 
     if (decision === 'deny' || decision === 'always_deny') {
       if (decision === 'always_deny') this.stickySet(this.alwaysDeny, chatId).add(capability)
@@ -140,17 +147,6 @@ export class PermissionGate {
     }
     return { ok: true }
   }
-}
-
-function abortDecision(signal?: AbortSignal): Promise<PermissionDecision> {
-  return new Promise((resolve) => {
-    if (!signal) return
-    if (signal.aborted) {
-      resolve('deny')
-      return
-    }
-    signal.addEventListener('abort', () => resolve('deny'), { once: true })
-  })
 }
 
 export function toolNameToCapability(name: string): PermissionCapability | null {

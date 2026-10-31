@@ -1,5 +1,6 @@
 <template>
   <SkillDialogShell
+    :busy="saving"
     :model-value="modelValue"
     kicker="插件"
     :title="dialogTitle"

@@ -1,5 +1,6 @@
 <template>
   <SkillDialogShell
+    :busy="saving"
     :model-value="modelValue"
     kicker="技能"
     :title="isEdit ? '编辑技能' : '新建技能'"

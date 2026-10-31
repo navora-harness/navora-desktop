@@ -3,8 +3,8 @@ import type {
   ChatCompletionResponse,
   ChatMessageParam,
   ChatCompletionTool,
-  ToolCall,
 } from '../../../shared/openai-types'
+import { readChatStream, type ChatReply } from './chat-stream'
 
 export type OpenAIClientOptions = {
   baseUrl: string
@@ -19,6 +19,8 @@ export type OpenAIClientOptions = {
 }
 
 export type ChatRequestOptions = {
+  /** Interactive calls stream; background helpers retain the JSON request path. */
+  onUpdate?: (reply: ChatReply) => void
   temperature?: number
   maxTokens?: number
   /** Per-request timeout; falls back to client default. */
@@ -75,12 +77,7 @@ export class OpenAICompatibleClient {
     tools: ChatCompletionTool[],
     signal?: AbortSignal,
     reqOpts?: ChatRequestOptions,
-  ): Promise<{
-    content: string | null
-    reasoningContent?: string | null
-    tool_calls?: ToolCall[]
-    finish_reason: string | null
-  }> {
+  ): Promise<ChatReply> {
     if (signal?.aborted) throw new Error('aborted')
 
     if (this.opts.supportsImages === false && messages.some(m => m.role === 'user' && Array.isArray(m.content) && m.content.some(p => p.type === 'image_url'))) {
@@ -92,7 +89,7 @@ export class OpenAICompatibleClient {
       messages,
       tools: tools.length ? tools : undefined,
       tool_choice: tools.length ? 'auto' : undefined,
-      stream: false,
+      stream: Boolean(reqOpts?.onUpdate),
       temperature: reqOpts?.temperature ?? 0.2,
       ...((reqOpts?.maxTokens ?? this.opts.maxOutputTokens) != null ? {
         [this.opts.outputTokenParam || 'max_tokens']: Math.min(reqOpts?.maxTokens ?? this.opts.maxOutputTokens!, this.opts.maxOutputTokens ?? Infinity),
@@ -131,6 +128,7 @@ export class OpenAICompatibleClient {
     try {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
+        Accept: reqOpts?.onUpdate ? 'text/event-stream, application/json' : 'application/json',
       }
       const key = String(this.opts.apiKey || '').trim()
       if (key) headers.Authorization = `Bearer ${key}`
@@ -150,6 +148,10 @@ export class OpenAICompatibleClient {
         }
         throw new Error(`llm_http_${res.status}:${truncate(text, 500)}`)
       }
+      if (res.headers.get('content-type')?.includes('text/event-stream')) {
+        return await readChatStream(res, reqOpts?.onUpdate)
+      }
+      // Some compatible servers ignore stream:true and return a complete JSON response.
       const data = (await res.json()) as ChatCompletionResponse
       const choice = data.choices?.[0]
       if (!choice) throw new Error('llm_empty_choices')

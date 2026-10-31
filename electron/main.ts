@@ -6,12 +6,17 @@ import { applyUserDataPath, ensureDir, ensurePortableRoot, isPortableRuntime, PO
 import { ConfigService } from './modules/config-service'
 import { mainWindowChrome } from './modules/window-chrome'
 import { fetchOpenAiModelsList } from '../shared/openai-models'
+import { probeModel } from './modules/model-probe'
 import { ChatStore } from './modules/chat-store'
 import { BrowserRegistry } from './modules/browser-registry'
 import { BrowserNetworkManager } from './modules/browser-network'
 import { WorkspaceFiles } from './modules/workspace-files'
 import { FileDownloadService } from './modules/file-download'
 import { BrowserDownloadList } from './modules/browser-download-list'
+import { ToolDownloadList } from '../shared/tool-downloads'
+import type { AgentEvent } from '../shared/types'
+const toolDownloads = new ToolDownloadList()
+function listDownloads(chatId?: string) { return [...browserDownloads.list(chatId), ...toolDownloads.list(chatId)].sort((a,b) => b.updatedAt - a.updatedAt) }
 import { WorkspaceShell } from './modules/workspace-shell'
 import { PermissionGate, type PermissionDecision, type PermissionRequest } from './modules/permission-gate'
 import { SecretsStore } from './modules/secrets'
@@ -360,7 +365,7 @@ function pushBrowserDownloadsChanged(): void {
   if (downloadsPushTimer) return
   downloadsPushTimer = setTimeout(() => {
     downloadsPushTimer = null
-    const payload = { downloads: browserDownloads.list() }
+    const payload = { downloads: listDownloads() }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('navora:downloads.changed', payload)
     }
@@ -370,6 +375,7 @@ function pushBrowserDownloadsChanged(): void {
 }
 
 function pushAgentEvent(payload: unknown): void {
+  if (toolDownloads.observe(payload as AgentEvent)) pushBrowserDownloadsChanged()
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('navora:agent.event', payload)
   }
@@ -646,6 +652,11 @@ async function createWindow(): Promise<void> {
 }
 
 function registerIpc(): void {
+  rpcHandle('navora:models.probe', async (_e, providerId: string, model: string, kind: string) => {
+    const provider = config.get().ai.providers.find(p => p.id === providerId)
+    if (!provider || (kind !== 'connection' && kind !== 'reply')) return { ok: false, text: '配置无效' }
+    return probeModel(provider, secrets.get(provider.api_key_ref) || '', model, kind)
+  })
   rpcHandle('navora:models.list', async (_e, providerId: string) => {
     const provider = config.get().ai.providers.find(p => p.id === providerId)
     if (!provider) return { ok: false as const, error: 'provider_not_found' }
@@ -1340,6 +1351,12 @@ function registerIpc(): void {
     return { ...info, ok: true }
   })
 
+  rpcHandle('navora:workspace.preview', async (_e, chatId: string, relPath: string) => {
+    if (!chatId || !chats.get(chatId)) return { ok: false, error: 'chat_not_found' }
+    try { return await files.preview(chatId, String(relPath || '')) }
+    catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
+  })
+
   rpcHandle('navora:workspace.readMedia', async (_e, chatId: string, relPath: string) => {
     if (!chatId) throw new Error('chatId_required')
     try {
@@ -1385,14 +1402,15 @@ function registerIpc(): void {
     }
   })
 
-  rpcHandle('navora:downloads.list', (_e, chatId?: string) => browserDownloads.list(chatId))
+  rpcHandle('navora:downloads.list', (_e, chatId?: string) => listDownloads(chatId))
   rpcHandle('navora:downloads.clear', (_e, chatId?: string) => {
+    toolDownloads.clear(chatId)
     const res = browserDownloads.clear(chatId)
     pushBrowserDownloadsChanged()
     return res
   })
   rpcHandle('navora:downloads.remove', (_e, id: string) => {
-    const res = browserDownloads.remove(String(id || ''))
+    const res = String(id).startsWith('tool:') ? toolDownloads.remove(id) : browserDownloads.remove(String(id || ''))
     if (res.ok) pushBrowserDownloadsChanged()
     return res
   })
@@ -1412,7 +1430,7 @@ function registerIpc(): void {
     return res
   })
   rpcHandle('navora:downloads.reveal', async (_e, id: string) => {
-    const entry = browserDownloads.get(String(id || ''))
+    const entry = toolDownloads.get(String(id || '')) || browserDownloads.get(String(id || ''))
     if (!entry?.relPath) return { ok: false, error: 'not_found' }
     if (entry.state !== 'completed') return { ok: false, error: 'not_ready' }
     try {
@@ -1422,7 +1440,7 @@ function registerIpc(): void {
     }
   })
   rpcHandle('navora:downloads.open', async (_e, id: string) => {
-    const entry = browserDownloads.get(String(id || ''))
+    const entry = toolDownloads.get(String(id || '')) || browserDownloads.get(String(id || ''))
     if (!entry?.relPath) return { ok: false, error: 'not_found' }
     if (entry.state !== 'completed') return { ok: false, error: 'not_ready' }
     try {

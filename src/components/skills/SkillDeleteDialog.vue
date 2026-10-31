@@ -1,5 +1,6 @@
 <template>
   <SkillDialogShell
+    :busy="saving"
     :model-value="modelValue"
     :kicker="kicker"
     :title="dialogTitle"

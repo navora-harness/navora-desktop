@@ -1,5 +1,11 @@
 <template>
   <nav v-if="items.length > 1" class="conversation-outline" aria-label="对话位置">
+    <div class="outline-compact">
+      <v-menu location="bottom end" max-height="360" :close-on-content-click="true">
+        <template #activator="{ props: menuProps }"><button type="button" class="outline-trigger" aria-label="对话目录" v-bind="menuProps"><font-awesome-icon icon="list-ul" /><span>{{ activeIndex + 1 }} / {{ items.length }}</span></button></template>
+        <div class="outline-directory" role="menu"><button v-for="(item,index) in items" :key="item.id" type="button" role="menuitem" :class="{ current: activeId === item.id }" @click="jump(item.id)"><span>{{ index + 1 }}</span>{{ item.text }}</button></div>
+      </v-menu>
+    </div>
     <div class="outline-list" @keydown="onKeydown">
       <button
         v-for="(item, index) in items"
@@ -34,6 +40,7 @@ const props = defineProps<{ messages: ChatMessage[]; scrollContainer: HTMLElemen
 const emit = defineEmits<{ jump: [messageId: string] }>()
 const items = computed(() => props.messages.filter(m => m.role === 'user').map(m => ({ id: m.id, text: m.content.trim().replace(/\s+/g, ' ') || '附带资源的提问' })))
 const activeId = ref('')
+const activeIndex = computed(() => Math.max(0, items.value.findIndex(item => item.id === activeId.value)))
 const preview = ref<{ text: string; index: number; style: Record<string, string> } | null>(null)
 let frame = 0
 let detach = () => {}
@@ -108,6 +115,12 @@ onUnmounted(() => { detach(); cancelAnimationFrame(frame); window.removeEventLis
 .outline-preview-index { display: block; margin-bottom: 4px; color: #8390a1; font-size: 10px; }
 .outline-preview > div { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 @keyframes outline-preview-in { from { opacity: 0; transform: translateX(4px); } to { opacity: 1; transform: translateX(0); } }
-@media(max-width:1100px) { .conversation-outline { display: none; } }
+.outline-compact { display:none; }
+.outline-directory { width:min(320px,85vw); max-height:360px; overflow:auto; padding:6px; background:#fff; }
+.outline-directory button { display:flex; gap:10px; width:100%; padding:9px; border:0; border-radius:7px; background:transparent; color:var(--navora-ink); text-align:left; font-size:12px; cursor:pointer; }
+.outline-directory button.current,.outline-directory button:hover { background:#edf1f6; }
+.outline-directory button span { color:var(--navora-muted); flex-shrink:0; }
+.outline-trigger { display:flex; align-items:center; gap:6px; padding:5px 8px; border:1px solid #e2e6ec; border-radius:8px; background:#fff; color:#667488; font-size:11px; cursor:pointer; }
+@media(max-width:1100px) { .conversation-outline { top:8px; right:18px; bottom:auto; width:auto; } .outline-list { display:none; } .outline-compact { display:block; } }
 @media(prefers-reduced-motion:reduce) { .outline-preview { animation: none; } .outline-step, .outline-step svg { transition: none; } }
 </style>

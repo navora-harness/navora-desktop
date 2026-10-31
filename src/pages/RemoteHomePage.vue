@@ -3,13 +3,14 @@
     <header class="top">
       <div class="top-row">
         <h1>远程窗口</h1>
+        <button type="button" class="back-chat" :disabled="refreshing" @click="refresh">{{ refreshing ? '刷新中…' : '刷新' }}</button>
         <button type="button" class="back-chat" @click="$router.push('/')">返回 Chat</button>
       </div>
       <p>选择一个窗口进行画面查看与操控</p>
     </header>
     <div v-if="error" class="err">{{ error }}</div>
-    <div v-else-if="loading" class="muted">加载中…</div>
-    <div v-else-if="!windows.length" class="muted empty">暂无 Agent 浏览器窗口</div>
+    <div v-if="loading" class="muted">加载中…</div>
+    <div v-else-if="!windows.length && !error" class="muted empty">暂无 Agent 浏览器窗口</div>
     <div v-else class="win-list">
       <button
         v-for="w in windows"
@@ -31,9 +32,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getStoredToken, remoteAuthMe } from '../remote-api'
+import { getStoredToken } from '../remote-api'
 
 const router = useRouter()
 const route = useRoute()
@@ -43,25 +44,43 @@ const windows = ref<
   Array<{ windowId: string; title: string; url: string; visible: boolean; loading: boolean }>
 >([])
 
+const refreshing = ref(false)
+let controller: AbortController | null = null
+let timer: ReturnType<typeof setInterval> | undefined
+let disposed = false
+async function refresh() {
+  if (refreshing.value || disposed) return
+  const token = getStoredToken()
+  refreshing.value = true
+  controller = new AbortController()
+  const timeout = setTimeout(() => controller?.abort(), 12000)
+  try {
+    const res = await fetch('/api/windows', { headers: { Authorization: 'Bearer ' + token }, signal: controller.signal })
+    if (res.status === 401 || res.status === 403) {
+      await router.replace({ path: '/login', query: { redirect: route.fullPath } }); return
+    }
+    if (!res.ok) throw new Error('无法获取窗口列表')
+    const data = await res.json() as { windows?: typeof windows.value }
+    if (!disposed) { windows.value = data.windows || []; error.value = '' }
+  } catch {
+    if (!disposed) error.value = '连接中断，请刷新重试' + (windows.value.length ? ' · 保留上次窗口' : '')
+  } finally { clearTimeout(timeout); refreshing.value = false; loading.value = false }
+}
+function onVisibility() { if (!document.hidden) void refresh() }
 onMounted(async () => {
   const token = getStoredToken()
-  if (!token || !(await remoteAuthMe(token))) {
-    await router.replace({ path: '/login', query: { redirect: route.fullPath } })
+  if (!token) {
+    if (!disposed) await router.replace({ path: '/login', query: { redirect: route.fullPath } })
     return
   }
-  try {
-    const res = await fetch('/api/windows', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    if (!res.ok) throw new Error('无法获取窗口列表')
-    const data = (await res.json()) as { windows?: typeof windows.value }
-    windows.value = data.windows || []
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '加载失败'
-  } finally {
-    loading.value = false
-  }
+  if (disposed) return
+  await refresh()
+  if (disposed) return
+  timer = setInterval(() => { if (!document.hidden) void refresh() }, 5000)
+  document.addEventListener('visibilitychange', onVisibility)
 })
+onUnmounted(() => { disposed = true; clearInterval(timer); controller?.abort(); document.removeEventListener('visibilitychange', onVisibility) })
+
 </script>
 
 <style scoped>

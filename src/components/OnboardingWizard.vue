@@ -36,7 +36,7 @@
 
       <div class="ob-body">
         <!-- 模型 -->
-        <div v-if="step === 0" class="ob-pane">
+        <div v-if="step === 0" class="ob-pane" :inert="saving">
           <p class="ob-hint">点选下方预设快速添加并设为默认，再填写 API Key。之后也可在设置中继续添加。</p>
           <div class="ob-presets" role="list">
             <button
@@ -67,43 +67,7 @@
             hide-details
             @update:model-value="onProviderPick"
           />
-          <v-text-field
-            v-if="provider"
-            v-model="provider.base_url"
-            label="Base URL"
-            variant="outlined"
-            density="comfortable"
-            color="primary"
-            base-color="#c5d0db"
-            hide-details
-            class="mt-3"
-          />
-          <v-select
-            v-if="provider"
-            v-model="provider.model"
-            :items="provider.models"
-            label="默认模型"
-            variant="outlined"
-            density="comfortable"
-            color="primary"
-            base-color="#c5d0db"
-            class="navora-select mt-3"
-            :menu-props="selectMenuProps"
-            hide-details
-          />
-          <v-text-field
-            v-model="apiKeyDraft"
-            :label="apiKeyLabel"
-            type="password"
-            autocomplete="off"
-            variant="outlined"
-            density="comfortable"
-            color="primary"
-            base-color="#c5d0db"
-            hide-details
-            class="mt-3"
-            placeholder="粘贴 API Key"
-          />
+          <div v-if="provider" class="ob-connection" :inert="saving"><ProviderConnectionFields :provider="provider" v-model:key-draft="apiKeyDraft" :key-label="apiKeyLabel" :show-name="false" show-model /></div>
         </div>
 
         <!-- 工作区 -->
@@ -282,6 +246,7 @@ import {
 } from '@shared/model-providers'
 import { MODEL_PRESETS, findModelPreset, matchModelPreset } from '@shared/model-presets'
 import type { PermissionPreset } from '@shared/types'
+import ProviderConnectionFields from './ProviderConnectionFields.vue'
 import { useMobileLayout } from '@/composables/useMobileLayout'
 
 const props = defineProps<{
@@ -309,7 +274,8 @@ const cfg = ref<AppConfig | null>(null)
 const saving = ref(false)
 const errorText = ref('')
 const selectedProviderId = ref('')
-const apiKeyDraft = ref('')
+const keyDrafts = ref<Record<string,string>>({})
+const apiKeyDraft = computed({ get: () => keyDrafts.value[selectedProviderId.value] || '', set: value => { keyDrafts.value[selectedProviderId.value] = value } })
 const apiKeyPreview = ref('')
 const remotePasswordDraft = ref('')
 const keyConfigured = ref(false)
@@ -397,7 +363,7 @@ async function load() {
   }
   cfg.value = c
   selectedProviderId.value = c.ai.default_provider || c.ai.providers[0]?.id || ''
-  apiKeyDraft.value = ''
+  keyDrafts.value = {}
   remotePasswordDraft.value = ''
   errorText.value = ''
   step.value = 0
@@ -409,7 +375,9 @@ async function load() {
   await refreshKeyPreview()
 }
 
+let keyPreviewRequest = 0
 async function refreshKeyPreview() {
+  const request = ++keyPreviewRequest
   const p = provider.value
   if (!p || !window.navora) {
     apiKeyPreview.value = ''
@@ -418,9 +386,11 @@ async function refreshKeyPreview() {
   }
   try {
     const st = await window.navora.secrets.getApiKey(p.api_key_ref)
+    if (request !== keyPreviewRequest || provider.value?.id !== p.id) return
     apiKeyPreview.value = st.preview || ''
     keyConfigured.value = !!st.configured
   } catch {
+    if (request !== keyPreviewRequest) return
     apiKeyPreview.value = ''
     keyConfigured.value = false
   }
@@ -443,11 +413,10 @@ function isPresetActive(presetId: string) {
 
 function selectProviderAsDefault(id: string) {
   if (!cfg.value) return
-  const switched = selectedProviderId.value !== id
   selectedProviderId.value = id
   cfg.value.ai.default_provider = id
-  // 仅切换服务商时清空 Key 草稿，避免误点同一预设把已输入 Key 清掉
-  if (switched) apiKeyDraft.value = ''
+  apiKeyPreview.value = ''
+  keyConfigured.value = false
   void refreshKeyPreview()
 }
 
@@ -518,29 +487,16 @@ async function persistCurrentStep(): Promise<boolean> {
     if (remotePasswordDraft.value.trim()) {
       payload.remote.password = remotePasswordDraft.value.trim()
     }
-    const keyValue = apiKeyDraft.value.trim()
-    const keyRefBefore = provider.value?.api_key_ref || ''
-    const selectedId = provider.value?.id || ''
+    const pendingKeys = cfg.value.ai.providers.flatMap(p => { const draft = keyDrafts.value[p.id] || ''; return draft.trim() ? [{ id:p.id, draft, value:draft.trim() }] : [] })
     cfg.value = await window.navora.config.save(payload)
-    if (keyValue) {
-      const savedProv = cfg.value.ai.providers.find((p) => p.id === selectedId)
-      const keyRef = savedProv?.api_key_ref || keyRefBefore
-      if (!keyRef) {
-        errorText.value = 'API Key 无法保存：缺少密钥路径'
-        return false
-      }
-      const keyRes = await window.navora.secrets.setApiKey(keyRef, keyValue)
-      if (!keyRes?.ok) {
-        const err = (keyRes as { error?: string } | undefined)?.error
-        errorText.value =
-          err === 'remote_forbidden'
-            ? '远程端不能保存 API Key，请在本机客户端设置'
-            : 'API Key 保存失败'
-        return false
-      }
-      apiKeyDraft.value = ''
-      await refreshKeyPreview()
+    for (const pending of pendingKeys) {
+      const saved = cfg.value.ai.providers.find(p => p.id === pending.id)
+      if (!saved?.api_key_ref) throw new Error('API Key 缺少保存路径')
+      const result = await window.navora.secrets.setApiKey(saved.api_key_ref, pending.value)
+      if (!result?.ok) throw new Error('API Key 保存失败，请在本机重试')
+      if (keyDrafts.value[pending.id] === pending.draft) delete keyDrafts.value[pending.id]
     }
+    await refreshKeyPreview()
     remotePasswordDraft.value = ''
     return true
   } catch (e) {

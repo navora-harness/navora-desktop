@@ -1,5 +1,6 @@
 <template>
   <SkillDialogShell
+    :busy="busy === 'install'"
     :model-value="modelValue"
     :kicker="kindLabel"
     :title="shellTitle"

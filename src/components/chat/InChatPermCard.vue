@@ -39,13 +39,10 @@
           <div class="perm-group-label">记住选择</div>
           <div class="perm-stack">
             <button type="button" class="perm-btn tonal" :disabled="busy" @click="emit('decide', 'allow_chat')">
-              本 Chat 内允许
-            </button>
-            <button type="button" class="perm-btn tonal" :disabled="busy" @click="emit('decide', 'always_allow')">
-              本会话始终允许
+              此对话内允许
             </button>
             <button type="button" class="perm-btn danger-ghost" :disabled="busy" @click="emit('decide', 'always_deny')">
-              本会话始终拒绝
+              此对话内拒绝
             </button>
           </div>
         </div>

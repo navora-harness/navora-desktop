@@ -19,11 +19,11 @@
         }}</span>
       </button>
     </template>
-    <div class="dl-panel" role="dialog" aria-label="触发式下载列表">
+    <div class="dl-panel" role="dialog" aria-label="下载列表">
       <div class="dl-panel-head">
         <div class="dl-panel-titles">
           <strong>下载列表</strong>
-          <span>浏览器触发的下载</span>
+          <span>浏览器与工具下载</span>
         </div>
         <button
           type="button"
@@ -35,12 +35,13 @@
           清空已结束
         </button>
       </div>
-      <div v-if="!items.length" class="dl-empty">暂无触发式下载</div>
+      <div v-if="!items.length" class="dl-empty">暂无下载</div>
       <ul v-else class="dl-list">
         <li v-for="item in items" :key="item.id" class="dl-item">
           <div class="dl-item-main">
             <div class="dl-name" :title="item.filename">{{ item.filename }}</div>
             <div class="dl-meta">
+              <span class="dl-source">{{ item.source === 'tool' ? '工具' : '浏览器' }}</span>
               <span class="dl-state" :data-state="item.state">{{ stateLabel(item.state) }}</span>
               <span v-if="sizeText(item)" class="dl-size">{{ sizeText(item) }}</span>
             </div>
@@ -69,7 +70,7 @@
           </div>
           <div class="dl-item-actions">
             <button
-              v-if="item.state === 'started'"
+              v-if="item.state === 'started' && item.canPause"
               type="button"
               class="dl-act"
               :disabled="!item.canPause"
@@ -89,7 +90,7 @@
               继续
             </button>
             <button
-              v-if="item.state === 'intercepted' || item.state === 'started' || item.state === 'paused'"
+              v-if="item.source !== 'tool' && (item.state === 'intercepted' || item.state === 'started' || item.state === 'paused')"
               type="button"
               class="dl-act danger"
               :disabled="item.canCancel === false"
@@ -107,7 +108,8 @@
             >
               打开
             </button>
-            <v-menu location="bottom end" :close-on-content-click="true">
+            <button v-if="item.source === 'tool' && item.state === 'started'" type="button" class="dl-act danger" title="停止此下载所在的任务" @click="stopToolTask(item.chatId)">停止任务</button>
+            <v-menu v-if="item.source !== 'tool' || isTerminal(item.state)" location="bottom end" :close-on-content-click="true">
               <template #activator="{ props: moreProps }">
                 <button
                   type="button"
@@ -282,6 +284,8 @@ async function removeItem(id: string) {
   await window.navora?.downloads?.remove(id)
   await refresh()
 }
+
+async function stopToolTask(chatId: string) { await window.navora?.agent.stop(chatId); await refresh() }
 
 async function pauseItem(id: string) {
   const res = await window.navora?.downloads?.pause?.(id)

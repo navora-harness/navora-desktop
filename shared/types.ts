@@ -281,6 +281,8 @@ export type AgentEvent =
       round?: number
       parentChatId?: string
     }
+  /** Transient current-round answer; only the final normalized message is persisted. */
+  | { type: 'answer_preview'; chatId: string; content: string; parentChatId?: string }
   | { type: 'message'; chatId: string; message: ChatMessage }
   | { type: 'message_update'; chatId: string; message: ChatMessage }
   | { type: 'error'; chatId: string; error: string; parentChatId?: string }
@@ -379,6 +381,7 @@ export type BrowserDownloadState =
 
 export type BrowserDownloadEntry = {
   id: string
+  source?: 'browser' | 'tool'
   chatId: string
   sessionId: string
   windowId?: string

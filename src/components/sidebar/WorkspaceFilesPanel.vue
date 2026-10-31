@@ -1,7 +1,8 @@
 <template>
   <div class="sidebar-panel workspace-panel" :class="{ 'is-collapsed': collapsed }">
-    <div class="res-head">
-      <button type="button" class="res-label-btn" :aria-expanded="!collapsed" aria-label="折叠或展开工作区" @click="collapsed = !collapsed">
+    <Teleport :to="headerTarget || 'body'" :disabled="!headerTarget" defer>
+    <div v-show="headerVisible !== false" class="res-head" :class="{ 'docked-head': headerTarget }">
+      <button type="button" v-if="!headerTarget" class="res-label-btn" :aria-expanded="!collapsed" aria-label="折叠或展开工作区" @click="collapsed = !collapsed">
         <font-awesome-icon icon="chevron-down" class="res-chevron" />
         <span class="res-label">工作区</span>
       </button>
@@ -26,6 +27,7 @@
         </button>
       </span>
     </div>
+    </Teleport>
     <Transition name="resource-body">
     <div v-show="!collapsed" class="res-body" data-ctx-menu="workspace" @contextmenu="onRootMenu">
       <div v-if="rootLabel" class="ws-root" :title="absoluteRoot">{{ rootLabel }}</div>
@@ -102,9 +104,10 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import SidebarContextMenu from './SidebarContextMenu.vue'
 import WorkspaceTreeNode, { type WsEntry } from './WorkspaceTreeNode.vue'
 
-const props = defineProps<{ chatId: string }>()
+const props = defineProps<{ chatId: string; headerTarget?: string; headerVisible?: boolean }>()
 const emit = defineEmits<{
   notify: [text: string, color?: string]
+  preview: [entry: WsEntry]
 }>()
 
 const collapsed = ref(false)
@@ -225,6 +228,7 @@ function toggleDir(ent: WsEntry) {
 
 function selectEntry(ent: WsEntry) {
   selectedPath.value = ent.path
+  if (ent.type === 'file') emit('preview', ent)
 }
 
 function openFile(ent: WsEntry) {

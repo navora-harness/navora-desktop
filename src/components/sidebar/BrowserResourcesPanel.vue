@@ -1,7 +1,8 @@
 <template>
   <div class="sidebar-panel browser-panel" :class="{ 'is-collapsed': collapsed }">
-    <div class="res-head">
-      <button type="button" class="res-label-btn" :aria-expanded="!collapsed" aria-label="折叠或展开浏览器资源" @click="collapsed = !collapsed">
+    <Teleport :to="headerTarget || 'body'" :disabled="!headerTarget" defer>
+    <div v-show="headerVisible !== false" class="res-head" :class="{ 'docked-head': headerTarget }">
+      <button type="button" v-if="!headerTarget" class="res-label-btn" :aria-expanded="!collapsed" aria-label="折叠或展开浏览器资源" @click="collapsed = !collapsed">
         <font-awesome-icon icon="chevron-down" class="res-chevron" />
         <span class="res-label">浏览器资源</span>
       </button>
@@ -19,6 +20,7 @@
       </button>
       </div>
     </div>
+    </Teleport>
     <Transition name="resource-body">
     <div v-show="!collapsed" class="res-body" data-ctx-menu="browser">
       <div v-if="!chatId" class="res-empty">选择对话后使用浏览器</div>
@@ -33,11 +35,12 @@
             @contextmenu="onSessionMenu($event, s)"
             title="拖到输入框或点击以引用"
           >
-            <span class="tree-name">
+            <button type="button" class="tree-name" @click.stop="emit('add-ref', sessionRef(s))">
               Session #{{ s.sessionIndex }}
               <span v-if="s.chatId !== chatId" class="tree-meta">{{ ownerLabel(s.chatId) }}</span>
+              <span class="tree-meta">{{ s.windows.length }} 个窗口</span>
               <span v-if="!s.persist" class="tree-meta">临时</span>
-            </span>
+            </button>
             <span class="tree-actions" @click.stop>
               <button
                 type="button"
@@ -48,7 +51,7 @@
               >
                 <font-awesome-icon icon="window-maximize" />
               </button>
-              <button type="button" class="icon-btn danger" title="关闭 Session" @click="emit('ask-close-session', s)">
+              <button type="button" class="icon-btn danger" title="释放会话并清除登录状态" aria-label="释放浏览器会话" @click="emit('ask-close-session', s)">
                 <font-awesome-icon icon="xmark" />
               </button>
             </span>
@@ -63,11 +66,11 @@
             @contextmenu="onWindowMenu($event, s, w)"
             title="拖到输入框或点击以引用"
           >
-            <span class="tree-name" :title="w.url">
+            <button type="button" class="tree-name" :title="w.url" @click.stop="emit('add-ref', windowRef(s,w))">
               {{ w.title || '无标题' }}
               <span v-if="w.loading" class="tree-meta">加载中</span>
               <span v-else-if="!w.visible" class="tree-meta">已隐藏</span>
-            </span>
+            </button>
             <span class="tree-actions" @click.stop>
               <button
                 type="button"
@@ -101,7 +104,7 @@
         @click="emit('ask-close-session', menuSession!)"
       >
         <font-awesome-icon icon="xmark" />
-        <span>关闭 Session</span>
+        <span>释放会话与登录状态</span>
       </button>
     </SidebarContextMenu>
 
@@ -136,6 +139,8 @@ import type { BrowserContextRef, BrowserTreeSession, BrowserTreeWindow } from '@
 import SidebarContextMenu from './SidebarContextMenu.vue'
 
 const props = defineProps<{
+  headerTarget?: string
+  headerVisible?: boolean
   chatId: string
   tree: BrowserTreeSession[]
   isRemote: boolean
