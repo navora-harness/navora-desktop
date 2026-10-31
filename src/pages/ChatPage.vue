@@ -7,20 +7,23 @@
       'remote-web': isWebRemote(),
       'sidebar-open': isMobileLayout && mobileSidebarOpen,
       'sidebar-collapsed': allSidebarHidden && !settingsOpen,
+      'sidebar-resizing': sidebarResizing,
       frameless: showDesktopChrome,
       'platform-mac': windowPlatform === 'darwin',
     }"
   >
+    <Transition name="sidebar-backdrop">
     <div
       v-if="isMobileLayout && mobileSidebarOpen"
       class="sidebar-backdrop"
       aria-hidden="true"
       @click="closeMobileSidebar"
     />
+    </Transition>
     <aside class="sidebar">
       <div class="sidebar-content-stack">
       <Transition name="sidebar-flip">
-      <div v-show="!settingsOpen || isMobileLayout" class="sidebar-chat-face">
+      <div v-show="!settingsOpen || isMobileLayout" class="sidebar-chat-face" :class="{ 'resources-only': !sidebarVisible.chats }">
       <div class="chat-toolbar" :class="{ 'app-drag': showDesktopChrome }">
         <Transition name="toolbar-swap" mode="out-in">
           <div v-if="!chatBatchMode" key="normal" class="chat-toolbar-row">
@@ -41,7 +44,7 @@
             </button>
             <Transition name="batch-btn-pop">
               <button
-                v-if="chats.length"
+                v-if="chats.length && sidebarVisible.chats"
                 key="batch-enter"
                 type="button"
                 class="chat-toolbar-icon-btn"
@@ -74,6 +77,7 @@
           </div>
         </Transition>
       </div>
+      <Transition name="sidebar-pane">
       <div v-show="sidebarVisible.chats" class="chat-list" :class="{ 'batch-mode': chatBatchMode }">
         <template v-for="sec in chatListSections" :key="sec.key">
           <div class="chat-date-label">{{ sec.label }}</div>
@@ -405,14 +409,18 @@
           </template>
         </template>
       </div>
+      </Transition>
 
       <Transition name="res-slide" mode="out-in">
         <div v-if="!chatBatchMode" key="resources" class="sidebar-dock">
-          <div v-if="sidebarVisible.chats && sidebarVisible.workspace" class="sidebar-divider horizontal" role="separator" aria-label="调整对话列表高度" aria-orientation="horizontal" tabindex="0" @pointerdown="beginSidebarResize($event, 'chats')" @keydown="sidebarResizeKey($event, 'chats')" />
+          <div v-if="sidebarVisible.chats && (sidebarVisible.workspace || sidebarVisible.browser)" class="sidebar-divider horizontal chat-resource-divider" role="separator" aria-label="调整对话列表高度" aria-orientation="horizontal" tabindex="0" @pointerdown="beginSidebarResize($event, 'chats')" @keydown="sidebarResizeKey($event, 'chats')" />
+          <Transition name="sidebar-pane">
           <div v-show="sidebarVisible.workspace" class="sidebar-workspace-pane">
             <WorkspaceFilesPanel :chat-id="activeId || ''" @notify="onPanelNotify" />
           </div>
+          </Transition>
           <div v-if="sidebarVisible.workspace && sidebarVisible.browser" class="sidebar-divider horizontal" role="separator" aria-label="调整工作区和浏览器资源高度" aria-orientation="horizontal" tabindex="0" @pointerdown="beginSidebarResize($event, 'resources')" @keydown="sidebarResizeKey($event, 'resources')" />
+          <Transition name="sidebar-pane">
           <div v-show="sidebarVisible.browser" class="sidebar-browser-pane">
           <BrowserResourcesPanel
             ref="browserResources"
@@ -427,6 +435,7 @@
             @notify="onPanelNotify"
           />
           </div>
+          </Transition>
         </div>
         <div v-else key="batch-actions" class="batch-list-footer">
           <v-btn
@@ -473,9 +482,9 @@
             <button type="button" class="sidebar-icon-btn rail-new-chat" title="开启新对话（Ctrl/⌘ N）" aria-label="开启新对话" @click="createChat"><font-awesome-icon icon="pen-to-square" /></button>
             <button type="button" class="sidebar-icon-btn rail-search" title="搜索对话（Ctrl/⌘ K）" aria-label="搜索对话" @click="openChatSearch"><font-awesome-icon icon="magnifying-glass" /></button>
           </template>
-          <button type="button" class="sidebar-icon-btn" :class="{ selected: sidebarVisible.chats }" title="显示/隐藏对话列表" aria-label="显示/隐藏对话列表" :aria-pressed="sidebarVisible.chats" @click="toggleSidebarPanel('chats')"><font-awesome-icon icon="comments" /></button>
-          <button type="button" class="sidebar-icon-btn" :class="{ selected: sidebarVisible.workspace }" title="显示/隐藏工作区" aria-label="显示/隐藏工作区" :aria-pressed="sidebarVisible.workspace" @click="toggleSidebarPanel('workspace')"><font-awesome-icon icon="folder-open" /></button>
-          <button type="button" class="sidebar-icon-btn" :class="{ selected: sidebarVisible.browser }" title="显示/隐藏浏览器资源" aria-label="显示/隐藏浏览器资源" :aria-pressed="sidebarVisible.browser" @click="toggleSidebarPanel('browser')"><font-awesome-icon icon="window-maximize" /></button>
+          <button type="button" class="sidebar-icon-btn" :class="{ selected: !settingsOpen && sidebarVisible.chats }" title="显示/隐藏对话列表" aria-label="显示/隐藏对话列表" :aria-pressed="!settingsOpen && sidebarVisible.chats" @click="toggleSidebarPanel('chats')"><font-awesome-icon icon="comments" /></button>
+          <button type="button" class="sidebar-icon-btn" :class="{ selected: !settingsOpen && sidebarVisible.workspace }" title="显示/隐藏工作区" aria-label="显示/隐藏工作区" :aria-pressed="!settingsOpen && sidebarVisible.workspace" @click="toggleSidebarPanel('workspace')"><font-awesome-icon icon="folder-open" /></button>
+          <button type="button" class="sidebar-icon-btn" :class="{ selected: !settingsOpen && sidebarVisible.browser }" title="显示/隐藏浏览器资源" aria-label="显示/隐藏浏览器资源" :aria-pressed="!settingsOpen && sidebarVisible.browser" @click="toggleSidebarPanel('browser')"><font-awesome-icon icon="window-maximize" /></button>
         </div>
         <div class="sidebar-foot">
         <div class="sidebar-foot-actions">
@@ -714,10 +723,11 @@
                         <span class="run-card-text">{{ runGroupSummary(block.items) }}</span>
                         <span class="run-card-chevron">
                           <font-awesome-icon
-                            :icon="isRunExpanded(block.key) ? 'chevron-down' : 'chevron-right'"
+                            icon="chevron-right"
                           />
                         </span>
                       </button>
+                      <DisclosureTransition>
                       <div v-if="isRunExpanded(block.key)" class="run-card-body">
                         <template v-for="item in block.items" :key="item.id">
                           <div v-if="item.role === 'log'" class="run-item log" :data-msg-id="item.id">
@@ -755,7 +765,7 @@
                                 <span class="tool-head-spacer" aria-hidden="true" />
                                 <span class="tool-chevron">
                                   <font-awesome-icon
-                                    :icon="expandedTools[item.id] ? 'chevron-down' : 'chevron-right'"
+                                    icon="chevron-right"
                                   />
                                 </span>
                               </button>
@@ -799,6 +809,7 @@
                                 }}</span>
                               </div>
                               <ToolCatalogList :message="item" />
+                              <DisclosureTransition>
                               <div v-if="expandedTools[item.id]" class="tool-detail">
                                 <div v-if="item.meta?.args" class="tool-section">
                                   <div class="tool-sec-label">参数</div>
@@ -809,10 +820,12 @@
                                   <pre>{{ item.content }}</pre>
                                 </div>
                               </div>
+                              </DisclosureTransition>
                             </div>
                           </div>
                         </template>
                       </div>
+                      </DisclosureTransition>
                     </div>
                   </div>
                 </div>
@@ -862,7 +875,7 @@
                         >
                         <span v-if="logCanExpand(block.message)" class="log-card-chevron">
                           <font-awesome-icon
-                            :icon="isLogExpanded(block.message.id) ? 'chevron-down' : 'chevron-right'"
+                            icon="chevron-right"
                           />
                         </span>
                       </div>
@@ -906,7 +919,7 @@
                         <span class="tool-head-spacer" aria-hidden="true" />
                         <span class="tool-chevron">
                           <font-awesome-icon
-                            :icon="expandedTools[block.message.id] ? 'chevron-down' : 'chevron-right'"
+                            icon="chevron-right"
                           />
                         </span>
                       </button>
@@ -987,6 +1000,7 @@
                         }}</span>
                       </div>
                       <ToolCatalogList :message="block.message" />
+                      <DisclosureTransition>
                       <div v-if="expandedTools[block.message.id]" class="tool-detail">
                         <div v-if="block.message.meta?.args" class="tool-section">
                           <div class="tool-sec-label">参数</div>
@@ -997,6 +1011,7 @@
                           <pre>{{ block.message.content }}</pre>
                         </div>
                       </div>
+                      </DisclosureTransition>
                     </div>
                   </div>
                 </div>
@@ -1045,20 +1060,18 @@
                         >
                           <font-awesome-icon
                             class="msg-reasoning-chevron"
-                            :icon="
-                              isReasoningExpanded(block.message.id)
-                                ? 'chevron-down'
-                                : 'chevron-right'
-                            "
+                            icon="chevron-right"
                           />
                           <span>思考</span>
                         </button>
+                        <DisclosureTransition>
                         <div
                           v-if="isReasoningExpanded(block.message.id)"
                           class="msg-reasoning-body"
                         >
                           {{ messageReasoning(block.message) }}
                         </div>
+                        </DisclosureTransition>
                       </div>
                       <ChatMarkdown
                         :chat-id="activeId || ''"
@@ -1165,7 +1178,7 @@
                   >
                     <font-awesome-icon
                       class="thinking-reason-chevron"
-                      :icon="liveReasoningOpen ? 'chevron-down' : 'chevron-right'"
+                      icon="chevron-right"
                     />
                     <span class="thinking-reason-title">
                       思考
@@ -1174,6 +1187,7 @@
                       }}</span>
                     </span>
                   </button>
+                  <DisclosureTransition>
                   <div
                     v-if="liveReasoningOpen"
                     ref="liveReasoningBodyEl"
@@ -1181,6 +1195,7 @@
                   >
                     {{ liveReasoningText }}
                   </div>
+                  </DisclosureTransition>
                 </div>
 
               </div>
@@ -1834,6 +1849,7 @@ defineOptions({ name: 'ChatPage' })
 import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import StatusIcon from '@/components/StatusIcon.vue'
 import ConversationOutline from '@/components/ConversationOutline.vue'
+import DisclosureTransition from '@/components/motion/DisclosureTransition'
 import { modelCapabilities } from '@shared/model-capabilities'
 import { useRoute, useRouter } from 'vue-router'
 import type {
@@ -2263,10 +2279,15 @@ const quitting = ref(false)
 const exportingChat = ref(false)
 const sidebarMoreOpen = ref(false)
 const settingsOpen = ref(false)
-const { layout: sidebarLayout, visible: sidebarVisible, style: sidebarStyle, toggle: toggleSidebarVisibility, beginResize: beginSidebarResize, resizeKey: sidebarResizeKey } = useSidebarLayout()
+const { layout: sidebarLayout, visible: sidebarVisible, style: sidebarStyle, resizing: sidebarResizing, toggle: toggleSidebarVisibility, beginResize: beginSidebarResize, resizeKey: sidebarResizeKey } = useSidebarLayout()
 const allSidebarHidden = computed(() => !sidebarVisible.value.chats && !sidebarVisible.value.workspace && !sidebarVisible.value.browser)
 function toggleSidebarPanel(panel: 'chats' | 'workspace' | 'browser') {
-  if (settingsOpen.value) { settingsOpen.value = false; return }
+  if (settingsOpen.value) {
+    settingsOpen.value = false
+    if (!sidebarVisible.value[panel]) toggleSidebarVisibility(panel)
+    return
+  }
+  if (panel === 'chats' && sidebarVisible.value.chats) exitChatBatchMode()
   toggleSidebarVisibility(panel)
 }
 const docsOpen = ref(false)
@@ -4452,16 +4473,29 @@ async function selectChat(id: string) {
   closeMobileSidebar()
 }
 
+let creatingChat: Promise<void> | undefined
 async function createChat() {
   if (!window.navora) return
-  try {
-    const c = await window.navora.chats.create()
-    await refreshList()
-    await selectChat(c.id)
-  } catch (e) {
-    console.error(e)
-    showToast(e instanceof Error ? e.message : '创建 Chat 失败')
+  if (creatingChat) return creatingChat
+  // Repeated clicks and shortcuts on an untouched conversation only focus it.
+  // Keep drafts, references and the selected model intact.
+  if (active.value && !active.value.messages.length && !agentRunning.value) {
+    settingsOpen.value = false
+    closeMobileSidebar()
+    focusComposer()
+    return
   }
+  creatingChat = (async () => {
+    try {
+      const c = await window.navora!.chats.create()
+      await refreshList()
+      await selectChat(c.id)
+    } catch (e) {
+      console.error(e)
+      showToast(e instanceof Error ? e.message : '创建 Chat 失败')
+    }
+  })()
+  try { await creatingChat } finally { creatingChat = undefined }
 }
 
 function askDeleteChat(c: ChatSession) {

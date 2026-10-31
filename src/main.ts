@@ -138,6 +138,7 @@ const vuetify = createVuetify({
     VTextField: { rounded: 'lg', variant: 'outlined', density: 'compact' },
     VTextarea: { rounded: 'lg', variant: 'outlined' },
     VSelect: { rounded: 'lg', variant: 'outlined' },
+    VSwitch: { inset: true, density: 'compact' },
     VMenu: { origin: 'overlap', maxHeight: 440, transition: { component: ButtonMenuTransition } },
     VDialog: { transition: { component: DialogTransition } },
     VSnackbar: { transition: 'fade-transition' },

@@ -146,12 +146,12 @@
               </div>
             </div>
 
-            <div class="card mt-3">
+            <div class="card mt-3 message-display-card">
               <h3 class="card-title">消息展示</h3>
               <div class="switch-row">
                 <div>
                   <div class="switch-title">显示已阅读网页</div>
-                  <div class="switch-hint">在回答顶部显示已阅读网页摘要</div>
+                  <div class="switch-hint">在回答底部显示来源</div>
                 </div>
                 <v-switch
                   v-model="cfg.app.show_read_pages"
@@ -160,7 +160,7 @@
                   density="compact"
                 />
               </div>
-              <div class="switch-row">
+              <div class="switch-row run-logs-setting">
                 <div>
                   <div class="switch-title">显示运行日志</div>
                   <div class="switch-hint">在对话中显示系统与操作日志</div>
@@ -170,6 +170,7 @@
                   color="primary"
                   hide-details
                   density="compact"
+                  aria-label="显示运行日志"
                 />
               </div>
               <div class="switch-row">
@@ -179,29 +180,30 @@
                 </div>
                 <v-switch
                   v-model="cfg.app.collapse_tool_runs"
+                  aria-label="折叠工具调用"
                   color="primary"
                   hide-details
                   density="compact"
                 />
               </div>
-              <div
-                class="switch-row switch-row-nested"
-                :class="{ muted: cfg.app.collapse_tool_runs || !cfg.app.show_run_logs }"
-              >
+              <DisclosureTransition>
+              <div v-if="cfg.app.show_run_logs" class="log-fold-setting">
+              <div class="switch-row log-fold-row">
                 <div>
-                  <div class="switch-title">折叠日志显示</div>
-                  <div class="switch-hint">
-                    将连续运行日志收成一条摘要；关闭后每条日志单独显示。开启「折叠工具调用」时日志会并入工具摘要，此项不可用
-                  </div>
+                  <div class="switch-title">日志折叠</div>
                 </div>
+                <span v-if="cfg.app.collapse_tool_runs" class="setting-status">已并入工具摘要</span>
                 <v-switch
+                  v-else
                   v-model="cfg.app.collapse_run_logs"
+                  aria-label="日志折叠"
                   color="primary"
                   hide-details
                   density="compact"
-                  :disabled="cfg.app.collapse_tool_runs || !cfg.app.show_run_logs"
                 />
               </div>
+              </div>
+              </DisclosureTransition>
             </div>
           </section>
 
@@ -1547,6 +1549,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import ModelCatalogEditor from '@/components/ModelCatalogEditor.vue'
+import DisclosureTransition from '@/components/motion/DisclosureTransition'
 import {
   createDefaultForkDecision,
   FORK_ASK_TIMEOUT_DEFAULT_MS,
