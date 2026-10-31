@@ -420,11 +420,12 @@ async function copyUrl(w: BrowserTreeWindow) {
   font-size: 0.7rem;
 }
 .res-head > .icon-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(236, 240, 241, 0.92);
+  background: #e8edf4;
+  color: #34465c;
 }
 .icon-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.16);
+  background: #e8edf4;
+  color: #34465c;
 }
 .icon-btn.danger:hover:not(:disabled) {
   background: rgba(231, 76, 60, 0.35);

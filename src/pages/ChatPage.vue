@@ -24,41 +24,12 @@
       <div class="sidebar-content-stack">
       <Transition name="sidebar-flip">
       <div v-show="(!settingsOpen && !creatorKind) || isMobileLayout" class="sidebar-chat-face">
-      <SidebarDock :model-value="dockLayout" :panels="sidebarPanels" @update:model-value="setDockLayout">
-        <template #chats>
-      <div class="chat-toolbar">
+      <SidebarDock :model-value="dockLayout" :panels="sidebarPanels" :single-selection="true" :class="{'rail-merge-target':railDragging && sidebarRail.active && railDragging !== sidebarRail.active}" @dragover="overSidebarRail" @drop="dropSidebarRail" @close="closeSidebar" @update:model-value="setDockLayout">
+        <template #chats="slot">
+      <Teleport :to="slot.headerTarget" defer><button v-show="slot.active" type="button" class="chat-toolbar-icon-btn chat-batch-trigger" :title="chatBatchMode ? '取消批量操作' : '批量管理对话'" :aria-label="chatBatchMode ? '取消批量操作' : '批量操作'" :aria-pressed="chatBatchMode" @click="chatBatchMode ? exitChatBatchMode() : enterChatBatchMode()"><font-awesome-icon :icon="chatBatchMode ? 'xmark' : 'list-check'" /></button></Teleport>
+      <div v-if="chatBatchMode" class="chat-toolbar">
         <Transition name="toolbar-swap" mode="out-in">
-          <div v-if="!chatBatchMode" key="normal" class="chat-toolbar-row">
-            <v-btn
-              size="small"
-              color="primary"
-              variant="text"
-              class="new-chat-btn"
-              title="开启新对话（Ctrl/⌘ N）"
-              aria-label="开启新对话"
-              @click="createChat"
-            >
-              <font-awesome-icon icon="pen-to-square" class="new-chat-icon" />
-              新对话
-            </v-btn>
-            <button type="button" class="brand-search-btn" title="搜索对话（Ctrl/⌘ K）" aria-label="搜索对话" @click="openChatSearch">
-              <font-awesome-icon icon="magnifying-glass" />
-            </button>
-            <Transition name="batch-btn-pop">
-              <button
-                v-if="chats.length && sidebarVisible.chats"
-                key="batch-enter"
-                type="button"
-                class="chat-toolbar-icon-btn"
-                title="批量操作"
-                aria-label="批量操作"
-                @click="enterChatBatchMode"
-              >
-                <font-awesome-icon icon="list-check" />
-              </button>
-            </Transition>
-          </div>
-          <div v-else key="batch" class="chat-toolbar-row">
+          <div key="batch" class="chat-toolbar-row">
             <v-btn
               size="small"
               variant="tonal"
@@ -67,15 +38,7 @@
             >
               {{ batchAllSelected ? '取消全选' : '全选' }}
             </v-btn>
-            <button
-              type="button"
-              class="chat-toolbar-icon-btn"
-              title="取消批量操作"
-              aria-label="取消批量操作"
-              @click="exitChatBatchMode"
-            >
-              取消
-            </button>
+            <span class="chat-batch-count" role="status" aria-live="polite">已选 {{ batchSelectedCount }}</span>
           </div>
         </Transition>
       </div>
@@ -117,7 +80,7 @@
               @touchcancel="chatBatchMode ? undefined : onChatTouchEnd(c.id)"
               @contextmenu="onChatItemContext($event, c)"
             >
-              <button type="button" class="chat-item-main" @click="onChatItemActivate(c.id)">
+              <button type="button" class="chat-item-main" :aria-pressed="chatBatchMode ? batchSelectedIds.has(c.id) : undefined" @click="onChatItemActivate(c.id)">
                 <Transition name="batch-check">
                   <span
                     v-if="chatBatchMode"
@@ -424,7 +387,7 @@
           >
             <font-awesome-icon icon="thumbtack" class="batch-pin-icon" />
             {{ batchSelectionAllPinned ? '取消置顶' : '置顶'
-            }}{{ batchSelectedCount ? ` ${batchSelectedCount}` : '' }}
+            }}
           </v-btn>
           <v-btn
             size="small"
@@ -434,7 +397,7 @@
             :disabled="!batchSelectedCount"
             @click="askBatchDeleteChats"
           >
-            删除{{ batchSelectedCount ? ` ${batchSelectedCount}` : '' }}
+            <font-awesome-icon icon="trash" class="batch-delete-icon" />删除
           </v-btn>
         </div>
         </template>
@@ -478,11 +441,9 @@
           <div class="rail-brand" :class="{ 'app-drag': showDesktopChrome }" title="Navora">
             <img src="/app-icon.png" alt="Navora" draggable="false" />
           </div>
-          <template v-if="allSidebarHidden && !settingsOpen && !creatorKind">
-            <button type="button" class="sidebar-icon-btn rail-new-chat" title="开启新对话（Ctrl/⌘ N）" aria-label="开启新对话" @click="createChat"><font-awesome-icon icon="pen-to-square" /></button>
-            <button type="button" class="sidebar-icon-btn rail-search" title="搜索对话（Ctrl/⌘ K）" aria-label="搜索对话" @click="openChatSearch"><font-awesome-icon icon="magnifying-glass" /></button>
-          </template>
-          <button v-for="panel in sidebarPanels" :key="panel.id" type="button" class="sidebar-icon-btn" :class="{ selected: !settingsOpen && !creatorKind && sidebarSelected[panel.id] }" :data-panel="panel.id" :data-visible="sidebarVisible[panel.id]" :title="railPanelLabel(panel.id, panel.label)" :aria-label="railPanelLabel(panel.id, panel.label)" :aria-pressed="!settingsOpen && !creatorKind && sidebarSelected[panel.id]" @click="toggleSidebarPanel(panel.id)"><font-awesome-icon :icon="panel.icon" /></button>
+          <button type="button" class="sidebar-icon-btn rail-new-chat" title="开启新对话（Ctrl/⌘ N）" aria-label="开启新对话" @click="createChat"><font-awesome-icon icon="pen-to-square" /></button>
+          <button type="button" class="sidebar-icon-btn rail-search brand-search-btn" title="搜索对话（Ctrl/⌘ K）" aria-label="搜索对话" @click="openChatSearch"><font-awesome-icon icon="magnifying-glass" /></button>
+          <SidebarRailGroups :panels="sidebarPanels" :state="sidebarRail" :inactive="settingsOpen || !!creatorKind" @activate="toggleSidebarGroup" @merge="mergeSidebarGroups" @split="splitSidebarPanel" @split-all="splitSidebarGroup" @dragging="railDragging=$event" />
         </div>
         <div class="sidebar-foot">
         <div class="sidebar-foot-actions">
@@ -715,6 +676,8 @@
                         type="button"
                         class="run-card-head"
                         :aria-expanded="isRunExpanded(block.key)"
+                        :aria-controls="`run-details-${block.key}`"
+                        :title="runGroupSummary(block.items)"
                         @click="toggleRun(block.key)"
                       >
                         <span class="run-status">
@@ -728,7 +691,7 @@
                         </span>
                       </button>
                       <DisclosureTransition>
-                      <div v-if="isRunExpanded(block.key)" class="run-card-body">
+                      <div v-if="isRunExpanded(block.key)" :id="`run-details-${block.key}`" class="run-card-body">
                         <template v-for="item in block.items" :key="item.id">
                           <div v-if="item.role === 'log'" class="run-item log" :data-msg-id="item.id">
                             <span class="log-kind-chip">{{ logKindText(item) }}</span>
@@ -1924,6 +1887,7 @@ import { normalizeProvider, resolveModelName, resolveProvider } from '@shared/mo
 import ChatMarkdown from '@/components/ChatMarkdown.vue'
 import SettingsPage from './SettingsPage.vue'
 import { useSidebarLayout } from '@/composables/useSidebarLayout'
+import SidebarRailGroups from '@/components/sidebar/SidebarRailGroups.vue'
 import DocsDialog from '@/components/DocsDialog.vue'
 import SkillReviewHost from '@/components/skills/SkillReviewHost.vue'
 import CatalogItemCard from '@/components/store/CatalogItemCard.vue'
@@ -2360,16 +2324,14 @@ const settingsTab = ref('basic')
 const settingsOpen = ref(false)
 watch(settingsOpen, open => { if (open) creatorKind.value = null })
 const { layout: sidebarLayout, style: sidebarStyle, resizing: sidebarResizing, beginResize: beginSidebarResize, resizeKey: sidebarResizeKey } = useSidebarLayout()
-const { layout: dockLayout, panels: sidebarPanels, visible: sidebarVisible, selected: sidebarSelected, activate: activateSidebarPanel, set: setDockLayout } = useSidebarDock()
+const { layout: dockLayout, panels: sidebarPanels, visible: sidebarVisible, set: setDockLayout, rail:sidebarRail, activateGroup,mergeGroups,splitPanel:splitSidebarPanel,splitGroup:splitSidebarGroup,close:closeSidebar } = useSidebarDock()
+const railDragging=ref('')
 const allSidebarHidden = computed(() => sidebarPanels.value.every(panel => !sidebarVisible.value[panel.id]))
-function railPanelLabel(id: string, label: string) { return `显示/隐藏${id === 'chats' ? '对话列表' : id === 'workspace' ? '工作区' : id === 'browser' ? '浏览器资源' : label}` }
-function toggleSidebarPanel(panel: string) {
-  creatorKind.value = null
-  const wasSettings = settingsOpen.value
-  settingsOpen.value = false
-  if (panel === 'chats' && sidebarSelected.value.chats && !wasSettings) exitChatBatchMode()
-  activateSidebarPanel(panel, !wasSettings)
-}
+watch(()=>sidebarVisible.value.chats,visible=>{if(!visible)exitChatBatchMode()})
+function toggleSidebarGroup(id:string){const force=settingsOpen.value||!!creatorKind.value;settingsOpen.value=false;creatorKind.value=null;exitChatBatchMode();activateGroup(id,!force)}
+function mergeSidebarGroups(source:string,target:string){settingsOpen.value=false;creatorKind.value=null;exitChatBatchMode();mergeGroups(source,target)}
+function overSidebarRail(event:DragEvent){if(railDragging.value&&sidebarRail.value.active&&railDragging.value!==sidebarRail.value.active){event.preventDefault();if(event.dataTransfer)event.dataTransfer.dropEffect='move'}}
+function dropSidebarRail(event:DragEvent){if(railDragging.value&&sidebarRail.value.active&&railDragging.value!==sidebarRail.value.active){event.preventDefault();mergeSidebarGroups(railDragging.value,sidebarRail.value.active);railDragging.value=''}}
 const docsOpen = ref(false)
 const mobileSidebarOpen = ref(false)
 const chatSearchOpen = ref(false)
@@ -2644,15 +2606,7 @@ const messageBlocks = computed((): MessageBlock[] => {
     let logBuf: ChatMessage[] = []
     const flushLogs = () => {
       if (!logBuf.length) return
-      if (logBuf.length === 1) {
-        blocks.push({ type: 'log', key: logBuf[0].id, message: logBuf[0] })
-      } else {
-        blocks.push({
-          type: 'run',
-          key: `run:${logBuf[0].id}`,
-          items: logBuf,
-        })
-      }
+      blocks.push({ type: 'run', key: `run:${logBuf[0].id}`, items: logBuf })
       logBuf = []
     }
     for (const m of msgs) {

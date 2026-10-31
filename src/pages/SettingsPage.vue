@@ -222,6 +222,7 @@
               <div class="provider-layout">
                 <div class="card provider-list-card">
                   <div class="provider-list-toolbar">
+                    <h3 class="provider-list-title">服务商 <span>{{ cfg.ai.providers.length }}</span></h3>
                     <v-select
                       v-model="addPresetId"
                       :items="modelPresetItems"
@@ -240,14 +241,7 @@
                     <button type="button" class="provider-tool-btn" @click="addCustomProvider">
                       自定义
                     </button>
-                    <button
-                      type="button"
-                      class="provider-tool-btn danger"
-                      title="恢复为内置预设列表（不删除已保存的 Key）"
-                      @click="resetProviders"
-                    >
-                      重置预设
-                    </button>
+                    <v-menu location="bottom end"><template #activator="{ props: menuProps }"><button v-bind="menuProps" type="button" class="provider-tool-btn provider-more" aria-label="服务商更多操作" title="更多操作"><font-awesome-icon icon="ellipsis" /></button></template><div class="skill-more-panel" role="menu"><button type="button" role="menuitem" class="skill-more-item" @click="resetProviders">重置预设</button></div></v-menu>
                   </div>
                   <v-select v-if="mobile" :model-value="selectedProviderId" :items="cfg.ai.providers.map(p => ({title:p.label || p.id,value:p.id}))" label="当前服务商" class="mobile-provider-select" :menu-props="selectMenuProps" hide-details @update:model-value="selectProvider" />
                   <ul v-else class="provider-list" role="listbox" aria-label="模型服务商">
@@ -293,7 +287,7 @@
 
                 <div class="card provider-edit-card">
                   <div class="provider-edit-head">
-                    <h3 class="card-title">编辑模型</h3>
+                    <h3 class="card-title">连接配置</h3>
                     <div class="provider-edit-actions">
                       <button
                         type="button"
@@ -314,7 +308,7 @@
                     </div>
                   </div>
                   <div class="form-grid connection-form">
-                    <ProviderConnectionFields :provider="provider" v-model:key-draft="apiKeyDraft" :key-label="apiKeyLabel">
+                    <ProviderConnectionFields :provider="provider" v-model:key-draft="apiKeyDraft" :key-label="apiKeyLabel" :key-placeholder="apiKeyPreview ? '留空保留现有密钥' : '输入 API Key'">
                       <template #key-actions><button v-if="apiKeyPreview" type="button" class="provider-tool-btn danger" :disabled="clearingApiKey" @click.stop="clearApiKey">清除</button></template>
                     </ProviderConnectionFields>
                     <button type="button" class="advanced-toggle span-2" :aria-expanded="advancedModel" @click="advancedModel = !advancedModel"><font-awesome-icon :icon="advancedModel ? 'chevron-down' : 'chevron-right'" />高级连接配置</button>
@@ -2635,7 +2629,7 @@ const provider = computed(() => {
 
 const apiKeyLabel = computed(() =>
   apiKeyPreview.value
-    ? `API Key（已配置 ${apiKeyPreview.value}，留空不改）`
+    ? `API Key · ${apiKeyPreview.value}`
     : 'API Key',
 )
 

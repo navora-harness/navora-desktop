@@ -452,8 +452,8 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 .icon-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(236, 240, 241, 0.92);
+  background: #e8edf4;
+  color: #34465c;
 }
 .icon-btn:disabled {
   opacity: 0.3;
