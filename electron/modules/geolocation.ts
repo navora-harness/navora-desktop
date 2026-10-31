@@ -155,7 +155,7 @@ async function reverseGeocode(
   try {
     const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&accept-language=zh-CN`
     const res = await fetch(url, {
-      signal,
+      signal: AbortSignal.any([AbortSignal.timeout(1200), ...(signal ? [signal] : [])]),
       headers: {
         Accept: 'application/json',
         'User-Agent': 'Navora/geolocation',
@@ -210,9 +210,10 @@ async function enrichPlace(
 async function fetchIpGeolocation(signal?: AbortSignal): Promise<GeolocationResult | GeolocationFail> {
   let lastError = 'ip_lookup_failed'
   for (const provider of IP_PROVIDERS) {
+    if (signal?.aborted) return { ok: false, error: 'aborted' }
     try {
       const res = await fetch(provider.url, {
-        signal,
+        signal: AbortSignal.any([AbortSignal.timeout(1800), ...(signal ? [signal] : [])]),
         headers: { Accept: 'application/json', 'User-Agent': 'Navora/geolocation' },
       })
       if (!res.ok) {
@@ -302,6 +303,7 @@ try {
       {
         timeout: ms + 8000,
         windowsHide: true,
+        signal,
         maxBuffer: 1024 * 64,
       },
     )
@@ -505,7 +507,7 @@ async function fetchDeviceGeolocation(
   }
 }
 
-export async function resolveGeolocation(opts: {
+async function lookupGeolocation(opts: {
   prefer?: 'device' | 'ip' | 'auto'
   timeoutMs?: number
   signal?: AbortSignal
@@ -519,7 +521,8 @@ export async function resolveGeolocation(opts: {
 
   let deviceError: string | undefined
   if (prefer === 'device' || prefer === 'auto') {
-    const device = await fetchDeviceGeolocation(timeoutMs, opts.signal)
+    const deviceSignal = AbortSignal.any([AbortSignal.timeout(Math.min(timeoutMs, 4500)), ...(opts.signal ? [opts.signal] : [])])
+    const device = await fetchDeviceGeolocation(timeoutMs, deviceSignal)
     if (device.ok) return device
     deviceError = device.error
     if (prefer === 'device') return device
@@ -535,4 +538,26 @@ export async function resolveGeolocation(opts: {
     hint:
       '设备定位与 IP 定位均失败。请用户直接提供城市/区域，或检查 Windows 位置权限与网络后重试。',
   }
+}
+
+let cachedLocation: { result: GeolocationResult; at: number } | undefined
+
+/** Permission is checked by the caller even when a recent result is reused. */
+export async function resolveGeolocation(opts: {
+  prefer?: 'device' | 'ip' | 'auto'
+  timeoutMs?: number
+  signal?: AbortSignal
+}): Promise<GeolocationResult | GeolocationFail> {
+  if (opts.signal?.aborted) throw new Error('aborted')
+  if (cachedLocation && Date.now() - cachedLocation.at < 300000 &&
+      (!opts.prefer || opts.prefer === 'auto' || opts.prefer === cachedLocation.result.source)) {
+    return { ...cachedLocation.result }
+  }
+  const timeout = Math.min(30000, Math.max(1000, opts.timeoutMs || 10000))
+  const signal = AbortSignal.any([AbortSignal.timeout(timeout), ...(opts.signal ? [opts.signal] : [])])
+  // Give the native attempt only part of the total budget so IP fallback can still finish.
+  const result = await lookupGeolocation({ ...opts, timeoutMs: Math.min(4000, timeout), signal })
+  if (opts.signal?.aborted) throw new Error('aborted')
+  if (result.ok) cachedLocation = { result, at: Date.now() }
+  return result
 }

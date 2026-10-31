@@ -168,6 +168,7 @@ export function toolNameToCapability(name: string): PermissionCapability | null 
     case 'browser_session_set_ua':
       return 'session.set_ua'
     case 'browser_session_fetch':
+    case 'weather_get':
       return 'session.fetch'
     case 'browser_cookies_get':
       return 'session.cookies_read'

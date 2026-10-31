@@ -64,7 +64,7 @@
 .chat-search-dialog { align-self: flex-start; margin-top: min(14vh,100px) !important; }
 .chat-search-dialog .chat-search-panel { width: 100%; background: #fff; border-color: #dfe2e7; }
 .navora-app > .v-application__wrap { height: 100dvh; min-height: 0; overflow: hidden; }
-.navora-app .shell:has(> .sidebar) { height: 100dvh; grid-template-columns: 252px minmax(0,1fr); }
+.navora-app .shell:has(> .sidebar) { height: 100dvh; grid-template-columns: var(--sidebar-width,310px) minmax(0,1fr); }
 .navora-app .sidebar { padding: 0 8px 8px; }
 .navora-app .sidebar .brand { padding: 8px 4px; }
 .navora-app .sidebar .brand-search-btn { border: 0; color: #39414d; }
@@ -130,23 +130,23 @@
 .v-overlay .v-field__outline { color: #b2bac5; }
 .v-overlay :is(button,.v-btn):disabled { opacity: .45; }
 .settings-dialog-content .settings-page { background: #fff; border: 1px solid #dfe2e7; box-shadow: 0 18px 60px #17203026; }
-.v-overlay .settings-page .top { padding: 12px 20px; background: #fff; backdrop-filter: none; }
-.settings-dialog-root .settings-page.is-embedded .shell { grid-template-columns: 170px minmax(0,1fr); padding: 14px !important; gap: 14px; background: #fff; }
-.v-overlay .settings-page .nav { padding: 6px; background: #f7f7f8; border: 0; }
-.v-overlay .settings-page .nav-item { padding: 9px 10px; border-radius: 8px; }
-.v-overlay .settings-page .nav-desc { font-size: 11px; color: #68717d; }
-.v-overlay .settings-page :is(.nav-desc,.top-sub,.section-head > p,.switch-hint,.provider-edit-card .form-grid > p) { display: none; }
-.v-overlay .settings-page .v-input:not(.v-input--error) > .v-input__details { display: none; }
-.v-overlay .settings-page .nav-item { min-height: 36px; }
-.v-overlay .settings-page .switch-row { padding: 6px 0; min-height: 42px; }
-.v-overlay .settings-page .v-switch .v-selection-control { min-height: 32px; }
-.v-overlay .settings-page .panel { border-color: #e2e5e9; }
-.v-overlay .settings-page .content { padding: 18px; }
-.v-overlay .settings-page .card { padding: 14px; background: #fff; }
-.v-overlay .settings-page .section-head { margin-bottom: 12px; }
-.v-overlay .settings-page .section-head h2 { font-size: 17px; }
-.v-overlay .settings-page .form-grid { gap: 12px; }
-.v-overlay .settings-page .provider-layout { grid-template-columns: 160px minmax(0,1fr); gap: 12px; }
+:is(.v-overlay,.main) .settings-page .top { padding: 12px 20px; background: #fff; backdrop-filter: none; }
+:is(.settings-dialog-root,.main) .settings-page.is-embedded .shell { grid-template-columns: 170px minmax(0,1fr); padding: 14px !important; gap: 14px; background: #fff; }
+:is(.v-overlay,.main) .settings-page .nav { padding: 6px; background: #f7f7f8; border: 0; }
+:is(.v-overlay,.main) .settings-page .nav-item { padding: 9px 10px; border-radius: 8px; }
+:is(.v-overlay,.main) .settings-page .nav-desc { font-size: 11px; color: #68717d; }
+:is(.v-overlay,.main) .settings-page :is(.nav-desc,.top-sub,.section-head > p,.switch-hint,.provider-edit-card .form-grid > p) { display: none; }
+:is(.v-overlay,.main) .settings-page .v-input:not(.v-input--error) > .v-input__details { display: none; }
+:is(.v-overlay,.main) .settings-page .nav-item { min-height: 36px; }
+:is(.v-overlay,.main) .settings-page .switch-row { padding: 6px 0; min-height: 42px; }
+:is(.v-overlay,.main) .settings-page .v-switch .v-selection-control { min-height: 32px; }
+:is(.v-overlay,.main) .settings-page .panel { border-color: #e2e5e9; }
+:is(.v-overlay,.main) .settings-page .content { padding: 18px; }
+:is(.v-overlay,.main) .settings-page .card { padding: 14px; background: #fff; }
+:is(.v-overlay,.main) .settings-page .section-head { margin-bottom: 12px; }
+:is(.v-overlay,.main) .settings-page .section-head h2 { font-size: 17px; }
+:is(.v-overlay,.main) .settings-page .form-grid { gap: 12px; }
+:is(.v-overlay,.main) .settings-page .provider-layout { grid-template-columns: 160px minmax(0,1fr); gap: 12px; }
 .settings-page .section { animation: navora-panel-enter 120ms ease-out; }
 .navora-app .shell.platform-mac .brand { padding-top: 48px; }
 .navora-app .shell.platform-mac .win-drag-main { position: fixed; left: 80px; }
@@ -157,9 +157,9 @@
 .navora-app .shell.mobile-layout .sidebar .chat-item:not(.active):hover .chat-item-track { background: #eceef2; }
 .navora-app .shell.frameless.mobile-layout .mobile-topbar { margin-top: 40px; padding-right: 12px; }
 .settings-dialog-root .settings-page.is-mobile.is-embedded .shell { grid-template-columns: 1fr; padding: 0 !important; gap: 0; }
-.v-overlay .settings-page.is-mobile .provider-layout { grid-template-columns: 1fr; }
-.v-overlay .settings-page.is-mobile .content { padding: 12px; }
-.v-overlay .settings-page.is-mobile .nav-item { padding: 7px 10px; }
+:is(.v-overlay,.main) .settings-page.is-mobile .provider-layout { grid-template-columns: 1fr; }
+:is(.v-overlay,.main) .settings-page.is-mobile .content { padding: 12px; }
+:is(.v-overlay,.main) .settings-page.is-mobile .nav-item { padding: 7px 10px; }
 .navora-app :is(.app-drag,.win-drag-main) :is(button,input,a,select) { -webkit-app-region: no-drag; }
 @keyframes navora-panel-enter { from { opacity: .5; } to { opacity: 1; } }
 @media(max-width:800px) {
@@ -176,4 +176,120 @@
 }
 @media (prefers-reduced-transparency: reduce) {
   .v-menu .v-overlay__content > div:not(.v-list) { background: rgb(var(--pp-glass-rgb)); backdrop-filter: none; }
+}
+
+/* The rail and resize handles are outside scrolling panes. Their hit areas never
+   participate in popup transforms or move adjacent content during feedback. */
+.navora-app .shell .sidebar { position: relative; padding-left: 54px; padding-right: 10px; }
+.navora-app .sidebar .activity-rail { position: absolute; inset: 46px auto 8px 6px; width: 38px; display: flex; flex-direction: column; justify-content: space-between; border-right: 1px solid #e4e6ea; padding-right: 5px; z-index: 3; }
+.activity-rail-sections, .navora-app .activity-rail .sidebar-foot-actions, .navora-app .activity-rail .sidebar-foot-end { display: flex; flex-direction: column; gap: 8px; }
+.navora-app .activity-rail .sidebar-foot { border: 0; margin: 0; padding: 0; }
+.navora-app .sidebar :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn), .navora-app .mobile-topbar-btn {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 32px; height: 32px; padding: 0;
+  border: 1px solid transparent; border-radius: 8px; background: transparent; color: #505965; cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+.navora-app .sidebar :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn) svg, .navora-app .mobile-topbar-btn svg { width: 16px; height: 16px; }
+.navora-app .sidebar :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn):hover, .navora-app .mobile-topbar-btn:hover { background: #e7e9ee; color: #272d36; border-color: #dce0e7; }
+.navora-app .sidebar .sidebar-icon-btn.selected { background: #e9ecf2; border-color: #dce1e9; color: #303d54; }
+.navora-app .sidebar .icon-btn { border: 1px solid transparent; border-radius: 8px; transition: background-color 150ms ease, border-color 150ms ease; }
+.navora-app .sidebar .icon-btn:hover { background: #e7e9ee; border-color: #dce0e7; }
+.navora-app .sidebar :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn):active { transform: scale(.94); }
+.navora-app :is(.sidebar-divider,button):focus-visible { outline: 2px solid #537ab9; outline-offset: 2px; }
+.sidebar-divider { position: relative; flex-shrink: 0; touch-action: none; z-index: 2; }
+.sidebar-divider::after { content: ''; position: absolute; border-radius: 2px; background: #c1cad7; opacity: 0; transition: opacity 140ms ease; }
+.sidebar-divider:hover::after, .sidebar-divider:focus-visible::after, .sidebar-divider.resizing::after { opacity: 1; }
+.sidebar-divider.horizontal { height: 8px; cursor: row-resize; }
+.sidebar-divider.horizontal::after { inset: 3px 6px; }
+.sidebar-divider.vertical { position: absolute; top: 0; right: 0; bottom: 0; width: 7px; cursor: col-resize; }
+.sidebar-divider.vertical::after { inset: 0 2px; }
+.navora-app .sidebar .sidebar-dock { display: flex; flex-direction: column; flex: 0 1 auto; overflow: hidden; gap: 0; min-height: 0; border: 0; }
+.sidebar-workspace-pane { height: var(--workspace-height); min-height: 48px; flex: 0 1 auto; }
+.sidebar-browser-pane { height: var(--browser-height); min-height: 48px; flex: 0 1 auto; }
+.navora-app .sidebar :is(.sidebar-workspace-pane,.sidebar-browser-pane) .sidebar-panel { height: 100%; }
+.navora-app .sidebar .res-body { flex: 1; overflow: auto; min-height: 0; }
+.navora-app .sidebar :is(.res-tree,.ws-root) { max-height: none; }
+.navora-app .sidebar .chat-list { min-height: 80px; }
+.navora-app .main .agent-live { gap: 7px; max-width: none; flex-shrink: 0; padding: 4px 5px 4px 10px; background: #f7f8fa; border: 1px solid #e5e8ee; border-radius: 10px; white-space: nowrap; }
+.navora-app .main .agent-live-text { font-size: 12px; }
+.navora-app .main .agent-elapsed { min-width: 26px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.navora-app .main .quick-stop-btn { white-space: nowrap; flex-shrink: 0; min-width: 59px; height: 28px; }
+.navora-app .main .thinking-row { gap: 10px; padding: 10px 0; align-items: flex-start; animation: navora-activity-enter 220ms ease-out; }
+.navora-app .main .thinking-activity { margin-top: 3px; flex-shrink: 0; color: #657a99; }
+.navora-app .main .thinking-bubble { background: transparent; border: 0; padding: 0; box-shadow: none; min-width: 0; flex: 1; }
+.navora-app .main .thinking-label { color: #687383; font-size: 13px; font-weight: 500; }
+.navora-app .main .thinking-reason { margin-top: 6px; }
+.navora-app .main .composer-input .v-field__input { min-height: 48px; padding-top: 9px; padding-bottom: 8px; }
+.navora-app .shell > .main > .settings-workspace { flex: 1; min-height: 0; height: auto; max-height: none; width: 100%; border: 0; border-radius: 0; box-shadow: none; background: #fff; }
+.navora-app .shell.frameless > .main > .settings-workspace { margin-top: 40px; }
+.navora-app .main .settings-workspace > .top { padding: 14px 24px; border-bottom: 1px solid #eceef2; background: #fff; }
+.navora-app .main .settings-workspace > .shell { width: 100%; height: auto; flex: 1; min-height: 0; grid-template-columns: 160px minmax(0,1fr); background: #fff; }
+.navora-app .main .settings-workspace .panel { border: 0; border-radius: 0; }
+.navora-app .main .settings-workspace .content { padding: 18px 28px; }
+.navora-app .main .settings-workspace .section { max-width: 1000px; margin-inline: auto; }
+.navora-app .main .settings-workspace .nav { background: #fafafa; border: 0; border-radius: 8px; }
+.navora-app .main .settings-workspace.is-mobile > .shell { grid-template-columns: 1fr; }
+.navora-app .main .settings-workspace.is-mobile .content { padding: 12px; }
+.navora-app .main .settings-workspace.is-mobile { margin-top: 0 !important; }
+.navora-app .main .settings-workspace .nav-item:hover { background: #e9ecf1; }
+.sidebar-content-stack { flex: 1; display: grid; min-height: 0; perspective: 1000px; }
+.sidebar-chat-face,.sidebar-settings-face { grid-area: 1 / 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; transform-origin: left center; backface-visibility: hidden; contain: layout paint; }
+.sidebar-flip-enter-active { transition: transform 230ms cubic-bezier(.2,.8,.2,1), opacity 180ms ease; }
+.sidebar-flip-leave-active { transition: transform 150ms ease, opacity 120ms ease; pointer-events: none; }
+.sidebar-flip-enter-from { transform: rotateY(18deg) translateX(6px); opacity: 0; }
+.sidebar-flip-leave-to { transform: rotateY(-14deg) translateX(-4px); opacity: 0; }
+.settings-return { display: flex; align-items: center; gap: 9px; min-height: 36px; padding: 6px 9px; margin: 8px 0; color: #505965; border: 1px solid transparent; border-radius: 8px; text-align: left; font-size: 13px; }
+.settings-return:hover { background: #e7e9ee; border-color: #dce0e7; }
+.settings-sidebar-heading { font-size: 20px; font-weight: 600; padding: 10px; }
+#settings-sidebar-nav { flex: 1; min-height: 0; display: flex; }
+.navora-app .sidebar .settings-navigation { flex: 1; min-height: 0; padding: 6px 0; background: transparent; border: 0; border-radius: 0; }
+.navora-app .sidebar .settings-navigation .nav-desc { display: none; }
+.navora-app .sidebar .settings-navigation .nav-item { min-height: 36px; padding: 9px 10px; }
+.navora-app .sidebar .settings-navigation .nav-label { font-size: 13px; color: #505965; font-weight: 500; }
+.navora-app .sidebar .settings-navigation .nav-item.active { background: #e4e9f2; }
+.navora-app .sidebar .settings-navigation .nav-item.active .nav-label { color: #294d83; }
+.navora-app .sidebar .settings-navigation .nav-item:hover { background: #e7e9ee; }
+.navora-app .shell > .main > .settings-workspace.external-navigation > .shell { grid-template-columns: minmax(0,1fr); padding: 0 !important; }
+.navora-app .shell > .main > .settings-workspace.external-navigation .content { padding: 24px 40px; }
+.navora-app .shell > .main > .settings-workspace.external-navigation .section { max-width: 980px; }
+/* One desktop toolbar shares the native caption row. Reserve the system controls
+   explicitly; interactive controls sit above the draggable background. */
+.navora-app .shell.frameless:not(.mobile-layout) > .main > .main-top { min-height: 52px; padding: 8px 154px 8px 24px; gap: 18px; position: relative; z-index: 5; -webkit-app-region: drag; }
+.navora-app .shell.frameless:not(.mobile-layout) > .main > .main-top button { -webkit-app-region: no-drag; }
+.navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace { margin-top: 0; }
+.navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace > .top { min-height: 52px; padding: 8px 154px 8px 24px; position: relative; z-index: 5; -webkit-app-region: drag; }
+.navora-app .settings-workspace > .top button { -webkit-app-region: no-drag; }
+.navora-app .settings-workspace > .top h1 { font-size: 16px; font-weight: 600; }
+.navora-app .settings-workspace > .top .top-actions { gap: 6px; }
+.navora-app .settings-workspace > .top .settings-close { width: 30px; height: 30px; border-radius: 8px; color: #505965; }
+.navora-app .settings-workspace > .top .settings-close:hover { background: #e7e9ee; }
+.navora-app .main .messages { padding-top: 20px; padding-bottom: 24px; gap: 18px; }
+.navora-app .main :is(.msg,.thinking-row,.retry-bar,.followup-block) { width: min(780px,100%); }
+.navora-app .main .composer-box { max-width: 780px; margin-inline: auto; border-radius: 18px; }
+.navora-app .main .msg.assistant .msg-body { line-height: 1.75; font-size: 14px; }
+.navora-app .main .msg.user .msg-body { padding: 9px 14px; font-size: 14px; }
+.navora-app .main .msg.run .msg-avatar { display: none; }
+.navora-app .main .msg.run .msg-role { display: none; }
+.navora-app .main .run-card { border-radius: 10px; border-color: #e0e5ec; background: #f8f9fb; }
+.navora-app .main .run-card-head { padding: 9px 12px; min-height: 36px; }
+.navora-app .main .run-card.error { background: #fcf8f8; border-color: #edd9d9; }
+.navora-app .main .run-card-body { padding: 8px; gap: 6px; }
+.navora-app .main .tool-card { border-radius: 8px; border-color: #e0e5ec; background: #fff; }
+.navora-app .main .tool-head { padding: 8px 10px; }
+.navora-app .main .tool-kind-chip { background: #f0f2f6; color: #58677a; border-color: #dfe4eb; }
+.navora-app .main .settings-workspace .card { padding: 14px 16px; margin-bottom: 12px; border-color: #e3e6ec; background: #fff; }
+.navora-app .main .settings-workspace .card-title { margin-bottom: 10px; letter-spacing: 0; font-weight: 600; }
+.navora-app .main .settings-workspace .switch-row { min-height: 42px; padding: 5px 0; }
+.navora-app .main .settings-workspace .form-grid { gap: 12px; }
+.navora-app .main .settings-workspace .provider-layout { grid-template-columns: 180px minmax(0,1fr); }
+.navora-app .main .settings-workspace.is-mobile .provider-layout { grid-template-columns: 1fr; }
+.navora-app .shell.platform-mac:not(.mobile-layout) > .main > .main-top,
+.navora-app .shell.platform-mac:not(.mobile-layout) > .main > .settings-workspace > .top { padding-right: 24px; }
+@media(max-width:800px) {
+  .navora-app .main .messages { padding-top: 12px; gap: 14px; }
+  .navora-app .main .msg.assistant .msg-body { font-size: 14px; }
+}
+@keyframes navora-activity-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@media(prefers-reduced-motion:reduce) {
+  .navora-app *, .v-overlay *, .navora-app *::before, .navora-app *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }

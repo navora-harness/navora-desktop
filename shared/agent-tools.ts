@@ -157,7 +157,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'datetime_now',
       description:
-        'Get the current local date and time on this machine (year, month, day, weekday, ISO, timezone). Use whenever the task depends on “今天/今年/现在/当前时间”, holiday schedules, or version timelines — do not guess the calendar year from training data.',
+        'Get a fresh local timestamp when precise elapsed time is needed. The host already supplies the current date/time at run start: use that for today/year references; do not call just to look up today’s date.',
       parameters: {
         type: 'object',
         properties: {
@@ -165,6 +165,20 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
             type: 'string',
             description: 'BCP 47 locale for formatted strings (default zh-CN)',
           },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'weather_get',
+      description: 'Read current weather and 7-day forecast directly from Open-Meteo, without opening a browser. Prefer this for weather questions. Supply an explicit city in location (include province/country if ambiguous); omit location to use permission-checked device/IP location automatically. No separate datetime/geolocation call needed. Cite source and date; never invent missing observations. On failure report it or try a different source once, never poll the same loading page.',
+      parameters: {
+        type: 'object',
+        properties: {
+          location: { type: 'string', description: 'Explicit user-specified city, optionally followed by comma and province/country. Omit for local weather.' },
+          days: { type: 'integer', minimum: 1, maximum: 7, description: 'Forecast days including today. Default 1; tomorrow requires 2, a week requires 7.' },
         },
       },
     },

@@ -254,6 +254,13 @@ export function collectReadPageSources(
     return
   }
 
+  if (tool === 'weather_get') {
+    const url = String(r.sourceUrl || '').trim()
+    if (r.ok !== true || !isHttpUrl(url)) return
+    upsertSource(bag, { url, title: 'Open-Meteo 天气预报', readAt: Date.now(), snippet: '天气模型估算与逐日预报' })
+    return
+  }
+
   if (tool === 'browser_session_fetch') {
     const url = String(r.url || args.url || '').trim()
     if (!isHttpUrl(url)) return

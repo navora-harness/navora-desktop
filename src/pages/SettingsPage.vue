@@ -1,5 +1,5 @@
 <template>
-  <div class="settings-page" :class="{ 'is-embedded': embedded, 'is-mobile': mobile }">
+  <div class="settings-page" :class="{ 'is-embedded': embedded, 'is-mobile': mobile, 'external-navigation': !!navigationTarget }">
     <header class="top">
       <div class="top-left">
         <v-btn v-if="!embedded" variant="text" class="back-btn" @click="$router.push('/')">
@@ -23,7 +23,7 @@
           应用
         </v-btn>
         <v-btn
-          v-if="!mobile"
+          v-if="!mobile && !navigationTarget"
           color="primary"
           variant="tonal"
           class="save-btn"
@@ -49,7 +49,8 @@
     </header>
 
     <div v-if="cfg" class="shell">
-      <nav class="nav">
+      <Teleport :to="navigationTarget || 'body'" :disabled="!navigationTarget">
+      <nav class="nav settings-navigation">
         <div ref="navListEl" class="nav-list">
           <button
             v-for="item in navItems"
@@ -70,6 +71,7 @@
           </button>
         </div>
       </nav>
+      </Teleport>
 
       <div class="panel">
         <div ref="contentEl" class="content">
@@ -1587,9 +1589,10 @@ import { useStoreUi } from '../composables/useStoreUi'
 
 const props = withDefaults(
   defineProps<{
-    /** Render inside a large modal instead of a full page. */
+    /** Render inside the application workspace. */
     embedded?: boolean
     mobile?: boolean
+    navigationTarget?: string
   }>(),
   { embedded: false, mobile: false },
 )
