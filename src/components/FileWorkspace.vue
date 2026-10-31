@@ -3,20 +3,20 @@
     <div v-if="!overlay" class="file-workspace-resizer" role="separator" aria-label="调整文件侧栏宽度" aria-orientation="vertical" :aria-valuenow="width" aria-valuemin="320" :aria-valuemax="maximum" tabindex="0" @pointerdown="beginResize" @keydown="resizeKey" />
     <header class="file-workspace-head">
       <div ref="tabBar" class="file-workspace-tabs" role="tablist" aria-label="已打开文件" @keydown="onTabsKey">
-        <div v-for="(tab,index) in tabs" :key="tab.key" class="file-workspace-tab" :class="{selected:active?.key===tab.key}" role="presentation">
+        <div v-for="(tab,index) in tabs" :key="tab.key" class="file-workspace-tab" :class="{selected:active?.key===tab.key}" role="presentation" @auxclick="closeOnMiddle($event,tab.key)">
           <button :id="`${uid}-${index}`" type="button" role="tab" :data-file-key="tab.key" :aria-label="`${name(tab.path)}，${ownerLabel(tab.chatId)}，${tab.path}`" :aria-selected="active?.key===tab.key" :aria-controls="`${uid}-content`" :tabindex="active?.key===tab.key?0:-1" :title="`${ownerLabel(tab.chatId)} / ${tab.path}`" @click="emit('select',tab.key)"><font-awesome-icon icon="file-lines" /><span>{{ name(tab.path) }}</span></button>
           <button type="button" class="file-tab-close" :aria-label="`关闭标签页：${name(tab.path)}`" :title="`关闭 ${tab.path}`" @click="closeTab(tab.key)"><font-awesome-icon icon="xmark" /></button>
         </div>
       </div>
-      <v-menu v-model="pickerOpen" location="bottom end" :close-on-content-click="false" max-width="360">
+      <v-menu v-model="pickerOpen" location="bottom end" :close-on-content-click="false" max-width="360" @after-leave="finishLocate">
         <template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" class="file-workspace-close" aria-label="新增文件标签页" title="选择文件"><font-awesome-icon icon="plus" /></button></template>
-        <section class="file-workspace-picker" aria-label="选择工作区文件"><header><span>当前对话文件</span><button type="button" class="file-workspace-close" aria-label="关闭文件选择" @click="pickerOpen=false"><font-awesome-icon icon="xmark" /></button></header><WorkspaceFilesPanel :chat-id="viewerChatId" embedded @preview="chooseFile($event.path)" @notify="notify" /></section>
+        <section class="file-workspace-picker" aria-label="选择工作区文件"><header><span>当前对话文件</span><button type="button" class="file-workspace-close" aria-label="关闭文件选择" @click="pickerOpen=false"><font-awesome-icon icon="xmark" /></button></header><WorkspaceFilePicker :chat-id="viewerChatId" @open="chooseFile" @locate="locateFile" /></section>
       </v-menu>
-      <button type="button" class="file-workspace-close" aria-label="关闭文件预览" title="收起文件侧栏" @click="emit('hide')"><font-awesome-icon icon="xmark" /></button>
+      <button type="button" class="file-workspace-close" aria-label="关闭文件预览" title="收起文件侧栏" @click="hidePanel"><font-awesome-icon icon="xmark" /></button>
     </header>
     <div v-if="active && active.chatId!==viewerChatId" class="file-workspace-owner">来自 {{ ownerLabel(active.chatId) }}</div>
     <div :id="`${uid}-content`" class="file-workspace-content" role="tabpanel" :aria-labelledby="`${uid}-${tabs.findIndex(tab=>tab.key===active?.key)}`">
-      <KeepAlive :max="4"><FilePreviewPanel v-if="active" :key="active.key" tabbed embedded :chat-id="active.chatId" :path="active.path" :width="width" @close="emit('hide')" @open-file="emit('openFile',{path:$event,chatId:active.chatId})" @notify="notify" /></KeepAlive>
+      <KeepAlive :max="4"><FilePreviewPanel v-if="active" :key="active.key" tabbed embedded :chat-id="active.chatId" :path="active.path" :width="width" @close="hidePanel" @open-file="emit('openFile',{path:$event,chatId:active.chatId})" @notify="notify" /></KeepAlive>
     </div>
   </aside>
 </template>
@@ -24,18 +24,25 @@
 import {nextTick,onBeforeUnmount,ref,useId,watch} from 'vue'
 import type {FileTab} from '@shared/file-tabs'
 import FilePreviewPanel from './FilePreviewPanel.vue'
-import WorkspaceFilesPanel from './sidebar/WorkspaceFilesPanel.vue'
+import WorkspaceFilePicker from './WorkspaceFilePicker.vue'
 const props=defineProps<{tabs:FileTab[];active:FileTab|null;viewerChatId:string;width:number;maximum:number;overlay:boolean;ownerLabel:(id:string)=>string}>()
-const emit=defineEmits<{select:[key:string];close:[key:string];hide:[];resize:[width:number];openFile:[file:{path:string;chatId:string}];notify:[text:string,color?:string]}>()
+const emit=defineEmits<{select:[key:string];close:[key:string];hide:[];resize:[width:number];openFile:[file:{path:string;chatId:string}];notify:[text:string,color?:string];locate:[payload:{chatId:string;messageId:string}]}>()
 const uid='file-workspace-'+useId(),panel=ref<HTMLElement|null>(null),tabBar=ref<HTMLElement|null>(null)
 const pickerOpen=ref(false)
+let pendingLocate:{chatId:string;messageId:string}|undefined
+function locateFile(messageId:string){pendingLocate={chatId:props.viewerChatId,messageId};pickerOpen.value=false}
+function finishLocate(){const target=pendingLocate;pendingLocate=undefined;if(target)emit('locate',target)}
+watch(pickerOpen,value=>{if(value)pendingLocate=undefined})
 function chooseFile(path:string){pickerOpen.value=false;emit('openFile',{path,chatId:props.viewerChatId})}
-watch(()=>props.viewerChatId,()=>{pickerOpen.value=false})
+watch(()=>props.viewerChatId,()=>{pendingLocate=undefined;pickerOpen.value=false})
 const name=(path:string)=>path.split('/').at(-1)||path
 const notify=(text:string,color?:string)=>emit('notify',text,color)
 function selectedButton(){return tabBar.value?.querySelector<HTMLButtonElement>('[role=tab][aria-selected=true]')}
 watch(()=>props.active?.key,()=>void nextTick(()=>selectedButton()?.scrollIntoView({block:'nearest',inline:'nearest'})))
-function closeTab(key:string){const restore=tabBar.value?.contains(document.activeElement);emit('close',key);if(restore)void nextTick(()=>selectedButton()?.focus({preventScroll:true}))}
+function restoreLauncher(){void nextTick(()=>{const target=[...document.querySelectorAll<HTMLButtonElement>('[data-chat-resource=workspace]:not(:disabled),[data-chat-resource=resources]')].filter(el=>el.checkVisibility()).sort((a,b)=>Number(b.dataset.chatResource==='workspace')-Number(a.dataset.chatResource==='workspace'))[0];target?.focus({preventScroll:true})})}
+function hidePanel(){emit('hide');restoreLauncher()}
+function closeOnMiddle(event:MouseEvent,key:string){if(event.button===1){event.preventDefault();closeTab(key)}}
+function closeTab(key:string){if(props.tabs.length===1){emit('close',key);restoreLauncher();return}const restore=tabBar.value?.contains(document.activeElement);emit('close',key);if(restore)void nextTick(()=>selectedButton()?.focus({preventScroll:true}))}
 function onTabsKey(event:KeyboardEvent){
   if(!['ArrowLeft','ArrowRight','Home','End','Delete'].includes(event.key)||!(event.target as Element).matches('[role=tab]'))return
   event.preventDefault();event.stopPropagation()
@@ -44,7 +51,7 @@ function onTabsKey(event:KeyboardEvent){
   const index=event.key==='Home'?0:event.key==='End'?props.tabs.length-1:(current+(event.key==='ArrowRight'?1:-1)+props.tabs.length)%props.tabs.length
   const tab=props.tabs[index];if(tab){emit('select',tab.key);void nextTick(()=>selectedButton()?.focus({preventScroll:true}))}
 }
-function onWorkspaceKey(event:KeyboardEvent){if(event.key==='Escape'){event.stopPropagation();if(!(event.target as Element).closest('input,textarea,select')){event.preventDefault();emit('hide')}return}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='w'&&props.active){event.preventDefault();event.stopPropagation();closeTab(props.active.key)}}
+function onWorkspaceKey(event:KeyboardEvent){if(event.key==='Escape'){event.stopPropagation();if(!(event.target as Element).closest('input,textarea,select')){event.preventDefault();hidePanel()}return}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='w'&&props.active){event.preventDefault();event.stopPropagation();closeTab(props.active.key)}}
 let stopResize:(()=>void)|undefined
 function resizeKey(event:KeyboardEvent){if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();emit('resize',event.key==='Home'?540:event.key==='End'?props.maximum:props.width+(event.key==='ArrowLeft'?20:-20))}
 function beginResize(event:PointerEvent){

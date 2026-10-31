@@ -5,9 +5,10 @@
     <nav v-if="tab!=='overview'" class="resource-card-tabs" aria-label="资源类型">
       <button v-for="item in tabs" :key="item.id" type="button" :data-resource-tab="item.id" :aria-pressed="tab===item.id" @click="changeTab(item.id)">{{ item.label }}<span v-if="item.id==='browser' && windowCount">{{ windowCount }}</span><span v-if="item.id==='outputs' && outputs.length">{{ outputs.length }}</span></button>
     </nav>
-    <ConversationResourceOverview v-if="tab==='overview'" :chat-id="chatId" :messages="messages" :tree="tree" @view="changeTab" @preview="emit('preview',$event)" @notify="notify" />
+    <ConversationResourceOverview v-if="tab==='overview'" :chat-id="chatId" :messages="messages" :tree="tree" @view="changeTab" @jump="emit('jump',$event)" @preview="emit('preview',$event)" @notify="notify" />
     <div v-else-if="tab==='files'" class="resource-card-body resource-files">
-      <WorkspaceFilesPanel :key="chatId" embedded :chat-id="chatId" @notify="notify" @preview="emit('preview',$event.path)" />
+      <WorkspaceFilePicker :chat-id="chatId" compact @open="emit('preview',$event)" @locate="emit('jump',$event)" @searching="filesSearching=$event" />
+      <WorkspaceFilesPanel v-show="!filesSearching" :key="chatId" embedded :chat-id="chatId" @notify="notify" @preview="emit('preview',$event.path)" />
     </div>
     <div v-else-if="tab==='browser'" class="resource-card-body resource-browser">
       <BrowserResourcesPanel :key="chatId" embedded :chat-id="chatId" :tree="tree" :is-remote="isRemote" :owner-label="ownerLabel" :dnd-mime="dndMime" @notify="notify" @add-ref="emit('addRef',$event)" @ask-close-session="emit('askCloseSession',$event)" @remote-view="emit('remoteView',$event)" />
@@ -29,6 +30,7 @@ import {finalOutputs} from '@shared/message-presentation'
 import {computed,onBeforeUnmount,onMounted,ref,watch} from 'vue'
 import type {BrowserContextRef,BrowserTreeSession,ChatMessage} from '@shared/types'
 import type {ResourceTab} from '@/composables/useConversationResources'
+import WorkspaceFilePicker from './WorkspaceFilePicker.vue'
 import WorkspaceFilesPanel from './sidebar/WorkspaceFilesPanel.vue'
 import BrowserResourcesPanel from './sidebar/BrowserResourcesPanel.vue'
 import ChatMarkdown from './ChatMarkdown.vue'
@@ -38,6 +40,7 @@ const emit=defineEmits<{close:[];tab:[tab:ResourceTab];resize:[width:number];pre
 const tabs:Array<{id:ResourceTab;label:string}>=[{id:'files',label:'文件'},{id:'browser',label:'浏览器'},{id:'outputs',label:'输出'}]
 const outputs=computed(()=>finalOutputs(props.messages).slice().reverse())
 const windowCount=computed(()=>props.tree.reduce((count,session)=>count+session.windows.length,0))
+const filesSearching=ref(false)
 const selectedOutputId=ref(''),card=ref<HTMLElement|null>(null)
 const selectedOutput=computed(()=>outputs.value.find(message=>message.id===selectedOutputId.value))
 const maximum=computed(()=>Math.max(280,Math.min(800,props.availableWidth-624)))
@@ -76,6 +79,7 @@ onBeforeUnmount(()=>{stopResize?.();document.removeEventListener('pointerdown',o
 .resource-card-head{display:flex;align-items:center;gap:8px;min-height:65px;padding:12px 14px 10px;flex-shrink:0}.resource-card-head>div{min-width:0;flex:1}.resource-card-head h2{font-size:13px;font-weight:600;margin:0 0 3px;color:#344156}.resource-card-head span{display:block;color:#7a8594;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .resource-icon-button{display:grid;place-items:center;width:28px;height:28px;flex-shrink:0;border:1px solid transparent;border-radius:7px;color:#657184;background:transparent}.resource-icon-button svg{width:14px;height:14px}.resource-icon-button:hover{background:#edf0f4;border-color:#dce2ea;color:#2c4666}
 .resource-card-tabs{display:flex;gap:3px;margin:0 12px 8px;padding:3px;background:#f0f2f5;border:1px solid #e0e5ec;border-radius:8px;flex-shrink:0}.resource-card-tabs button{display:flex;align-items:center;justify-content:center;gap:5px;flex:1;border:1px solid transparent;border-radius:5px;padding:5px 8px;color:#69768a;transition:background-color 140ms,color 140ms,border-color 140ms}.resource-card-tabs button:hover{color:#334b68;background:#e3e9f0}.resource-card-tabs button[aria-pressed=true]{background:#fff;border-color:#d7dfe8;color:#345b87;box-shadow:0 1px 2px #182b4610}.resource-card-tabs span{font-size:10px;color:#7e8b9d}
+.resource-files{display:flex;flex-direction:column;gap:8px}.resource-files>.workspace-file-picker{flex-shrink:0}.resource-card-body.resource-files>.sidebar-panel{flex:1;height:auto}
 .resource-card-body{flex:1;min-height:0;overflow:auto;padding:0 12px 12px;overscroll-behavior:contain;scrollbar-width:thin}.resource-card-body .sidebar-panel{margin:0;padding:0;border:0;min-height:0;display:flex;flex-direction:column;height:100%;background:transparent}.resource-card-body .res-head{display:flex;align-items:center;justify-content:flex-end;min-height:30px;padding:0;margin:0 0 5px}.resource-card-body .res-head-actions{display:flex;gap:2px}.resource-card-body .res-body{padding:0;overflow:auto;min-height:0;flex:1}.resource-card-body .res-tree{max-height:none;overflow:visible}.resource-card-body .res-empty,.resource-empty{color:#7c8a9b;min-height:130px;display:grid;place-items:center;font-size:12px}.resource-card-body .ws-root{color:#8390a2;font-size:10px;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.resource-card-body .icon-btn{display:inline-grid;place-items:center;width:27px;height:27px;padding:0;border:1px solid transparent;border-radius:6px;color:#64748b;background:transparent}.resource-card-body .icon-btn svg{width:12px;height:12px}.resource-card-body .icon-btn:hover{background:#edf0f4;border-color:#dce2ea;color:#2c4666}.resource-card-body .icon-btn:disabled{opacity:.4}.resource-card-body .tree-row{color:#52647a}.resource-card-body .tree-row:hover{background:#f0f3f7}.resource-card-body .tree-name{color:inherit}.resource-card-body .tree-meta{color:#8491a2}.resource-card-body .tree-actions{display:flex}
 .resource-output-row{display:flex;align-items:center;gap:8px;text-align:left;width:100%;min-height:40px;border-bottom:1px solid #e3e8ef;padding:9px 6px;color:#536277;transition:background-color 140ms}.resource-output-row:hover{background:#edf1f6;color:#2d4868}.resource-output-row>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.resource-output-row>svg{width:12px;height:12px;flex-shrink:0}.resource-output-row>small{color:#7c8a9a;font-size:10px}.resource-output-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:14px;padding:5px 0 10px;border-bottom:1px solid #dbe2ec}.resource-output-actions button{color:#496889;border-radius:5px;padding:4px}.resource-output-actions button:hover{background:#eef2f7}.resource-output-actions svg{width:10px;margin-left:3px}.navora-app .main .resource-outputs .msg-body{font-size:13px;line-height:1.75;border:0;border-radius:0;background:transparent;padding:0;box-shadow:none}
 .resource-card-resizer{position:absolute;inset:8px auto 8px -4px;width:8px;cursor:col-resize;touch-action:none;z-index:2;border-radius:4px}.resource-card-resizer:hover{background:#537ab929}.conversation-resource-card button:focus-visible,.resource-card-resizer:focus-visible{outline:2px solid #537ab9;outline-offset:-2px}

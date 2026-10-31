@@ -2,9 +2,11 @@
   <div class="resource-overview">
     <section class="resource-overview-section">
       <header><h3>输出内容</h3><button type="button" class="resource-icon-button" data-resource-view="files" aria-label="查看全部文件" title="查看全部文件" @click="emit('view','files')"><font-awesome-icon icon="folder-open" /></button></header>
-      <div v-if="error" class="resource-overview-empty">无法读取文件 <button type="button" @click="load">重试</button></div>
+      <div v-if="error" class="resource-overview-empty">无法读取文件 <button type="button" @click="load(true)">重试</button></div>
       <div v-else-if="!entries.length" class="resource-overview-empty">{{ loading?'正在读取…':'暂无输出文件' }}</div>
-      <button v-for="entry in entries.slice(0,3)" :key="entry.path" type="button" class="resource-overview-row" :title="entry.path" @click="entry.type==='dir'?emit('view','files'):emit('preview',entry.path)"><font-awesome-icon :icon="entry.type==='dir'?'folder':'file-lines'" /><span>{{ entry.name }}</span></button>
+      <button v-for="entry in entries.slice(0,3)" :key="entry.path" type="button" class="resource-overview-row" :title="entry.path" :data-resource-path="entry.path" @click="emit('preview',entry.path)"><font-awesome-icon icon="file-lines" /><span>{{ entry.name }}</span><small>{{ entry.evidence?'产物':'文件' }}</small></button>
+      <div v-if="snapshot?.truncated||snapshot?.unavailable" class="resource-overview-empty resource-overview-warning">{{ snapshot?.unavailable?'部分目录无法读取':'仅展示已索引文件' }} <button type="button" @click="load(true)">刷新</button></div>
+      <button v-if="latestArtifact?.evidence" type="button" class="resource-overview-more" @click="emit('jump',latestArtifact.evidence.answerId||latestArtifact.evidence.turnId||latestArtifact.evidence.messageId)"><font-awesome-icon icon="arrow-up-right-from-square" />定位最近产物的对话</button>
       <button v-if="entries.length" type="button" class="resource-overview-more" @click="emit('view','files')"><font-awesome-icon icon="folder-open" />查看全部文件</button>
       <button v-if="outputCount" type="button" class="resource-overview-more" data-resource-view="outputs" @click="emit('view','outputs')"><font-awesome-icon icon="align-left" />对话输出 <small>{{ outputCount }}</small></button>
     </section>
@@ -23,34 +25,22 @@
 </template>
 <script setup lang="ts">
 import {finalOutputs} from '@shared/message-presentation'
-import {computed,onBeforeUnmount,onMounted,ref,watch} from 'vue'
+import {computed,ref,toRef,watch} from 'vue'
+import {useWorkspaceResources} from '@/composables/useWorkspaceResources'
 import type {BrowserTreeSession,ChatMessage} from '@shared/types'
 import {conversationSources} from '@shared/conversation-resources'
 import type {ResourceTab} from '@/composables/useConversationResources'
-import type {WsEntry} from './sidebar/WorkspaceTreeNode.vue'
 const props=defineProps<{chatId:string;messages:ChatMessage[];tree:BrowserTreeSession[]}>()
-const emit=defineEmits<{view:[tab:ResourceTab];preview:[path:string];notify:[text:string]}>()
-const entries=ref<WsEntry[]>([]),loading=ref(false),error=ref(false),allSources=ref(false)
+const emit=defineEmits<{view:[tab:ResourceTab];preview:[path:string];notify:[text:string];jump:[id:string]}>()
+const allSources=ref(false)
+const {entries,snapshot,loading,error,refresh:load}=useWorkspaceResources(toRef(props,'chatId'))
 const sources=computed(()=>conversationSources(props.messages))
 const shownSources=computed(()=>allSources.value?sources.value:sources.value.slice(0,3))
 const outputCount=computed(()=>finalOutputs(props.messages).length)
+const latestArtifact=computed(()=>entries.value.find(entry=>entry.evidence))
 const windows=computed(()=>props.tree.flatMap(session=>session.windows))
-let generation=0,timer:ReturnType<typeof setTimeout>|undefined,unsubscribe:(()=>void)|undefined
-async function load(){
-  const seq=++generation,id=props.chatId
-  loading.value=true;error.value=false
-  try{
-    const result=await window.navora!.workspace.list(id,'.')
-    if(seq!==generation)return
-    if(!result.ok)throw Error(result.error)
-    entries.value=(result.entries||[]).sort((a,b)=>(b.mtimeMs||0)-(a.mtimeMs||0))
-  }catch{if(seq===generation)error.value=true}
-  finally{if(seq===generation)loading.value=false}
-}
 async function openSource(url:string){try{const result=await window.navora!.app.openExternal(url);if(!result.ok)throw Error('open_failed')}catch{emit('notify','无法打开此来源')}}
-watch(()=>props.chatId,()=>{entries.value=[];allSources.value=false;void load()},{immediate:true})
-onMounted(()=>{unsubscribe=window.navora?.workspace.onChanged(event=>{if(event.chatId===props.chatId){clearTimeout(timer);timer=setTimeout(()=>void load(),150)}})})
-onBeforeUnmount(()=>{generation++;clearTimeout(timer);unsubscribe?.()})
+watch(()=>props.chatId,()=>{allSources.value=false})
 </script>
 <style>
 .resource-overview{padding:0 14px 8px;overflow:auto;min-height:0;overscroll-behavior:contain;scrollbar-width:thin}

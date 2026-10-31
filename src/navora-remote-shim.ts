@@ -393,6 +393,7 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
       },
     },
     workspace: {
+      resources:(chatId:string,refresh=false)=>invoke<import('../shared/workspace-resources').WorkspaceResourceSnapshot>('navora:workspace.resources',chatId,refresh),
       hasFiles:(chatId:string)=>invoke<boolean>('navora:workspace.hasFiles',chatId),
       owners:(refresh=false)=>invoke<{chatIds:string[];unavailable:number}>('navora:workspace.owners',refresh),
       preview: (chatId: string, relPath: string) =>

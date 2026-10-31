@@ -45,7 +45,7 @@ export function transcriptBlocks(messages: readonly ChatMessage[], options: {
   }
   for (const message of messages) {
     if (message.role === 'log') {
-      if (!options.showLogs && logKindFromMeta(message.meta?.kind) !== 'error') continue
+      if (!options.showLogs && logKindFromMeta(message.meta?.kind) !== 'error' && !['agent_stop','round_limit'].includes(String(message.meta?.kind))) continue
       if (options.collapseTools || options.collapseLogs) pending.push(message)
       else { flush(); blocks.push({ type: 'log', key: message.id, message }) }
     } else if (message.role === 'tool') {

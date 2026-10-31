@@ -1,0 +1,30 @@
+<template>
+  <section class="workspace-file-picker" aria-label="查找工作区文件">
+    <div class="workspace-picker-search"><font-awesome-icon icon="magnifying-glass" /><input v-model="query" aria-label="搜索工作区文件" placeholder="搜索文件名或路径" /><button type="button" aria-label="刷新文件索引" title="刷新" :disabled="loading" @click="refresh(true)"><font-awesome-icon icon="arrow-rotate-right" /></button></div>
+    <div class="workspace-picker-filters" role="group" aria-label="筛选文件类型"><button v-for="filter in filters" :key="filter.id" type="button" :aria-pressed="kind===filter.id" @click="kind=filter.id">{{ filter.label }}</button></div>
+    <div v-if="error" class="workspace-picker-status" role="alert">无法读取文件 <button type="button" @click="refresh(true)">重试</button></div>
+    <div v-else-if="loading&&!entries.length" class="workspace-picker-status" role="status">正在读取…</div>
+    <div v-else-if="showResults&&!matches.length" class="workspace-picker-status">{{ query?'没有匹配文件':kind==='all'?'暂无文件':'暂无此类文件' }}</div>
+    <div v-if="showResults" class="workspace-picker-results">
+      <div v-for="entry in matches.slice(0,30)" :key="entry.id" class="workspace-picker-row"><button type="button" class="workspace-picker-file" :data-resource-path="entry.path" :aria-label="`打开 ${entry.path}`" :title="entry.path" @click="emit('open',entry.path)"><font-awesome-icon icon="file-lines" /><span><b>{{ entry.name }}</b><small>{{ entry.path }}</small></span></button><button v-if="entry.evidence" type="button" class="workspace-picker-locate" :aria-label="`定位相关对话：${entry.name}`" title="定位相关对话" @click="emit('locate',entry.evidence.answerId||entry.evidence.turnId||entry.evidence.messageId)"><font-awesome-icon icon="arrow-up-right-from-square" /></button></div>
+    </div>
+    <div v-if="matches.length>30||snapshot?.truncated||snapshot?.unavailable" class="workspace-picker-limit"><span v-if="matches.length>30">显示前 30 个匹配 · 共 {{ matches.length }} 个</span><span v-if="snapshot?.truncated">索引未涵盖全部文件</span><button v-if="snapshot?.unavailable" type="button" @click="refresh(true)">部分目录无法读取 · 重试</button></div>
+  </section>
+</template>
+<script setup lang="ts">
+import {computed,ref,toRef,watch} from 'vue'
+import {searchWorkspaceResources} from '@shared/workspace-resources'
+import {useWorkspaceResources} from '@/composables/useWorkspaceResources'
+const props=defineProps<{chatId:string;compact?:boolean}>(),emit=defineEmits<{open:[path:string];locate:[messageId:string];searching:[value:boolean]}>()
+const query=ref(''),kind=ref('all'),
+filters=[{id:'all',label:'全部'},{id:'artifact',label:'产物'},{id:'image',label:'图片'},{id:'document',label:'文档'},{id:'code',label:'代码'},{id:'file',label:'其它'}],{entries,snapshot,loading,error,refresh}=useWorkspaceResources(toRef(props,'chatId'))
+const matches=computed(()=>searchWorkspaceResources(entries.value.filter(entry=>kind.value==='all'||(kind.value==='artifact'?!!entry.evidence:entry.kind===kind.value)),query.value))
+const showResults=computed(()=>!props.compact||!!query.value.trim()||kind.value!=='all')
+watch(showResults,value=>emit('searching',value),{immediate:true})
+watch(()=>props.chatId,()=>{query.value='';kind.value='all'})
+</script>
+<style>
+.workspace-file-picker{min-height:0;display:flex;flex-direction:column;color:#53657b;font-size:12px}.workspace-picker-search{display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:7px;flex-shrink:0;border:1px solid #c9d3e0;border-radius:8px;background:#fff}.workspace-picker-search>svg{width:12px;height:12px;color:#7d8b9d}.workspace-picker-search input{min-width:0;flex:1;outline:none;font-size:12px;color:#41546e}.workspace-picker-search:focus-within{border-color:#6084b1;box-shadow:0 0 0 2px #6084b118}.workspace-picker-search button{display:grid;place-items:center;width:24px;height:24px;border-radius:5px;color:#71829a}.workspace-picker-search button svg{width:12px;height:12px}.workspace-picker-search button:hover{color:#345370;background:#e9eef4}.workspace-picker-search button:disabled{opacity:.45}.workspace-picker-results{overflow:auto;overscroll-behavior:contain;min-height:0;max-height:300px;scrollbar-width:thin}.workspace-picker-row{display:flex;align-items:center}.workspace-picker-file{display:flex;flex:1;min-width:0;align-items:center;gap:9px;width:100%;text-align:left;padding:7px 8px;border:1px solid transparent;border-radius:7px;color:inherit;transition:background-color 140ms,color 140ms}.workspace-picker-file:hover{background:#edf1f6;color:#304e70}.workspace-picker-file>svg{width:13px;height:13px;flex-shrink:0;color:#7e8ea4}.workspace-picker-file>span{min-width:0;flex:1}.workspace-picker-file b,.workspace-picker-file small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.workspace-picker-file b{font-size:12px;font-weight:500}.workspace-picker-file small{font-size:10px;color:#8793a3;margin-top:2px}.workspace-picker-file:focus-visible,.workspace-picker-search button:focus-visible{outline:2px solid #6487b1;outline-offset:-2px}.workspace-picker-status{padding:22px 8px;color:#7c8a9b;text-align:center}.workspace-picker-status button,.workspace-picker-limit button{color:#4b719b}.workspace-picker-limit{display:flex;flex-direction:column;gap:4px;margin-top:7px;color:#8a96a6;font-size:10px;text-align:left}
+.workspace-picker-filters{display:flex;gap:3px;margin-bottom:7px;flex-wrap:wrap}.workspace-picker-filters button{padding:3px 7px;border:1px solid transparent;border-radius:6px;font-size:11px;color:#7b8b9f}.workspace-picker-filters button:hover{background:#eef2f7;color:#3f5d7c}.workspace-picker-filters button[aria-pressed=true]{border-color:#d3dfec;background:#edf2f8;color:#385d87}.workspace-picker-locate{display:grid;place-items:center;flex-shrink:0;width:27px;height:27px;border:1px solid transparent;border-radius:6px;color:#758ba3}.workspace-picker-locate svg{width:11px;height:11px}.workspace-picker-locate:hover{border-color:#d3dfec;background:#edf2f8;color:#385d87}.workspace-picker-filters button:focus-visible,.workspace-picker-locate:focus-visible{outline:2px solid #6487b1;outline-offset:-2px}
+@media(prefers-reduced-motion:reduce){.workspace-picker-file{transition:none}}
+</style>

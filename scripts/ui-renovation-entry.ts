@@ -22,6 +22,7 @@ fs.mkdirSync(path.join(root,'chats'),{recursive:true})
 const workspaceFixture = path.join(root, 'workspace', 'chat_renovation119', 'folder')
 fs.mkdirSync(workspaceFixture, {recursive:true})
 fs.writeFileSync(path.join(workspaceFixture, 'note.txt'), 'Keyboard navigation fixture')
+fs.writeFileSync(path.join(workspaceFixture, 'z-guide.md'), '# 嵌套文档\n\n[同目录文件](./note.txt)\n\n[上级文件](../preview.md)')
 const otherWorkspace=path.join(root,'workspace','chat_renovation118')
 fs.mkdirSync(otherWorkspace,{recursive:true});fs.writeFileSync(path.join(otherWorkspace,'other-only.txt'),'From another conversation')
 fs.writeFileSync(path.join(path.dirname(workspaceFixture), 'preview.md'), '# 文件预览\n\n**Markdown** 内容\n\n<script>window.__previewExecuted=true</script>')
@@ -38,7 +39,7 @@ for(let i=0;i<120;i++) {
     {id:'ui-style-progress-old',role:'assistant',content:'连接超时了，我再试一次。',createdAt:401,meta:{partial:false,reasoning:'第一轮观察'}},
     {id:'ui-style-tool-error',role:'tool',content:'{"ok":false,"error":"load_failed"}',createdAt:401,meta:{toolName:'browser_open',status:'error'}},
     {id:'ui-style-progress-new',role:'assistant',content:'窗口已存在，正在读取页面内容。',createdAt:402,meta:{phase:'progress',partial:false,reasoning:'第二轮观察'}},
-    {id:'ui-style-tool-recovered',role:'tool',content:'{"ok":true}',createdAt:403,meta:{toolName:'browser_get',status:'done'}},
+    {id:'ui-style-tool-recovered',role:'tool',content:'{"ok":true,"path":"preview.md"}',createdAt:403,meta:{toolName:'file_write',status:'done'}},
     {id:'ui-style-answer-error',role:'assistant',content:'这里仅检查失败工具的折叠样式。',createdAt:404,meta:{phase:'final',reasoning:'第一轮观察\n第二轮观察\n完成回答'}},
     {id:'ui-style-user-plugin',role:'user',content:'插件样式（本地测试夹具）',createdAt:403},
     {id:'ui-style-plugin',role:'tool',content:'{"ok":true}',createdAt:404,meta:{toolName:'fixture_plugin',status:'done',fromPlugin:true,pluginId:'fixture'}},
@@ -96,7 +97,8 @@ app.on('browser-window-created', (_,win) => {
       }
       if(typeof lastUser==='string' && lastUser.startsWith('UI_PROCESS')){
         const read=request.messages.some((message:{role:string;tool_call_id?:string})=>message.role==='tool'&&message.tool_call_id==='ui-process-time')
-        const reply=read?{role:'assistant',content:'已读取设备时间，过程已完成。',reasoning_content:'已取得真实工具结果。'}:{role:'assistant',content:'正在读取当前时间。',reasoning_content:'先查看设备时间。',tool_calls:[{id:'ui-process-time',type:'function',function:{name:'datetime_now',arguments:'{}'}}]}
+        if(read)await new Promise(resolve=>setTimeout(resolve,500))
+        const reply=read?{role:'assistant',content:'已生成文件：[打开文件](generated-live.md)。',reasoning_content:'已取得真实工具结果。'}:{role:'assistant',content:'正在生成文件。',reasoning_content:'需要保存工作区文件。',tool_calls:[{id:'ui-process-time',type:'function',function:{name:'file_write',arguments:JSON.stringify({path:'generated-live.md',content:'# Generated fixture'})}}]}
         res.end(JSON.stringify({choices:[{message:reply,finish_reason:read?'stop':'tool_calls'}]}));return
       }
       modelRequests++
@@ -209,10 +211,33 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('!!document.querySelector(".media-lightbox")'),false,'Workspace images open in tabs rather than a separate dialog')
 
       await click('[aria-label="新增文件标签页"]')
-      await click('.file-workspace-picker .tree-row[title="preview.md"]')
+      await input('.file-workspace-picker [aria-label="搜索工作区文件"]','preview.md')
+      await click('.file-workspace-picker [data-resource-path="preview.md"]')
       assert.equal(await js('document.querySelectorAll(".file-workspace [role=tab]").length'),4,'The file picker reuses an existing tab')
       assert.equal(await js('document.querySelector(".file-workspace [role=tab][aria-selected=true]").textContent.includes("preview.md")'),true,'The plus button can select workspace files')
       await js('[...document.querySelectorAll(".file-workspace [role=tab]")].find(tab=>tab.textContent.includes("image.png")).click()');await wait(100)
+
+      await click('[aria-label="新增文件标签页"]')
+      await js('[...document.querySelectorAll(".file-workspace-picker .workspace-picker-filters button")].find(button=>button.textContent==="产物").click()');await wait(80)
+      assert.equal(await js('document.querySelectorAll(".file-workspace-picker .workspace-picker-file").length'),1,'Artifact filters only include known successful outputs')
+      await capture('artifact-filter-and-association')
+      await click('.file-workspace-picker .workspace-picker-locate')
+      assert.equal(await js('!!document.querySelector(".file-workspace-picker")'),false,'Locating a related answer dismisses the file picker')
+      const relatedJump=await js('(()=>{const row=document.querySelector("[data-msg-id=ui-style-answer-error]"),box=document.querySelector(".messages");return {top:row.getBoundingClientRect().top-box.getBoundingClientRect().top,tail:box.scrollHeight-box.clientHeight-box.scrollTop,height:box.clientHeight,rowHeight:row.getBoundingClientRect().height}})()')
+      assert.ok(Math.abs(relatedJump.top)<5||(relatedJump.tail<2&&relatedJump.top>=0&&relatedJump.top+relatedJump.rowHeight<=relatedJump.height),'Artifact links locate their actual final answer: '+JSON.stringify(relatedJump))
+      await click('[aria-label="新增文件标签页"]')
+      await input('.file-workspace-picker [aria-label="搜索工作区文件"]','folder guide')
+      assert.equal(await js('document.querySelectorAll(".file-workspace-picker .workspace-picker-file").length'),1,'Search matches tokens across nested file paths')
+      await capture('nested-file-search')
+      await click('.file-workspace-picker [data-resource-path="folder/z-guide.md"]')
+      await js(`document.querySelector('.preview-markdown a[href="./note.txt"]').click()`);await wait(120)
+      assert.equal(await js('document.querySelector(".preview-code").textContent'),'Keyboard navigation fixture','Nested Markdown resolves same-directory file links')
+      await js('[...document.querySelectorAll(".file-workspace [role=tab]")].find(tab=>tab.textContent.includes("z-guide.md")).click()');await wait(80)
+      await js(`document.querySelector('.preview-markdown a[href="../preview.md"]').click()`);await wait(120)
+      assert.equal(await js('document.querySelector(".file-workspace [role=tab][aria-selected=true]").textContent.includes("preview.md")'),true,'Parent links resolve inside the workspace')
+      await js('[...document.querySelectorAll(".file-workspace-tab")].find(tab=>tab.textContent.includes("z-guide.md")).dispatchEvent(new MouseEvent("auxclick",{button:1,bubbles:true}))');await wait(100)
+      assert.equal(await js('document.querySelectorAll(".file-workspace [role=tab]").length'),4,'Middle click closes a tab without closing its neighbours')
+      await js('[...document.querySelectorAll(".file-workspace [role=tab]")].find(tab=>tab.textContent.includes("image.png")).click()');await wait(80)
 
       await click('[aria-label="关闭标签页：binary.bin"]')
       assert.equal(await js('document.querySelectorAll(".file-workspace [role=tab]").length'),3,'Closing an inactive tab preserves the selected file')
@@ -225,6 +250,7 @@ app.on('browser-window-created', (_,win) => {
 
       await click('[aria-label="关闭文件预览"]')
       assert.equal(await js('!!document.querySelector(".file-preview")'),false)
+      assert.equal(await js('document.activeElement.dataset.chatResource'),'workspace','Hiding the file pane restores focus to its launcher')
       await click('[data-chat-resource="workspace"]')
       assert.equal(await js('document.querySelectorAll(".file-workspace [role=tab]").length'),3,'Hiding and reopening preserves file tabs')
       await click('[aria-label="关闭文件预览"]')
@@ -337,6 +363,15 @@ app.on('browser-window-created', (_,win) => {
       await click('[aria-label="关闭文件预览"]')
       await capture('all-chat-files')
       if(await js('!!document.querySelector(".conversation-resource-card")'))await click('[aria-label="关闭资源面板"]')
+      const indexed=await js('window.navora.workspace.resources("chat_renovation119",true)')
+      assert.ok(indexed.entries.some((entry:{path:string})=>entry.path==='folder/z-guide.md'),'Resource index includes nested files with stable ownership')
+      const version=indexed.entries.find((entry:{path:string})=>entry.path==='folder/note.txt')
+      fs.writeFileSync(path.join(workspaceFixture,'note.txt'),'Updated existing file')
+      await js('window.navora.workspace.setChatRoot("chat_renovation119",null)');await wait(300)
+      assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),false,'Updating an existing file respects manual resource dismissal')
+      const updated=await js('window.navora.workspace.resources("chat_renovation119")')
+      assert.equal(updated.entries.find((entry:{path:string})=>entry.path==='folder/note.txt').id,version.id)
+      assert.notEqual(updated.entries.find((entry:{path:string})=>entry.path==='folder/note.txt').revision,version.revision)
       fs.mkdirSync(path.join(workspaceFixture,'deep'),{recursive:true});fs.writeFileSync(path.join(workspaceFixture,'deep','new.txt'),'New nested output')
       await js('window.navora.workspace.setChatRoot("chat_renovation119",null)');await wait(300)
       assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),true,'Deep file changes automatically reveal resources')
@@ -462,16 +497,21 @@ app.on('browser-window-created', (_,win) => {
       const sentUsers=await js('(async()=>{const c=await window.navora.chats.get("chat_renovation119");return c.messages.filter(m=>m.role==="user"&&m.content.startsWith("UI_QUEUE_")).map(m=>m.content)})()')
       assert.deepEqual(sentUsers,['UI_QUEUE_FIRST','UI_QUEUE_STEER','UI_QUEUE_SECOND_EDITED'],'Each user message is recorded once and deleted work is never executed')
       assert.equal(await js('!!document.querySelector(".message-queue")'),false,'The empty queue disappears')
-      await js('window.navora.agent.submit("chat_renovation119",{content:"UI_PROCESS 请读取当前设备时间并回答"},"queue")')
+      if(await js('!!document.querySelector(".conversation-resource-card")'))await click('[aria-label="关闭资源面板"]')
+      await js('(async()=>{const cfg=await window.navora.config.get();await window.navora.chats.setPermissions("chat_renovation119",{preset:"custom",modes:{...cfg.permissions.modes,"file.write":"allow"}});await window.navora.agent.submit("chat_renovation119",{content:"UI_PROCESS 创建一个Markdown文件并回答"},"queue")})()')
       for(let n=0;n<150;n++){if(await js('(async()=>{const c=await window.navora.chats.get("chat_renovation119");return !await window.navora.agent.isRunning(c.id)&&c.messages.at(-1)?.meta?.phase==="final"})()'))break;await wait(40)}
       const processTurn=await js('(async()=>{const c=await window.navora.chats.get("chat_renovation119"),i=c.messages.findIndex(m=>m.role==="user"&&m.content.startsWith("UI_PROCESS"));return c.messages.slice(i+1)})()')
       assert.equal(processTurn.find((m:{role:string})=>m.role==='assistant').meta.phase,'progress','Runtime preserves narration phase after shimmer clears')
       assert.equal(processTurn.find((m:{role:string})=>m.role==='assistant').meta.partial,false)
       assert.equal(processTurn.at(-1).meta.phase,'final','The completed answer is explicitly tagged final')
-      assert.equal(await js('[...document.querySelectorAll(".msg.assistant")].filter(el=>el.textContent.includes("正在读取当前时间")).length'),0,'Tool narration does not become an independent reply')
+      assert.equal(await js('[...document.querySelectorAll(".msg.assistant")].filter(el=>el.textContent.includes("正在生成文件")).length'),0,'Tool narration does not become an independent reply')
+      await wait(240)
+      const liveResource=await js('(async()=>{const snapshot=await window.navora.workspace.resources("chat_renovation119");return snapshot.entries.find(entry=>entry.path==="generated-live.md")})()')
+      assert.equal(liveResource.evidence.answerId,processTurn.at(-1).id,'An actual generated file acquires its completed answer association')
+      assert.equal(await js(`!!document.querySelector('.resource-overview [data-resource-path="generated-live.md"]')`),true,'The resource overview updates after an actual file-producing run')
       await capture('conversation-unified-activity')
       assert.deepEqual(errors,[],'No renderer errors')
-      fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reduced,frameMetrics,modelRequests,checks:['process-vs-final-legacy','process-vs-final-runtime','process-reasoning-group','final-resource-filter','provider-drafts','reopen-draft','tier-rename','preview-race','separate-probes','permission-search','visible-empty-states','workspace-keyboard','file-preview','file-preview-source-safety','file-preview-width','file-tab-reuse-and-close','file-tab-state-cache','image-zoom-tabs','file-picker-tabs','file-workspace-hide-restore','compact-chat-rows','native-explorer-current-path','floating-resource-files-browser-outputs','resource-auto-open-dismissal','resource-space-aware-overlay','resource-outside-dismissal','resource-owned-menu','compact-resource-overview','resource-source-links','conversation-scrollbar-window-edge','all-chat-files','all-browser-owners','single-sidebar','old-group-migration','message-queue-edit-delete-insert','main-process-queue-persistence','active-context-insertion','long-conversation-jump','zoom-layout','interrupted-motion','single-mobile-header']},null,2))
+      fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reduced,frameMetrics,modelRequests,checks:['runtime-file-answer-association','artifact-associations','artifact-type-filter','lazy-settings-and-creators','nested-resource-index','file-search','nested-markdown-links','stable-file-identities','tab-focus-recovery','process-vs-final-legacy','process-vs-final-runtime','process-reasoning-group','final-resource-filter','provider-drafts','reopen-draft','tier-rename','preview-race','separate-probes','permission-search','visible-empty-states','workspace-keyboard','file-preview','file-preview-source-safety','file-preview-width','file-tab-reuse-and-close','file-tab-state-cache','image-zoom-tabs','file-picker-tabs','file-workspace-hide-restore','compact-chat-rows','native-explorer-current-path','floating-resource-files-browser-outputs','resource-auto-open-dismissal','resource-space-aware-overlay','resource-outside-dismissal','resource-owned-menu','compact-resource-overview','resource-source-links','conversation-scrollbar-window-edge','all-chat-files','all-browser-owners','single-sidebar','old-group-migration','message-queue-edit-delete-insert','main-process-queue-persistence','active-context-insertion','long-conversation-jump','zoom-layout','interrupted-motion','single-mobile-header']},null,2))
       console.log(JSON.stringify({ok:true,reduced,frameMetrics,modelRequests}))
       server.close(); app.exit(0)
     } catch(error) { console.error(error); await capture('failure'); server.close(); app.exit(1) }

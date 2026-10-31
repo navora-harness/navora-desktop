@@ -1,4 +1,6 @@
 import type { ChatMessage, ChatSession } from './types'
+import {transcriptBlocks} from './message-presentation'
+import {conversationSources} from './conversation-resources'
 import { resolveToolDisplay } from './tool-display'
 
 function pad(n: number): string {
@@ -68,43 +70,39 @@ export function formatChatAsMarkdown(chat: ChatSession): string {
   lines.push('---')
   lines.push('')
 
-  for (const m of chat.messages || []) {
-    lines.push(`### ${roleHeading(m.role, m.meta)} · ${formatExportTimestamp(m.createdAt)}`)
-    lines.push('')
-    const content = (m.content || '').trimEnd()
-    if (content) {
-      lines.push(content)
-      lines.push('')
-    }
-    if (m.role === 'assistant' && typeof m.meta?.reasoning === 'string' && m.meta.reasoning.trim()) {
-      lines.push('<details>')
-      lines.push('<summary>思考</summary>')
-      lines.push('')
-      lines.push(m.meta.reasoning.trim())
-      lines.push('')
-      lines.push('</details>')
-      lines.push('')
-    }
-    if (m.role === 'tool' && m.meta) {
-      if (m.meta.args != null) {
-        lines.push('**参数**')
-        lines.push('')
-        lines.push('```json')
-        lines.push(stringifyMetaValue(m.meta.args))
-        lines.push('```')
-        lines.push('')
-      }
-      if (m.meta.result != null) {
-        lines.push('**结果**')
-        lines.push('')
-        lines.push('```')
-        lines.push(stringifyMetaValue(m.meta.result))
-        lines.push('```')
-        lines.push('')
+  const fence=(text:string,language='')=>{
+    let length=3
+    for(const match of text.matchAll(/`+/g))length=Math.max(length,match[0].length+1)
+    const marker='`'.repeat(length)
+    return `${marker}${language}\n${text}\n${marker}`
+  }
+  const render=(message:ChatMessage,process=false)=>{
+    const heading=process&&message.role==='assistant'?'进展':roleHeading(message.role,message.meta)
+    lines.push(`${process?'####':'###'} ${heading} · ${formatExportTimestamp(message.createdAt)}`,'')
+    const content=(message.content||'').trimEnd()
+    if(content)lines.push(message.role==='tool'?fence(content):content,'')
+    if(message.role==='tool'&&message.meta){
+      if(message.meta.args!=null)lines.push('**参数**','',fence(stringifyMetaValue(message.meta.args),'json'),'')
+      if(message.meta.result!=null){
+        const result=stringifyMetaValue(message.meta.result)
+        let same=false
+        try{same=JSON.stringify(JSON.parse(content))===JSON.stringify(message.meta.result)}catch{/* Human-readable content may supplement structured data. */}
+        if(!same)lines.push('**结果**','',fence(result),'')
       }
     }
-    lines.push('---')
-    lines.push('')
+    if(!process&&message.role==='assistant'){
+      const sources=conversationSources([message]).filter(source=>!content.includes(source.url))
+      if(sources.length){lines.push('**来源**','');for(const source of sources)lines.push(`- [${(source.title||source.url).replace(/[\[\]<>\r\n]/g,' ')}](<${source.url}>)`);lines.push('')}
+    }
+  }
+  for(const block of transcriptBlocks(chat.messages||[],{collapseTools:true,collapseLogs:true,showLogs:true})){
+    if(block.type==='run'){
+      lines.push('<details>','<summary>执行过程</summary>','')
+      if(block.reasoning)lines.push('<details>','<summary>思考过程</summary>','',block.reasoning,'','</details>','')
+      for(const message of block.items){if(message.content.trim()||message.role!=='assistant')render(message,true)}
+      lines.push('</details>','')
+    }else render(block.message)
+    lines.push('---','')
   }
 
   return `${lines.join('\n').trimEnd()}\n`

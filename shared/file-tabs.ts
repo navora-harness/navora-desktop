@@ -1,18 +1,33 @@
 export type FileTab={key:string;chatId:string;path:string}
 export type FileTabs={tabs:FileTab[];active:string;open:boolean}
 export const emptyFileTabs=():FileTabs=>({tabs:[],active:'',open:false})
-export function workspaceLinkPath(href:string):string|null{
-  if(!href||/^(?:[a-z][a-z\d+.-]*:|[/#])/i.test(href))return null
-  try{return makeFileTab('link',decodeURIComponent(href.split(/[?#]/)[0]!)).path}catch{return null}
+export function workspaceLinkPath(href:string,baseFile?:string):string|null{
+  if(!href||/^(?:[a-z][a-z\d+.-]*:|[/#])/i.test(href.trim()))return null
+  try{
+    const path=decodeURIComponent(href.trim().split(/[?#]/)[0]!).replace(/\\/g,'/')
+    if(!path||path.startsWith('/')||/[:\0-\x1f\x7f]/.test(path))return null
+    const parts=baseFile?makeFileTab('link',baseFile).path.split('/').slice(0,-1):[]
+    for(const part of path.split('/')){
+      if(!part||part==='.')continue
+      if(part==='..'){if(!parts.length)return null;parts.pop()}else parts.push(part)
+    }
+    return makeFileTab('link',parts.join('/')).path
+  }catch{return null}
 }
 export function makeFileTab(chatId:string,path:string):FileTab{
-  const normalized=path.replace(/\\/g,'/').replace(/^(\.\/)+/,'')
+  const raw=path.replace(/\\/g,'/')
+  if(raw.startsWith('/'))throw Error('invalid_file_tab')
+  const normalized=raw.split('/').filter(part=>part&&part!=='.').join('/')
   if(!chatId||chatId.length>200||!normalized||normalized.length>2048||normalized.startsWith('/')||normalized.split('/').some(part=>part==='..')||/[:\0]/.test(normalized))throw Error('invalid_file_tab')
   return {key:JSON.stringify([chatId,normalized]),chatId,path:normalized}
 }
 export function openFileTab(state:FileTabs,chatId:string,path:string):FileTabs{
   const tab=makeFileTab(chatId,path)
+  if(state.tabs.length>=32&&!state.tabs.some(item=>item.key===tab.key))throw Error('标签页已达上限，请先关闭部分文件')
   return {tabs:state.tabs.some(item=>item.key===tab.key)?state.tabs:[...state.tabs,tab],active:tab.key,open:true}
+}
+export function removeFileOwner(state:FileTabs,owner:string):FileTabs{
+  return state.tabs.filter(tab=>tab.chatId===owner).reduce((next,tab)=>closeFileTab(next,tab.key),state)
 }
 export function closeFileTab(state:FileTabs,key:string):FileTabs{
   const index=state.tabs.findIndex(tab=>tab.key===key)

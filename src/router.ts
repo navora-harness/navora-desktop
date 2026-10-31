@@ -1,8 +1,8 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import ChatPage from './pages/ChatPage.vue'
-import RemoteLoginPage from './pages/RemoteLoginPage.vue'
-import RemoteBridgePage from './pages/RemoteBridgePage.vue'
-import RemoteHomePage from './pages/RemoteHomePage.vue'
+const RemoteLoginPage=()=>import('./pages/RemoteLoginPage.vue')
+const RemoteBridgePage=()=>import('./pages/RemoteBridgePage.vue')
+const RemoteHomePage=()=>import('./pages/RemoteHomePage.vue')
 import { ensureRemoteNavora } from './navora-remote-shim'
 import { getStoredToken, isWebRemote, remoteAuthMe, setStoredToken } from './remote-api'
 
