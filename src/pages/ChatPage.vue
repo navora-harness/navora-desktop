@@ -638,7 +638,7 @@
             </div>
 
             <!-- Sidebar and composer changes must not rebuild unchanged transcript rows. -->
-            <template v-for="block in messageBlocks" :key="block.key" v-memo="[block, activeId, agentRunning, expandedRuns, expandedTools, expandedLogs, expandedReasoning, logOverflowById, toolMediaSrc, chats, showReadPages, readPagesPanelOpen, readPagesPanelFromId, copiedMessageId, Math.floor(nowTick / 60000)]">
+            <template v-for="block in messageBlocks" :key="block.key" v-memo="[block, activeId, agentRunning, expandedRuns, expandedTools, expandedLogs, expandedReasoning, logOverflowById, toolMediaSrc, chats, showReadPages, readPagesPanelOpen, readPagesPanelFromId, copiedMessageId, replyFilesById, Math.floor(nowTick / 60000)]">
               <div v-if="block.type === 'run'" class="msg run" :data-run-key="block.key">
                 <div class="msg-row">
                   <div class="msg-avatar run" aria-hidden="true">
@@ -1039,6 +1039,7 @@
                         @open-media="(p) => openLightbox(p.src, p.alt)" @open-file="openFilePreview" @notify="onPanelNotify"
                       >
                         <template v-if="block.message.role === 'assistant'" #footer>
+                          <ReplyArtifacts v-if="replyFilesById.has(block.message.id)" :files="replyFilesById.get(block.message.id)!" @open="openFilePreview" />
                           <div class="reply-footer">
                             <button
                               v-if="showReadPages && messageSources(block.message).length"
@@ -1818,7 +1819,10 @@
 
 <script setup lang="ts">
 defineOptions({ name: 'ChatPage' })
-import { transcriptBlocks } from '@shared/message-presentation'
+import { transcriptBlocks, executionSummary } from '@shared/message-presentation'
+import { replyArtifactGroups } from '@shared/workspace-resources'
+import { useWorkspaceResources } from '@/composables/useWorkspaceResources'
+import ReplyArtifacts from '@/components/ReplyArtifacts.vue'
 import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import StatusIcon from '@/components/StatusIcon.vue'
 import ConversationOutline from '@/components/ConversationOutline.vue'
@@ -2565,6 +2569,9 @@ const messageBlocks = computed(() => transcriptBlocks(active.value?.messages || 
   collapseLogs: collapseRunLogs.value,
   showLogs: showRunLogs.value,
 }))
+const artifactChatId = computed(() => activeId.value || '')
+const {entries: artifactEntries} = useWorkspaceResources(artifactChatId)
+const replyFilesById = computed(() => replyArtifactGroups(artifactEntries.value, active.value?.messages || []))
 
 const activeChatError = computed(() => {
   const id = activeId.value
@@ -3409,9 +3416,13 @@ function lastUserTurnFailed(messages: ChatMessage[] | undefined | null): {
 
 function runGroupLive(items: ChatMessage[]): boolean {
   if (!agentRunning.value || !items.length) return false
-  if (items.some((m) => m.role === 'tool' && effectiveToolStatus(m) === 'running')) return true
-  const last = messageBlocks.value[messageBlocks.value.length - 1]
-  return Boolean(last && last.type === 'run' && last.key === `run:${items[0].id}`)
+  const blocks = messageBlocks.value
+  for (let index = blocks.length - 1; index >= 0; index--) {
+    const block = blocks[index]!
+    if (block.type === 'chat' && (block.message.role === 'user' || block.message.role === 'system')) return false
+    if (block.type === 'run') return block.key === `run:${items[0]!.id}`
+  }
+  return false
 }
 
 function isStopRunLog(m: ChatMessage): boolean {
@@ -3428,54 +3439,13 @@ function runGroupHasError(items: ChatMessage[]): boolean {
   return items.some((m) => isErrorRunLog(m))
 }
 
-function runGroupErrorSummary(items: ChatMessage[]): string | null {
-  const errLog = [...items].reverse().find((m) => isErrorRunLog(m))
-  if (!errLog) return null
-  const summary = String(errLog.meta?.summary || '').trim()
-  if (summary && summary !== 'Agent 出错') return summary
-  const full = logFullText(errLog).trim()
-  const line = full.split(/\r?\n/).find((l) => l.trim() && l.trim() !== 'Agent 出错')
-  return line?.trim() || summary || '执行失败'
-}
-
-function runGroupCountLabel(items: ChatMessage[]): string {
-  const tools = runGroupTools(items)
-  const pluginCount = tools.filter(m => toolDisplay(m).kind === 'plugin').length
-  const toolCount = tools.length - pluginCount
-  if (pluginCount) return [toolCount ? toolCount + ' 个工具' : '', pluginCount + ' 个插件'].filter(Boolean).join(' · ')
-  if (toolCount) return toolCount + ' 个工具'
-  const logCount = items.filter((m) => m.role === 'log').length
-  return logCount ? `${logCount} 条日志` : '执行过程'
-}
-
 function runGroupSummary(items: ChatMessage[]): string {
-  const tools = runGroupTools(items)
-
-  if (runGroupLive(items)) {
-    const running = tools.find((m) => effectiveToolStatus(m) === 'running')
-    if (running) {
-      const disp = toolDisplay(running)
-      const name = friendlyToolName(String(running.meta?.toolName || 'tool'))
-      const step = tools.indexOf(running) + 1
-      return `第 ${step}/${tools.length || 1} 步 · ${disp.label} · ${name}…`
-    }
-    if (tools.length) return `已完成 ${tools.length} 步 · 继续中…`
-    return '执行中…'
-  }
-
-  const hasProgress = items.some(m => m.role === 'assistant')
-  const count = runGroupCountLabel(items)
-  const base = hasProgress && count !== '执行过程' ? `执行过程 · ${count}` : count
-  // User stop must not be framed as tool failure in the collapsed title.
-  if (runGroupWasAborted(items) && !runGroupHasError(items)) {
-    return `${base} · 用户终止`
-  }
-  if (runGroupHasError(items)) {
-    const errHint = runGroupErrorSummary(items)
-    return errHint ? `${base} · ${errHint}` : `${base} · 有失败`
-  }
-  if (tools.length === 1 && !hasProgress) return `${friendlyToolName(String(tools[0]!.meta?.toolName || 'tool'))} · 已完成`
-  return tools.length ? `${hasProgress ? '执行过程 · ' : ''}已完成 ${tools.length} 步` : base
+  const running = items.find(message => message.role === 'tool' && effectiveToolStatus(message) === 'running')
+  return executionSummary(items, {
+    live: runGroupLive(items),
+    runningLabel: running ? friendlyToolName(String(running.meta?.toolName || 'tool')) : undefined,
+    status: effectiveToolStatus,
+  })
 }
 
 function toggleLog(id: string) {

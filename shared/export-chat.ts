@@ -1,5 +1,5 @@
 import type { ChatMessage, ChatSession } from './types'
-import {transcriptBlocks} from './message-presentation'
+import {executionSummary,transcriptBlocks} from './message-presentation'
 import {conversationSources} from './conversation-resources'
 import { resolveToolDisplay } from './tool-display'
 
@@ -97,7 +97,7 @@ export function formatChatAsMarkdown(chat: ChatSession): string {
   }
   for(const block of transcriptBlocks(chat.messages||[],{collapseTools:true,collapseLogs:true,showLogs:true})){
     if(block.type==='run'){
-      lines.push('<details>','<summary>执行过程</summary>','')
+      lines.push('<details>',`<summary>${executionSummary(block.items)}</summary>`,'')
       if(block.reasoning)lines.push('<details>','<summary>思考过程</summary>','',block.reasoning,'','</details>','')
       for(const message of block.items){if(message.content.trim()||message.role!=='assistant')render(message,true)}
       lines.push('</details>','')

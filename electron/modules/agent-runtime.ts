@@ -456,7 +456,12 @@ export class AgentRuntime {
   }
 
   notifyWindowClosed(chatId: string, windowId: string): void {
-    this.pushUserOpLog(chatId, logWindowClosed(windowId))
+    // Keep the running Agent aware of removed resources without adding a chat
+    // message or replacing its current phase for a routine manual UI action.
+    if (!this.runs.has(chatId)) return
+    const events = this.pendingEvents.get(chatId) || []
+    events.push(logWindowClosed(windowId).content)
+    this.pendingEvents.set(chatId, events)
   }
 
   stop(chatId: string): boolean {

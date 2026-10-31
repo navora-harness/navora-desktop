@@ -28,7 +28,7 @@ const KIND_INFO: Record<ToolDisplayKind, Omit<ToolDisplayInfo, 'kind'>> = {
 }
 
 /** collective label for collapsed run groups (logs + tool ops). */
-export const TOOL_RUN_GROUP_LABEL = '工具'
+export const TOOL_RUN_GROUP_LABEL = '执行过程'
 
 export type ResolveToolDisplayOpts = {
   /** Set when the call was dispatched via a loadable plugin (still role=tool). */

@@ -9,11 +9,14 @@ test('Markdown export keeps intermediate narration inside process details and pr
     {id:'p',role:'assistant',content:'Retrying the request',createdAt:2,meta:{phase:'progress',reasoning:'first thought'}},
     {id:'t',role:'tool',content:'{"ok":true,"text":"```"}',createdAt:3,meta:{toolName:'browser_get',status:'done',args:{what:'text'}}},
     {id:'a',role:'assistant',content:'Final answer',createdAt:4,meta:{phase:'final',reasoning:'aggregate thought',sources:[{url:'https://example.com/final',title:'Evidence'}]}},
+    {id:'l',role:'log',content:'Closing bookkeeping',createdAt:5,meta:{kind:'agent_status'}},
   ]} as ChatSession
   const markdown=formatChatAsMarkdown(chat)
   const note=markdown.indexOf('Retrying the request'),final=markdown.indexOf('Final answer')
-  assert.ok(markdown.indexOf('<summary>执行过程</summary>')<note)
+  assert.ok(markdown.indexOf('<summary>执行记录 · 1 次调用 · 1 条日志</summary>')<note)
   assert.ok(markdown.indexOf('</details>',note)<final)
+  assert.ok(markdown.indexOf('Closing bookkeeping')<final,'Late logs join the same process before the answer')
+  assert.equal(markdown.match(/<summary>执行记录[^<]*<\/summary>/g)?.length,1)
   assert.equal(markdown.includes('first thought'),false,'Aggregate reasoning replaces duplicated round reasoning')
   assert.equal(markdown.match(/aggregate thought/g)?.length,1)
   assert.match(markdown,/````\n\{"ok":true/,'Tool data cannot terminate its own code fence')
