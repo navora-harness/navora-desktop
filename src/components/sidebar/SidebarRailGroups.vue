@@ -32,7 +32,7 @@ onBeforeUnmount(()=>{window.removeEventListener('dragend',clear);window.removeEv
 </script>
 <style scoped>
 .rail-panel-groups{display:flex;flex-direction:column;gap:8px;min-height:0;max-height:calc(100dvh - 300px);overflow-y:auto;scrollbar-width:none;padding:3px 4px;margin-inline:-4px;width:40px}
-.rail-group-entry{position:relative;width:32px;height:32px;flex-shrink:0}.rail-group-button{cursor:grab}.rail-group-button:active{cursor:grabbing}.rail-drag-source{opacity:.5}.rail-menu-anchor{position:absolute;inset:0;visibility:hidden;pointer-events:none}
+.rail-group-entry{position:relative;width:32px;height:32px;flex-shrink:0}.rail-group-button{cursor:default}.rail-drag-source{opacity:.5}.rail-menu-anchor{position:absolute;inset:0;visibility:hidden;pointer-events:none}
 .rail-drop-target .rail-group-button{background:#e2edf7!important;border-color:#86a7cc!important;outline:2px solid #7b9dc140;outline-offset:2px}
 .rail-detach-target{display:grid;place-items:center;width:32px;height:32px;flex-shrink:0;border:1px dashed #7f9dbf;border-radius:8px;color:#5b7b9e;background:#eaf1f8;pointer-events:none}.rail-detach-target svg{width:15px;height:15px}
 .rail-drag-hint{position:fixed;left:56px;top:96px;z-index:2400;pointer-events:none;padding:6px 9px;background:#fff;border:1px solid #dde5ee;border-radius:7px;color:#5c7592;font-size:11px;white-space:nowrap;box-shadow:0 3px 12px #2136500d}

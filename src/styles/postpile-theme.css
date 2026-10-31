@@ -196,6 +196,8 @@
 .navora-app .activity-rail .sidebar-icon-btn::before { content:''; position:absolute; left:-5px; width:2px; height:12px; border-radius:2px; background:#6b87a9; opacity:0; transition:opacity 150ms ease; pointer-events:none; }
 .navora-app .activity-rail .sidebar-icon-btn.selected::before { opacity:1; }
 .navora-app .sidebar .sidebar-icon-btn.selected:hover { background:#e5eaf1; border-color:#dce1e9; }
+.navora-app .sidebar :is(.dock-tab,.dock-menu-button,.rail-group-button)[draggable="true"] { cursor:default; }
+.navora-app .shell .sidebar:has(.dock-dragging,.rail-drag-source),.navora-app .shell .sidebar:has(.dock-dragging,.rail-drag-source) * { cursor:grabbing; }
 .navora-app .sidebar .icon-btn { border: 1px solid transparent; border-radius: 8px; transition: background-color 150ms ease, border-color 150ms ease; }
 .navora-app .sidebar .icon-btn:hover { background: #e7e9ee; border-color: #dce0e7; }
 .navora-app .sidebar :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn):active { transform: scale(.94); }
