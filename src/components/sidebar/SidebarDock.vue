@@ -1,9 +1,9 @@
 <template>
   <div class="sidebar-dock dock-layout" :class="{ 'dock-dragging': dragging.length, 'dock-resizing': resizing, 'single-selection':singleSelection }" @dragend="clearDrag" @drop="clearDrag">
     <template v-for="group in modelValue.groups" :key="group.id">
-      <section v-show="members(group).length" class="dock-group" :class="{ 'dock-collapsed': group.collapsed, 'dock-single': members(group).length === 1, 'dock-leading': modelValue.groups.find(item => members(item).length)?.id === group.id }" :data-group="group.id" :style="{ flex: group.collapsed ? '0 0 34px' : `${group.weight} 1 0px` }">
+      <section v-show="members(group).length" class="dock-group" :class="{ 'dock-collapsed': isCollapsed(group), 'dock-single': members(group).length === 1, 'dock-leading': modelValue.groups.find(item => members(item).length)?.id === group.id }" :data-group="group.id" :style="{ flex: isCollapsed(group) ? '0 0 34px' : `${group.weight} 1 0px` }">
         <header class="dock-header">
-          <button type="button" class="dock-collapse" :aria-expanded="!group.collapsed" :aria-label="`折叠或展开${label(active(group))}`" @click="collapse(group)"><font-awesome-icon :icon="group.collapsed ? 'chevron-right' : 'chevron-down'" /></button>
+          <button v-if="collapsible !== false" type="button" class="dock-collapse" :aria-expanded="!isCollapsed(group)" :aria-label="`折叠或展开${label(active(group))}`" @click="collapse(group)"><font-awesome-icon :icon="isCollapsed(group) ? 'chevron-right' : 'chevron-down'" /></button>
           <div class="dock-tabs" role="tablist" aria-label="侧栏面板">
             <button v-for="panel in members(group)" :id="`dock-tab-${panel.id}`" :key="panel.id" type="button" role="tab" :aria-selected="active(group) === panel.id" :aria-controls="`dock-pane-${panel.id}`" :tabindex="active(group) === panel.id ? 0 : -1" class="dock-tab" :class="{ active: active(group) === panel.id }" :title="`${panel.label} · 拖动可组合或拆分`" draggable="true" @dragstart="startDrag($event, [panel.id])" @click="select(group, panel.id)" @keydown="tabKey($event, group, panel.id)">{{ panel.label }}</button>
           </div>
@@ -20,7 +20,7 @@
             </div>
           </v-menu>
         </header>
-        <div :id="`dock-content-${group.id}`" class="dock-content" :inert="group.collapsed" />
+        <div :id="`dock-content-${group.id}`" class="dock-content" :inert="isCollapsed(group)" />
         <div v-if="dragging.length" class="dock-drop-zones">
           <div v-for="placement in placements" :key="placement" class="dock-drop-zone" :class="[placement, { targeted: dropTarget === `${group.id}:${placement}` }]" :aria-label="placement === 'tab' ? '合并为标签组' : placement === 'before' ? '放在上方' : '放在下方'" @dragover.prevent.stop="over($event, group.id, placement)" @dragleave="dropTarget = ''" @drop.prevent.stop="drop(group.id, placement)"><span v-if="placement === 'tab'">合并</span></div>
         </div>
@@ -42,7 +42,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { moveDockPanels, normalizeDock, splitDockPanel, type DockGroup, type DockPlacement, type SidebarDockLayout } from '../../../shared/sidebar-dock'
 import type { SidebarPanelDefinition } from '@/composables/useSidebarDock'
-const props = defineProps<{ modelValue: SidebarDockLayout; panels: SidebarPanelDefinition[]; singleSelection?:boolean }>()
+const props = defineProps<{ modelValue: SidebarDockLayout; panels: SidebarPanelDefinition[]; singleSelection?:boolean;collapsible?:boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [layout: SidebarDockLayout];close:[];panelDragging:[panels:string[]] }>()
 const ready = ref(false), dragging = ref<string[]>([]), dropTarget = ref(''), resizing = ref(false)
 const placements = computed<DockPlacement[]>(()=>props.singleSelection?['before','after']:['before','tab','after'])
@@ -51,7 +51,8 @@ const visibleGroups = computed(()=>props.modelValue.groups.filter(group=>members
 const active = (group: DockGroup) => members(group).some(panel => panel.id === group.active) ? group.active : members(group)[0]?.id || ''
 const label = (id: string) => props.panels.find(panel => panel.id === id)?.label || id
 const groupFor = (id: string) => props.modelValue.groups.find(group => group.panels.includes(id))
-const isActive = (id: string) => { const group = groupFor(id); return Boolean(group && !group.collapsed && active(group) === id) }
+const isCollapsed = (group:DockGroup) => props.collapsible !== false && group.collapsed
+const isActive = (id: string) => { const group = groupFor(id); return Boolean(group && !isCollapsed(group) && active(group) === id) }
 const update = (layout: SidebarDockLayout) => emit('update:modelValue', layout)
 function select(group: DockGroup, panel: string) { update({ ...props.modelValue, groups: props.modelValue.groups.map(item => item === group ? { ...item, active: panel, collapsed: false } : item) }) }
 function collapse(group: DockGroup) { update({ ...props.modelValue, groups: props.modelValue.groups.map(item => item === group ? { ...item, collapsed: !item.collapsed } : item) }) }
@@ -82,8 +83,8 @@ async function tabKey(event: KeyboardEvent, group: DockGroup, panel: string) {
   if (next) { select(group, next.id); await nextTick(); document.getElementById(`dock-tab-${next.id}`)?.focus() }
 }
 function nextVisible(group: DockGroup) {
-  if (!members(group).length || group.collapsed) return undefined
-  return props.modelValue.groups.slice(props.modelValue.groups.indexOf(group) + 1).find(item => members(item).length && !item.collapsed)
+  if (!members(group).length || isCollapsed(group)) return undefined
+  return props.modelValue.groups.slice(props.modelValue.groups.indexOf(group) + 1).find(item => members(item).length && !isCollapsed(item))
 }
 function adjust(first: DockGroup, second: DockGroup, delta: number, heights?: [number, number]) {
   const a = heights?.[0] ?? first.weight, b = heights?.[1] ?? second.weight
@@ -136,11 +137,10 @@ onBeforeUnmount(() => { endResize?.(); window.removeEventListener('dragend', cle
 .dock-single > .dock-header { border-bottom-color:transparent; }
 .dock-collapsed .dock-header { border-bottom-color:transparent; }
 .dock-tabs { display:flex; align-items:center; min-width:0; flex:1; overflow:auto; scrollbar-width:none; gap:2px; }
-.dock-tab { min-width:0; flex:0 1 auto; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; height:26px; padding:3px 6px; border:1px solid transparent; border-radius:6px; font-size:11px; color:#778291; cursor:grab; }
+.dock-tab { min-width:0; flex:0 1 auto; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; height:26px; padding:3px 6px; border:1px solid transparent; border-radius:6px; font-size:11px; color:#778291; cursor:default; }
 .dock-tab.active { background:#e9edf3; color:#344b68; border-color:#dfe5ed; font-weight:600; }
 .dock-single .dock-tab { padding-inline:3px; color:#556174; font-size:12px; }
 .dock-single .dock-tab.active { background:transparent; border-color:transparent; }
-.dock-tab:active { cursor:grabbing; }
 .dock-collapse,.dock-menu-button { width:23px; height:26px; flex-shrink:0; display:grid; place-items:center; border:1px solid transparent; border-radius:6px; color:#6c7786; cursor:pointer; }
 .dock-collapse > svg { width:9px; height:9px; }
 .dock-menu-button > svg { width:13px; height:13px; }
