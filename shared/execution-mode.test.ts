@@ -14,6 +14,7 @@ test('only short weather queries receive a smaller toolkit; compound and plugin 
 
 test('direct weather routing extracts only explicit city/today requests', () => {
   assert.deepEqual(directWeatherRequest('看看今天的天气'), {})
+  assert.deepEqual(directWeatherRequest('看看今天天气'), {})
   assert.deepEqual(directWeatherRequest('查一下北京今天的天气'), { location: '北京' })
   assert.deepEqual(directWeatherRequest('今天上海的天气'), { location: '上海' })
   assert.equal(directWeatherRequest('明天北京的天气'), null)

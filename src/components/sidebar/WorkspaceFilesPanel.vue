@@ -1,7 +1,7 @@
 <template>
-  <div class="sidebar-panel">
+  <div class="sidebar-panel workspace-panel" :class="{ 'is-collapsed': collapsed }">
     <div class="res-head">
-      <button type="button" class="res-label-btn" @click="collapsed = !collapsed">
+      <button type="button" class="res-label-btn" :aria-expanded="!collapsed" aria-label="折叠或展开工作区" @click="collapsed = !collapsed">
         <font-awesome-icon :icon="collapsed ? 'chevron-right' : 'chevron-down'" class="res-chevron" />
         <span class="res-label">工作区</span>
       </button>
@@ -28,9 +28,9 @@
     </div>
     <div v-if="!collapsed" class="res-body" data-ctx-menu="workspace" @contextmenu="onRootMenu">
       <div v-if="rootLabel" class="ws-root" :title="absoluteRoot">{{ rootLabel }}</div>
-      <div v-if="!chatId" class="res-empty">先选择一个 Chat</div>
-      <div v-else-if="loadError" class="res-empty">{{ loadError }}</div>
-      <div v-else-if="!rootEntries.length" class="res-empty">空工作区</div>
+      <div v-if="!chatId" class="res-empty">选择对话后查看文件</div>
+      <div v-else-if="loadError" class="res-empty res-error">{{ loadError }}</div>
+      <div v-else-if="!rootEntries.length" class="res-empty">暂无文件</div>
       <div v-else class="res-tree">
         <WorkspaceTreeNode
           :entries="rootEntries"
@@ -125,6 +125,7 @@ const rootLabel = computed(() => {
   const abs = absoluteRoot.value
   if (!abs) return ''
   const parts = abs.replace(/\\/g, '/').split('/').filter(Boolean)
+  if (/^chat_[a-z0-9]+$/i.test(parts.at(-1) || '')) return '当前对话文件夹'
   if (parts.length <= 2) return abs
   return `…/${parts.slice(-2).join('/')}`
 })

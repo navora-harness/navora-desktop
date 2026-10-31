@@ -6,6 +6,7 @@
       'mobile-layout': isMobileLayout,
       'remote-web': isWebRemote(),
       'sidebar-open': isMobileLayout && mobileSidebarOpen,
+      'sidebar-collapsed': allSidebarHidden && !settingsOpen,
       frameless: showDesktopChrome,
       'platform-mac': windowPlatform === 'darwin',
     }"
@@ -20,23 +21,7 @@
       <div class="sidebar-content-stack">
       <Transition name="sidebar-flip">
       <div v-show="!settingsOpen || isMobileLayout" class="sidebar-chat-face">
-      <div class="brand" :class="{ 'app-drag': showDesktopChrome }">
-        <div class="brand-top">
-          <div class="brand-identity">
-            <img class="brand-logo" src="/app-icon.png" alt="" />
-            <div class="brand-name">Navora</div>
-          </div>
-          <button
-            type="button"
-            class="brand-search-btn"
-            title="搜索对话"
-            @click="openChatSearch"
-          >
-            <font-awesome-icon icon="magnifying-glass" />
-          </button>
-        </div>
-      </div>
-      <div v-show="sidebarVisible.chats" class="chat-toolbar">
+      <div class="chat-toolbar" :class="{ 'app-drag': showDesktopChrome }">
         <Transition name="toolbar-swap" mode="out-in">
           <div v-if="!chatBatchMode" key="normal" class="chat-toolbar-row">
             <v-btn
@@ -44,11 +29,16 @@
               color="primary"
               variant="text"
               class="new-chat-btn"
+              title="开启新对话（Ctrl/⌘ N）"
+              aria-label="开启新对话"
               @click="createChat"
             >
               <font-awesome-icon icon="pen-to-square" class="new-chat-icon" />
-              开启新对话
+              新对话
             </v-btn>
+            <button type="button" class="brand-search-btn" title="搜索对话（Ctrl/⌘ K）" aria-label="搜索对话" @click="openChatSearch">
+              <font-awesome-icon icon="magnifying-glass" />
+            </button>
             <Transition name="batch-btn-pop">
               <button
                 v-if="chats.length"
@@ -476,6 +466,13 @@
       </div>
       <nav class="activity-rail" aria-label="侧栏导航">
         <div class="activity-rail-sections">
+          <div class="rail-brand" :class="{ 'app-drag': showDesktopChrome }" title="Navora">
+            <img src="/app-icon.png" alt="Navora" draggable="false" />
+          </div>
+          <template v-if="allSidebarHidden && !settingsOpen">
+            <button type="button" class="sidebar-icon-btn rail-new-chat" title="开启新对话（Ctrl/⌘ N）" aria-label="开启新对话" @click="createChat"><font-awesome-icon icon="pen-to-square" /></button>
+            <button type="button" class="sidebar-icon-btn rail-search" title="搜索对话（Ctrl/⌘ K）" aria-label="搜索对话" @click="openChatSearch"><font-awesome-icon icon="magnifying-glass" /></button>
+          </template>
           <button type="button" class="sidebar-icon-btn" :class="{ selected: sidebarVisible.chats }" title="显示/隐藏对话列表" aria-label="显示/隐藏对话列表" :aria-pressed="sidebarVisible.chats" @click="toggleSidebarPanel('chats')"><font-awesome-icon icon="comments" /></button>
           <button type="button" class="sidebar-icon-btn" :class="{ selected: sidebarVisible.workspace }" title="显示/隐藏工作区" aria-label="显示/隐藏工作区" :aria-pressed="sidebarVisible.workspace" @click="toggleSidebarPanel('workspace')"><font-awesome-icon icon="folder-open" /></button>
           <button type="button" class="sidebar-icon-btn" :class="{ selected: sidebarVisible.browser }" title="显示/隐藏浏览器资源" aria-label="显示/隐藏浏览器资源" :aria-pressed="sidebarVisible.browser" @click="toggleSidebarPanel('browser')"><font-awesome-icon icon="window-maximize" /></button>
@@ -556,7 +553,7 @@
         </div>
       </div>
       </nav>
-      <div v-if="!isMobileLayout" class="sidebar-divider vertical" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarLayout.width" aria-valuemin="250" aria-valuemax="560" tabindex="0" @pointerdown="beginSidebarResize($event, 'width')" @keydown="sidebarResizeKey($event, 'width')" />
+      <div v-if="!isMobileLayout && (!allSidebarHidden || settingsOpen)" class="sidebar-divider vertical" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarLayout.width" aria-valuemin="250" aria-valuemax="560" tabindex="0" @pointerdown="beginSidebarResize($event, 'width')" @keydown="sidebarResizeKey($event, 'width')" />
     </aside>
 
     <main class="main">
@@ -708,6 +705,7 @@
                       <button
                         type="button"
                         class="run-card-head"
+                        :aria-expanded="isRunExpanded(block.key)"
                         @click="toggleRun(block.key)"
                       >
                         <span class="run-status">
@@ -1062,41 +1060,32 @@
                           {{ messageReasoning(block.message) }}
                         </div>
                       </div>
-                      <button
-                        v-if="
-                          block.message.role === 'assistant' &&
-                          showReadPages &&
-                          messageSources(block.message).length
-                        "
-                        type="button"
-                        class="read-pages-bar"
-                        :class="{ active: readPagesPanelOpen && readPagesPanelFromId === block.message.id }"
-                        @click="toggleReadPagesPanel(block.message.id, messageSources(block.message))"
-                      >
-                        <span class="read-pages-text"
-                          >{{ messageSources(block.message).length }} 个来源</span
-                        >
-                        <span class="read-pages-icons" aria-hidden="true">
-                          <img
-                            v-for="(s, i) in messageSources(block.message).slice(0, 4)"
-                            :key="`${s.url}-${i}`"
-                            class="read-pages-icon"
-                            :src="s.favicon || faviconFallback(s.url)"
-                            :alt="s.siteName || ''"
-                            loading="lazy"
-                            @error="onFaviconError"
-                          />
-                        </span>
-                        <font-awesome-icon icon="chevron-down" class="read-pages-chevron" />
-                      </button>
                       <ChatMarkdown
                         :chat-id="activeId || ''"
                         :content="displayMessageContent(block.message)"
                         :shimmer="isMessageShimmer(block.message)"
                         @open-media="(p) => openLightbox(p.src, p.alt)"
                       >
-                        <template v-if="assistantElapsedLabel(block.message)" #footer>
-                          <span class="msg-elapsed">{{ assistantElapsedLabel(block.message) }}</span>
+                        <template v-if="block.message.role === 'assistant'" #footer>
+                          <div class="reply-footer">
+                            <button
+                              v-if="showReadPages && messageSources(block.message).length"
+                              type="button"
+                              class="read-pages-bar"
+                              :class="{ active: readPagesPanelOpen && readPagesPanelFromId === block.message.id }"
+                              :aria-expanded="readPagesPanelOpen && readPagesPanelFromId === block.message.id"
+                              @click="toggleReadPagesPanel(block.message.id, messageSources(block.message))"
+                            >
+                              <font-awesome-icon icon="book" />
+                              <span>{{ messageSources(block.message).length }} 个来源</span>
+                              <font-awesome-icon icon="chevron-down" class="read-pages-chevron" />
+                            </button>
+                            <button type="button" class="reply-copy-btn" :title="copiedMessageId === block.message.id ? '已复制' : '复制回答'" :aria-label="copiedMessageId === block.message.id ? '已复制' : '复制回答'" @click="copyReply(block.message)">
+                              <StatusIcon v-if="copiedMessageId === block.message.id" kind="success" />
+                              <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2" /><path d="M15 5V4a1 1 0 0 0-1-1H5a2 2 0 0 0-2 2v9a1 1 0 0 0 1 1h1" /></svg>
+                            </button>
+                            <span v-if="assistantElapsedLabel(block.message)" class="msg-elapsed">{{ assistantElapsedLabel(block.message) }}</span>
+                          </div>
                         </template>
                       </ChatMarkdown>
                     </template>
@@ -1254,15 +1243,17 @@
             </div>
           </section>
 
+          <ConversationOutline :messages="active.messages" :scroll-container="msgBox" @jump="jumpToMessage" />
+
           <button
             v-if="showJumpBottom"
             type="button"
             class="jump-bottom"
             title="回到底部"
+            aria-label="回到底部"
             @click="jumpToBottom"
           >
-            <font-awesome-icon icon="arrow-down" class="mr-1" />
-            回到底部
+            <font-awesome-icon icon="arrow-down" />
           </button>
         </div>
 
@@ -1842,6 +1833,7 @@
 defineOptions({ name: 'ChatPage' })
 import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import StatusIcon from '@/components/StatusIcon.vue'
+import ConversationOutline from '@/components/ConversationOutline.vue'
 import { modelCapabilities } from '@shared/model-capabilities'
 import { useRoute, useRouter } from 'vue-router'
 import type {
@@ -2272,6 +2264,7 @@ const exportingChat = ref(false)
 const sidebarMoreOpen = ref(false)
 const settingsOpen = ref(false)
 const { layout: sidebarLayout, visible: sidebarVisible, style: sidebarStyle, toggle: toggleSidebarVisibility, beginResize: beginSidebarResize, resizeKey: sidebarResizeKey } = useSidebarLayout()
+const allSidebarHidden = computed(() => !sidebarVisible.value.chats && !sidebarVisible.value.workspace && !sidebarVisible.value.browser)
 function toggleSidebarPanel(panel: 'chats' | 'workspace' | 'browser') {
   if (settingsOpen.value) { settingsOpen.value = false; return }
   toggleSidebarVisibility(panel)
@@ -3521,7 +3514,8 @@ function runGroupSummary(items: ChatMessage[]): string {
     const errHint = runGroupErrorSummary(items)
     return errHint ? `${base} · ${errHint}` : `${base} · 有失败`
   }
-  return base
+  if (tools.length === 1) return `${friendlyToolName(String(tools[0]!.meta?.toolName || 'tool'))} · 已完成`
+  return tools.length ? `已完成 ${tools.length} 步` : base
 }
 
 function toggleLog(id: string) {
@@ -4959,6 +4953,24 @@ function onMessagesContext(e: MouseEvent) {
   pageCtxMenu.value?.show(e)
 }
 
+const copiedMessageId = ref<string | null>(null)
+let copiedMessageTimer: ReturnType<typeof setTimeout> | undefined
+async function copyReply(message: ChatMessage) {
+  try {
+    await navigator.clipboard.writeText(displayMessageContent(message))
+    copiedMessageId.value = message.id
+    clearTimeout(copiedMessageTimer)
+    copiedMessageTimer = setTimeout(() => { copiedMessageId.value = null }, 1600)
+  } catch { showToast('复制失败，请重试') }
+}
+
+function jumpToMessage(id: string) {
+  const element = msgBox.value?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`)
+  if (!element) return
+  stickToBottom.value = false
+  element.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+}
+
 async function copyText(text: string) {
   const t = String(text || '')
   if (!t) return
@@ -5560,6 +5572,7 @@ onActivated(() => {
 })
 
 onUnmounted(() => {
+  clearTimeout(copiedMessageTimer)
   chatSelection++
   chatTransition?.cancel()
   window.removeEventListener('keydown', onAppShortcut)

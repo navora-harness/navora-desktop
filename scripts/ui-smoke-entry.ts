@@ -22,6 +22,12 @@ config.remote.enabled = true // Regression fixture: legacy default password.
 // JSON is also valid YAML, and contains only default test configuration.
 fs.writeFileSync(path.join(root,'config.yml'),JSON.stringify(config))
 app.setPath('userData',root)
+if(process.env.NAVORA_LIVE_WEATHER === '1') {
+  const plugin = path.join(root,'plugins','fixture-status')
+  fs.mkdirSync(plugin,{recursive:true})
+  fs.writeFileSync(path.join(plugin,'plugin.json'),JSON.stringify({id:'fixture-status',name:'Status fixture',version:'1.0.0',description:'Unrelated enabled plugin regression',main:'main.cjs',defaultEnabled:true}))
+  fs.writeFileSync(path.join(plugin,'main.cjs'),`module.exports={tools:[{type:'function',function:{name:'fixture_status',description:'Read a fixture status',parameters:{type:'object',properties:{}}}}],execute(){return {ok:true}}}`)
+}
 BrowserWindow.prototype.show = function () {}
 BrowserWindow.prototype.focus = function () {}
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve,ms))
@@ -105,6 +111,13 @@ app.on('browser-window-created',(_event,win) => {
         await assertViewport()
         await assertIconContrast()
         assert.equal(await win.webContents.executeJavaScript(`getComputedStyle(document.querySelector('.sidebar')).backgroundColor`),'rgb(247, 247, 248)')
+        assert.equal(await win.webContents.executeJavaScript(`!!document.querySelector('.activity-rail .rail-brand img') && !document.querySelector('.brand-name')`),true,'Brand is an icon in the rail')
+        assert.equal(await win.webContents.executeJavaScript(`(()=>{const r=['.new-chat-btn','.brand-search-btn','.chat-toolbar-icon-btn'].map(s=>document.querySelector(s).getBoundingClientRect());return Math.max(...r.map(a=>a.y+a.height/2))-Math.min(...r.map(a=>a.y+a.height/2))<2})()`),true,'Conversation actions share one aligned row')
+        for(const selector of ['.workspace-panel','.browser-panel']) {
+          await click(selector+' .res-label-btn')
+          assert.ok(await win.webContents.executeJavaScript(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().height <= 38`),'Collapsed resources release their height')
+          await click(selector+' .res-label-btn')
+        }
         const menuButton = `document.querySelector('.sidebar-foot button[title="更多"]')`
         await win.webContents.executeJavaScript(`${menuButton}.click()`)
         await wait(500)
@@ -148,11 +161,55 @@ app.on('browser-window-created',(_event,win) => {
         win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'})
         win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'})
         await wait(220)
+        await win.webContents.executeJavaScript(`(async()=>{const c=(await window.navora.chats.list()).find(c=>c.title==='检索回归');await window.navora.chats.append(c.id,{role:'tool',content:'{"ok":true}',meta:{toolName:'weather_get',status:'done',args:{},result:{ok:true},durationMs:1000}});await window.navora.chats.append(c.id,{role:'assistant',content:'**天气排版测试**\\n\\n当前 **18°C**，多云。\\n\\n| 日期 | 天气 | 温度 | 降雨概率 |\\n| --- | --- | --- | --- |\\n| 10/31 | 多云 | 12°C～20°C | 6% |\\n| 11/01 | 阵雨 | 11°C～18°C | 80% |\\n| 11/02 | 阴 | 12°C～19°C | 20% |\\n| 11/03 | 小雨 | 10°C～18°C | 60% |\\n| 11/04 | 多云 | 12°C～20°C | 10% |\\n| 11/05 | 晴 | 13°C～21°C | 5% |\\n| 11/06 | 晴 | 12°C～20°C | 8% |\\n\\n> 以上数值是界面回归夹具，并非实时预报。\\n\\n- 列表与表格使用统一的间距。\\n- 数据来源、复制和耗时位于回答底部。\\n\\n此内容为界面测试夹具。',meta:{durationMs:1400,sources:[{url:'https://open-meteo.com/en/docs',title:'Open-Meteo',siteName:'Open-Meteo'}]}})})()`)
+        await wait(180)
+        await win.webContents.executeJavaScript(`(async()=>{const c=(await window.navora.chats.list()).find(c=>c.title==='检索回归');await window.navora.chats.append(c.id,{role:'user',content:'第二轮：验证右侧对话导航'});await window.navora.chats.append(c.id,{role:'assistant',content:'右侧标记可以预览每次提问，点击后跳到该轮对话。',meta:{durationMs:800}})})()`)
+        await wait(200)
+        assert.equal(await win.webContents.executeJavaScript(`document.querySelectorAll('.outline-step').length`),2,'Outline has one stop per user turn')
+        const point = await win.webContents.executeJavaScript(`(()=>{const r=document.querySelector('.outline-step').getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`)
+        win.webContents.sendInputEvent({type:'mouseMove',...point})
+        await wait(80)
+        assert.equal(await win.webContents.executeJavaScript(`!!document.querySelector('.outline-preview')`),true,'Outline hover shows the user question')
+        await click('.outline-step')
+        await wait(600)
+        assert.equal(await win.webContents.executeJavaScript(`document.querySelector('.outline-step').getAttribute('aria-current')`),'location','Outline click selects the first turn')
+        const aligned = await win.webContents.executeJavaScript(`(()=>{const box=document.querySelector('.messages'),message=box.querySelector('.msg.user');return Math.abs(message.getBoundingClientRect().top-box.getBoundingClientRect().top)})()`)
+        assert.ok(aligned<4,'Outline scrolls to the actual question: '+aligned)
+        await win.webContents.executeJavaScript(`(()=>{const c=document.querySelector('.md-table-scroll'),table=c.querySelector('table');return !!table&&c.getBoundingClientRect().width<=document.querySelector('.msg.assistant').getBoundingClientRect().width})()`)
+        const replyLayout = await win.webContents.executeJavaScript(`(()=>{const reply=document.querySelector('.msg.assistant'),body=reply.querySelector('.msg-md-content').getBoundingClientRect(),footer=reply.querySelector('.reply-footer').getBoundingClientRect(),run=document.querySelector('.run-card').getBoundingClientRect();return {bodyBottom:body.bottom,footerTop:footer.top,runWidth:run.width,replyWidth:reply.getBoundingClientRect().width}})()`)
+        assert.ok(replyLayout.footerTop>=replyLayout.bodyBottom,'Sources, copy and elapsed follow the answer')
+        assert.ok(replyLayout.runWidth<replyLayout.replyWidth*.7,'Completed tool disclosure is compact')
+        assert.equal(await win.webContents.executeJavaScript(`document.querySelector('.run-card-head').getAttribute('aria-expanded')`),'false')
+        await capture('navora-conversation.png')
+        await click('.run-card-head')
+        assert.equal(await win.webContents.executeJavaScript(`!!document.querySelector('.run-card.open')`),true,'Tool details remain accessible')
+        await click('.run-card-head')
+        await click('.reply-footer .read-pages-bar')
+        assert.equal(await win.webContents.executeJavaScript(`!!document.querySelector('.read-pages-dialog')`),true,'Footer source button opens its details')
+        await click('.read-pages-dialog-close')
+        await win.webContents.executeJavaScript(`Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.__copiedReply=text}}})`)
+        await click('.reply-copy-btn')
+        assert.equal(await win.webContents.executeJavaScript(`window.__copiedReply.includes('天气排版测试')`),true,'Copy uses the actual answer')
+        await assertIconContrast()
         await click('.reasoning-tier-button')
         await win.webContents.executeJavaScript(`[...document.querySelectorAll('[aria-label="推理档位"] [role="menuitemradio"]')].find(el=>el.textContent.trim()==='high').click()`)
         await wait(220)
         assert.equal(await win.webContents.executeJavaScript(`document.querySelector('.reasoning-tier-button').textContent.trim()`),'high')
         assert.equal(await win.webContents.executeJavaScript(`(async()=>{const chats=await window.navora.chats.list();return chats.find(c=>c.title==='检索回归').reasoningLevel})()`),'high')
+        for(const label of ['工作区','浏览器资源','对话列表']) await click(`[aria-label="显示/隐藏${label}"]`)
+        assert.equal(await win.webContents.executeJavaScript(`Math.round(document.querySelector('aside.sidebar').getBoundingClientRect().width)`),52,'All-hidden mode leaves a rail, not an empty sidebar')
+        assert.equal(await win.webContents.executeJavaScript(`!!document.querySelector('.rail-search') && !!document.querySelector('.rail-new-chat')`),true,'Search and new chat stay available in rail mode')
+        await capture('navora-rail-only.png')
+        await click('.rail-search')
+        assert.equal(await win.webContents.executeJavaScript(`!!document.querySelector('.chat-search-input')`),true)
+        win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'})
+        win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'})
+        await wait(250)
+        await click('.sidebar-settings-btn')
+        assert.equal(await win.webContents.executeJavaScript(`Math.round(document.querySelector('aside.sidebar').getBoundingClientRect().width)>52`),true,'Settings opens from rail-only mode')
+        await click('.settings-close')
+        assert.equal(await win.webContents.executeJavaScript(`Math.round(document.querySelector('aside.sidebar').getBoundingClientRect().width)`),52,'Closing settings restores rail mode')
+        for(const label of ['对话列表','工作区','浏览器资源']) await click(`[aria-label="显示/隐藏${label}"]`)
         assert.equal(await win.webContents.executeJavaScript(`!!document.querySelector('.sidebar-settings-btn')`),true)
         await win.webContents.executeJavaScript(`document.querySelector('.sidebar-settings-btn').click()`)
         await wait(40)
@@ -268,6 +325,7 @@ app.on('browser-window-created',(_event,win) => {
         } finally { titles.closeAllConnections(); await new Promise<void>(resolve=>titles.close(()=>resolve())) }
 
         if(process.env.NAVORA_LIVE_WEATHER === '1') {
+          assert.equal(await win.webContents.executeJavaScript(`(async()=>{const list=await window.navora.plugins.list();return list.some(p=>p.id==='fixture-status')})()`),true,'Unrelated plugin is loaded during weather regression')
           const results: unknown[] = []
           for(const [index,question] of ['看看今天的天气','查一下北京今天的天气'].entries()) {
             const title = `天气实测 ${index+1}`
@@ -372,8 +430,17 @@ app.on('browser-window-created',(_event,win) => {
           }
         }
         await click('.settings-close')
+        await click('.mobile-topbar-btn[aria-label="打开菜单"]')
+        const mobileRail = await win.webContents.executeJavaScript(`(()=>{const rail=document.querySelector('.activity-rail').getBoundingClientRect(),toolbar=document.querySelector('.chat-toolbar').getBoundingClientRect();return {right:rail.right,left:toolbar.left}})()`)
+        assert.ok(mobileRail.left>=mobileRail.right,'Mobile actions do not overlap the icon rail')
+        await capture('navora-mobile-sidebar.png')
+        await win.webContents.executeJavaScript(`[...document.querySelectorAll('.chat-item-title-text')].find(el=>el.textContent.trim()==='检索回归').closest('.chat-item-main').click()`)
+        await wait(300)
+        const tableBounds = await win.webContents.executeJavaScript(`(()=>{const table=document.querySelector('.md-table-scroll'),r=table.getBoundingClientRect();return {right:r.right,width:innerWidth,scroll:document.documentElement.scrollWidth}})()`)
+        assert.ok(tableBounds.right<=tableBounds.width && tableBounds.scroll<=tableBounds.width,'A wide Markdown table stays inside the mobile answer')
+        await capture('navora-mobile-conversation.png')
         assert.deepEqual(errors,[])
-        console.log(JSON.stringify({ok:true,reducedMotion,checks:['sidebar-pointer-resize','pane-toggle-persistence','rail-icon-consistency','settings-sidebar-flip','real-app-preload','desktop-shell','right-edge','menu-open-close','menu-interruption-cleanup','search-native-click','search-message-match','search-shortcut','reasoning-tier-persistence','all-settings-tabs','settings-save-legacy-remote','onboarding-skip-legacy-remote','close-button','stop-from-real-ui','mobile-layout','mobile-settings'],output}))
+        console.log(JSON.stringify({ok:true,reducedMotion,checks:['sidebar-pointer-resize','pane-toggle-persistence','rail-icon-consistency','rail-only-recovery','conversation-outline','answer-footer','markdown-table','settings-sidebar-flip','real-app-preload','desktop-shell','right-edge','menu-open-close','menu-interruption-cleanup','search-native-click','search-message-match','search-shortcut','reasoning-tier-persistence','all-settings-tabs','settings-save-legacy-remote','onboarding-skip-legacy-remote','close-button','stop-from-real-ui','mobile-layout','mobile-settings'],output}))
         fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reducedMotion}))
         app.exit(0)
       } catch(error) {

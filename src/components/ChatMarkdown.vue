@@ -169,7 +169,7 @@ function onClick(e: MouseEvent) {
   max-width: 100%;
 }
 .msg-body.md :deep(p) {
-  margin: 0 0 0.65em;
+  margin: 0 0 0.8em;
 }
 .msg-body.md :deep(p:last-child) {
   margin-bottom: 0;
@@ -212,9 +212,9 @@ function onClick(e: MouseEvent) {
   word-break: break-word;
 }
 .msg-body.md :deep(pre) {
-  margin: 0.5em 0;
-  padding: 10px 12px;
-  border-radius: 8px;
+  margin: 0.85em 0;
+  padding: 12px 14px;
+  border-radius: 10px;
   background: #15202b;
   color: #ecf0f1;
   overflow-x: auto;
@@ -222,7 +222,7 @@ function onClick(e: MouseEvent) {
   max-width: 100%;
   max-height: min(360px, 45vh);
   font-size: 0.8rem;
-  line-height: 1.45;
+  line-height: 1.6;
   box-sizing: border-box;
 }
 .msg-body.md :deep(pre code) {
@@ -235,10 +235,12 @@ function onClick(e: MouseEvent) {
   overflow-wrap: normal;
 }
 .msg-body.md :deep(blockquote) {
-  margin: 0.5em 0;
-  padding: 0.25em 0 0.25em 0.85em;
-  border-left: 3px solid #9fc0d8;
-  color: #5d6d7e;
+  margin: 0.8em 0;
+  padding: 8px 12px;
+  border-left: 3px solid #d1d9e5;
+  border-radius: 0 8px 8px 0;
+  background: #f7f8fa;
+  color: #5c6878;
 }
 .msg-body.md :deep(a) {
   color: #1b4f72;
@@ -246,24 +248,46 @@ function onClick(e: MouseEvent) {
   text-underline-offset: 2px;
   word-break: break-all;
 }
-.msg-body.md :deep(table) {
-  border-collapse: collapse;
-  width: max-content;
-  max-width: 100%;
-  display: block;
+.msg-body.md :deep(.md-table-scroll) {
+  width: 100%;
+  margin: 0.85em 0;
+  border: 1px solid #e2e6ed;
+  border-radius: 10px;
   overflow-x: auto;
-  margin: 0.5em 0;
-  font-size: 0.85rem;
+  scrollbar-width: thin;
+  scrollbar-color: #bdc6d2 transparent;
+}
+.msg-body.md :deep(.md-table-scroll:focus-visible) {
+  outline: 2px solid #537ab9;
+  outline-offset: 2px;
+}
+.msg-body.md :deep(table) {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  margin: 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
 }
 .msg-body.md :deep(th),
 .msg-body.md :deep(td) {
-  border: 1px solid #d5dde5;
-  padding: 6px 8px;
+  border: 0;
+  border-bottom: 1px solid #e8ebf0;
+  padding: 9px 12px;
   text-align: left;
+  white-space: nowrap;
 }
 .msg-body.md :deep(th) {
-  background: #f0f4f8;
+  background: #f5f6f8;
+  color: #4d596b;
   font-weight: 600;
+}
+.msg-body.md :deep(tbody tr:last-child td) { border-bottom: 0; }
+.msg-body.md :deep(tbody tr:hover) { background: #fafbfd; }
+@media(max-width:600px) {
+  .msg-body.md :deep(table) { font-size: 12px; }
+  .msg-body.md :deep(th), .msg-body.md :deep(td) { padding: 8px 10px; }
 }
 .msg-body.md :deep(hr) {
   border: 0;

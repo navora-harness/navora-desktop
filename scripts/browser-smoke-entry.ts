@@ -6,6 +6,7 @@ import http from 'node:http'
 import { executeAgentTool, type ToolExecContext } from '../electron/modules/browser-tools'
 import { createDefaultConfig } from '../shared/config'
 import { PluginStore } from '../electron/modules/plugin-store'
+import { ChatStore } from '../electron/modules/chat-store'
 import { createPluginHostApi } from '../electron/modules/plugin-host'
 import type { PageSnapshot } from '../shared/page-index'
 
@@ -14,6 +15,21 @@ app.setPath('userData', path.join(root, 'profile'))
 app.commandLine.appendSwitch('disable-gpu')
 void app.whenReady().then(async () => {
 console.log('[browser-smoke] Electron ready')
+const titleChats = new ChatStore(path.join(root,'title-regression'))
+const titleChat = titleChats.create()
+titleChats.appendMessage(titleChat.id,{role:'user',content:'请帮我看看未来几天天气。'})
+assert.equal(titleChats.setProvisionalTitleFromFirstUser(titleChat.id,'请帮我看看未来几天天气。'),'未来几天天气')
+assert.equal(titleChats.get(titleChat.id)?.titleSource,'auto')
+titleChats.setTitle(titleChat.id,'我手动命名的对话',{fromUser:true})
+titleChats.setTitle(titleChat.id,'迟到的后台标题',{fromAi:true})
+assert.equal(titleChats.get(titleChat.id)?.title,'我手动命名的对话','Late automatic titles must not overwrite user names')
+titleChats.flushChat(titleChat.id)
+assert.equal(new ChatStore(path.join(root,'title-regression')).get(titleChat.id)?.titleSource,'user','Title provenance survives restart')
+const legacyTitle = titleChats.create()
+titleChats.appendMessage(legacyTitle.id,{role:'user',content:'看看未来几天天气'})
+titleChats.setTitle(legacyTitle.id,'看看未来几天天气')
+titleChats.flushChat(legacyTitle.id)
+assert.equal(new ChatStore(path.join(root,'title-regression')).get(legacyTitle.id)?.titleSource,'auto','Only clear unlocked legacy titles regain automatic updates')
 const win = new BrowserWindow({show:false,width:1000,height:800,webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true}})
 win.webContents.on('console-message',(event: unknown) => {
   const message = event as { level?: string; message?: string }
@@ -206,7 +222,7 @@ try {
   assert.equal(win.webContents.getTitle(),'Native document')
   assert.equal(win.webContents.debugger.isAttached(),false)
   console.log(JSON.stringify({ok:true,electron:process.versions.electron,capabilities:capabilities.value,
-    checks:['weather-permissions','cancelled-navigation-soft-wait','wait-deadline-listener-cleanup','snapshot','cache','trusted-click','typed-input','open-shadow','closed-shadow-query','cross-origin-frame-query-click','no-arbitrary-frame-click','native-file-input-navigation','native-dialog','native-document-response','semantic-stale-ref','navigation-stale-ref','plugin-load-execute','plugin-permissions','no-debugger'],
+    checks:['title-provenance-manual-rename','weather-permissions','cancelled-navigation-soft-wait','wait-deadline-listener-cleanup','snapshot','cache','trusted-click','typed-input','open-shadow','closed-shadow-query','cross-origin-frame-query-click','no-arbitrary-frame-click','native-file-input-navigation','native-dialog','native-document-response','semantic-stale-ref','navigation-stale-ref','plugin-load-execute','plugin-permissions','no-debugger'],
     captureMs:snapshot.captureMs,permissionChecks,benchmark}))
 } catch(error) {
   console.error(error)

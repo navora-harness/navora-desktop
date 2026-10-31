@@ -1,11 +1,12 @@
 <template>
-  <div class="sidebar-panel">
+  <div class="sidebar-panel browser-panel" :class="{ 'is-collapsed': collapsed }">
     <div class="res-head">
-      <button type="button" class="res-label-btn" @click="collapsed = !collapsed">
+      <button type="button" class="res-label-btn" :aria-expanded="!collapsed" aria-label="折叠或展开浏览器资源" @click="collapsed = !collapsed">
         <font-awesome-icon :icon="collapsed ? 'chevron-right' : 'chevron-down'" class="res-chevron" />
         <span class="res-label">浏览器资源</span>
       </button>
-      <button type="button" class="quick-browser-btn" :disabled="!chatId || busyQuickOpen" title="打开或复用浏览器（Ctrl/⌘ Shift B）" aria-label="快速打开浏览器" @click="quickOpen">{{ busyQuickOpen ? '打开中' : '打开' }}</button>
+      <div class="res-head-actions">
+      <button type="button" class="quick-browser-btn icon-btn" :disabled="!chatId || busyQuickOpen" title="打开或复用浏览器（Ctrl/⌘ Shift B）" aria-label="快速打开浏览器" @click="quickOpen"><font-awesome-icon :icon="busyQuickOpen ? 'circle-notch' : 'arrow-up-right-from-square'" :spin="busyQuickOpen" /></button>
       <button
         type="button"
         class="icon-btn"
@@ -16,10 +17,11 @@
       >
         <font-awesome-icon icon="plus" />
       </button>
+      </div>
     </div>
     <div v-if="!collapsed" class="res-body" data-ctx-menu="browser">
-      <div v-if="!chatId" class="res-empty">先选择一个 Chat</div>
-      <div v-else-if="!tree.length" class="res-empty">暂无浏览资源，点右侧 + 创建</div>
+      <div v-if="!chatId" class="res-empty">选择对话后使用浏览器</div>
+      <div v-else-if="!tree.length" class="res-empty">暂无浏览器窗口</div>
       <div v-else class="res-tree">
         <div v-for="s in tree" :key="s.sessionId" class="tree-sess">
           <div
