@@ -307,6 +307,11 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
         on<ChatChangedEvent>('navora:chats.changed', cb),
     },
     agent: {
+      submit:(chatId:string,payload:{content:string;refs?:BrowserContextRef[]},mode?:'queue'|'insert')=>invoke<ChatSession|null>('navora:agent.submit',chatId,payload,mode),
+      queueEdit:(chatId:string,id:string,content:string)=>invoke<ChatSession|null>('navora:agent.queue.edit',chatId,id,content),
+      queueRemove:(chatId:string,id:string)=>invoke<ChatSession|null>('navora:agent.queue.remove',chatId,id),
+      queueInsert:(chatId:string,id:string)=>invoke<ChatSession|null>('navora:agent.queue.insert',chatId,id),
+      queueResume:(chatId:string)=>invoke<ChatSession|null>('navora:agent.queue.resume',chatId),
       run: (chatId: string, payload: { content: string; refs?: BrowserContextRef[] }) =>
         invoke<ChatSession | null>('navora:agent.run', chatId, payload),
       retry: (chatId: string) => invoke<ChatSession | null>('navora:agent.retry', chatId),
@@ -338,6 +343,7 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
       onCancel: (cb: (id: string) => void) => on<string>('navora:permission.cancel', cb),
     },
     browser: {
+      treeAll: () => invoke<BrowserTreeSession[]>('navora:browser.treeAll'),
       tree: (chatId: string) => invoke<BrowserTreeSession[]>('navora:browser.tree', chatId),
       windowCounts: () => invoke<Record<string, number>>('navora:browser.windowCounts'),
       createSession: (chatId: string, opts?: { persist?: boolean }) =>

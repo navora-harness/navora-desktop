@@ -108,6 +108,10 @@
             <div class="card mt-3">
               <h3 class="card-title">对话与标题</h3>
               <div class="switch-row">
+                <div><div class="switch-title">运行中直接插入消息</div><div class="switch-hint">关闭时加入队列</div></div>
+                <v-switch v-model="cfg.app.running_message_mode" true-value="insert" false-value="queue" color="primary" hide-details density="compact" />
+              </div>
+              <div class="switch-row">
                 <div>
                   <div class="switch-title">回复后显示后续操作建议</div>
                   <div class="switch-hint">显示任务相关的快捷操作，不增加模型请求</div>

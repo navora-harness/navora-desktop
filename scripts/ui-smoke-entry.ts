@@ -111,7 +111,7 @@ app.on('browser-window-created',(_event,win) => {
         assert.equal(await win.webContents.executeJavaScript(`document.querySelector('aside.sidebar').getBoundingClientRect().width`),sidebarWidth+60)
         for(const id of ['workspace','browser','chats']) {
           await click(`[data-panel="${id}"]`)
-          assert.equal(await win.webContents.executeJavaScript('document.querySelectorAll(".rail-group-button[aria-pressed=true]").length'),1,'Only one rail entry opens at a time')
+          assert.equal(await win.webContents.executeJavaScript('document.querySelectorAll(".rail-panel-button[aria-pressed=true]").length'),1,'Only one rail entry opens at a time')
         }
         assert.equal(await win.webContents.executeJavaScript('!!document.querySelector(".rail-search")?.closest(".activity-rail") && !!document.querySelector(".chat-batch-trigger")?.closest(".dock-header")'),true,'Search and batch controls have dedicated stable positions')
         await capture('navora-desktop.png')
@@ -206,7 +206,7 @@ app.on('browser-window-created',(_event,win) => {
         await wait(220)
         assert.equal(await win.webContents.executeJavaScript(`document.querySelector('.reasoning-tier-button').textContent.trim()`),'high')
         assert.equal(await win.webContents.executeJavaScript(`(async()=>{const chats=await window.navora.chats.list();return chats.find(c=>c.title==='检索回归').reasoningLevel})()`),'high')
-        await click('.rail-group-button[aria-pressed=true]')
+        await click('.rail-panel-button[aria-pressed=true]')
         assert.equal(await win.webContents.executeJavaScript(`Math.round(document.querySelector('aside.sidebar').getBoundingClientRect().width)`),52,'All-hidden mode leaves a rail, not an empty sidebar')
         assert.equal(await win.webContents.executeJavaScript(`!!document.querySelector('.rail-search') && !!document.querySelector('.rail-new-chat')`),true,'Search and new chat stay available in rail mode')
         assert.equal(await win.webContents.executeJavaScript(`(()=>{const rail=document.querySelector('.activity-rail'),side=document.querySelector('aside.sidebar'),r=rail.getBoundingClientRect(),s=side.getBoundingClientRect();return getComputedStyle(rail).borderRightWidth==='0px'&&Math.abs((r.left+r.width/2)-(s.left+s.width/2))<1})()`),true,'Collapsed rail has one edge and centered controls, without an inner strip')
@@ -221,17 +221,17 @@ app.on('browser-window-created',(_event,win) => {
         await click('.settings-close')
         assert.equal(await win.webContents.executeJavaScript(`Math.round(document.querySelector('aside.sidebar').getBoundingClientRect().width)`),52,'Closing settings restores rail mode')
         await click('.sidebar-settings-btn')
-        await click('[aria-label="显示/隐藏工作区"]')
-        assert.equal(await win.webContents.executeJavaScript(`!document.querySelector('.settings-workspace') && document.querySelector('[aria-label="显示/隐藏工作区"]').getAttribute('aria-pressed')==='true' && document.querySelector('.workspace-panel').checkVisibility()`),true,'Selecting a hidden panel from settings opens that panel on the first click')
-        await click('[aria-label="显示/隐藏工作区"]')
-        await win.webContents.executeJavaScript(`(async()=>{const b=document.querySelector('[aria-label="显示/隐藏工作区"]');for(let i=0;i<4;i++){b.click();await new Promise(r=>setTimeout(r,25))}})()`)
+        await click('[data-panel="workspace"]')
+        assert.equal(await win.webContents.executeJavaScript(`!document.querySelector('.settings-workspace') && document.querySelector('[data-panel="workspace"]').getAttribute('aria-pressed')==='true' && document.querySelector('.workspace-panel').checkVisibility()`),true,'Selecting a hidden panel from settings opens that panel on the first click')
+        await click('[data-panel="workspace"]')
+        await win.webContents.executeJavaScript(`(async()=>{const b=document.querySelector('[data-panel="workspace"]');for(let i=0;i<4;i++){b.click();await new Promise(r=>setTimeout(r,25))}})()`)
         let sidebarSettled = false
         for(let i=0;i<20;i++) {
-          sidebarSettled = await win.webContents.executeJavaScript(`Math.round(document.querySelector('aside.sidebar').getBoundingClientRect().width)===52 && !document.querySelector('.sidebar-workspace-pane').checkVisibility()`)
+          sidebarSettled = await win.webContents.executeJavaScript(`Math.round(document.querySelector('aside.sidebar').getBoundingClientRect().width)===52 && !document.querySelector('#dock-pane-workspace').checkVisibility()`)
           if(sidebarSettled) break
           await wait(40)
         }
-        const sidebarEnd = await win.webContents.executeJavaScript(`(()=>{const pane=document.querySelector('.sidebar-workspace-pane'),side=document.querySelector('aside.sidebar'),button=document.querySelector('[aria-label="显示/隐藏工作区"]');return {width:side.getBoundingClientRect().width,pane:pane.getAttribute('style'),visible:pane.checkVisibility(),pressed:button.getAttribute('aria-pressed'),shell:side.parentElement.className,classes:pane.className,animations:document.getAnimations().map(a=>({target:a.effect?.target?.className,state:a.playState}))}})()`)
+        const sidebarEnd = await win.webContents.executeJavaScript(`(()=>{const pane=document.querySelector('#dock-pane-workspace'),side=document.querySelector('aside.sidebar'),button=document.querySelector('[data-panel="workspace"]');return {width:side.getBoundingClientRect().width,pane:pane.getAttribute('style'),visible:pane.checkVisibility(),pressed:button.getAttribute('aria-pressed'),shell:side.parentElement.className,classes:pane.className,animations:document.getAnimations().map(a=>({target:a.effect?.target?.className,state:a.playState}))}})()`)
         assert.equal(sidebarSettled,true,'Interrupted sidebar toggles settle at the intended collapsed state: '+JSON.stringify(sidebarEnd))
         await click('[data-panel="chats"]')
         assert.equal(await win.webContents.executeJavaScript(`!!document.querySelector('.sidebar-settings-btn')`),true)

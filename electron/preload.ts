@@ -137,6 +137,11 @@ const api = {
     },
   },
   agent: {
+    submit: (chatId:string,payload:{content:string;refs?:BrowserContextRef[]},mode?:'queue'|'insert'):Promise<ChatSession|null> => ipcRenderer.invoke('navora:agent.submit',chatId,payload,mode),
+    queueEdit:(chatId:string,id:string,content:string):Promise<ChatSession|null>=>ipcRenderer.invoke('navora:agent.queue.edit',chatId,id,content),
+    queueRemove:(chatId:string,id:string):Promise<ChatSession|null>=>ipcRenderer.invoke('navora:agent.queue.remove',chatId,id),
+    queueInsert:(chatId:string,id:string):Promise<ChatSession|null>=>ipcRenderer.invoke('navora:agent.queue.insert',chatId,id),
+    queueResume:(chatId:string):Promise<ChatSession|null>=>ipcRenderer.invoke('navora:agent.queue.resume',chatId),
     run: (
       chatId: string,
       payload: { content: string; refs?: BrowserContextRef[] },
@@ -202,6 +207,7 @@ const api = {
     },
   },
   browser: {
+    treeAll: (): Promise<BrowserTreeSession[]> => ipcRenderer.invoke('navora:browser.treeAll'),
     tree: (chatId: string): Promise<BrowserTreeSession[]> =>
       ipcRenderer.invoke('navora:browser.tree', chatId),
     windowCounts: (): Promise<Record<string, number>> =>

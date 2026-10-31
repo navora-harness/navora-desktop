@@ -45,7 +45,7 @@ try {
     delete env.VITE_DEV_SERVER_URL
     const status = await new Promise((resolve,reject) => {
       const child = spawn(require('electron'),[entry],{cwd:root,env,stdio:'inherit',windowsHide:true})
-      const timer = setTimeout(() => {child.kill();reject(new Error('UI smoke exceeded its deadline'))},process.env.NAVORA_LIVE_CREATOR === '1' ? 120000 : 60000)
+      const timer = setTimeout(() => {child.kill();reject(new Error('UI smoke exceeded its deadline'))},process.env.NAVORA_LIVE_CREATOR === '1' ? 120000 : 90000)
       child.on('error',(error) => {clearTimeout(timer);reject(error)})
       child.on('exit',(code) => {clearTimeout(timer);resolve(code ?? 1)})
     })

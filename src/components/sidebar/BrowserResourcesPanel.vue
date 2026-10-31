@@ -2,7 +2,7 @@
   <div class="sidebar-panel browser-panel" :class="{ 'is-collapsed': collapsed }">
     <Teleport :to="headerTarget || 'body'" :disabled="!headerTarget" defer>
     <div v-show="headerVisible !== false" class="res-head" :class="{ 'docked-head': headerTarget }">
-      <button type="button" v-if="!headerTarget" class="res-label-btn" :aria-expanded="!collapsed" aria-label="折叠或展开浏览器资源" @click="collapsed = !collapsed">
+      <button type="button" v-if="!headerTarget && !embedded" class="res-label-btn" :aria-expanded="!collapsed" aria-label="折叠或展开浏览器资源" @click="collapsed = !collapsed">
         <font-awesome-icon icon="chevron-down" class="res-chevron" />
         <span class="res-label">浏览器资源</span>
       </button>
@@ -138,15 +138,16 @@ import { ref } from 'vue'
 import type { BrowserContextRef, BrowserTreeSession, BrowserTreeWindow } from '@shared/types'
 import SidebarContextMenu from './SidebarContextMenu.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   headerTarget?: string
   headerVisible?: boolean
+  embedded?: boolean
   chatId: string
   tree: BrowserTreeSession[]
   isRemote: boolean
   ownerLabel: (chatId: string) => string
   dndMime: string
-}>()
+}>(), {headerVisible:true})
 
 const emit = defineEmits<{
   'add-ref': [ref: BrowserContextRef]

@@ -229,6 +229,19 @@ export class AgentRuntime {
   private askUser: AskUserFn
   private askSkillReview: AskSkillReviewFn
   private pendingEvents = new Map<string, string[]>()
+  private insertedInputs = new Map<string, ChatMessageParam[]>()
+  insertUserInput(chatId:string, input:{content:string;refs?:BrowserContextRef[]}):boolean {
+    if(!this.isRunning(chatId))return false
+    const pending=this.insertedInputs.get(chatId)||[]
+    if(pending.length>=80)throw new Error('message_queue_full')
+    const content=input.content||'（附带浏览器上下文）'
+    const message=this.chats.appendMessage(chatId,{role:'user',content,meta:{inserted:true,...(input.refs?.length?{refs:input.refs}:{})}})
+    if(!message)return false
+    pending.push({role:'user',content:content+(input.refs?.length?'\n[浏览器引用]\n'+JSON.stringify(input.refs):'')})
+    this.insertedInputs.set(chatId,pending)
+    this.emit({type:'message',chatId,message})
+    return true
+  }
   /** chatId -> fingerprint -> remembered answer for similar fork asks */
   private forkMemory = new Map<string, Map<string, string>>()
   /** Active hierarchical fork answers for the current agent run */
@@ -715,6 +728,9 @@ export class AgentRuntime {
 
         rounds += 1
 
+        const inserted=this.insertedInputs.get(chatId)
+        if(inserted?.length){messages.push(...inserted);this.insertedInputs.delete(chatId);directWeatherReply=null}
+
         const pending = this.pendingEvents.get(chatId) || []
         if (pending.length) {
           this.pendingEvents.set(chatId, [])
@@ -1131,6 +1147,9 @@ export class AgentRuntime {
         }
 
         // UI shows read-pages panel; strip any model-written trailing 来源 block to avoid duplication.
+        // A correction arriving during the provider call must be consumed before
+        // the run completes. Tool results have already been paired at this boundary.
+        if(this.insertedInputs.get(chatId)?.length){messages.push({role:'assistant',content:text});continue}
         if (!isSub && cfg.app.show_read_pages !== false) {
           text = stripTrailingSourcesSection(text)
         }
@@ -1214,6 +1233,7 @@ export class AgentRuntime {
     } finally {
       this.clearLoadingMarkers(chatId, stoppedByUser || ctrl.signal.aborted ? 'aborted' : 'done')
       this.runs.delete(chatId)
+      this.insertedInputs.delete(chatId)
       this.pendingEvents.delete(chatId)
       this.forkChains.delete(chatId)
       this.emitReasoning(chatId, '', 'clear')

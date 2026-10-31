@@ -2,7 +2,7 @@
   <div class="sidebar-panel workspace-panel" :class="{ 'is-collapsed': collapsed }">
     <Teleport :to="headerTarget || 'body'" :disabled="!headerTarget" defer>
     <div v-show="headerVisible !== false" class="res-head" :class="{ 'docked-head': headerTarget }">
-      <button type="button" v-if="!headerTarget" class="res-label-btn" :aria-expanded="!collapsed" aria-label="折叠或展开工作区" @click="collapsed = !collapsed">
+      <button type="button" v-if="!headerTarget && !embedded" class="res-label-btn" :aria-expanded="!collapsed" aria-label="折叠或展开工作区" @click="collapsed = !collapsed">
         <font-awesome-icon icon="chevron-down" class="res-chevron" />
         <span class="res-label">工作区</span>
       </button>
@@ -104,7 +104,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import SidebarContextMenu from './SidebarContextMenu.vue'
 import WorkspaceTreeNode, { type WsEntry } from './WorkspaceTreeNode.vue'
 
-const props = defineProps<{ chatId: string; headerTarget?: string; headerVisible?: boolean }>()
+const props = withDefaults(defineProps<{ chatId: string; headerTarget?: string; headerVisible?: boolean; embedded?: boolean }>(), {headerVisible:true})
 const emit = defineEmits<{
   notify: [text: string, color?: string]
   preview: [entry: WsEntry]
@@ -130,7 +130,7 @@ const rootLabel = computed(() => {
   const abs = absoluteRoot.value
   if (!abs) return ''
   const parts = abs.replace(/\\/g, '/').split('/').filter(Boolean)
-  if (/^chat_[a-z0-9]+$/i.test(parts.at(-1) || '')) return '当前对话文件夹'
+  if (/^chat_[a-z0-9]+$/i.test(parts.at(-1) || '')) return '对话文件夹'
   if (parts.length <= 2) return abs
   return `…/${parts.slice(-2).join('/')}`
 })

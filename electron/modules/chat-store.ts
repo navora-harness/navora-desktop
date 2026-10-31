@@ -38,6 +38,8 @@ export class ChatStore {
         const raw = fs.readFileSync(path.join(this.dir, name), 'utf8')
         const chat = JSON.parse(raw) as ChatSession
         if (chat?.id) {
+          chat.queuedMessages=(Array.isArray(chat.queuedMessages)?chat.queuedMessages:[])
+            .filter(entry=>entry&&typeof entry.id==='string'&&typeof entry.content==='string'&&entry.content.length<=200000).slice(0,80)
           // Only migrate unmistakable unlocked first-message titles. Legacy
           // locked/renamed titles have no provenance and must be preserved.
           const firstAsk = chat.messages?.find(m => m.role === 'user')?.content || ''
@@ -240,6 +242,14 @@ export class ChatStore {
     const p = this.chats.get(chatId)?.permissions
     if (!p?.modes) return null
     return { preset: p.preset || 'custom', modes: { ...p.modes } }
+  }
+
+  setMessageQueue(chatId:string, queuedMessages:NonNullable<ChatSession['queuedMessages']>, paused:boolean):void {
+    const chat=this.chats.get(chatId)
+    if(!chat)throw new Error('chat_not_found')
+    chat.queuedMessages=queuedMessages
+    chat.queuePaused=paused
+    this.persist(chat,'immediate')
   }
 
   setExecutionMode(chatId: string, mode: 'auto' | 'chat' | 'agent'): ChatSession | null {

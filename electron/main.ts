@@ -28,6 +28,8 @@ import { PluginDevWatcher } from './modules/plugin-dev-watcher'
 import { SkillStore } from './modules/skill-store'
 import { MarketplaceClient } from './modules/marketplace-client'
 import { AgentRuntime } from './modules/agent-runtime'
+import { AgentInbox } from './modules/agent-inbox'
+let agentInbox: AgentInbox | undefined
 import { createAppTray, type TrayController } from './modules/tray'
 import { RemoteServer } from './modules/remote-server'
 import { NavoraRpcRegistry } from './modules/remote-rpc'
@@ -384,6 +386,9 @@ function pushAgentEvent(payload: unknown): void {
     mainWindow.webContents.send('navora:agent.event', payload)
   }
   remote?.broadcast('navora:agent.event', payload)
+  const event=payload as AgentEvent
+  if(event.type==='error')agentInbox?.pause(event.chatId)
+  if(event.type==='done')agentInbox?.finished(event.chatId)
 }
 
 function pushPermissionRequest(req: unknown): void {
@@ -1654,9 +1659,7 @@ function registerIpc(): void {
     },
   )
 
-  rpcHandle(
-    'navora:agent.run',
-    async (_e: unknown, chatId: string, payload: { content: string; refs?: BrowserContextRef[] }) => {
+  const startAgentMessage = async (chatId:string,payload:{content:string;refs?:BrowserContextRef[]}) => {
       if (!chatId) throw new Error('chatId_required')
       const maxChars = Math.min(
         200000,
@@ -1700,8 +1703,25 @@ function registerIpc(): void {
         console.error('[agent.run]', e)
       })
       return chats.get(chatId)
-    },
-  )
+  }
+  agentInbox=new AgentInbox({
+    get:id=>chats.get(id),save:(id,entries,paused)=>chats.setMessageQueue(id,entries,paused),
+    changed:chatId=>pushChatChanged({type:'upsert',chatId}),running:id=>agent.isRunning(id),
+    start:startAgentMessage,insert:(id,input)=>agent.insertUserInput(id,input),
+    maxChars:()=>Math.min(200000,Math.max(1000,Math.floor(config.get().app.max_composer_chars||16000))),
+  })
+  // Restore drafts of queued work without silently resuming automation on launch.
+  for(const chat of chats.list())if(chat.queuedMessages?.length)agentInbox.pause(chat.id)
+  rpcHandle('navora:agent.run',(_e,chatId:string,payload:{content:string;refs?:BrowserContextRef[]})=>startAgentMessage(chatId,payload))
+  rpcHandle('navora:agent.submit',async(_e,chatId:string,payload:{content:string;refs?:BrowserContextRef[]},mode?:'queue'|'insert')=>{
+    await agentInbox!.submit(chatId,payload,mode==='insert'||mode==='queue'?mode:config.get().app.running_message_mode==='insert'?'insert':'queue')
+    chats.setDraft(chatId,'');pushChatChanged({type:'upsert',chatId})
+    return chats.get(chatId)
+  })
+  rpcHandle('navora:agent.queue.edit',(_e,id:string,messageId:string,content:string)=>{agentInbox!.edit(id,messageId,content);return chats.get(id)})
+  rpcHandle('navora:agent.queue.remove',(_e,id:string,messageId:string)=>{agentInbox!.remove(id,messageId);return chats.get(id)})
+  rpcHandle('navora:agent.queue.insert',async(_e,id:string,messageId:string)=>{await agentInbox!.insert(id,messageId);return chats.get(id)})
+  rpcHandle('navora:agent.queue.resume',async(_e,id:string)=>{await agentInbox!.resume(id);return chats.get(id)})
 
   rpcHandle('navora:agent.retry', async (_e: unknown, chatId: string) => {
     if (!chatId) throw new Error('chatId_required')
@@ -1723,6 +1743,7 @@ function registerIpc(): void {
   })
 
   rpcHandle('navora:agent.stop', (_e, chatId: string) => {
+    agentInbox?.pause(chatId)
     abortAsksForChat(chatId)
     const ok = agent.stop(chatId)
     return { ok }
@@ -1764,6 +1785,7 @@ function registerIpc(): void {
   )
 
   rpcHandle('navora:browser.tree', (_e, chatId: string) => displayBrowserTree(chatId))
+  rpcHandle('navora:browser.treeAll', () => chats.list().flatMap(chat => registry.getTree(chat.id)))
   rpcHandle('navora:browser.windowCounts', () => displayWindowCounts())
 
   rpcHandle('navora:browser.session.create', (_e: unknown, chatId: string, opts?: { persist?: boolean }) => {
