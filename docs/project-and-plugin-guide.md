@@ -414,3 +414,14 @@ unofficial Electron 二进制常经本机 mirror（见 desktop README / `.npmrc.
 | 权限门闩 | `navora-desktop/electron/modules/permission-gate.ts` |
 | Agent 运行时 | `navora-desktop/electron/modules/agent-runtime.ts` |
 | 工具执行 | `navora-desktop/electron/modules/browser-tools.ts` |
+
+
+## 内置插件与技能创建器
+
+对话输入框左下角的 `+` 提供「插件创建器」与「技能创建器」；设置的插件、技能分类也提供入口。
+
+从模板新建草稿后，可以直接编辑文件，或选择已配置的模型并描述需求生成内容。草稿名称与文件内容自动保存到本机数据目录 `creators/`；生成可以停止，也可以撤销刚生成的文件。手动修改后撤销生成入口会关闭，以免覆盖后续编辑。
+
+「校验」检查文件路径、大小、元信息和入口语法，不执行插件。插件需包含 `tools`、`planPermissions`、`execute`；技能沿用 YAML frontmatter 的 `SKILL.md`。确认内容后点击「安装到本机」，后续修订使用「更新」；导出 ZIP 可通过现有插件/技能导入器安装。
+
+「打开试用对话」会准备一个单独的对话和可编辑测试任务。插件仅链接到该对话及其子对话，不作为试用操作的全局安装；发送测试任务后仍经过现有 Agent 权限门闸。技能试用使用当前草稿正文，不需要先安装。远程网页可编辑草稿，安装、插件装载试用及系统导出只允许在桌面端操作。

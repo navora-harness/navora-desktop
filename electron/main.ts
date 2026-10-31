@@ -7,6 +7,9 @@ import { ConfigService } from './modules/config-service'
 import { mainWindowChrome } from './modules/window-chrome'
 import { fetchOpenAiModelsList } from '../shared/openai-models'
 import { probeModel } from './modules/model-probe'
+import { CreatorService } from './modules/creator-service'
+import type { CreatorKind, CreatorFiles } from '../shared/creators'
+import AdmZip from 'adm-zip'
 import { ChatStore } from './modules/chat-store'
 import { BrowserRegistry } from './modules/browser-registry'
 import { BrowserNetworkManager } from './modules/browser-network'
@@ -101,6 +104,7 @@ let downloads!: FileDownloadService
 let browserDownloads!: BrowserDownloadList
 let workspaceShell!: WorkspaceShell
 let secrets!: SecretsStore
+let creators!: CreatorService
 let skills!: SkillStore
 let plugins!: PluginStore
 let pluginDevWatch!: PluginDevWatcher
@@ -652,6 +656,31 @@ async function createWindow(): Promise<void> {
 }
 
 function registerIpc(): void {
+  const creatorCall = async <T>(operation: () => T | Promise<T>) => {
+    try { return { ok: true as const, ...await operation() } }
+    catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : 'creator_failed' } }
+  }
+  rpcHandle('navora:creators.list', (_e, kind: CreatorKind) => creatorCall(() => ({ projects: creators.store.list(kind) })))
+  rpcHandle('navora:creators.create', (_e, kind: CreatorKind, template: string) => creatorCall(() => ({ project: creators.store.create(kind, template) })))
+  rpcHandle('navora:creators.get', (_e, id: string) => creatorCall(() => ({ project: creators.store.get(id) })))
+  rpcHandle('navora:creators.save', (_e, id: string, revision: number, files: CreatorFiles, name: string) => creatorCall(() => ({ project: creators.save(id, revision, files, name) })))
+  rpcHandle('navora:creators.validate', (_e, id: string, revision: number) => creatorCall(() => ({ validation: creators.validate(id, revision) })))
+  rpcHandle('navora:creators.install', (_e, id: string, revision: number) => creatorCall(async () => ({ project: await creators.install(id, revision) })))
+  rpcHandle('navora:creators.trial', (_e, id: string, revision: number, task: string) => creatorCall(() => creators.trial(id, revision, task)))
+  rpcHandle('navora:creators.generate', (_e, id: string, revision: number, request: string, providerId?: string, model?: string) => creatorCall(async () => ({ files: await creators.generate(id, revision, request, providerId, model) })))
+  rpcHandle('navora:creators.cancelGenerate', (_e, id: string) => creatorCall(() => { creators.cancelGenerate(id); return {} }))
+  rpcHandle('navora:creators.export', (_e, id: string, revision: number) => creatorCall(async () => {
+    const project = creators.store.get(id)
+    if (project.revision !== revision) throw new Error('revision_conflict')
+    if (!creators.validate(id, revision).ok) throw new Error('validation_failed')
+    const filename = project.name.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_').replace(/[. ]+$/g, '').slice(0,80) || project.kind
+    const selected = await dialog.showSaveDialog({ title: '导出'+(project.kind === 'plugin' ? '插件' : '技能'), defaultPath: `Navora-${filename}.zip`, filters: [{name:'ZIP',extensions:['zip']}] })
+    if (selected.canceled || !selected.filePath) return { canceled: true }
+    const zip = new AdmZip()
+    for (const [name, content] of Object.entries(project.files)) zip.addFile(name, Buffer.from(content, 'utf8'))
+    zip.writeZip(selected.filePath)
+    return { path: selected.filePath }
+  }))
   rpcHandle('navora:models.probe', async (_e, providerId: string, model: string, kind: string) => {
     const provider = config.get().ai.providers.find(p => p.id === providerId)
     if (!provider || (kind !== 'connection' && kind !== 'reply')) return { ok: false, text: '配置无效' }
@@ -1791,6 +1820,7 @@ if (!gotLock) {
     skills = new SkillStore(dataRoot)
     skills.onChanged(() => pushSkillsChanged())
     plugins = new PluginStore(dataRoot)
+    creators = new CreatorService(dataRoot, {plugins, skills, chats, secrets, getConfig: () => config.get()})
     pluginDevWatch = new PluginDevWatcher(plugins, () => resolvePluginDevMode(config.get()))
     plugins.onChanged(() => {
       pushPluginsChanged()

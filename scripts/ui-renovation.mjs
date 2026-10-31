@@ -9,11 +9,12 @@ import { spawn } from 'node:child_process'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(import.meta.url)
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'navora-ui-renovation-'))
-const entry = path.join(root, 'dist-electron', 'ui-renovation.mjs')
-const output = path.resolve(process.env.NAVORA_UI_OUTPUT || path.join(root, 'release', 'ui-renovation'))
+const suite = process.env.NAVORA_UI_SUITE === 'creators' ? 'ui-creators' : 'ui-renovation'
+const entry = path.join(root, 'dist-electron', suite+'.mjs')
+const output = path.resolve(process.env.NAVORA_UI_OUTPUT || path.join(root, 'release', suite))
 try {
   fs.mkdirSync(output, {recursive:true})
-  await build({entryPoints:[path.join(root,'scripts/ui-renovation-entry.ts')],outfile:entry,
+  await build({entryPoints:[path.join(root,`scripts/${suite}-entry.ts`)],outfile:entry,
     bundle:true,platform:'node',target:'node20',format:'esm',external:['electron'],
     banner:{js:"import {createRequire as __createRequire} from 'node:module'; const require=__createRequire(import.meta.url);"},
     plugins:[{
@@ -32,7 +33,7 @@ try {
       },
     }],
   })
-  for(const reduced of [false,true]) {
+  for(const reduced of process.env.NAVORA_LIVE_CREATOR === '1' ? [false] : [false,true]) {
     const images = reduced ? path.join(output,'reduced-motion') : output
     fs.mkdirSync(images,{recursive:true})
     fs.rmSync(path.join(images,'completed.json'),{force:true})
@@ -43,7 +44,7 @@ try {
     delete env.VITE_DEV_SERVER_URL
     const status = await new Promise((resolve,reject) => {
       const child = spawn(require('electron'),[entry],{cwd:root,env,stdio:'inherit',windowsHide:true})
-      const timer = setTimeout(() => {child.kill();reject(new Error('UI smoke exceeded its deadline'))},60000)
+      const timer = setTimeout(() => {child.kill();reject(new Error('UI smoke exceeded its deadline'))},process.env.NAVORA_LIVE_CREATOR === '1' ? 120000 : 60000)
       child.on('error',(error) => {clearTimeout(timer);reject(error)})
       child.on('exit',(code) => {clearTimeout(timer);resolve(code ?? 1)})
     })

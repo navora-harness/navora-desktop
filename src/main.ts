@@ -11,6 +11,7 @@ import { library } from '@fortawesome/fontawesome-svg-core'
 import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
 import {
   faPlus,
+  faWandMagicSparkles,
   faTrash,
   faGear,
   faPaperPlane,
@@ -72,6 +73,7 @@ import { router } from './router'
 
 library.add(
   faPlus,
+  faWandMagicSparkles,
   faTrash,
   faGear,
   faPaperPlane,

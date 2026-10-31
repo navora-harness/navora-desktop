@@ -228,6 +228,12 @@ app.on('browser-window-created', (_,win) => {
         await capture('model-width-'+width)
         await click('.settings-close')
       }
+      await click('.mobile-topbar-btn[aria-label="打开菜单"]')
+      await click('[data-panel="workspace"]')
+      await click('.tree-row[title="preview.md"]')
+      assert.equal(await js(`(()=>{const preview=document.querySelector('.file-preview').getBoundingClientRect(),caption=document.querySelector('.mobile-topbar').getBoundingClientRect();return preview.top>=caption.bottom-1})()`),true,'Narrow preview stays below the caption and chat header')
+      await capture('file-preview-narrow')
+      await click('[aria-label="关闭文件预览"]')
       assert.deepEqual(errors,[],'No renderer errors')
       fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reduced,frameMetrics,modelRequests,checks:['provider-drafts','reopen-draft','tier-rename','preview-race','separate-probes','permission-search','visible-empty-states','workspace-keyboard','file-preview','file-preview-source-safety','file-preview-width','compact-chat-rows','dock-three-panels','dock-state-retention','dock-splitting','dock-keyboard','dock-persistence','long-conversation-jump','zoom-layout','interrupted-motion','single-mobile-header']},null,2))
       console.log(JSON.stringify({ok:true,reduced,frameMetrics,modelRequests}))

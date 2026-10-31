@@ -530,3 +530,39 @@
 .navora-app .sidebar .dock-panel-actions .docked-head .icon-btn svg { width:11px; height:11px; }
 .navora-app .sidebar .dock-pane .batch-list-footer { flex-shrink:0; padding:6px; }
 .navora-app .sidebar .dock-pane .res-body { flex:1; }
+
+.navora-app .main:has(> .creator-workspace) { grid-template-rows:minmax(0,1fr); }
+.navora-app .shell.frameless .main > .creator-workspace { margin-top:0; height:100%; }
+.navora-app .shell.mobile-layout .main > .creator-workspace { margin-top:0; height:100%; }
+.navora-app .creator-launch-menu { min-width:220px; }
+.navora-app .creator-menu-trigger { width:28px; height:28px; justify-content:center; padding:5px; border:1px solid transparent; border-radius:7px; }
+
+#creator-sidebar-nav { display:flex; flex:1; min-height:0; }
+.navora-app .sidebar .creator-library { flex:1; min-width:0; background:transparent; border:0; padding:8px 0; }
+.navora-app .sidebar .creator-new { flex-wrap:nowrap; }
+.navora-app .sidebar .creator-new button { width:auto; }
+
+/* Scene headers own their native caption area, including during entry motion. */
+.navora-app .shell.frameless:not(.mobile-layout) .creator-header { position:relative; z-index:5; padding-right:154px; -webkit-app-region:drag; }
+.navora-app .creator-header :is(button,input,select) { -webkit-app-region:no-drag; }
+.navora-app .shell.platform-mac:not(.mobile-layout) .creator-header { padding-right:24px; }
+.navora-app .shell.frameless.mobile-layout .main > .creator-workspace { padding-top:40px; }
+/* Skip offscreen row layout and allocate compositor layers only during swipes. */
+.navora-app .sidebar .chat-item { content-visibility:auto; contain-intrinsic-block-size:auto 34px; }
+.navora-app .sidebar .chat-item-track { will-change:auto; }
+.navora-app .sidebar :is(.chat-item.swiping,.chat-item.swipe-open) .chat-item-track { will-change:transform; }
+
+.navora-app .shell.mobile-layout .mobile-topbar { height:calc(48px + env(safe-area-inset-top,0px)); min-height:calc(48px + env(safe-area-inset-top,0px)); padding:calc(7px + env(safe-area-inset-top,0px)) 10px 7px; }
+.navora-app .shell.mobile-layout .mobile-topbar-btn { width:32px; height:32px; }
+.navora-app .shell.mobile-layout .file-preview { top:calc(48px + env(safe-area-inset-top,0px)); }
+.navora-app .shell.frameless.mobile-layout .file-preview { top:calc(88px + env(safe-area-inset-top,0px)); }
+
+.plugin-development-settings { border:1px solid #e6eaf0; border-radius:8px; margin-bottom:12px; padding:0 12px; background:#fafbfc; }
+.plugin-development-settings summary { display:flex; align-items:center; gap:8px; min-height:38px; color:#738197; font-size:11px; list-style:none; cursor:pointer; }
+.plugin-development-settings summary::-webkit-details-marker { display:none; }
+.plugin-development-settings summary svg { width:12px; height:12px; }
+.plugin-development-settings summary svg:last-child { margin-left:auto; width:9px; transition:transform 160ms ease; }
+.plugin-development-settings[open] summary svg:last-child { transform:rotate(180deg); }
+.plugin-development-settings .switch-row { border-top:1px solid #e8edf3; padding-block:10px; }
+.navora-app .settings-page .plugin-import-trigger svg { width:10px; height:10px; }
+@media(prefers-reduced-motion:reduce) { .plugin-development-settings summary svg:last-child { transition:none; } }
