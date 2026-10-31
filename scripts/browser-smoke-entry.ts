@@ -61,6 +61,11 @@ try {
     </script>`
   fixtureServer = http.createServer((request, response) => {
     response.setHeader('Content-Type','text/html; charset=utf-8')
+    if (request.url === '/loading') {
+      response.write('<title>Loading fixture</title><p>Partial document')
+      setTimeout(() => response.end('</p>'), 500)
+      return
+    }
     response.end(request.url === '/next' ? '<title>Next</title><button>Next document</button>' : request.url === '/benchmark'
       ? '<title>Index benchmark</title><main>' + Array.from({length:250},(_, i) => `<article><h2>商品 ${i}</h2><p>商品 ${i} 的参数和说明</p><a href="https://example.com/products/${i}">商品 ${i} 详情</a><button>选择商品 ${i}</button></article>`).join('') + '</main>'
       : html)
@@ -68,6 +73,24 @@ try {
   await new Promise<void>((resolve) => fixtureServer!.listen(0,'127.0.0.1',resolve))
   const address = fixtureServer.address() as {port:number}
   const fixtureUrl = `http://127.0.0.1:${address.port}`
+  const permissionCheck = context.gate.check
+  const checked: string[] = []
+  context.gate.check = async (_chatId, capability) => { checked.push(capability); return { ok: capability !== 'browser.geolocation', reason: 'fixture_denied' } }
+  const deniedWeather = await call('weather_get')
+  assert.equal(deniedWeather.error, 'fixture_denied')
+  assert.deepEqual(checked, ['session.fetch', 'browser.geolocation'], 'Local weather retains BOTH network and location permissions')
+  context.gate.check = permissionCheck
+  const loading = win.loadURL(fixtureUrl + '/loading')
+  await new Promise(resolve => setTimeout(resolve, 30))
+  const listeners = win.webContents.listenerCount('did-fail-load')
+  const startedWaiting = Date.now()
+  setTimeout(() => win.webContents.emit('did-fail-load', {}, -3, '', fixtureUrl + '/loading', true), 10)
+  const partial = await call('browser_wait', { waitUntil: 'load', timeoutMs: 80 })
+  assert.equal(partial.ok, true, 'Cancelled intermediate navigation is not a load failure')
+  assert.equal(partial.partial, true)
+  assert.ok(Date.now() - startedWaiting < 250, 'One deadline bounds the wait')
+  assert.equal(win.webContents.listenerCount('did-fail-load'), listeners, 'Timed-out waits detach their listeners')
+  await loading
   await win.loadURL(fixtureUrl)
   const capabilities = await call('browser_get',{what:'capabilities'})
   assert.equal(capabilities.value.queryDeep,true)
@@ -183,7 +206,7 @@ try {
   assert.equal(win.webContents.getTitle(),'Native document')
   assert.equal(win.webContents.debugger.isAttached(),false)
   console.log(JSON.stringify({ok:true,electron:process.versions.electron,capabilities:capabilities.value,
-    checks:['snapshot','cache','trusted-click','typed-input','open-shadow','closed-shadow-query','cross-origin-frame-query-click','no-arbitrary-frame-click','native-file-input-navigation','native-dialog','native-document-response','semantic-stale-ref','navigation-stale-ref','plugin-load-execute','plugin-permissions','no-debugger'],
+    checks:['weather-permissions','cancelled-navigation-soft-wait','wait-deadline-listener-cleanup','snapshot','cache','trusted-click','typed-input','open-shadow','closed-shadow-query','cross-origin-frame-query-click','no-arbitrary-frame-click','native-file-input-navigation','native-dialog','native-document-response','semantic-stale-ref','navigation-stale-ref','plugin-load-execute','plugin-permissions','no-debugger'],
     captureMs:snapshot.captureMs,permissionChecks,benchmark}))
 } catch(error) {
   console.error(error)

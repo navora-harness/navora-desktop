@@ -13,7 +13,7 @@ const entry = path.join(root, 'dist-electron', 'ui-smoke.mjs')
 const output = path.resolve(process.env.NAVORA_UI_OUTPUT || path.join(root, 'release', 'ui-smoke'))
 try {
   fs.mkdirSync(output, {recursive:true})
-  const live = process.env.NAVORA_LIVE_MODEL === '1'
+  const live = process.env.NAVORA_LIVE_MODEL === '1' || process.env.NAVORA_LIVE_WEATHER === '1'
   if(live) {
     if(!process.env.NAVORA_LIVE_KEY_FILE) throw new Error('Live tests require NAVORA_LIVE_KEY_FILE')
   }
@@ -39,6 +39,7 @@ try {
   for(const reduced of live ? [false] : [false,true]) {
     const images = reduced ? path.join(output,'reduced-motion') : output
     fs.mkdirSync(images,{recursive:true})
+    fs.rmSync(path.join(images,'completed.json'),{force:true})
     const profile = path.join(temporary,reduced ? 'reduced-motion' : 'normal')
     fs.mkdirSync(profile,{recursive:true})
     if(live) {
@@ -57,6 +58,7 @@ try {
     })
     process.exitCode = Number(status)
     if(process.exitCode !== 0) break
+    if(!fs.existsSync(path.join(images,'completed.json'))) throw new Error('UI process exited before completing checks: '+images)
   }
   console.log(`UI screenshots: ${output}`)
 } finally {

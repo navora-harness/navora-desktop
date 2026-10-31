@@ -48,6 +48,7 @@ import {
 import { clickInIframe, clickInIframeWhenReady } from './iframe-click'
 import { loadDocumentWithResponse } from './load-document-response'
 import { resolveGeolocation } from './geolocation'
+import { readWeather } from './weather'
 import { latestPackageVersion } from '../../shared/store'
 import { resolvePluginDevMode } from '../../shared/config'
 import { runPluginDevCli, type PluginDevCliAction } from './plugin-dev-cli'
@@ -595,6 +596,7 @@ async function waitForMainFrameLoad(
   if (!wc.isLoadingMainFrame()) {
     return { ready: true, timedOut: false, loadingMainFrame: false, wasLoading: false }
   }
+  let detach = () => {}
   try {
     await withTimeout(
       new Promise<void>((resolve, reject) => {
@@ -608,28 +610,35 @@ async function waitForMainFrameLoad(
         const onStop = () => settle()
         const onFail = (
           _e: Electron.Event,
-          _errCode: number,
+          errorCode: number,
           errDesc: string,
           _validatedURL: string,
           isMainFrame: boolean,
         ) => {
           if (!isMainFrame) return
+          // Redirects, superseded loads and client-side challenges can cancel an
+          // intermediate navigation. Keep observing the replacement main frame.
+          if (errorCode === -3) return
           cleanup()
-          reject(new Error(`load_failed:${errDesc}`))
+          reject(new Error(`load_failed:${errDesc || `net_error_${errorCode}`}`))
         }
         const onAbort = () => {
           cleanup()
           reject(new Error('aborted'))
         }
+        const onDestroyed = () => { cleanup(); reject(new Error('window_destroyed')) }
         const cleanup = () => {
           wc.removeListener('did-finish-load', onFinish)
           wc.removeListener('did-stop-loading', onStop)
           wc.removeListener('did-fail-load', onFail)
+          wc.removeListener('destroyed', onDestroyed)
           signal.removeEventListener('abort', onAbort)
         }
+        detach = cleanup
         wc.on('did-finish-load', onFinish)
         wc.on('did-stop-loading', onStop)
         wc.on('did-fail-load', onFail)
+        wc.on('destroyed', onDestroyed)
         signal.addEventListener('abort', onAbort, { once: true })
         // Race: loading may finish between isLoadingMainFrame check and listener attach
         settle()
@@ -653,6 +662,8 @@ async function waitForMainFrameLoad(
       }
     }
     throw e
+  } finally {
+    detach()
   }
 }
 
@@ -779,6 +790,7 @@ async function applyPageWait(
     }
   }
 
+  const deadline = Date.now() + Math.max(1, opts.timeoutMs)
   let result: SoftWaitResult
   if (opts.waitUntil === 'text_stable') {
     // Cap text_stable — dynamic pages (ads/search) often never fully settle.
@@ -792,7 +804,7 @@ async function applyPageWait(
     result = await waitForMainFrameLoad(wc, opts.timeoutMs, opts.signal)
     if (result.ready && cfg.browser.wait.network_idle && result.wasLoading) {
       const idleMs = cfg.browser.wait.network_idle_ms || 500
-      const remain = Math.min(opts.timeoutMs, Math.max(idleMs * 4, idleMs + 800))
+      const remain = Math.max(1, deadline - Date.now())
       const quiet = await waitForLoadingQuiet(wc, idleMs, remain, opts.signal, {
         requireIdlePeriod: true,
       })
@@ -801,7 +813,7 @@ async function applyPageWait(
   }
 
   if (result.ready && cfg.browser.wait.delay_ms > 0) {
-    await sleep(cfg.browser.wait.delay_ms, opts.signal)
+    await sleep(Math.min(cfg.browser.wait.delay_ms, Math.max(0, deadline - Date.now())), opts.signal)
   }
   return result
 }
@@ -1263,6 +1275,18 @@ export async function executeAgentTool(
           hour12: false,
         }),
       }
+    }
+
+    case 'weather_get': {
+      const location = String(rawArgs.location || '').trim()
+      const days = Number(rawArgs.days) || 1
+      if (location) return readWeather({ location, days, latitude: NaN, longitude: NaN, signal: ctx.signal })
+      const gate = await ctx.gate.check(ctx.chatId, 'browser.geolocation', '查询本地天气的位置', ctx.signal)
+      if (!gate.ok) return { ok: false, error: gate.reason || 'permission_denied', hint: '可以请用户提供城市，勿绕过定位权限。' }
+      const geo = await resolveGeolocation({ timeoutMs: 7000, signal: ctx.signal })
+      if (!geo.ok) return { ...geo, hint: '未能获取位置，请用户提供城市后再查询。' }
+      const weather = await readWeather({ latitude: geo.latitude, longitude: geo.longitude, placeName: [geo.region, geo.city].filter(Boolean).join(' '), days, signal: ctx.signal })
+      return { ...weather, locationSource: geo.source, locationSummary: geo.summary }
     }
 
     case 'geolocation_get': {
@@ -2869,7 +2893,7 @@ export async function executeAgentTool(
           partial: wc.isLoadingMainFrame(),
         }
       }
-      const waitBudget = Math.min(getMs, Number(rawArgs.waitTimeoutMs) || 8000)
+      const waitBudget = Math.min(getMs, Number(rawArgs.waitTimeoutMs) || 1500)
       const defaultUntil: WaitUntilMode =
         cfg.browser.wait.load || cfg.browser.wait.network_idle
           ? 'load'

@@ -1,6 +1,7 @@
 <template>
   <div
     class="shell"
+    :style="sidebarStyle"
     :class="{
       'mobile-layout': isMobileLayout,
       'remote-web': isWebRemote(),
@@ -16,6 +17,9 @@
       @click="closeMobileSidebar"
     />
     <aside class="sidebar">
+      <div class="sidebar-content-stack">
+      <Transition name="sidebar-flip">
+      <div v-show="!settingsOpen || isMobileLayout" class="sidebar-chat-face">
       <div class="brand" :class="{ 'app-drag': showDesktopChrome }">
         <div class="brand-top">
           <div class="brand-identity">
@@ -32,7 +36,7 @@
           </button>
         </div>
       </div>
-      <div class="chat-toolbar">
+      <div v-show="sidebarVisible.chats" class="chat-toolbar">
         <Transition name="toolbar-swap" mode="out-in">
           <div v-if="!chatBatchMode" key="normal" class="chat-toolbar-row">
             <v-btn
@@ -80,7 +84,7 @@
           </div>
         </Transition>
       </div>
-      <div class="chat-list" :class="{ 'batch-mode': chatBatchMode }">
+      <div v-show="sidebarVisible.chats" class="chat-list" :class="{ 'batch-mode': chatBatchMode }">
         <template v-for="sec in chatListSections" :key="sec.key">
           <div class="chat-date-label">{{ sec.label }}</div>
           <template v-for="c in sec.items" :key="c.id">
@@ -414,7 +418,12 @@
 
       <Transition name="res-slide" mode="out-in">
         <div v-if="!chatBatchMode" key="resources" class="sidebar-dock">
-          <WorkspaceFilesPanel :chat-id="activeId || ''" @notify="onPanelNotify" />
+          <div v-if="sidebarVisible.chats && sidebarVisible.workspace" class="sidebar-divider horizontal" role="separator" aria-label="调整对话列表高度" aria-orientation="horizontal" tabindex="0" @pointerdown="beginSidebarResize($event, 'chats')" @keydown="sidebarResizeKey($event, 'chats')" />
+          <div v-show="sidebarVisible.workspace" class="sidebar-workspace-pane">
+            <WorkspaceFilesPanel :chat-id="activeId || ''" @notify="onPanelNotify" />
+          </div>
+          <div v-if="sidebarVisible.workspace && sidebarVisible.browser" class="sidebar-divider horizontal" role="separator" aria-label="调整工作区和浏览器资源高度" aria-orientation="horizontal" tabindex="0" @pointerdown="beginSidebarResize($event, 'resources')" @keydown="sidebarResizeKey($event, 'resources')" />
+          <div v-show="sidebarVisible.browser" class="sidebar-browser-pane">
           <BrowserResourcesPanel
             ref="browserResources"
             :chat-id="activeId || ''"
@@ -427,6 +436,7 @@
             @remote-view="openRemoteWindow"
             @notify="onPanelNotify"
           />
+          </div>
         </div>
         <div v-else key="batch-actions" class="batch-list-footer">
           <v-btn
@@ -454,7 +464,23 @@
         </div>
       </Transition>
 
-      <div class="sidebar-foot">
+      </div>
+      </Transition>
+      <Transition name="sidebar-flip">
+        <div v-show="settingsOpen && !isMobileLayout" class="sidebar-settings-face">
+          <button type="button" class="settings-return" @click="settingsOpen = false"><font-awesome-icon icon="arrow-left" /> 返回对话</button>
+          <div class="settings-sidebar-heading">设置</div>
+          <div id="settings-sidebar-nav" />
+        </div>
+      </Transition>
+      </div>
+      <nav class="activity-rail" aria-label="侧栏导航">
+        <div class="activity-rail-sections">
+          <button type="button" class="sidebar-icon-btn" :class="{ selected: sidebarVisible.chats }" title="显示/隐藏对话列表" aria-label="显示/隐藏对话列表" :aria-pressed="sidebarVisible.chats" @click="toggleSidebarPanel('chats')"><font-awesome-icon icon="comments" /></button>
+          <button type="button" class="sidebar-icon-btn" :class="{ selected: sidebarVisible.workspace }" title="显示/隐藏工作区" aria-label="显示/隐藏工作区" :aria-pressed="sidebarVisible.workspace" @click="toggleSidebarPanel('workspace')"><font-awesome-icon icon="folder-open" /></button>
+          <button type="button" class="sidebar-icon-btn" :class="{ selected: sidebarVisible.browser }" title="显示/隐藏浏览器资源" aria-label="显示/隐藏浏览器资源" :aria-pressed="sidebarVisible.browser" @click="toggleSidebarPanel('browser')"><font-awesome-icon icon="window-maximize" /></button>
+        </div>
+        <div class="sidebar-foot">
         <div class="sidebar-foot-actions">
           <v-menu
             v-model="sidebarMoreOpen"
@@ -520,6 +546,7 @@
             <button
               type="button"
               class="sidebar-icon-btn sidebar-settings-btn"
+              :class="{ selected: settingsOpen }"
               title="设置"
               @click="settingsOpen = true"
             >
@@ -528,6 +555,8 @@
           </div>
         </div>
       </div>
+      </nav>
+      <div v-if="!isMobileLayout" class="sidebar-divider vertical" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarLayout.width" aria-valuemin="250" aria-valuemax="560" tabindex="0" @pointerdown="beginSidebarResize($event, 'width')" @keydown="sidebarResizeKey($event, 'width')" />
     </aside>
 
     <main class="main">
@@ -596,7 +625,8 @@
           </button>
         </div>
       </header>
-      <template v-if="active">
+      <SettingsPage v-if="settingsOpen" class="settings-workspace" embedded :mobile="isMobileLayout" :navigation-target="isMobileLayout ? undefined : '#settings-sidebar-nav'" @close="settingsOpen = false" />
+      <template v-else-if="active">
         <header
           v-if="!isMobileLayout || agentRunning"
           class="main-top"
@@ -633,7 +663,7 @@
           </div>
           <div v-if="agentRunning" class="agent-live">
             <StatusIcon kind="running" />
-            <span class="agent-live-text">{{ phaseLabel }}</span>
+            <span class="agent-live-text">运行中</span>
             <span class="agent-elapsed">{{ elapsedLabel }}</span>
             <button type="button" class="quick-stop-btn" title="停止任务（Esc）" aria-label="停止任务" @click="stopAgent"><StatusIcon kind="stopped" />停止</button>
           </div>
@@ -681,16 +711,7 @@
                         @click="toggleRun(block.key)"
                       >
                         <span class="run-status">
-                          <StatusIcon v-if="runGroupLive(block.items)" kind="running" />
-                          <font-awesome-icon
-                            v-else-if="runGroupHasError(block.items)"
-                            icon="xmark"
-                          />
-                          <font-awesome-icon
-                            v-else-if="runGroupWasAborted(block.items)"
-                            icon="stop"
-                          />
-                          <font-awesome-icon v-else icon="check" />
+                          <StatusIcon :kind="runGroupLive(block.items) ? 'running' : runGroupHasError(block.items) ? 'error' : runGroupWasAborted(block.items) ? 'stopped' : 'success'" />
                         </span>
                         <span class="run-card-text">{{ runGroupSummary(block.items) }}</span>
                         <span class="run-card-chevron">
@@ -1053,7 +1074,7 @@
                         @click="toggleReadPagesPanel(block.message.id, messageSources(block.message))"
                       >
                         <span class="read-pages-text"
-                          >已阅读 {{ messageSources(block.message).length }} 个网页</span
+                          >{{ messageSources(block.message).length }} 个来源</span
                         >
                         <span class="read-pages-icons" aria-hidden="true">
                           <img
@@ -1119,9 +1140,7 @@
               class="thinking-row"
               aria-live="polite"
             >
-              <div class="thinking-avatar" aria-hidden="true">
-                <img src="/app-icon.png" alt="" />
-              </div>
+              <StatusIcon kind="running" class="thinking-activity" />
               <div class="thinking-bubble">
                 <div class="thinking-label">{{ phaseLabel }}</div>
                 <div
@@ -1174,9 +1193,7 @@
                     {{ liveReasoningText }}
                   </div>
                 </div>
-                <div v-else class="thinking-dots" aria-hidden="true">
-                  <span /><span /><span />
-                </div>
+
               </div>
             </div>
 
@@ -1553,10 +1570,10 @@
       content-class="read-pages-dialog-host"
       @update:model-value="onReadPagesDialog"
     >
-      <div class="read-pages-dialog" aria-label="已阅读网页">
+      <div class="read-pages-dialog" aria-label="引用来源">
         <header class="read-pages-dialog-head">
           <div>
-            <h2>已阅读网页</h2>
+            <h2>引用来源</h2>
             <p>{{ readPagesPanelList.length }} 个来源</p>
           </div>
           <button type="button" class="read-pages-dialog-close" title="关闭" @click="closeReadPagesPanel">
@@ -1812,7 +1829,6 @@
       </div>
     </Teleport>
 
-    <SettingsDialog v-model="settingsOpen" />
     <DocsDialog v-model="docsOpen" />
     <SkillReviewHost />
 
@@ -1854,7 +1870,8 @@ import {
 } from '@shared/followups'
 import { normalizeProvider, resolveModelName, resolveProvider } from '@shared/model-providers'
 import ChatMarkdown from '@/components/ChatMarkdown.vue'
-import SettingsDialog from '@/components/SettingsDialog.vue'
+import SettingsPage from './SettingsPage.vue'
+import { useSidebarLayout } from '@/composables/useSidebarLayout'
 import DocsDialog from '@/components/DocsDialog.vue'
 import SkillReviewHost from '@/components/skills/SkillReviewHost.vue'
 import CatalogItemCard from '@/components/store/CatalogItemCard.vue'
@@ -2254,6 +2271,11 @@ const quitting = ref(false)
 const exportingChat = ref(false)
 const sidebarMoreOpen = ref(false)
 const settingsOpen = ref(false)
+const { layout: sidebarLayout, visible: sidebarVisible, style: sidebarStyle, toggle: toggleSidebarVisibility, beginResize: beginSidebarResize, resizeKey: sidebarResizeKey } = useSidebarLayout()
+function toggleSidebarPanel(panel: 'chats' | 'workspace' | 'browser') {
+  if (settingsOpen.value) { settingsOpen.value = false; return }
+  toggleSidebarVisibility(panel)
+}
 const docsOpen = ref(false)
 const mobileSidebarOpen = ref(false)
 const chatSearchOpen = ref(false)
@@ -2443,6 +2465,7 @@ let unsubAskCancel: (() => void) | undefined
 let dragDepth = 0
 let tickTimer: ReturnType<typeof setInterval> | undefined
 let resizeObserver: ResizeObserver | undefined
+let stopMessageResizeWatch: (() => void) | undefined
 let onWinResize: (() => void) | undefined
 
 const suggestions = [
@@ -3203,6 +3226,7 @@ function friendlyToolName(name: string) {
     agent_await_subchats: '等待子对话',
     agent_subchat_status: '子对话状态',
     datetime_now: '获取时间',
+    weather_get: '查询天气',
     geolocation_get: '获取位置',
     browser_open: '打开浏览',
     browser_session_create: '创建 Session',
@@ -4361,19 +4385,29 @@ async function refreshList() {
   }
 }
 
+let chatSelection = 0
+let chatTransition: Animation | undefined
 async function selectChat(id: string) {
   if (!window.navora) return
+  const selection = ++chatSelection
+  settingsOpen.value = false
   const prev = activeId.value
   if (prev && prev !== id) {
     await flushDraftSave(prev)
   }
+  if (selection !== chatSelection) return
   if (prev && prev !== id) revokeMediaUrlsForChat(prev)
   toolMediaSrc.value = {}
   expandedRuns.value = {}
   closeLightbox()
   closeReadPagesPanel()
   activeId.value = id
-  active.value = await window.navora.chats.get(id)
+  const [nextChat, nextTree, running] = await Promise.all([
+    window.navora.chats.get(id), window.navora.browser.tree(id), window.navora.agent.isRunning(id),
+  ])
+  if (selection !== chatSelection) return
+  active.value = nextChat
+  tree.value = nextTree
   if (
     active.value?.pendingAsk &&
     active.value.pendingAsk.timeoutMs <= 0 &&
@@ -4381,8 +4415,6 @@ async function selectChat(id: string) {
   ) {
     rememberPendingAsk(active.value.pendingAsk)
   }
-  tree.value = await window.navora.browser.tree(id)
-  const running = await window.navora.agent.isRunning(id)
   setRunning(id, running)
   // Restore retry affordance from persisted agent_error / agent_stop logs.
   if (!running) {
@@ -4417,6 +4449,11 @@ async function selectChat(id: string) {
   showJumpBottom.value = false
   followupSuggestions.value = followupsByChat.value[id] || []
   await scrollMessages(true)
+  if (selection !== chatSelection) return
+  chatTransition?.cancel()
+  if (prev !== id && msgBox.value && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    chatTransition = msgBox.value.animate([{ opacity: .35, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' })
+  }
   focusComposer()
   closeMobileSidebar()
 }
@@ -5486,14 +5523,16 @@ onMounted(async () => {
     if (stickToBottom.value) void scrollMessages(true)
     remeasureAllLogOverflow()
   }
+  stopMessageResizeWatch = watch(msgBox, (element) => {
+    resizeObserver?.disconnect()
+    if (element && typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(layoutTick)
+      resizeObserver.observe(element)
+      layoutTick()
+    }
+  }, { flush: 'post', immediate: true })
   onWinResize = () => layoutTick()
   window.addEventListener('resize', onWinResize)
-  void nextTick(() => {
-    if (msgBox.value && typeof ResizeObserver !== 'undefined') {
-      resizeObserver = new ResizeObserver(() => layoutTick())
-      resizeObserver.observe(msgBox.value)
-    }
-  })
 
   await loadUiPrefs()
   await refreshSettingsPermissions()
@@ -5521,6 +5560,8 @@ onActivated(() => {
 })
 
 onUnmounted(() => {
+  chatSelection++
+  chatTransition?.cancel()
   window.removeEventListener('keydown', onAppShortcut)
   void flushDraftSave(activeId.value)
   clearTimeout(draftSaveTimer)
@@ -5535,6 +5576,7 @@ onUnmounted(() => {
   if (tickTimer) clearInterval(tickTimer)
   if (onWinResize) window.removeEventListener('resize', onWinResize)
   resizeObserver?.disconnect()
+  stopMessageResizeWatch?.()
   for (const ro of logResizeObservers.values()) ro.disconnect()
   logResizeObservers.clear()
   logMeasureEls.clear()

@@ -22,10 +22,10 @@ function surfaceTransition(name: string, menu: boolean) {
         if (props.disabled || matchMedia('(prefers-reduced-motion: reduce)').matches) { done(); return }
         // Composite only; resizing, blur, live shadows and source-button clones
         // force large repaints and make borderless activators disappear on return.
-        const full = { opacity: 1, transform: 'translateY(0px)' }
-        const small = { opacity: 0, transform: `translateY(${menu ? '-4' : '8'}px)` }
+        const full = { opacity: 1, transform: 'translateY(0px) scale(1)' }
+        const small = { opacity: 0, transform: `translateY(${menu ? '-5' : '10'}px) scale(${menu ? '.97' : '.985'})` }
         const animation = el.animate(opening ? [small, full] : [full, small], {
-          duration: opening ? (menu ? 140 : 180) : 100,
+          duration: opening ? (menu ? 210 : 240) : 130,
           easing: 'cubic-bezier(.2,.8,.2,1)',
         })
         running.set(el, animation)
