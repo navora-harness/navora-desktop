@@ -1,10 +1,12 @@
 import type {BrowserTreeSession,ChatMessage} from './types'
 import {parseSourcesFromMarkdown,type AnswerSource} from './answer-sources'
+import {progressMessageIds} from './message-presentation'
 
 export function conversationSources(messages:ChatMessage[]):AnswerSource[]{
   const sources=new Map<string,AnswerSource>()
+  const progress=progressMessageIds(messages)
   for(const message of [...messages].reverse()){
-    if(message.role!=='assistant')continue
+    if(message.role!=='assistant'||progress.has(message.id))continue
     const items=Array.isArray(message.meta?.sources)?message.meta.sources:parseSourcesFromMarkdown(message.content)
     for(const item of items){
       if(!item||typeof item!=='object'||typeof item.url!=='string')continue

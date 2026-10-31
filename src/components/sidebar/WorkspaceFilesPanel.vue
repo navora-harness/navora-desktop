@@ -233,7 +233,7 @@ function selectEntry(ent: WsEntry) {
 
 function openFile(ent: WsEntry) {
   selectedPath.value = ent.path
-  void openPath(ent.path, 'open')
+  emit('preview', ent)
 }
 
 function onEntryMenu(e: MouseEvent, ent: WsEntry) {
@@ -268,7 +268,7 @@ function openEntry() {
   if (!ent) return
   selectedPath.value = ent.path
   if (ent.type === 'dir') toggleDir(ent)
-  else void openPath(ent.path, 'open')
+  else emit('preview', ent)
 }
 
 function revealEntry() {

@@ -22,6 +22,7 @@
   </div>
 </template>
 <script setup lang="ts">
+import {finalOutputs} from '@shared/message-presentation'
 import {computed,onBeforeUnmount,onMounted,ref,watch} from 'vue'
 import type {BrowserTreeSession,ChatMessage} from '@shared/types'
 import {conversationSources} from '@shared/conversation-resources'
@@ -32,7 +33,7 @@ const emit=defineEmits<{view:[tab:ResourceTab];preview:[path:string];notify:[tex
 const entries=ref<WsEntry[]>([]),loading=ref(false),error=ref(false),allSources=ref(false)
 const sources=computed(()=>conversationSources(props.messages))
 const shownSources=computed(()=>allSources.value?sources.value:sources.value.slice(0,3))
-const outputCount=computed(()=>props.messages.filter(message=>message.role==='assistant'&&message.content.trim()).length)
+const outputCount=computed(()=>finalOutputs(props.messages).length)
 const windows=computed(()=>props.tree.flatMap(session=>session.windows))
 let generation=0,timer:ReturnType<typeof setTimeout>|undefined,unsubscribe:(()=>void)|undefined
 async function load(){

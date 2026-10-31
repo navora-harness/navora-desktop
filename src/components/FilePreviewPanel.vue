@@ -2,11 +2,13 @@
   <aside class="file-preview" :class="{embedded}" aria-label="文件预览" :style="{ '--preview-width': `${width}px` }">
     <div v-if="!embedded" class="preview-resizer" role="separator" aria-label="调整文件预览宽度" aria-orientation="vertical" :aria-valuenow="width" aria-valuemin="280" aria-valuemax="maximum" tabindex="0" @pointerdown="beginResize" @keydown="resizeKey" />
     <header class="preview-head">
-      <font-awesome-icon icon="file" />
-      <div class="preview-name" :title="path">{{ name }}</div>
+      <font-awesome-icon v-if="!tabbed" icon="file" />
+      <div v-if="!tabbed" class="preview-name" :title="path">{{ name }}</div>
+      <span v-if="tabbed" class="preview-name">{{ data?.kind==='image'?'图片':data?.kind==='markdown'?'Markdown':data?.kind==='text'?'文本':'文件' }}</span>
+      <select v-if="data?.kind==='image'" v-model="imageZoom" class="preview-zoom" aria-label="图片缩放"><option value="fit">适应窗口</option><option value="50">50%</option><option value="100">100%</option><option value="150">150%</option><option value="200">200%</option></select>
       <button type="button" title="刷新预览" aria-label="刷新预览" :disabled="loading" @click="load"><font-awesome-icon icon="arrow-rotate-right" /></button>
       <button type="button" title="在系统中打开" aria-label="在系统中打开" @click="systemOpen"><font-awesome-icon icon="arrow-up-right-from-square" /></button>
-      <button ref="closeButton" type="button" title="关闭预览" aria-label="关闭文件预览" @click="emit('close')"><font-awesome-icon icon="xmark" /></button>
+      <button v-if="!tabbed" ref="closeButton" type="button" title="关闭预览" aria-label="关闭文件预览" @click="emit('close')"><font-awesome-icon icon="xmark" /></button>
     </header>
     <div v-if="data?.ok" class="preview-tools">
       <span>{{ formatSize(data.size || 0) }}</span>
@@ -19,7 +21,7 @@
       <div v-if="loading" class="preview-empty" role="status">正在读取…</div>
       <div v-else-if="error" class="preview-empty" role="alert"><span>{{ error }}</span><button type="button" @click="load">重试</button></div>
       <template v-else-if="data">
-        <div v-if="data.kind === 'image'" class="preview-image"><img :src="`data:${data.mime};base64,${data.base64}`" :alt="name" @error="error = '无法显示此图片'" /></div>
+        <div v-if="data.kind === 'image'" class="preview-image" :class="imageZoom==='fit'?'fit':'zoomed'"><img :style="imageZoom==='fit'?{}:{width:`${imageNaturalWidth*Number(imageZoom)/100}px`,maxWidth:'none'}" @load="imageNaturalWidth=($event.target as HTMLImageElement).naturalWidth" :src="`data:${data.mime};base64,${data.base64}`" :alt="name" @error="error = '无法显示此图片'" /></div>
         <div v-else-if="data.kind === 'markdown' && !source" class="preview-markdown" v-html="markdown" @click="onLink" />
         <pre v-else-if="data.content !== undefined" class="preview-code" tabindex="0"><code>{{ data.content || '（空文件）' }}</code></pre>
         <div v-else class="preview-empty"><font-awesome-icon icon="file" /><span>此文件暂不支持预览</span><button type="button" @click="systemOpen">在系统中打开</button></div>
@@ -29,17 +31,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, onActivated, onDeactivated, ref, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { renderMarkdown } from '@/utils/markdown'
+import {workspaceLinkPath} from '@shared/file-tabs'
 import type { WorkspacePreview } from '../../shared/workspace-preview'
 
-const props = defineProps<{ chatId: string; path: string; width: number; embedded?: boolean }>()
-const emit = defineEmits<{ close: []; resize: [width: number]; notify: [text: string, color?: string] }>()
+const props = defineProps<{ chatId: string; path: string; width: number; embedded?: boolean; tabbed?: boolean }>()
+const emit = defineEmits<{ close: []; resize: [width: number]; notify: [text: string, color?: string]; openFile:[path:string] }>()
 const data = ref<WorkspacePreview | null>(null)
 const loading = ref(false)
 const error = ref('')
 const source = ref(false)
+const imageZoom=ref('fit'),imageNaturalWidth=ref(0)
+let active=true,dirty=false
 const copied = ref(false)
 const closeButton = ref<HTMLButtonElement | null>(null)
 const maximum = ref(Math.max(280, Math.min(800, innerWidth - 360)))
@@ -69,7 +74,7 @@ async function load() {
     error.value = /ENOENT|not_found/.test(message) ? '文件已移走或删除' : /outside_workspace/.test(message) ? '文件不在当前工作区内' : '无法读取此文件'
   } finally { if (!disposed && seq === sequence) loading.value = false }
 }
-watch(() => [props.chatId, props.path], () => { source.value = false; copied.value = false; void load() }, { immediate: true })
+watch(() => [props.chatId, props.path], () => { source.value = false; copied.value = false; imageZoom.value='fit'; void load() }, { immediate: true })
 async function systemOpen() {
   try {
     const result = await window.navora!.workspace.open(props.chatId, props.path)
@@ -92,6 +97,7 @@ function onLink(event: MouseEvent) {
   event.preventDefault()
   const url = anchor.getAttribute('href') || ''
   if (/^https?:\/\//i.test(url)) void window.navora?.app.openExternal(url)
+  else { const path=workspaceLinkPath(url); if(path)emit('openFile',path) }
 }
 function formatSize(bytes: number) { return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB` }
 function clampWidth(value: number) { emit('resize', Math.max(280, Math.min(maximum.value, value))) }
@@ -124,9 +130,9 @@ function beginResize(event: PointerEvent) {
   stopResize = end
 }
 function onKey(event: KeyboardEvent) {
-  if (event.key !== 'Escape' || event.defaultPrevented) return
+  if (!active || event.key !== 'Escape' || event.defaultPrevented) return
   const target = event.target as Element
-  if (target.closest('input,textarea,[contenteditable="true"],[role="dialog"]')) return
+  if (target.closest('input,textarea,select,[contenteditable="true"],[role="dialog"]')) return
   if (target.closest('.file-preview')) { event.stopPropagation(); event.preventDefault(); emit('close') }
 }
 onMounted(() => {
@@ -135,10 +141,13 @@ onMounted(() => {
   window.addEventListener('keydown', onKey, true)
   unsubscribe = window.navora?.workspace.onChanged?.(event => {
     if (event.chatId !== props.chatId) return
+    if (!active) { dirty=true; return }
     clearTimeout(reloadTimer)
     reloadTimer = setTimeout(() => { void load() }, 200)
   })
 })
+onDeactivated(()=>{active=false})
+onActivated(()=>{active=true;if(dirty){dirty=false;void load()}})
 onBeforeUnmount(() => { disposed = true; sequence++; stopResize?.(); unsubscribe?.(); clearTimeout(reloadTimer); clearTimeout(copiedTimer); window.removeEventListener('resize', onResize); window.removeEventListener('keydown', onKey, true) })
 </script>
 
@@ -167,7 +176,10 @@ button:disabled { opacity:.45; cursor:default; }
 .preview-markdown :deep(th),.preview-markdown :deep(td) { padding:6px 9px; border:1px solid #e2e7ed; }
 .preview-markdown :deep(a) { color:#31628f; text-decoration:underline; }
 .preview-image { display:flex; align-items:center; justify-content:center; min-height:100%; padding:16px; background:repeating-conic-gradient(#f2f4f7 0% 25%,#fff 0% 50%) 0 0 / 16px 16px; }
-.preview-image img { display:block; max-width:100%; height:auto; }
+.preview-image img { display:block; max-width:100%; height:auto; flex-shrink:0; }
+.preview-image.fit{height:100%;min-height:0}.preview-image.fit img{max-height:100%;object-fit:contain}
+.preview-image.zoomed{display:block;min-width:fit-content}.preview-image.zoomed img{margin:auto}
+.preview-zoom{font-size:11px;border:1px solid #d8dfe8;border-radius:6px;padding:4px 5px;color:#58677b;max-width:110px}
 .preview-empty { min-height:180px; height:100%; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:12px; color:#7c8694; font-size:12px; padding:24px; text-align:center; }
 .preview-empty > svg { width:28px; height:28px; }
 .preview-empty button { border-color:#dfe4eb; padding:6px 12px; }

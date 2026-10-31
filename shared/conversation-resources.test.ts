@@ -29,3 +29,13 @@ test('browser title, visibility and loading changes do not change resource ident
   tree[0]!.windows[0]!.title='Ready';tree[0]!.windows[0]!.loading=false;tree[0]!.windows[0]!.visible=true
   assert.deepEqual(browserResourceIds(tree),ids)
 })
+
+
+test('resource citations exclude narration while preserving evidence on the final answer',()=>{
+  const messages=[
+    {id:'note',role:'assistant',content:'Opening source',createdAt:1,meta:{sources:[{url:'https://example.com/progress'}]}},
+    {id:'tool',role:'tool',content:'done',createdAt:2},
+    {id:'answer',role:'assistant',content:'Result',createdAt:3,meta:{phase:'final',sources:[{url:'https://example.com/final'}]}},
+  ] as ChatMessage[]
+  assert.deepEqual(conversationSources(messages).map(source=>source.url),['https://example.com/final'])
+})

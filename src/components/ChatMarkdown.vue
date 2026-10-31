@@ -21,7 +21,7 @@
         type="button"
         class="msg-media-item"
         :title="item.path"
-        @click="emit('openMedia', { src: item.url, alt: item.path })"
+        @click="emit('openFile',item.path)"
       >
         <img :src="item.url" :alt="item.path" loading="lazy" />
         <span>{{ item.path }}</span>
@@ -33,6 +33,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import { renderMarkdown } from '@/utils/markdown'
+import {workspaceLinkPath} from '@shared/file-tabs'
 import {
   extractWorkspaceImagePathsFromText,
   isHttpOrDataUrl,
@@ -48,6 +49,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   openMedia: [payload: { src: string; alt?: string }]
+  openFile:[path:string]
+  notify:[text:string]
 }>()
 
 const rootRef = ref<HTMLElement | null>(null)
@@ -129,10 +132,21 @@ onMounted(() => {
 
 function onClick(e: MouseEvent) {
   const t = e.target
+  if(t instanceof Element){
+    const anchor=t.closest('a'),href=anchor?.getAttribute('href')||''
+    if(anchor&&href&&!/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(href)){
+      e.preventDefault()
+      const path=workspaceLinkPath(href)
+      if(path)emit('openFile',path);else emit('notify','文件链接无效或不在工作区内')
+      return
+    }
+  }
   if (!(t instanceof HTMLImageElement)) return
   const src = t.currentSrc || t.src
   if (!src || t.classList.contains('broken') || t.classList.contains('loading')) return
   e.preventDefault()
+  const path=t.getAttribute('data-src')||''
+  if(looksLikeWorkspaceImagePath(path)){emit('openFile',path);return}
   emit('openMedia', { src, alt: t.alt || t.getAttribute('data-src') || '' })
 }
 </script>
