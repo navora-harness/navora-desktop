@@ -35,14 +35,17 @@ for(let i=0;i<120;i++) {
   ]).flat() : []
   if(i===119)messages.push(...([
     {id:'ui-style-user-error',role:'user',content:'工具失败样式（本地测试夹具）',createdAt:400},
+    {id:'ui-style-progress-old',role:'assistant',content:'连接超时了，我再试一次。',createdAt:401,meta:{partial:false,reasoning:'第一轮观察'}},
     {id:'ui-style-tool-error',role:'tool',content:'{"ok":false,"error":"load_failed"}',createdAt:401,meta:{toolName:'browser_open',status:'error'}},
-    {id:'ui-style-answer-error',role:'assistant',content:'这里仅检查失败工具的折叠样式。',createdAt:402},
+    {id:'ui-style-progress-new',role:'assistant',content:'窗口已存在，正在读取页面内容。',createdAt:402,meta:{phase:'progress',partial:false,reasoning:'第二轮观察'}},
+    {id:'ui-style-tool-recovered',role:'tool',content:'{"ok":true}',createdAt:403,meta:{toolName:'browser_get',status:'done'}},
+    {id:'ui-style-answer-error',role:'assistant',content:'这里仅检查失败工具的折叠样式。',createdAt:404,meta:{phase:'final',reasoning:'第一轮观察\n第二轮观察\n完成回答'}},
     {id:'ui-style-user-plugin',role:'user',content:'插件样式（本地测试夹具）',createdAt:403},
     {id:'ui-style-plugin',role:'tool',content:'{"ok":true}',createdAt:404,meta:{toolName:'fixture_plugin',status:'done',fromPlugin:true,pluginId:'fixture'}},
     {id:'ui-style-answer-plugin',role:'assistant',content:'插件摘要。',createdAt:405},
     {id:'ui-style-user-log',role:'user',content:'日志样式（本地测试夹具）',createdAt:406},
     {id:'ui-style-log',role:'log',content:'本地日志样式记录',createdAt:407,meta:{kind:'agent_status'}},
-    {id:'ui-style-answer-log',role:'assistant',content:'日志摘要。',createdAt:408,meta:{sources:[{url:'https://example.com/fixture',title:'本地来源测试'}]}},
+    {id:'ui-style-answer-log',role:'assistant',content:'日志摘要。\n\n[打开文档](preview.md)\n\n![图片](image.png)',createdAt:408,meta:{sources:[{url:'https://example.com/fixture',title:'本地来源测试'}]}},
   ]) as typeof messages)
   const chat={id:'chat_renovation'+i,title:'本地回归对话 '+i,createdAt:i+1,updatedAt:i+1,messages}
   fs.writeFileSync(path.join(root,'chats',chat.id+'.json'),JSON.stringify(chat))
@@ -90,6 +93,11 @@ app.on('browser-window-created', (_,win) => {
         queuePrompts.push(lastUser)
         if(lastUser==='UI_QUEUE_FIRST')await new Promise<void>(resolve=>{releaseQueueFirst=resolve})
         res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'完成：'+lastUser,reasoning_content:'这是隔离测试中的思考内容。'},finish_reason:'stop'}]}));return
+      }
+      if(typeof lastUser==='string' && lastUser.startsWith('UI_PROCESS')){
+        const read=request.messages.some((message:{role:string;tool_call_id?:string})=>message.role==='tool'&&message.tool_call_id==='ui-process-time')
+        const reply=read?{role:'assistant',content:'已读取设备时间，过程已完成。',reasoning_content:'已取得真实工具结果。'}:{role:'assistant',content:'正在读取当前时间。',reasoning_content:'先查看设备时间。',tool_calls:[{id:'ui-process-time',type:'function',function:{name:'datetime_now',arguments:'{}'}}]}
+        res.end(JSON.stringify({choices:[{message:reply,finish_reason:read?'stop':'tool_calls'}]}));return
       }
       modelRequests++
       assert.equal(request.model,'qwen38-turbo-q6')
@@ -172,7 +180,7 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('document.querySelector(".preview-code")?.textContent'), 'Keyboard navigation fixture')
       await capture('file-preview-text')
       const oldWidth = await js('document.querySelector(".file-preview").getBoundingClientRect().width')
-      await js("document.querySelector('.resource-card-resizer').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}))")
+      await js("document.querySelector('.file-workspace-resizer').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}))")
       await wait(80)
       assert.equal(await js('document.querySelector(".file-preview").getBoundingClientRect().width'),oldWidth+20)
       await click('.tree-row[title="preview.md"]')
@@ -186,8 +194,40 @@ app.on('browser-window-created', (_,win) => {
       await capture('file-preview-image')
       await click('.tree-row[title="binary.bin"]')
       assert.equal(await js('document.querySelector(".preview-empty")?.textContent.includes("暂不支持预览")'),true)
+      assert.equal(await js('document.querySelectorAll(".file-workspace [role=tab]").length'),4,'Files open in independent tabs')
+      await js('[...document.querySelectorAll(".file-workspace [role=tab]")].find(tab=>tab.textContent.includes("preview.md")).click()');await wait(120)
+      assert.equal(await js('document.querySelector(".preview-code")?.textContent.includes("<script>")'),true,'Switching tabs preserves Markdown source mode')
+      await js('[...document.querySelectorAll(".file-workspace [role=tab]")].find(tab=>tab.textContent.includes("image.png")).click()');await wait(120)
+      await input('[aria-label="图片缩放"]','100','change')
+      await js('[...document.querySelectorAll(".file-workspace [role=tab]")].find(tab=>tab.textContent.includes("preview.md")).click()');await wait(100)
+      await js('[...document.querySelectorAll(".file-workspace [role=tab]")].find(tab=>tab.textContent.includes("image.png")).click()');await wait(100)
+      assert.equal(await js('document.querySelector(".preview-zoom").value'),'100','Image zoom survives tab switches')
+      await capture('file-workspace-tabs')
+      await js(`document.querySelector('.messages .msg-md-content a[href="preview.md"]').click()`);await wait(150)
+      assert.equal(await js('document.querySelector(".file-workspace [role=tab][aria-selected=true]").textContent.includes("preview.md")'),true,'Workspace links in replies open file tabs')
+      await js(`document.querySelector('.messages .msg-md-content img[data-src="image.png"]').click()`);await wait(150)
+      assert.equal(await js('!!document.querySelector(".media-lightbox")'),false,'Workspace images open in tabs rather than a separate dialog')
+
+      await click('[aria-label="新增文件标签页"]')
+      await click('.file-workspace-picker .tree-row[title="preview.md"]')
+      assert.equal(await js('document.querySelectorAll(".file-workspace [role=tab]").length'),4,'The file picker reuses an existing tab')
+      assert.equal(await js('document.querySelector(".file-workspace [role=tab][aria-selected=true]").textContent.includes("preview.md")'),true,'The plus button can select workspace files')
+      await js('[...document.querySelectorAll(".file-workspace [role=tab]")].find(tab=>tab.textContent.includes("image.png")).click()');await wait(100)
+
+      await click('[aria-label="关闭标签页：binary.bin"]')
+      assert.equal(await js('document.querySelectorAll(".file-workspace [role=tab]").length'),3,'Closing an inactive tab preserves the selected file')
+      await js('document.querySelector(".file-workspace [role=tab][aria-selected=true]").focus();document.activeElement.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowLeft",bubbles:true}))');await wait(100)
+      assert.equal(await js('document.querySelector(".file-workspace [role=tab][aria-selected=true]").textContent.includes("preview.md")'),true,'Keyboard navigation selects the neighbouring file tab')
+      await click('.sidebar-settings-btn')
+      assert.equal(await js('!!document.querySelector(".file-workspace")'),false,'Settings owns its space while file tabs stay saved')
+      await click('.settings-close')
+      assert.equal(await js('document.querySelectorAll(".file-workspace [role=tab]").length'),3,'Returning from settings restores the file workspace')
+
       await click('[aria-label="关闭文件预览"]')
       assert.equal(await js('!!document.querySelector(".file-preview")'),false)
+      await click('[data-chat-resource="workspace"]')
+      assert.equal(await js('document.querySelectorAll(".file-workspace [role=tab]").length'),3,'Hiding and reopening preserves file tabs')
+      await click('[aria-label="关闭文件预览"]')
       await click('[data-panel="chats"]')
       assert.equal(await js('document.querySelector(".chat-item").getBoundingClientRect().height'),34,'Chats use single-line compact rows')
       await capture('sidebar-detail')
@@ -197,10 +237,18 @@ app.on('browser-window-created', (_,win) => {
       await js('document.querySelector(".composer-input textarea").focus()')
       win.webContents.sendInputEvent({type:'mouseMove',x:500,y:25});await wait(180)
       assert.equal(await js('getComputedStyle(document.querySelector(".run-card.error .run-card-head")).borderTopColor'),'rgba(0, 0, 0, 0)','Collapsed activity has no resting border')
+      assert.equal(await js('document.querySelectorAll(".msg.assistant[data-msg-id^=ui-style-progress]").length'),0,'Progress never renders as independent final replies')
       await click('.run-card.error .run-card-head')
+      assert.equal(await js('document.querySelectorAll(".run-card.error .process-note").length'),2,'Legacy and explicitly tagged progress join one process')
+      assert.equal(await js('document.querySelectorAll(".process-note .reply-footer").length'),0,'Intermediate notes have no final-answer actions or duration')
+      await click('.run-card.error .msg-reasoning-toggle')
+      assert.equal(await js('document.querySelector(".run-card.error .msg-reasoning-body").textContent.includes("完成回答")'),true,'Aggregate reasoning is available once inside the process')
+      assert.equal(await js('document.querySelectorAll(".msg.assistant>.msg-row>.msg-main>.msg-reasoning").length'),0,'Final answers do not duplicate the process disclosure')
       assert.equal(await js('document.querySelector(".run-card.error .run-card-head").getBoundingClientRect().width'),compactError,'Opening details never resizes the trigger')
-      await capture('tool-error-disclosure')
+      await capture('process-and-final-output')
       await click('.run-card.error .run-card-head')
+      await js('document.querySelector("[data-msg-id=ui-style-answer-error]").scrollIntoView({block:"center"})')
+      await capture('final-answer-separation')
       await js('(async()=>{const cfg=await window.navora.config.get();await window.navora.config.save({app:{...cfg.app,collapse_tool_runs:false,collapse_run_logs:true}})})()')
       await wait(200)
       assert.equal(await js('[...document.querySelectorAll(".run-card-text")].some(el=>el.textContent.includes("1 条日志"))'),true,'Even a single folded log uses the shared disclosure')
@@ -244,8 +292,10 @@ app.on('browser-window-created', (_,win) => {
       await click('[data-resource-tab="files"]')
       assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),true,'Inside clicks keep the floating card open')
       await js(`(()=>{const el=document.querySelector('.conversation-resource-card .tree-row[title="preview.md"]'),r=el.getBoundingClientRect();el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+20,clientY:r.y+10}))})()`);await wait(120)
-      await click('.sidebar-ctx-panel button:first-child')
-      assert.equal(openedPaths.at(-1),path.join(path.dirname(workspaceFixture),'preview.md'),'Teleported resource actions execute without dismissing the card')
+      await js('(()=>{window.__clipboardWrite=navigator.clipboard.writeText.bind(navigator.clipboard);navigator.clipboard.writeText=async text=>{window.__copiedResource=text};return true})()')
+      await click('.sidebar-ctx-panel button:nth-child(3)')
+      assert.equal(await js('window.__copiedResource'),'preview.md','Teleported resource actions execute without dismissing the card')
+      await js('(()=>{navigator.clipboard.writeText=window.__clipboardWrite;return true})()')
       assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),true,'The card owns its teleported context menu')
       await capture('resource-overlay-wide-sidebar')
       await click('.composer-input textarea')
@@ -271,8 +321,10 @@ app.on('browser-window-created', (_,win) => {
       await click('.conversation-resource-card .tree-row[title="preview.md"]')
       assert.equal(await js('document.querySelector(".preview-markdown h1")?.textContent'),'文件预览')
       await click('[aria-label="关闭文件预览"]')
-      await click('[data-resource-tab="outputs"]')
+      if(!await js('!!document.querySelector(".conversation-resource-card")'))await click('[data-chat-resource="resources"]')
+      if(await js('!!document.querySelector("[data-resource-view=outputs]")'))await click('[data-resource-view="outputs"]');else await click('[data-resource-tab="outputs"]')
       assert.ok(await js('document.querySelectorAll(".resource-output-row").length')>0,'Conversation outputs are available in the resource card')
+      assert.equal(await js('[...document.querySelectorAll(".resource-output-row")].some(el=>el.textContent.includes("重试一次")||el.textContent.includes("窗口已存在"))'),false,'Resource outputs exclude process narration')
       await click('.resource-output-row:first-child')
       assert.equal(await js('!!document.querySelector(".resource-outputs .msg-md-content")'),true,'Output details reuse the safe message renderer')
       await capture('current-chat-outputs')
@@ -281,13 +333,14 @@ app.on('browser-window-created', (_,win) => {
       await click('[data-owner-id="chat_renovation118"] .resource-owner-toggle')
       await click('.global-resources .tree-row[title="other-only.txt"]')
       assert.equal(await js('document.querySelector(".preview-code")?.textContent'),'From another conversation','Global preview carries the resource owner, not the active chat')
+      assert.equal(await js('document.querySelector(".file-workspace-owner").textContent.includes("118")'),true,'Cross-conversation file tabs display their owner')
       await click('[aria-label="关闭文件预览"]')
       await capture('all-chat-files')
-      await click('[aria-label="关闭资源面板"]')
+      if(await js('!!document.querySelector(".conversation-resource-card")'))await click('[aria-label="关闭资源面板"]')
       fs.mkdirSync(path.join(workspaceFixture,'deep'),{recursive:true});fs.writeFileSync(path.join(workspaceFixture,'deep','new.txt'),'New nested output')
       await js('window.navora.workspace.setChatRoot("chat_renovation119",null)');await wait(300)
       assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),true,'Deep file changes automatically reveal resources')
-      await click('[aria-label="关闭资源面板"]')
+      if(await js('!!document.querySelector(".conversation-resource-card")'))await click('[aria-label="关闭资源面板"]')
       await js('window.navora.workspace.delete("chat_renovation118","other-only.txt")');await wait(300)
       assert.equal(await js('document.querySelectorAll("[data-resource-kind=files] .resource-owner").length'),1,'Deleting the last file removes its conversation from global files')
       await js('(async()=>{window.__localSession=await window.navora.browser.createSession("chat_renovation119",{persist:false});window.__otherSession=await window.navora.browser.createSession("chat_renovation118",{persist:false});await window.navora.browser.createWindow(window.__otherSession.sessionId,{url:"about:blank",show:false})})()')
@@ -298,7 +351,7 @@ app.on('browser-window-created', (_,win) => {
       await click('[data-resource-view="browser"]')
       assert.equal(await js('document.querySelectorAll(".conversation-resource-card .tree-sess").length'),1,'Current browser card excludes unrelated sessions')
       await capture('current-chat-browser')
-      await click('[aria-label="关闭资源面板"]')
+      if(await js('!!document.querySelector(".conversation-resource-card")'))await click('[aria-label="关闭资源面板"]')
       await js('(async()=>{const tree=await window.navora.browser.tree("chat_renovation119");await window.navora.browser.setVisible(tree[0].windows[0].windowId,true)})()');await wait(160)
       assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),false,'Visibility changes respect manual dismissal')
       await click('[data-panel="browser"]')
@@ -312,6 +365,10 @@ app.on('browser-window-created', (_,win) => {
       await js('localStorage.setItem("navora.sidebar.rail",JSON.stringify({version:1,active:"old-combination",groups:[{id:"old-combination",panels:["chats","workspace","browser"]}]}))')
       await win.webContents.reload();await wait(400)
       assert.equal(await js('document.querySelectorAll(".rail-panel-button").length'),3,'Legacy combinations become independent entries')
+      await click('[data-chat-resource="workspace"]')
+      assert.ok(await js('document.querySelectorAll(".file-workspace [role=tab]").length')>=3,'File tab metadata survives reloading the application')
+      await click('[aria-label="关闭文件预览"]')
+
       assert.equal(await js('document.querySelectorAll(".rail-panel-button[aria-pressed=true]").length'),1)
       await click('.chat-batch-trigger')
       assert.equal(await js('document.querySelector(".batch-delete-btn").disabled'),true,'Batch actions start disabled')
@@ -376,6 +433,12 @@ app.on('browser-window-created', (_,win) => {
       await js('window.navora.agent.submit("chat_renovation119",{content:"UI_QUEUE_FIRST"},"queue")')
       for(let n=0;n<50&&!releaseQueueFirst;n++)await wait(30)
       assert.ok(releaseQueueFirst,'Agent request is in flight')
+      await click('[data-chat-resource="workspace"]')
+      await js('document.querySelector(".file-workspace [role=tab][aria-selected=true]").focus()')
+      win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});await wait(220)
+      assert.equal(await js('!!document.querySelector(".file-workspace")'),false,'Escape in the file tab strip hides the workspace')
+      assert.equal(await js('window.navora.agent.isRunning("chat_renovation119")'),true,'Escape in file tabs never stops the Agent')
+
       await input('.composer-input textarea','UI_QUEUE_SECOND')
       await click('[aria-label="加入队列"]')
       await js('window.navora.agent.submit("chat_renovation119",{content:"UI_QUEUE_DELETE"},"queue")');await wait(100)
@@ -399,9 +462,16 @@ app.on('browser-window-created', (_,win) => {
       const sentUsers=await js('(async()=>{const c=await window.navora.chats.get("chat_renovation119");return c.messages.filter(m=>m.role==="user"&&m.content.startsWith("UI_QUEUE_")).map(m=>m.content)})()')
       assert.deepEqual(sentUsers,['UI_QUEUE_FIRST','UI_QUEUE_STEER','UI_QUEUE_SECOND_EDITED'],'Each user message is recorded once and deleted work is never executed')
       assert.equal(await js('!!document.querySelector(".message-queue")'),false,'The empty queue disappears')
+      await js('window.navora.agent.submit("chat_renovation119",{content:"UI_PROCESS 请读取当前设备时间并回答"},"queue")')
+      for(let n=0;n<150;n++){if(await js('(async()=>{const c=await window.navora.chats.get("chat_renovation119");return !await window.navora.agent.isRunning(c.id)&&c.messages.at(-1)?.meta?.phase==="final"})()'))break;await wait(40)}
+      const processTurn=await js('(async()=>{const c=await window.navora.chats.get("chat_renovation119"),i=c.messages.findIndex(m=>m.role==="user"&&m.content.startsWith("UI_PROCESS"));return c.messages.slice(i+1)})()')
+      assert.equal(processTurn.find((m:{role:string})=>m.role==='assistant').meta.phase,'progress','Runtime preserves narration phase after shimmer clears')
+      assert.equal(processTurn.find((m:{role:string})=>m.role==='assistant').meta.partial,false)
+      assert.equal(processTurn.at(-1).meta.phase,'final','The completed answer is explicitly tagged final')
+      assert.equal(await js('[...document.querySelectorAll(".msg.assistant")].filter(el=>el.textContent.includes("正在读取当前时间")).length'),0,'Tool narration does not become an independent reply')
       await capture('conversation-unified-activity')
       assert.deepEqual(errors,[],'No renderer errors')
-      fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reduced,frameMetrics,modelRequests,checks:['provider-drafts','reopen-draft','tier-rename','preview-race','separate-probes','permission-search','visible-empty-states','workspace-keyboard','file-preview','file-preview-source-safety','file-preview-width','compact-chat-rows','native-explorer-current-path','floating-resource-files-browser-outputs','resource-auto-open-dismissal','resource-space-aware-overlay','resource-outside-dismissal','resource-owned-menu','compact-resource-overview','resource-source-links','conversation-scrollbar-window-edge','all-chat-files','all-browser-owners','single-sidebar','old-group-migration','message-queue-edit-delete-insert','main-process-queue-persistence','active-context-insertion','long-conversation-jump','zoom-layout','interrupted-motion','single-mobile-header']},null,2))
+      fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reduced,frameMetrics,modelRequests,checks:['process-vs-final-legacy','process-vs-final-runtime','process-reasoning-group','final-resource-filter','provider-drafts','reopen-draft','tier-rename','preview-race','separate-probes','permission-search','visible-empty-states','workspace-keyboard','file-preview','file-preview-source-safety','file-preview-width','file-tab-reuse-and-close','file-tab-state-cache','image-zoom-tabs','file-picker-tabs','file-workspace-hide-restore','compact-chat-rows','native-explorer-current-path','floating-resource-files-browser-outputs','resource-auto-open-dismissal','resource-space-aware-overlay','resource-outside-dismissal','resource-owned-menu','compact-resource-overview','resource-source-links','conversation-scrollbar-window-edge','all-chat-files','all-browser-owners','single-sidebar','old-group-migration','message-queue-edit-delete-insert','main-process-queue-persistence','active-context-insertion','long-conversation-jump','zoom-layout','interrupted-motion','single-mobile-header']},null,2))
       console.log(JSON.stringify({ok:true,reduced,frameMetrics,modelRequests}))
       server.close(); app.exit(0)
     } catch(error) { console.error(error); await capture('failure'); server.close(); app.exit(1) }

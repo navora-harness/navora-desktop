@@ -3,6 +3,7 @@
     <button type="button" class="chat-resource-button" data-chat-resource="files" title="打开对话文件夹" aria-label="打开对话文件夹" :disabled="!chatId || isRemote || openingFolder" @click="openFolder">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5.5A1.5 1.5 0 0 1 4.5 4H9l2 2h8.5A1.5 1.5 0 0 1 21 7.5V19a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7Z"/><path d="M3 10h18M7 14h4m-4 3h7"/></svg>
     </button>
+    <button type="button" class="chat-resource-button" :class="{selected:fileWorkspaceOpen}" data-chat-resource="workspace" title="文件侧栏" aria-label="文件侧栏" :aria-expanded="fileWorkspaceOpen" :disabled="!hasFileTabs" @click="emit('toggleWorkspace')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5m0 4h8m-8 3h5"/></svg></button>
     <button type="button" class="chat-resource-button" :class="{selected:open}" data-chat-resource="resources" title="当前对话资源" aria-label="当前对话资源" :aria-expanded="open" :disabled="!chatId" @click="emit('toggleResources')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16m3-11h1m-1 3h1m-1 3h1"/></svg>
     </button>
@@ -12,8 +13,8 @@
 <script setup lang="ts">
 import {ref} from 'vue'
 import type {BrowserTreeSession} from '@shared/types'
-const props=defineProps<{chatId:string;tree:BrowserTreeSession[];isRemote:boolean;open?:boolean}>()
-const emit=defineEmits<{notify:[text:string,color?:string];toggleResources:[];showBrowser:[]}>()
+const props=defineProps<{chatId:string;tree:BrowserTreeSession[];isRemote:boolean;open?:boolean;fileWorkspaceOpen?:boolean;hasFileTabs?:boolean}>()
+const emit=defineEmits<{notify:[text:string,color?:string];toggleResources:[];toggleWorkspace:[];showBrowser:[]}>()
 const openingFolder=ref(false),openingBrowser=ref(false)
 async function openFolder(){
   if(!props.chatId||props.isRemote||openingFolder.value)return

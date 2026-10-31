@@ -68,6 +68,8 @@ export type ChatMessage = {
   content: string
   createdAt: number
   meta?: {
+    /** Distinguishes execution narration from a completed answer after streaming ends. */
+    phase?: 'progress' | 'final'
     refs?: BrowserContextRef[]
     [key: string]: unknown
   }

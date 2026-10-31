@@ -1,12 +1,11 @@
 <template>
-  <aside ref="card" class="conversation-resource-card" :class="{'is-overview':tab==='overview'&&!preview}" :data-layout="overlay?'overlay':'docked'" aria-label="当前对话资源面板" :style="{'--resource-width':`${width}px`}" @keydown.esc="onEscape">
+  <aside ref="card" class="conversation-resource-card" :class="{'is-overview':tab==='overview'}" :data-layout="overlay?'overlay':'docked'" aria-label="当前对话资源面板" :style="{'--resource-width':`${width}px`}" @keydown.esc="onEscape">
     <div v-if="!overlay" class="resource-card-resizer" role="separator" aria-label="调整资源面板宽度" aria-orientation="vertical" :aria-valuenow="width" aria-valuemin="280" :aria-valuemax="maximum" tabindex="0" @pointerdown="beginResize" @keydown="resizeKey" />
-    <header class="resource-card-head"><button v-if="tab!=='overview'||preview" type="button" class="resource-icon-button" aria-label="返回资源概览" title="返回资源概览" @click="changeTab('overview')"><font-awesome-icon icon="arrow-left" /></button><div><h2>{{ tab==='overview'&&!preview ? '资源' : '对话资源' }}</h2><span :title="preview && preview.chatId!==chatId ? ownerLabel(preview.chatId) : title">{{ preview && preview.chatId!==chatId ? '来自：'+ownerLabel(preview.chatId) : title }}</span></div><button type="button" class="resource-icon-button" aria-label="关闭资源面板" title="关闭资源面板" @click="emit('close')"><font-awesome-icon icon="xmark" /></button></header>
-    <nav v-if="tab!=='overview'||preview" class="resource-card-tabs" aria-label="资源类型">
+    <header class="resource-card-head"><button v-if="tab!=='overview'" type="button" class="resource-icon-button" aria-label="返回资源概览" title="返回资源概览" @click="changeTab('overview')"><font-awesome-icon icon="arrow-left" /></button><div><h2>{{ tab==='overview' ? '资源' : '对话资源' }}</h2><span :title="title">{{ title }}</span></div><button type="button" class="resource-icon-button" aria-label="关闭资源面板" title="关闭资源面板" @click="emit('close')"><font-awesome-icon icon="xmark" /></button></header>
+    <nav v-if="tab!=='overview'" class="resource-card-tabs" aria-label="资源类型">
       <button v-for="item in tabs" :key="item.id" type="button" :data-resource-tab="item.id" :aria-pressed="tab===item.id" @click="changeTab(item.id)">{{ item.label }}<span v-if="item.id==='browser' && windowCount">{{ windowCount }}</span><span v-if="item.id==='outputs' && outputs.length">{{ outputs.length }}</span></button>
     </nav>
-    <ConversationResourceOverview v-if="tab==='overview'&&!preview" :chat-id="chatId" :messages="messages" :tree="tree" @view="changeTab" @preview="emit('preview',$event)" @notify="notify" />
-    <FilePreviewPanel v-else-if="preview" embedded :chat-id="preview.chatId" :path="preview.path" :width="width" @close="emit('clearPreview')" @notify="notify" />
+    <ConversationResourceOverview v-if="tab==='overview'" :chat-id="chatId" :messages="messages" :tree="tree" @view="changeTab" @preview="emit('preview',$event)" @notify="notify" />
     <div v-else-if="tab==='files'" class="resource-card-body resource-files">
       <WorkspaceFilesPanel :key="chatId" embedded :chat-id="chatId" @notify="notify" @preview="emit('preview',$event.path)" />
     </div>
@@ -16,7 +15,7 @@
     <div v-else class="resource-card-body resource-outputs">
       <template v-if="selectedOutput">
         <div class="resource-output-actions"><button type="button" @click="selectedOutputId=''">返回输出列表</button><button type="button" @click="emit('jump',selectedOutput.id)">定位到对话 <font-awesome-icon icon="arrow-up-right-from-square" /></button></div>
-        <ChatMarkdown :chat-id="chatId" :content="selectedOutput.content" @open-media="emit('openMedia',$event)" />
+        <ChatMarkdown :chat-id="chatId" :content="selectedOutput.content" @open-media="emit('openMedia',$event)" @open-file="emit('preview',$event)" @notify="notify" />
       </template>
       <template v-else>
         <div v-if="!outputs.length" class="resource-empty">暂无输出</div>
@@ -26,18 +25,18 @@
   </aside>
 </template>
 <script setup lang="ts">
+import {finalOutputs} from '@shared/message-presentation'
 import {computed,onBeforeUnmount,onMounted,ref,watch} from 'vue'
 import type {BrowserContextRef,BrowserTreeSession,ChatMessage} from '@shared/types'
 import type {ResourceTab} from '@/composables/useConversationResources'
 import WorkspaceFilesPanel from './sidebar/WorkspaceFilesPanel.vue'
 import BrowserResourcesPanel from './sidebar/BrowserResourcesPanel.vue'
-import FilePreviewPanel from './FilePreviewPanel.vue'
 import ChatMarkdown from './ChatMarkdown.vue'
 import ConversationResourceOverview from './ConversationResourceOverview.vue'
-const props=defineProps<{chatId:string;title:string;messages:ChatMessage[];tree:BrowserTreeSession[];tab:ResourceTab;width:number;availableWidth:number;overlay:boolean;preview:{chatId:string;path:string}|null;isRemote:boolean;ownerLabel:(id:string)=>string;dndMime:string}>()
-const emit=defineEmits<{close:[];clearPreview:[];tab:[tab:ResourceTab];resize:[width:number];preview:[path:string];jump:[id:string];notify:[text:string,color?:string];addRef:[ref:BrowserContextRef];askCloseSession:[session:BrowserTreeSession];remoteView:[id:string];openMedia:[payload:{src:string;alt?:string}]}>()
+const props=defineProps<{chatId:string;title:string;messages:ChatMessage[];tree:BrowserTreeSession[];tab:ResourceTab;width:number;availableWidth:number;overlay:boolean;isRemote:boolean;ownerLabel:(id:string)=>string;dndMime:string}>()
+const emit=defineEmits<{close:[];tab:[tab:ResourceTab];resize:[width:number];preview:[path:string];jump:[id:string];notify:[text:string,color?:string];addRef:[ref:BrowserContextRef];askCloseSession:[session:BrowserTreeSession];remoteView:[id:string];openMedia:[payload:{src:string;alt?:string}]}>()
 const tabs:Array<{id:ResourceTab;label:string}>=[{id:'files',label:'文件'},{id:'browser',label:'浏览器'},{id:'outputs',label:'输出'}]
-const outputs=computed(()=>props.messages.filter(message=>message.role==='assistant'&&message.content.trim()).slice().reverse())
+const outputs=computed(()=>finalOutputs(props.messages).slice().reverse())
 const windowCount=computed(()=>props.tree.reduce((count,session)=>count+session.windows.length,0))
 const selectedOutputId=ref(''),card=ref<HTMLElement|null>(null)
 const selectedOutput=computed(()=>outputs.value.find(message=>message.id===selectedOutputId.value))
@@ -45,9 +44,9 @@ const maximum=computed(()=>Math.max(280,Math.min(800,props.availableWidth-624)))
 let stopResize:(()=>void)|undefined
 const notify=(text:string,color?:string)=>emit('notify',text,color)
 function outputTitle(content:string){return content.replace(/[#*_`>|]/g,'').trim().split('\n').find(Boolean)?.slice(0,100)||'对话输出'}
-function changeTab(tab:ResourceTab){emit('clearPreview');emit('tab',tab)}
+function changeTab(tab:ResourceTab){emit('tab',tab)}
 watch(()=>props.chatId,()=>{selectedOutputId.value=''})
-function onEscape(event:KeyboardEvent){if((event.target as Element).closest('input,textarea,[contenteditable=true]'))return;event.preventDefault();event.stopPropagation();if(props.preview)emit('clearPreview');else emit('close')}
+function onEscape(event:KeyboardEvent){if((event.target as Element).closest('input,textarea,[contenteditable=true]'))return;event.preventDefault();event.stopPropagation();emit('close')}
 function resize(value:number){emit('resize',Math.max(280,Math.min(maximum.value,value)))}
 function onOutsidePointer(event:PointerEvent){
   if(!props.overlay||event.button!==0)return

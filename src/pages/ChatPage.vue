@@ -507,7 +507,7 @@
       <div v-if="!isMobileLayout && (!allSidebarHidden || settingsOpen || creatorKind)" class="sidebar-divider vertical" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarLayout.width" aria-valuemin="250" aria-valuemax="560" tabindex="0" @pointerdown="beginSidebarResize($event, 'width')" @keydown="sidebarResizeKey($event, 'width')" />
     </aside>
 
-    <main ref="mainElement" class="main" :class="{ 'resource-card-docked': resourceOpen && !resourceOverlay && !settingsOpen && !creatorKind }" :style="{ '--preview-width': `${previewWidth}px` }">
+    <main ref="mainElement" class="main" :class="{ 'resource-card-docked': resourceOpen && !resourceOverlay && !settingsOpen && !creatorKind, 'file-workspace-open': fileWorkspaceVisible }" :style="{ '--preview-width': `${previewWidth}px`, '--file-workspace-reserve':`${fileWorkspaceReserve}px` }">
       <div v-if="showDesktopChrome && ((!settingsOpen && !creatorKind) || isMobileLayout)" class="win-drag-main" aria-hidden="true" />
       <header v-if="isMobileLayout && !settingsOpen && !creatorKind" class="mobile-topbar">
         <button
@@ -549,7 +549,7 @@
           </div>
         </div>
         <div class="mobile-topbar-actions">
-          <ChatResourcesMenu ref="browserResources" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :open="resourceOpen" @notify="onPanelNotify" @toggle-resources="toggleResources" @show-browser="showResources('browser')" />
+          <ChatResourcesMenu ref="browserResources" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :open="resourceOpen" :file-workspace-open="fileWorkspaceVisible" :has-file-tabs="fileTabsState.tabs.length>0" @toggle-workspace="toggleFileWorkspace" @notify="onPanelNotify" @toggle-resources="toggleResources" @show-browser="showResources('browser')" />
           <button
             v-if="isWebRemote()"
             type="button"
@@ -617,7 +617,7 @@
             <span class="agent-elapsed">{{ elapsedLabel }}</span>
             <button type="button" class="quick-stop-btn" title="停止任务（Esc）" aria-label="停止任务" @click="stopAgent"><StatusIcon kind="stopped" />停止</button>
           </div>
-          <ChatResourcesMenu v-if="!isMobileLayout" ref="browserResources" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :open="resourceOpen" @notify="onPanelNotify" @toggle-resources="toggleResources" @show-browser="showResources('browser')" />
+          <ChatResourcesMenu v-if="!isMobileLayout" ref="browserResources" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :open="resourceOpen" :file-workspace-open="fileWorkspaceVisible" :has-file-tabs="fileTabsState.tabs.length>0" @toggle-workspace="toggleFileWorkspace" @notify="onPanelNotify" @toggle-resources="toggleResources" @show-browser="showResources('browser')" />
         </header>
 
         <div class="messages-wrap">
@@ -677,13 +677,23 @@
                       </button>
                       <DisclosureTransition>
                       <div v-if="isRunExpanded(block.key)" :id="`run-details-${block.key}`" class="run-card-body activity-detail">
+                        <div v-if="block.reasoning" class="msg-reasoning activity-group" :class="{open:isReasoningExpanded(block.key)}">
+                          <button type="button" class="msg-reasoning-toggle activity-trigger" :aria-expanded="isReasoningExpanded(block.key)" @click="toggleReasoning(block.key)">
+                            <StatusIcon kind="thought" /><span>思考过程</span><font-awesome-icon class="msg-reasoning-chevron" icon="chevron-right" />
+                          </button>
+                          <DisclosureTransition><div v-if="isReasoningExpanded(block.key)" class="msg-reasoning-body activity-detail">{{ block.reasoning }}</div></DisclosureTransition>
+                        </div>
                         <template v-for="item in block.items" :key="item.id">
-                          <div v-if="item.role === 'log'" class="run-item log" :data-msg-id="item.id">
+                          <div v-if="item.role === 'assistant' && item.content.trim()" class="run-item process-note" :data-msg-id="item.id">
+                            <span class="process-note-label">进展</span>
+                            <ChatMarkdown :chat-id="activeId || ''" :content="item.content" @open-media="(p) => openLightbox(p.src,p.alt)" @open-file="openFilePreview" @notify="onPanelNotify" />
+                          </div>
+                          <div v-else-if="item.role === 'log'" class="run-item log" :data-msg-id="item.id">
                             <span class="log-kind-chip">{{ logKindText(item) }}</span>
                             <span class="run-item-text">{{ logFullText(item) }}</span>
                           </div>
                           <div
-                            v-else
+                            v-else-if="item.role === 'tool'"
                             class="run-item tool"
                             :data-msg-id="item.id"
                             :class="[toolStatusClass(item), `kind-${toolDisplay(item).kind}`]"
@@ -777,10 +787,7 @@
                                 v-if="toolMediaSrc[item.id]"
                                 class="tool-media"
                                 @click.stop="
-                                  openLightbox(
-                                    toolMediaSrc[item.id],
-                                    toolMediaPath(item) || '',
-                                  )
+                                  openToolMedia(item)
                                 "
                               >
                                 <img :src="toolMediaSrc[item.id]" alt="" loading="lazy" />
@@ -969,10 +976,7 @@
                         v-if="toolMediaSrc[block.message.id]"
                         class="tool-media"
                         @click.stop="
-                          openLightbox(
-                            toolMediaSrc[block.message.id],
-                            toolMediaPath(block.message) || '',
-                          )
+                          openToolMedia(block.message)
                         "
                       >
                         <img :src="toolMediaSrc[block.message.id]" alt="" loading="lazy" />
@@ -1028,34 +1032,11 @@
                       </span>
                     </div>
                     <template v-if="block.message.role === 'assistant' || block.message.role === 'user'">
-                      <div
-                        v-if="block.message.role === 'assistant' && messageReasoning(block.message)"
-                        class="msg-reasoning activity-group"
-                        :class="{ open: isReasoningExpanded(block.message.id) }"
-                      >
-                        <button
-                          type="button"
-                          class="msg-reasoning-toggle activity-trigger"
-                          :aria-expanded="isReasoningExpanded(block.message.id)"
-                          @click="toggleReasoning(block.message.id)"
-                        >
-                          <StatusIcon kind="thought" /><span>思考过程</span>
-                          <font-awesome-icon class="msg-reasoning-chevron" icon="chevron-right" />
-                        </button>
-                        <DisclosureTransition>
-                        <div
-                          v-if="isReasoningExpanded(block.message.id)"
-                          class="msg-reasoning-body activity-detail"
-                        >
-                          {{ messageReasoning(block.message) }}
-                        </div>
-                        </DisclosureTransition>
-                      </div>
                       <ChatMarkdown
                         :chat-id="activeId || ''"
                         :content="displayMessageContent(block.message)"
                         :shimmer="isMessageShimmer(block.message)"
-                        @open-media="(p) => openLightbox(p.src, p.alt)"
+                        @open-media="(p) => openLightbox(p.src, p.alt)" @open-file="openFilePreview" @notify="onPanelNotify"
                       >
                         <template v-if="block.message.role === 'assistant'" #footer>
                           <div class="reply-footer">
@@ -1555,8 +1536,9 @@
         </div>
       </div>
       <Transition name="resource-card">
-        <ConversationResourcesCard v-if="resourceOpen && activeId && !settingsOpen && !creatorKind" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :overlay="resourceOverlay" :available-width="resourceAvailableWidth" :preview="previewSelection" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @clear-preview="previewSelection=null" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="jumpToMessage" @open-media="(p) => openLightbox(p.src,p.alt)" />
+        <ConversationResourcesCard v-if="resourceOpen && activeId && !settingsOpen && !creatorKind" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :overlay="resourceOverlay" :available-width="resourceAvailableWidth" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="jumpToMessage" @open-media="(p) => openLightbox(p.src,p.alt)" />
       </Transition>
+      <Transition name="file-workspace"><FileWorkspace v-if="fileWorkspaceVisible" :tabs="fileTabsState.tabs" :active="activeFileTab" :viewer-chat-id="activeId || ''" :width="fileWorkspaceWidth" :maximum="fileWorkspaceMaximum" :overlay="fileWorkspaceOverlay" :owner-label="treeOwnerLabel" @select="selectFileTab" @close="closeFileTab" @hide="hideFileWorkspace" @open-file="openFilePreview($event.path,$event.chatId)" @resize="resizeFileWorkspace" @notify="onPanelNotify" /></Transition>
     </main>
 
     <v-dialog
@@ -1836,6 +1818,7 @@
 
 <script setup lang="ts">
 defineOptions({ name: 'ChatPage' })
+import { transcriptBlocks } from '@shared/message-presentation'
 import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import StatusIcon from '@/components/StatusIcon.vue'
 import ConversationOutline from '@/components/ConversationOutline.vue'
@@ -1884,6 +1867,9 @@ import BrowserDownloadsMenu from '@/components/BrowserDownloadsMenu.vue'
 import ConversationResourcesCard from '@/components/ConversationResourcesCard.vue'
 import {useConversationResources} from '@/composables/useConversationResources'
 import {useResourceCardLayout} from '@/composables/useResourceCardLayout'
+import {useFileTabs} from '@/composables/useFileTabs'
+import {useFileWorkspaceLayout} from '@/composables/useFileWorkspaceLayout'
+import FileWorkspace from '@/components/FileWorkspace.vue'
 import CreatorWorkspace from '@/components/CreatorWorkspace.vue'
 import type { CreatorKind } from '@shared/creators'
 import SidebarDock from '@/components/sidebar/SidebarDock.vue'
@@ -2278,24 +2264,26 @@ const quitting = ref(false)
 const exportingChat = ref(false)
 const sidebarMoreOpen = ref(false)
 const {open:resourceOpen,tab:resourceTab,show:showResources,close:hideResources} = useConversationResources(activeId,tree)
-function closeResources(){hideResources();previewSelection.value=null}
+function closeResources(){hideResources()}
 function toggleResources(){if(resourceOpen.value)closeResources();else showResources('overview')}
-const previewSelection = ref<{ chatId: string; path: string } | null>(null)
+const {current:fileTabsState,active:activeFileTab,open:openFileTab,select:selectFileTab,close:closeFileTab,hide:hideFileWorkspace,toggle:toggleFileWorkspace}=useFileTabs(activeId)
+const fileWorkspaceVisible=computed(()=>fileTabsState.value.open&&fileTabsState.value.tabs.length>0&&!settingsOpen.value&&!creatorKind.value)
 const previewWidth = ref(400)
 const mainElement=ref<HTMLElement|null>(null)
-const {overlay:resourceOverlay,availableWidth:resourceAvailableWidth}=useResourceCardLayout(mainElement,previewWidth,isMobileLayout)
+const {overlay:fileWorkspaceOverlay,maximum:fileWorkspaceMaximum,width:fileWorkspaceWidth,reserve:fileWorkspaceReserve,resize:resizeFileWorkspace}=useFileWorkspaceLayout(mainElement,fileWorkspaceVisible,isMobileLayout)
+const {overlay:resourceOverlay,availableWidth:resourceAvailableWidth}=useResourceCardLayout(mainElement,previewWidth,isMobileLayout,fileWorkspaceReserve)
 try { const saved = Number(localStorage.getItem('navora.preview.width')); if (saved >= 280 && saved <= 800) previewWidth.value = saved } catch { /* optional persistence */ }
+watch(fileWorkspaceVisible,async()=>{const follow=stickToBottom.value;await nextTick();if(follow)void scrollMessages(true)})
 function setPreviewWidth(width: number) {
   previewWidth.value = width
   try { localStorage.setItem('navora.preview.width', String(width)) } catch { /* optional persistence */ }
 }
 function openFilePreview(path: string, chatId = activeId.value) {
   if (!chatId) return
-  previewSelection.value = { chatId, path }
-  showResources('files')
+  try { openFileTab(chatId,path) } catch(error) { onPanelNotify(error instanceof Error?error.message:'无法打开文件');return }
+  if(fileWorkspaceOverlay.value)hideResources()
   if (isMobileLayout.value) closeMobileSidebar()
 }
-watch(activeId, () => { previewSelection.value = null })
 const creatorKind = ref<CreatorKind | null>(null)
 let creatorReturnToSettings = false
 function openCreator(kind: CreatorKind) {
@@ -2571,78 +2559,11 @@ const logOverflowById = ref<Record<string, boolean>>({})
 const logMeasureEls = new Map<string, HTMLElement>()
 const logResizeObservers = new Map<string, ResizeObserver>()
 
-type MessageBlock =
-  | { type: 'chat'; key: string; message: ChatMessage }
-  | { type: 'tool'; key: string; message: ChatMessage }
-  | { type: 'log'; key: string; message: ChatMessage }
-  | { type: 'run'; key: string; items: ChatMessage[] }
-
-const messageBlocks = computed((): MessageBlock[] => {
-  const msgs = active.value?.messages || []
-  const blocks: MessageBlock[] = []
-
-  const pushLogOrFold = (m: ChatMessage, logBuf: ChatMessage[], flushLogs: () => void) => {
-    if (!showRunLogs.value && !isErrorRunLog(m)) return
-    if (collapseRunLogs.value && showRunLogs.value) {
-      logBuf.push(m)
-      return
-    }
-    flushLogs()
-    blocks.push({ type: 'log', key: m.id, message: m })
-  }
-
-  // Tools expanded: optionally fold consecutive logs only.
-  if (!collapseToolRuns.value) {
-    let logBuf: ChatMessage[] = []
-    const flushLogs = () => {
-      if (!logBuf.length) return
-      blocks.push({ type: 'run', key: `run:${logBuf[0].id}`, items: logBuf })
-      logBuf = []
-    }
-    for (const m of msgs) {
-      if (m.role === 'log') {
-        pushLogOrFold(m, logBuf, flushLogs)
-        continue
-      }
-      flushLogs()
-      if (m.role === 'tool') {
-        blocks.push({ type: 'tool', key: m.id, message: m })
-        continue
-      }
-      blocks.push({ type: 'chat', key: m.id, message: m })
-    }
-    flushLogs()
-    return blocks
-  }
-
-  // Tools collapsed: logs always join the same run summary (no separate log-fold switch).
-  let runBuf: ChatMessage[] = []
-  const flushRun = () => {
-    if (!runBuf.length) return
-    blocks.push({
-      type: 'run',
-      key: `run:${runBuf[0].id}`,
-      items: runBuf,
-    })
-    runBuf = []
-  }
-
-  for (const m of msgs) {
-    if (m.role === 'log') {
-      if (!showRunLogs.value && !isErrorRunLog(m)) continue
-      runBuf.push(m)
-      continue
-    }
-    if (m.role === 'tool') {
-      runBuf.push(m)
-      continue
-    }
-    flushRun()
-    blocks.push({ type: 'chat', key: m.id, message: m })
-  }
-  flushRun()
-  return blocks
-})
+const messageBlocks = computed(() => transcriptBlocks(active.value?.messages || [], {
+  collapseTools: collapseToolRuns.value,
+  collapseLogs: collapseRunLogs.value,
+  showLogs: showRunLogs.value,
+}))
 
 const activeChatError = computed(() => {
   const id = activeId.value
@@ -3004,12 +2925,6 @@ function toggleLiveReasoning() {
   }
 }
 
-function messageReasoning(m: ChatMessage): string {
-  if (m.role !== 'assistant') return ''
-  const raw = m.meta?.reasoning
-  return typeof raw === 'string' ? raw.trim() : ''
-}
-
 function isReasoningExpanded(id: string): boolean {
   return expandedReasoning.value[id] === true
 }
@@ -3172,6 +3087,7 @@ async function hydrateActiveToolMedia(): Promise<void> {
   await Promise.all(msgs.filter((m) => m.role === 'tool').map((m) => hydrateToolMedia(m, chatId)))
 }
 
+function openToolMedia(message:ChatMessage){const path=toolMediaPath(message);if(path)openFilePreview(path);else openLightbox(toolMediaSrc.value[message.id]||'')}
 function openLightbox(src: string, alt = '') {
   if (!src) return
   lightbox.value = { src, alt }
@@ -3417,7 +3333,7 @@ function clearLocalLoadingMarkers(chatId: string) {
     let meta = m.meta
     let content = m.content
     if (meta?.partial) {
-      meta = { ...meta, partial: false }
+      meta = { ...meta, phase: meta.phase || 'progress', partial: false }
       changed = true
     }
     if (m.role === 'tool' && meta?.status === 'running') {
@@ -3528,7 +3444,7 @@ function runGroupCountLabel(items: ChatMessage[]): string {
   if (pluginCount) return [toolCount ? toolCount + ' 个工具' : '', pluginCount + ' 个插件'].filter(Boolean).join(' · ')
   if (toolCount) return toolCount + ' 个工具'
   const logCount = items.filter((m) => m.role === 'log').length
-  return logCount ? `${logCount} 条日志` : '操作记录'
+  return logCount ? `${logCount} 条日志` : '执行过程'
 }
 
 function runGroupSummary(items: ChatMessage[]): string {
@@ -3546,7 +3462,9 @@ function runGroupSummary(items: ChatMessage[]): string {
     return '执行中…'
   }
 
-  const base = runGroupCountLabel(items)
+  const hasProgress = items.some(m => m.role === 'assistant')
+  const count = runGroupCountLabel(items)
+  const base = hasProgress && count !== '执行过程' ? `执行过程 · ${count}` : count
   // User stop must not be framed as tool failure in the collapsed title.
   if (runGroupWasAborted(items) && !runGroupHasError(items)) {
     return `${base} · 用户终止`
@@ -3555,8 +3473,8 @@ function runGroupSummary(items: ChatMessage[]): string {
     const errHint = runGroupErrorSummary(items)
     return errHint ? `${base} · ${errHint}` : `${base} · 有失败`
   }
-  if (tools.length === 1) return `${friendlyToolName(String(tools[0]!.meta?.toolName || 'tool'))} · 已完成`
-  return tools.length ? `已完成 ${tools.length} 步` : base
+  if (tools.length === 1 && !hasProgress) return `${friendlyToolName(String(tools[0]!.meta?.toolName || 'tool'))} · 已完成`
+  return tools.length ? `${hasProgress ? '执行过程 · ' : ''}已完成 ${tools.length} 步` : base
 }
 
 function toggleLog(id: string) {
@@ -5621,8 +5539,8 @@ onMounted(async () => {
   }, 500)
 
   const layoutTick = () => {
-    onMessagesScroll()
     if (stickToBottom.value) void scrollMessages(true)
+    else onMessagesScroll()
     remeasureAllLogOverflow()
   }
   stopMessageResizeWatch = watch(msgBox, (element) => {

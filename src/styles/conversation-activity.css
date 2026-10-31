@@ -21,6 +21,11 @@
 .navora-app .shell .main .messages .activity-detail {margin:6px 0 10px 15px;padding:10px 12px;border:0;border-left:2px solid #dce4ee;border-radius:0 7px 7px 0;background:#f8fafc;color:#65758b;font-size:12px;line-height:1.7;max-width:calc(100% - 15px);overflow:auto;overscroll-behavior:contain}
 .navora-app .shell .main .messages :is(.thinking-reason-body,.msg-reasoning-body).activity-detail {white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;font-size:12px;color:#6a778b}
 .navora-app .shell .main .messages .run-card-body .run-item {padding:2px 0;border:0;background:transparent}
+.navora-app .shell .main .messages .run-card-body .process-note {padding:8px 6px 10px}
+.navora-app .shell .main .messages .process-note-label {display:block;font-size:10px;line-height:18px;color:#7e8c9e;margin-bottom:2px}
+.navora-app .shell .main .messages .process-note .msg-body {padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;font-size:12px;line-height:1.75;color:#586b82}
+.navora-app .shell .main .messages .process-note .msg-md-content>:first-child {margin-top:0}
+.navora-app .shell .main .messages .process-note .msg-md-content>:last-child {margin-bottom:0}
 .navora-app .shell .main .messages .run-card-body .activity-detail {background:#fff}
 .navora-app .shell .main .messages .activity-detail :is(.tool-sec-label,.log-kind-chip) {font-size:10px;font-weight:500;color:#8b97a7;margin-bottom:4px}
 .navora-app .shell .main .messages .activity-detail pre {max-height:280px;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;background:transparent;border:0;padding:0;color:#60738c;font-size:11px;line-height:1.65}

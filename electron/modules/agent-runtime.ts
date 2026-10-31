@@ -76,6 +76,7 @@ import type { WorkspaceShell } from './workspace-shell'
 import { executeAgentTool } from './browser-tools'
 import { OpenAICompatibleClient, resolveLlmTimeoutMs } from './llm/openai-compatible'
 import { formatCurrentWeather } from './weather'
+import { finalOutputs } from '../../shared/message-presentation'
 import { localChatTitle, canRefreshAutoTitle } from '../../shared/chat-title'
 
 export type { AgentEvent }
@@ -846,7 +847,7 @@ export class AgentRuntime {
               const m = this.chats.appendMessage(chatId, {
                 role: 'assistant',
                 content: reply.content,
-                meta: { partial: true, ...(reasoningText ? { reasoning: reasoningText } : {}) },
+                meta: { phase: 'progress', partial: true, ...(reasoningText ? { reasoning: reasoningText } : {}) },
               })
               if (m) this.emit({ type: 'message', chatId, message: m })
             }
@@ -1161,6 +1162,7 @@ export class AgentRuntime {
           role: 'assistant',
           content: text,
           meta: {
+            phase: 'final',
             durationMs,
             ...(runReasoningParts.length ? { reasoning: formatRunReasoning(runReasoningParts) } : {}),
             ...(finalSources.length ? { sources: finalSources } : {}),
@@ -1293,7 +1295,7 @@ export class AgentRuntime {
     for (const m of chat.messages) {
       if (!m.meta?.partial) continue
       const updated = this.chats.updateMessage(chatId, m.id, {
-        meta: { ...m.meta, partial: false },
+        meta: { ...m.meta, phase: m.meta.phase || 'progress', partial: false },
       })
       if (updated) this.emit({ type: 'message_update', chatId, message: updated })
     }
@@ -1811,9 +1813,10 @@ export class AgentRuntime {
   private summarizeSubchat(subChatId: string): string {
     const chat = this.chats.get(subChatId)
     if (!chat) return ''
-    for (let i = chat.messages.length - 1; i >= 0; i--) {
-      const m = chat.messages[i]
-      if (m.role === 'assistant' && m.content?.trim() && !m.meta?.partial) {
+    const outputs = finalOutputs(chat.messages)
+    for (let i = outputs.length - 1; i >= 0; i--) {
+      const m = outputs[i]
+      if (m.content?.trim()) {
         const t = m.content.trim().replace(/\s+/g, ' ')
         return t.length > 1200 ? `${t.slice(0, 1200)}…` : t
       }
