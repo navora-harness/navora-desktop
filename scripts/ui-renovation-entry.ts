@@ -200,6 +200,10 @@ app.on('browser-window-created', (_,win) => {
         await js(`(()=>{const button=document.querySelector(${JSON.stringify(source)}),dt=new DataTransfer();button.dispatchEvent(new DragEvent('dragstart',{dataTransfer:dt,bubbles:true}));const destination=document.querySelector(${JSON.stringify(target)})${pane?'':".closest('.rail-group-entry')"};destination.dispatchEvent(new DragEvent('dragover',{dataTransfer:dt,bubbles:true,cancelable:true}));destination.dispatchEvent(new DragEvent('drop',{dataTransfer:dt,bubbles:true,cancelable:true}));})()`)
         await wait(350)
       }
+      const checkCompositeBounds = async () => assert.equal(await js(`(()=>{
+        const icon=document.querySelector('.rail-composite-icon'),bounds=icon.getBoundingClientRect();
+        return [...icon.querySelectorAll('path')].every(path=>{const r=path.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=bounds.left-.5&&r.top>=bounds.top-.5&&r.right<=bounds.right+.5&&r.bottom<=bounds.bottom+.5});
+      })()`),true,'Combined member glyphs stay within their own icon bounds')
       await click('[data-panel="workspace"]')
       assert.equal(await js('document.querySelector(".workspace-panel").checkVisibility()&&!document.querySelector(".chat-list").checkVisibility()'),true,'Opening a rail entry closes the previous entry')
       assert.equal(await js('document.querySelectorAll(".dock-collapse").length'),0,'Independent sidebar panels have no collapse control')
@@ -215,6 +219,7 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('document.querySelectorAll(".rail-group-button").length'),2,'Combined members share one icon')
       assert.equal(await js('document.querySelector(".workspace-panel").checkVisibility()&&document.querySelector(".chat-list").checkVisibility()'),true,'Combined panes open together')
       assert.equal(await js('[...document.querySelectorAll(".dock-collapse")].filter(el=>el.checkVisibility()).length'),2,'Combination members retain their collapse controls')
+      await checkCompositeBounds()
       await capture('rail-combined-two')
       await railDrag('[data-panel="browser"]','.sidebar-dock',true)
       assert.equal(await js('!!document.querySelector(".rail-drag-hint")'),false,'Dropping into a pane clears the drag hint')
@@ -234,6 +239,7 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('[...document.querySelectorAll(".dock-group")].filter(el=>el.checkVisibility())[0].dataset.group'),'group-workspace','Reordering skips hidden groups')
       await click('[data-group="group-chats"] .dock-menu-button')
       await js('[...document.querySelectorAll(".dock-menu button")].find(el=>el.checkVisibility()&&el.textContent==="上移此组").click()');await wait(120)
+      await checkCompositeBounds()
       await capture('rail-combined-three')
       // A panel title can be detached directly into the activity rail.
       await click('[data-group="group-workspace"] .dock-collapse')
