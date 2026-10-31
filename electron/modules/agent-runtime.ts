@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { AGENT_TOOLS, PLUGIN_DEV_TOOL_NAMES, buildSystemPrompt } from '../../shared/agent-tools'
 import type { AppConfig } from '../../shared/config'
 import { modelCapabilities, reasoningValue } from '../../shared/model-capabilities'
@@ -210,6 +211,7 @@ const downloadProgressTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 export class AgentRuntime {
   private runs = new Map<string, AbortController>()
+  private runContexts = new Map<string, {id:string; turnId?:string; sequence:number}>()
   private titleController?: AbortController
   private titleTimer?: ReturnType<typeof setTimeout>
   private getConfig: () => AppConfig
@@ -236,7 +238,7 @@ export class AgentRuntime {
     const pending=this.insertedInputs.get(chatId)||[]
     if(pending.length>=80)throw new Error('message_queue_full')
     const content=input.content||'（附带浏览器上下文）'
-    const message=this.chats.appendMessage(chatId,{role:'user',content,meta:{inserted:true,...(input.refs?.length?{refs:input.refs}:{})}})
+    const message=this.appendRunMessage(chatId,{role:'user',content,meta:{inserted:true,...(input.refs?.length?{refs:input.refs}:{})}})
     if(!message)return false
     pending.push({role:'user',content:content+(input.refs?.length?'\n[浏览器引用]\n'+JSON.stringify(input.refs):'')})
     this.insertedInputs.set(chatId,pending)
@@ -294,6 +296,15 @@ export class AgentRuntime {
     this.onChatChanged = deps.onChatChanged
     this.askUser = deps.askUser
     this.askSkillReview = deps.askSkillReview
+  }
+
+  private appendRunMessage(chatId: string, message: Parameters<ChatStore['appendMessage']>[1]): ChatMessage | null {
+    const context = this.runContexts.get(chatId)
+    if (!context) return this.chats.appendMessage(chatId, message)
+    return this.chats.appendMessage(chatId, {
+      ...message,
+      meta: {...message.meta, runId:context.id, runSequence:context.sequence++, ...(context.turnId ? {turnId:context.turnId} : {})},
+    })
   }
 
   private parentIdOf(chatId: string): string | undefined {
@@ -392,7 +403,7 @@ export class AgentRuntime {
       this.pendingEvents.set(chatId, list)
       this.setPhase(chatId, 'observing', log.summary)
     }
-    const msg = this.chats.appendMessage(chatId, {
+    const msg = this.appendRunMessage(chatId, {
       role: 'log',
       content: log.content,
       meta: {
@@ -456,11 +467,19 @@ export class AgentRuntime {
   }
 
   notifyWindowClosed(chatId: string, windowId: string): void {
+    this.notifyResourceClosed(chatId, logWindowClosed(windowId).content)
+  }
+
+  notifySessionClosed(chatId: string, sessionId: string): void {
+    this.notifyResourceClosed(chatId, `你关闭了一个浏览器会话\nSession ID：${sessionId}`)
+  }
+
+  private notifyResourceClosed(chatId: string, content: string): void {
     // Keep the running Agent aware of removed resources without adding a chat
     // message or replacing its current phase for a routine manual UI action.
     if (!this.runs.has(chatId)) return
     const events = this.pendingEvents.get(chatId) || []
-    events.push(logWindowClosed(windowId).content)
+    events.push(content)
     this.pendingEvents.set(chatId, events)
   }
 
@@ -534,7 +553,7 @@ export class AgentRuntime {
 
     const answer = String(res.answer || '').trim()
     const entry = logUserChoice(answer)
-    const log = this.chats.appendMessage(chatId, {
+    const log = this.appendRunMessage(chatId, {
       role: 'log',
       content: `${entry.content}\n请按该选择继续任务，不要重复同一询问/决策。`,
       meta: {
@@ -564,7 +583,7 @@ export class AgentRuntime {
   /** Fail before the run loop starts (missing provider / API key, etc.). */
   private emitRunFailure(chatId: string, msg: string): void {
     const entry = logAgentError(msg)
-    const m = this.chats.appendMessage(chatId, {
+    const m = this.appendRunMessage(chatId, {
       role: 'log',
       content: entry.content,
       meta: {
@@ -623,6 +642,11 @@ export class AgentRuntime {
     this.titleController?.abort()
     const ctrl = new AbortController()
     this.runs.set(chatId, ctrl)
+    this.runContexts.set(chatId, {
+      id: randomUUID(),
+      turnId: [...(chat?.messages || [])].reverse().find(message => message.role === 'user')?.id,
+      sequence: 0,
+    })
     this.forkChains.set(chatId, [])
     const runStartedAt = Date.now()
     this.emit({
@@ -716,7 +740,7 @@ export class AgentRuntime {
           if (wantContinue) {
             budget += continueBy
             const entry = logContinueRounds(continueBy, budget)
-            const log = this.chats.appendMessage(chatId, {
+            const log = this.appendRunMessage(chatId, {
               role: 'log',
               content: entry.content,
               meta: {
@@ -795,7 +819,7 @@ export class AgentRuntime {
             toolArgsRecoveries += 1
             const tip = summarizeToolArgsLlmError(msg)
             const entry = logToolArgsRetry(toolArgsRecoveries, maxToolArgsRecoveries, tip)
-            const log = this.chats.appendMessage(chatId, {
+            const log = this.appendRunMessage(chatId, {
               role: 'log',
               content: entry.content,
               meta: {
@@ -849,7 +873,7 @@ export class AgentRuntime {
 
             if (reply.content?.trim()) {
               this.clearPartialMarkers(chatId)
-              const m = this.chats.appendMessage(chatId, {
+              const m = this.appendRunMessage(chatId, {
                 role: 'assistant',
                 content: reply.content,
                 meta: { phase: 'progress', partial: true, ...(reasoningText ? { reasoning: reasoningText } : {}) },
@@ -948,7 +972,7 @@ export class AgentRuntime {
             '继续执行',
             `模型只口述了下一步（第 ${incompleteReplyRecoveries} 次），已自动催促继续调用工具。`,
           )
-          const log = this.chats.appendMessage(chatId, {
+          const log = this.appendRunMessage(chatId, {
             role: 'log',
             content: entry.content,
             meta: {
@@ -980,7 +1004,7 @@ export class AgentRuntime {
             this.setPhase(chatId, 'calling_tool', '宿主代读页面…', 'browser_get')
             const autoCallId = `call_host_get_${Date.now().toString(36)}`
             const autoArgs = { windowId, what: 'text' as const }
-            const startMsg = this.chats.appendMessage(chatId, {
+            const startMsg = this.appendRunMessage(chatId, {
               role: 'tool',
               content: '执行中…',
               meta: {
@@ -1080,7 +1104,7 @@ export class AgentRuntime {
               '宿主代读',
               `本地模型未继续操作，已自动 browser_get（${windowId}）。`,
             )
-            const log = this.chats.appendMessage(chatId, {
+            const log = this.appendRunMessage(chatId, {
               role: 'log',
               content: entry.content,
               meta: {
@@ -1099,7 +1123,7 @@ export class AgentRuntime {
             '继续执行',
             `工具已执行但模型未给出结论（第 ${emptyAfterToolRecoveries} 次），已催促继续读取或作答。`,
           )
-          const log = this.chats.appendMessage(chatId, {
+          const log = this.appendRunMessage(chatId, {
             role: 'log',
             content: entry.content,
             meta: {
@@ -1163,7 +1187,7 @@ export class AgentRuntime {
         messages.push({ role: 'assistant', content: text })
         this.clearPartialMarkers(chatId)
         const durationMs = Math.max(0, Date.now() - runStartedAt)
-        const m = this.chats.appendMessage(chatId, {
+        const m = this.appendRunMessage(chatId, {
           role: 'assistant',
           content: text,
           meta: {
@@ -1181,7 +1205,7 @@ export class AgentRuntime {
 
       if (hitRoundLimit) {
         const entry = logRoundLimit(rounds)
-        const m = this.chats.appendMessage(chatId, {
+        const m = this.appendRunMessage(chatId, {
           role: 'log',
           content: entry.content,
           meta: {
@@ -1208,7 +1232,7 @@ export class AgentRuntime {
       if (isUserAbort) {
         stoppedByUser = true
         const entry = logAgentStopped()
-        const m = this.chats.appendMessage(chatId, {
+        const m = this.appendRunMessage(chatId, {
           role: 'log',
           content: entry.content,
           meta: {
@@ -1220,7 +1244,7 @@ export class AgentRuntime {
         if (m) this.emit({ type: 'message', chatId, message: m })
       } else {
         const entry = logAgentError(msg)
-        const m = this.chats.appendMessage(chatId, {
+        const m = this.appendRunMessage(chatId, {
           role: 'log',
           content: entry.content,
           meta: {
@@ -1239,6 +1263,7 @@ export class AgentRuntime {
       }
     } finally {
       this.clearLoadingMarkers(chatId, stoppedByUser || ctrl.signal.aborted ? 'aborted' : 'done')
+      this.runContexts.delete(chatId)
       this.runs.delete(chatId)
       this.insertedInputs.delete(chatId)
       this.pendingEvents.delete(chatId)
@@ -1612,7 +1637,7 @@ export class AgentRuntime {
 
     const scopeChatId = this.chats.resolvePluginScopeChatId(chatId)
     const pluginOwner = this.plugins.ownerOfToolForChat(scopeChatId, call.function.name)
-    const startMsg = this.chats.appendMessage(chatId, {
+    const startMsg = this.appendRunMessage(chatId, {
       role: 'tool',
       content: '执行中…',
       meta: {
@@ -2228,7 +2253,7 @@ export class AgentRuntime {
           answer: remembered,
         })
         const entry = logUserChoice(remembered)
-        const log = this.chats.appendMessage(chatId, {
+        const log = this.appendRunMessage(chatId, {
           role: 'log',
           content: entry.content,
           meta: {
@@ -2310,7 +2335,7 @@ export class AgentRuntime {
     }
 
     const entry = logUserChoice(answer)
-    const log = this.chats.appendMessage(chatId, {
+    const log = this.appendRunMessage(chatId, {
       role: 'log',
       content: entry.content,
       meta: {

@@ -3416,6 +3416,8 @@ function lastUserTurnFailed(messages: ChatMessage[] | undefined | null): {
 
 function runGroupLive(items: ChatMessage[]): boolean {
   if (!agentRunning.value || !items.length) return false
+  const latestRunId = active.value?.messages.at(-1)?.meta?.runId
+  if (latestRunId) return items.some(message => message.meta?.runId === latestRunId)
   const blocks = messageBlocks.value
   for (let index = blocks.length - 1; index >= 0; index--) {
     const block = blocks[index]!

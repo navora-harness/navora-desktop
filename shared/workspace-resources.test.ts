@@ -33,6 +33,10 @@ test('only successful known file operations receive turn and answer associations
   assert.equal(replyArtifactGroups(entries,messages.slice(0,2)).size,0,'In-flight files wait for the final answer')
   assert.equal(replyArtifactGroups(entries.slice(1),messages).size,0,'Removed or unknown files never become output cards')
   assert.equal(entries[0]!.evidence,undefined,'Cached metadata stays immutable')
+  const insertedRun=[messages[0]!,{...messages[1]!,meta:{...messages[1]!.meta,runId:'run-1',turnId:'u'}},
+    {id:'correction',role:'user',content:'Please keep it short',createdAt:2,meta:{inserted:true,runId:'run-1',turnId:'u'}},
+    {...messages[2]!,meta:{...messages[2]!.meta,runId:'run-1'}}] as import('./types').ChatMessage[]
+  assert.equal(replyArtifactGroups(entries,insertedRun).get('a')?.[0]?.evidence?.turnId,'u','Inserted corrections do not detach already-produced files from their run')
   for(const meta of [{toolName:'file_write',status:'error'},{toolName:'file_write',status:'running'},{toolName:'file_write',status:'done',fromPlugin:true}]){
     assert.equal(associateResourceEvidence(entries,[{...messages[1]!,meta}])[0]!.evidence,undefined)
   }

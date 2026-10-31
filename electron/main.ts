@@ -1807,8 +1807,10 @@ function registerIpc(): void {
   })
 
   rpcHandle('navora:browser.session.close', async (_e, sessionId: string) => {
+    const ownerChatId = registry.getSessionRecord(sessionId)?.chatId
     network.disposeSession(sessionId)
     await registry.closeSession(sessionId, true)
+    if (ownerChatId) agent?.notifySessionClosed(ownerChatId, sessionId)
     return true
   })
 
@@ -1828,7 +1830,9 @@ function registerIpc(): void {
   })
 
   rpcHandle('navora:browser.window.close', (_e, windowId: string) => {
+    const ownerChatId = registry.getWindowRecord(windowId)?.chatId
     registry.closeWindow(windowId)
+    if (ownerChatId) agent?.notifyWindowClosed(ownerChatId, windowId)
     return true
   })
 }

@@ -2,7 +2,7 @@ import type {ChatMessage} from './types'
 import {makeFileTab} from './file-tabs'
 import {finalOutputs} from './message-presentation'
 
-export type ResourceEvidence={messageId:string;turnId?:string;answerId?:string;operation:string;createdAt:number}
+export type ResourceEvidence={messageId:string;turnId?:string;runId?:string;answerId?:string;operation:string;createdAt:number}
 export type WorkspaceResource = {
   id: string
   ownerChatId: string
@@ -23,8 +23,17 @@ export function associateResourceEvidence(entries:readonly WorkspaceResource[],m
   const safe=(path:unknown)=>{try{return typeof path==='string'?makeFileTab('evidence',path).path:null}catch{return null}}
   const clear=(path:string)=>{for(const key of records.keys())if(key===path||key.startsWith(path+'/')){records.delete(key);pending.delete(key)}}
   for(const message of messages){
-    if(message.role==='user'){turnId=message.id;pending.clear();continue}
-    if(finals.has(message.id)){for(const record of pending.values())record.answerId=message.id;pending.clear();continue}
+    if(message.role==='user'){
+      if(message.meta?.inserted&&message.meta.runId){turnId=message.meta.turnId||turnId;continue}
+      turnId=message.id;pending.clear();continue
+    }
+    if(finals.has(message.id)){
+      for(const [path,record] of pending){
+        if(record.runId&&message.meta?.runId&&record.runId!==message.meta.runId)continue
+        record.answerId=message.id;pending.delete(path)
+      }
+      continue
+    }
     if(message.role!=='tool'||message.meta?.status!=='done'||message.meta?.fromPlugin)continue
     const operation=String(message.meta?.toolName||'')
     if(!['file_write','file_copy','file_move','file_concat','file_download','file_delete','browser_screenshot','desktop_screenshot'].includes(operation))continue
@@ -38,7 +47,7 @@ export function associateResourceEvidence(entries:readonly WorkspaceResource[],m
     if(!path)continue
     if(operation==='file_delete'){clear(path);continue}
     if(!wanted.has(path))continue
-    const record:ResourceEvidence={messageId:message.id,turnId,operation,createdAt:message.createdAt}
+    const record:ResourceEvidence={messageId:message.id,turnId:message.meta.turnId||turnId,operation,createdAt:message.createdAt,...(message.meta.runId?{runId:message.meta.runId}:{})}
     records.set(path,record);pending.set(path,record)
   }
   return entries.map(entry=>({...entry,evidence:records.get(entry.path)}))

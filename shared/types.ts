@@ -68,6 +68,12 @@ export type ChatMessage = {
   content: string
   createdAt: number
   meta?: {
+    /** Host-assigned identity for a started run; absent on legacy or idle UI messages. */
+    runId?: string
+    /** Append order within a run; updates keep their original sequence. */
+    runSequence?: number
+    /** Initial user message; inserted corrections remain part of the same run. */
+    turnId?: string
     /** Distinguishes execution narration from a completed answer after streaming ends. */
     phase?: 'progress' | 'final'
     refs?: BrowserContextRef[]
