@@ -43,6 +43,19 @@ export function associateResourceEvidence(entries:readonly WorkspaceResource[],m
   }
   return entries.map(entry=>({...entry,evidence:records.get(entry.path)}))
 }
+
+/** Existing, successfully produced workspace files, placed under their actual answer. */
+export function replyArtifactGroups(entries:readonly WorkspaceResource[],messages:readonly ChatMessage[]):Map<string,WorkspaceResource[]>{
+  const groups=new Map<string,WorkspaceResource[]>()
+  for(const entry of associateResourceEvidence(entries,messages)){
+    const answerId=entry.evidence?.answerId
+    if(!answerId)continue
+    const group=groups.get(answerId)||[]
+    group.push(entry)
+    groups.set(answerId,group)
+  }
+  return groups
+}
 export type WorkspaceResourceSnapshot = {
   ok: boolean
   entries: WorkspaceResource[]

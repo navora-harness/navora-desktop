@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { finalOutputs, progressMessageIds, transcriptBlocks } from './message-presentation'
+import { executionSummary, finalOutputs, progressMessageIds, transcriptBlocks } from './message-presentation'
 import type { ChatMessage } from './types'
 
 const message = (id: string, role: ChatMessage['role'], meta?: ChatMessage['meta']): ChatMessage => ({id,role,content:id,createdAt:1,meta})
@@ -56,4 +56,34 @@ test('turn stopping and round limits remain visible when routine logs are disabl
     const last=blocks.at(-1)!
     assert.equal(last.type==='run'&&last.items[0]!.meta?.kind,kind)
   }
+})
+
+test('post-answer logs rejoin the existing execution without crossing turns or later tool continuations',()=>{
+  const first=[message('u','user'),message('t','tool'),message('a','assistant',{phase:'final'})]
+  const logs=[message('l1','log',{kind:'agent_status'}),message('l2','log',{kind:'user_choice'})]
+  const all=[...first,...logs,message('u2','user'),message('a2','assistant',{phase:'final'}),message('l3','log'),message('t2','tool'),message('l4','log')]
+  const original=JSON.stringify(all),blocks=transcriptBlocks(all,options)
+  assert.deepEqual(blocks.map(block=>block.key),['u','run:t','a','u2','run:l3','a2','run:t2'])
+  assert.deepEqual(blocks.filter(block=>block.type==='run').map(block=>block.items.map(item=>item.id)),[['t','l1','l2'],['l3'],['t2','l4']])
+  assert.equal(transcriptBlocks(first,options)[1]!.key,blocks[1]!.key,'Appending closing logs preserves the disclosure key')
+  assert.equal(JSON.stringify(all),original,'Grouping does not mutate the persisted transcript')
+})
+
+test('manual resource closure stays quiet while genuine failures remain visible',()=>{
+  const all=[message('u','user'),message('t','tool'),message('a','assistant'),
+    {...message('close','log',{kind:'user_op',summary:'你关闭了一个浏览器窗口'}),content:'你关闭了一个浏览器窗口\n窗口 ID：123'},
+    message('error','log',{kind:'agent_error'})]
+  const blocks=transcriptBlocks(all,options),run=blocks.find(block=>block.type==='run')!
+  assert.deepEqual(run.type==='run'&&run.items.map(item=>item.id),['t','error'])
+  assert.equal(all.length,5,'Legacy logs remain in original history and JSON exports')
+})
+
+test('execution summaries count logs and attempted calls without claiming all attempts succeeded',()=>{
+  const all=[message('ok','tool',{status:'done'}),message('failed','tool',{status:'error'}),message('log','log',{kind:'agent_status'})]
+  assert.equal(executionSummary(all),'执行记录 · 2 次调用 · 1 条日志 · 1 次调用失败')
+  assert.equal(executionSummary(all,{live:true,runningLabel:'读取页面'}),'正在读取页面 · 2 次调用 · 1 条日志 · 1 次调用失败')
+  assert.match(executionSummary([...all,message('error','log',{kind:'agent_error'})]),/^执行中断/)
+  assert.match(executionSummary([...all,message('stop','log',{kind:'agent_stop'})]),/^已停止/)
+  assert.match(executionSummary([message('limit','log',{kind:'round_limit'})]),/^已达轮次上限/)
+  assert.equal(executionSummary([message('thought','assistant')]),'执行记录')
 })

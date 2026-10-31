@@ -66,6 +66,17 @@ try {
   const lifetimeRuntime = new AgentRuntime({
     chats: titleChats, registry: lifetimeRegistry, getConfig: () => config, emit: () => {},
   } as unknown as ConstructorParameters<typeof AgentRuntime>[0])
+  const manualCloseState = lifetimeRuntime as unknown as {runs:Map<string,AbortController>;pendingEvents:Map<string,string[]>}
+  const historyBeforeClose = titleChats.get(titleChat.id)!.messages.length
+  lifetimeRuntime.notifyWindowClosed(titleChat.id, 'idle-window')
+  assert.equal(titleChats.get(titleChat.id)!.messages.length, historyBeforeClose, 'Idle manual closure does not add a chat log')
+  assert.equal(manualCloseState.pendingEvents.has(titleChat.id), false, 'Idle closures do not leak into a future task')
+  manualCloseState.runs.set(titleChat.id, new AbortController())
+  lifetimeRuntime.notifyWindowClosed(titleChat.id, 'active-window')
+  assert.equal(titleChats.get(titleChat.id)!.messages.length, historyBeforeClose, 'Active manual closure stays out of the visible transcript')
+  assert.match(manualCloseState.pendingEvents.get(titleChat.id)![0]!, /active-window/, 'The active Agent still learns which window was removed')
+  manualCloseState.runs.delete(titleChat.id)
+  manualCloseState.pendingEvents.delete(titleChat.id)
   const parentSession = lifetimeRegistry.createSession(titleChat.id)
   lifetimeRegistry.createWindow(parentSession.sessionId, { show: false })
   const owners = [titleChat.id]

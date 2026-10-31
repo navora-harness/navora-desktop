@@ -41,6 +41,8 @@ for(let i=0;i<120;i++) {
     {id:'ui-style-progress-new',role:'assistant',content:'窗口已存在，正在读取页面内容。',createdAt:402,meta:{phase:'progress',partial:false,reasoning:'第二轮观察'}},
     {id:'ui-style-tool-recovered',role:'tool',content:'{"ok":true,"path":"preview.md"}',createdAt:403,meta:{toolName:'file_write',status:'done'}},
     {id:'ui-style-answer-error',role:'assistant',content:'这里仅检查失败工具的折叠样式。',createdAt:404,meta:{phase:'final',reasoning:'第一轮观察\n第二轮观察\n完成回答'}},
+    ...Array.from({length:4},(_,n)=>({id:'ui-style-tail-log'+n,role:'log',content:'收尾日志 '+n,createdAt:404,meta:{kind:'agent_status'}})),
+    {id:'ui-style-close-log',role:'log',content:'你关闭了一个浏览器窗口',createdAt:404,meta:{kind:'user_op'}},
     {id:'ui-style-user-plugin',role:'user',content:'插件样式（本地测试夹具）',createdAt:403},
     {id:'ui-style-plugin',role:'tool',content:'{"ok":true}',createdAt:404,meta:{toolName:'fixture_plugin',status:'done',fromPlugin:true,pluginId:'fixture'}},
     {id:'ui-style-answer-plugin',role:'assistant',content:'插件摘要。',createdAt:405},
@@ -265,6 +267,10 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('getComputedStyle(document.querySelector(".run-card.error .run-card-head")).borderTopColor'),'rgba(0, 0, 0, 0)','Collapsed activity has no resting border')
       assert.equal(await js('document.querySelectorAll(".msg.assistant[data-msg-id^=ui-style-progress]").length'),0,'Progress never renders as independent final replies')
       await click('.run-card.error .run-card-head')
+      assert.equal(await js('document.querySelectorAll(".run-card.error .run-item.log").length'),4,'Closing logs stay with their tool calls before the final answer')
+      assert.match(await js('document.querySelector(".run-card.error .run-card-head").textContent'),/2 次调用 · 4 条日志 · 1 次调用失败/,'Folded summary distinguishes failed attempts from the final outcome')
+      assert.equal(await js('document.querySelectorAll("[data-msg-id=ui-style-close-log]").length'),0,'Manual browser closure never adds a visible chat log')
+      assert.equal(await js('document.querySelector("[data-msg-id=ui-style-answer-error] .reply-artifact").dataset.outputPath'),'preview.md','Output files sit beneath their own final answer')
       assert.equal(await js('document.querySelectorAll(".run-card.error .process-note").length'),2,'Legacy and explicitly tagged progress join one process')
       assert.equal(await js('document.querySelectorAll(".process-note .reply-footer").length'),0,'Intermediate notes have no final-answer actions or duration')
       await click('.run-card.error .msg-reasoning-toggle')
@@ -275,6 +281,9 @@ app.on('browser-window-created', (_,win) => {
       await click('.run-card.error .run-card-head')
       await js('document.querySelector("[data-msg-id=ui-style-answer-error]").scrollIntoView({block:"center"})')
       await capture('final-answer-separation')
+      await click('[data-msg-id="ui-style-answer-error"] .reply-artifact')
+      assert.equal(await js('document.querySelector(".file-workspace [role=tab][aria-selected=true]").textContent.includes("preview.md")'),true,'Output card opens the existing tabbed file preview')
+      await click('[aria-label="关闭文件预览"]')
       await js('(async()=>{const cfg=await window.navora.config.get();await window.navora.config.save({app:{...cfg.app,collapse_tool_runs:false,collapse_run_logs:true}})})()')
       await wait(200)
       assert.equal(await js('[...document.querySelectorAll(".run-card-text")].some(el=>el.textContent.includes("1 条日志"))'),true,'Even a single folded log uses the shared disclosure')
@@ -508,6 +517,7 @@ app.on('browser-window-created', (_,win) => {
       await wait(240)
       const liveResource=await js('(async()=>{const snapshot=await window.navora.workspace.resources("chat_renovation119");return snapshot.entries.find(entry=>entry.path==="generated-live.md")})()')
       assert.equal(liveResource.evidence.answerId,processTurn.at(-1).id,'An actual generated file acquires its completed answer association')
+      assert.equal(await js(`document.querySelector('[data-msg-id="${processTurn.at(-1).id}"] .reply-artifact')?.dataset.outputPath`),'generated-live.md','Real file generation appends its output card below the final answer')
       assert.equal(await js(`!!document.querySelector('.resource-overview [data-resource-path="generated-live.md"]')`),true,'The resource overview updates after an actual file-producing run')
       await capture('conversation-unified-activity')
       assert.deepEqual(errors,[],'No renderer errors')
