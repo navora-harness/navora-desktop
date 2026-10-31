@@ -46,7 +46,7 @@
             <div class="card">
               <h3 class="card-title">第一步：配置模型</h3>
               <ol class="doc-list">
-                <li>打开右下角齿轮进入<strong>设置 → 模型</strong></li>
+                <li>点击左侧图标栏的设置按钮进入<strong>设置 → 模型</strong></li>
                 <li>添加 OpenAI 兼容服务商（Base URL / 模型名）</li>
                 <li>API Key 可选：先无密钥试用；若接口要求鉴权，再在设置或对话中补充</li>
               </ol>

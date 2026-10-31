@@ -421,16 +421,112 @@
 .navora-app .message-display-card .log-fold-row .switch-title { font-size: 12px; font-weight: 500; color: #505965; }
 .navora-app .message-display-card .setting-status { font-size: 11px; line-height: 20px; color: #657181; text-align: right; }
 /* Postpile form treatment with the native Vuetify keyboard/checked semantics. */
-.navora-app .v-switch.v-switch--inset .v-switch__track { min-width: 36px; height: 20px; background: #c8cdd5; opacity: 1; border-radius: 99px; transition: background-color 200ms ease; }
-.navora-app .v-switch.v-switch--inset .v-switch__thumb { width: 14px; height: 14px; background: #fff; color: #fff; transform: none; box-shadow: 0 1px 3px #18283826; }
-.navora-app .v-switch.v-switch--inset .v-selection-control--dirty .v-switch__track { background: #438da2; }
-.navora-app .v-switch .v-selection-control__input { transform: translateX(-8px); transition: transform 220ms var(--navora-ease); }
-.navora-app .v-switch .v-selection-control--dirty .v-selection-control__input { transform: translateX(8px); }
-.navora-app .v-switch:dir(rtl) .v-selection-control__input { transform: translateX(8px); }
-.navora-app .v-switch:dir(rtl) .v-selection-control--dirty .v-selection-control__input { transform: translateX(-8px); }
-.navora-app .v-switch .v-selection-control__input:has(input:focus-visible) { outline: 2px solid #438da2; outline-offset: 2px; }
+:is(.navora-app,.skill-dlg-card,.ob-card) .v-switch.v-switch--inset .v-switch__track { min-width: 36px; height: 20px; background: #c8cdd5; opacity: 1; border-radius: 99px; transition: background-color 200ms ease; }
+:is(.navora-app,.skill-dlg-card,.ob-card) .v-switch.v-switch--inset .v-switch__thumb { width: 14px; height: 14px; background: #fff; color: #fff; transform: none; box-shadow: 0 1px 3px #18283826; }
+:is(.navora-app,.skill-dlg-card,.ob-card) .v-switch.v-switch--inset .v-selection-control--dirty .v-switch__track { background: #438da2; }
+:is(.navora-app,.skill-dlg-card,.ob-card) .v-switch .v-selection-control__input { transform: translateX(-8px); transition: transform 220ms var(--navora-ease); }
+:is(.navora-app,.skill-dlg-card,.ob-card) .v-switch .v-selection-control--dirty .v-selection-control__input { transform: translateX(8px); }
+:is(.navora-app,.skill-dlg-card,.ob-card) .v-switch:dir(rtl) .v-selection-control__input { transform: translateX(8px); }
+:is(.navora-app,.skill-dlg-card,.ob-card) .v-switch:dir(rtl) .v-selection-control--dirty .v-selection-control__input { transform: translateX(-8px); }
+:is(.navora-app,.skill-dlg-card,.ob-card) .v-switch .v-selection-control__input:has(input:focus-visible) { outline: 2px solid #438da2; outline-offset: 2px; }
 .navora-app .settings-page .v-field__outline { transition: color 180ms ease, opacity 180ms ease; }
 @keyframes navora-activity-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 @media(prefers-reduced-motion:reduce) {
   .navora-app *, .v-overlay *, .navora-app *::before, .navora-app *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+
+/* Shared surface controls also cover dialogs teleported outside the application. */
+:root { --n-muted:var(--navora-muted); --n-surface:var(--navora-surface); --n-text:var(--navora-ink); --n-border:#e1e5eb; --n-accent:var(--navora-accent); --n-hover:#f0f2f6; }
+:is(.skill-dlg-card,.ob-card) { color:var(--navora-ink); }
+:is(.skill-dlg-card,.ob-card) :is(.v-field,.v-btn) { border-radius:8px; }
+:is(.skill-dlg-card,.ob-card) .v-field__input { min-height:40px; padding-top:8px; padding-bottom:8px; font-size:13px; }
+:is(.skill-dlg-card,.ob-card) .v-label { font-size:12px; }
+:is(.skill-dlg-card,.ob-card) :is(button,input,textarea,select):focus-visible { outline:2px solid var(--navora-accent); outline-offset:2px; }
+.skill-dlg-card .skill-dlg-head { padding:14px 18px; background:#fff; align-items:center; }
+.skill-dlg-card .skill-dlg-title { font-size:16px; font-weight:600; }
+.skill-dlg-card .skill-dlg-sub { font-size:12px; }
+.skill-dlg-card .skill-dlg-close { width:30px; height:30px; margin:0; border:1px solid #e1e5eb; border-radius:8px; color:#626d7b; }
+.skill-dlg-card .skill-dlg-close:disabled { opacity:.4; cursor:default; }
+.skill-dlg-card .skill-dlg-actions { padding:10px 16px !important; background:#fff; }
+.surface-toggle { appearance:none; flex-shrink:0; position:relative; width:34px; height:20px; border:1px solid transparent; border-radius:20px; background:#c8cdd5; cursor:pointer; transition:background-color .2s; }
+.surface-toggle::after { content:''; position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%; background:#fff; transition:transform .2s var(--navora-ease); }
+.surface-toggle:checked { background:#438da2; }
+.surface-toggle:checked::after { transform:translateX(14px); }
+.navora-app .settings-page .advanced-toggle { display:flex; align-items:center; gap:7px; padding:5px 0; color:#626d7b; background:transparent; border:0; text-align:left; font-size:12px; cursor:pointer; }
+.navora-app .settings-page .advanced-toggle svg { width:10px; }
+.navora-app .settings-page .advanced-connection { padding:10px; background:#f7f8fa; border:1px solid #edf0f4; border-radius:8px; }
+.navora-app .settings-page .connection-form > .v-input:first-child { grid-column:1 / -1; }
+.navora-app .settings-page .settings-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; min-height:120px; padding:20px; color:#727b8a; text-align:center; font-size:12px; }
+.navora-app .settings-page .settings-empty > svg { width:22px; height:22px; color:#8593a4; }
+.navora-app .settings-page .settings-empty > strong { color:#505c6c; font-size:13px; font-weight:500; }
+.navora-app .settings-page .permission-filters { display:flex; align-items:center; gap:10px; margin:12px 0; flex-wrap:wrap; }
+.navora-app .settings-page .permission-filters > .v-input { flex:1; min-width:160px; }
+.filter-check { display:flex; gap:6px; align-items:center; font-size:12px; color:#626d7b; }
+.filter-check input { accent-color:#438da2; }
+.navora-app .settings-page .provider-list-item:focus-visible { outline:2px solid var(--navora-accent); outline-offset:-2px; }
+@media(min-width:900px) { .navora-app .settings-page .provider-list-card { position:sticky; top:0; max-height:calc(100dvh - 110px); overflow:auto; align-self:start; } }
+@media(pointer:coarse) { .catalog-button,.icon-control,.skill-dlg-card .skill-dlg-close { min-height:36px; min-width:36px; } }
+@media(prefers-reduced-motion:reduce) { .surface-toggle,.surface-toggle::after { transition:none; } }
+
+/* Keep field labels readable on both workspace and teleported surfaces. */
+:is(.navora-app .settings-page,.skill-dlg-card,.ob-card) .v-field .v-field-label { color:#626d7b; opacity:1; }
+:is(.navora-app .settings-page,.skill-dlg-card,.ob-card) .v-field__outline { color:#9ba8b8; opacity:1; }
+
+.settings-save-status { color:var(--navora-muted); font-size:11px; white-space:nowrap; }
+@media(max-width:600px) { .settings-save-status { max-width:92px; overflow:hidden; text-overflow:ellipsis; } .settings-page .nav-guide { padding-inline:9px; } }
+
+/* Parent scene cancellation must not leave a hidden pane interactive or measurable. */
+.navora-app :is(.sidebar-workspace-pane,.sidebar-browser-pane)[data-visible="false"]:not(.sidebar-pane-leave-active) { display:none !important; }
+
+/* Narrow desktop windows still reserve the native caption hit area. */
+.navora-app .shell.frameless.mobile-layout > .main > .settings-workspace { padding-top:40px; }
+
+.ob-connection { display:grid; gap:12px; margin-top:12px; }
+
+.navora-app .main .messages > .msg { contain:layout style; }
+
+.navora-app .sidebar .tree-row > button.tree-name { min-width:0; border:0; background:transparent; text-align:left; font:inherit; color:inherit; padding:0; cursor:pointer; }
+.settings-discard { border:1px solid transparent; padding:4px 7px; border-radius:7px; color:var(--navora-muted); font-size:11px; cursor:pointer; -webkit-app-region:no-drag; }
+.settings-discard:hover:not(:disabled) { background:#eef0f4; color:var(--navora-ink); }
+.mobile-provider-select { margin-top:12px; }
+.navora-app .settings-workspace.is-mobile .nav-item { border-radius:8px; border-color:transparent; color:#626d7b; }
+.navora-app .settings-workspace.is-mobile .nav-item.active { background:#e4e9f2; color:#294d83; border-color:#d8e0eb; }
+@media(max-width:340px) { .settings-save-status { display:none; } }
+
+/* Offscreen transcript rows retain measured height and skip layout/paint work. */
+.navora-app .main .messages > .msg { content-visibility:auto; contain-intrinsic-block-size:auto 96px; }
+
+/* Resource resizing stays inside the rail instead of invalidating the transcript. */
+.navora-app .sidebar { contain:layout style paint; }
+.navora-app .sidebar .chat-list { contain:layout style paint; }
+.navora-app .main .messages { contain:layout style paint; }
+
+/* Compact conversation rows keep status and pending decisions on the same line. */
+.navora-app .sidebar .chat-item { min-height:34px; height:34px; }
+.navora-app .sidebar .chat-item-main { min-height:34px; height:34px; padding-block:4px; }
+.navora-app .sidebar .chat-item-body { display:flex; flex-direction:row; align-items:center; justify-content:flex-start; gap:5px; min-width:0; }
+.navora-app .sidebar .chat-item-title { flex:1; min-width:0; font-size:12px; }
+.navora-app .sidebar .chat-item-title-text { text-overflow:ellipsis; white-space:nowrap; }
+.navora-app .sidebar .chat-item-meta { flex:none; margin:0; height:auto; min-height:0; }
+.navora-app .sidebar .chat-item-time,.navora-app .sidebar .chat-item-stats { display:none; }
+.navora-app .sidebar .chat-item-meta-end { gap:3px; }
+.navora-app .sidebar .ask-pending-badge { max-width:52px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:1px 4px; font-size:9px; }
+.navora-app .sidebar .chat-date-label { padding-block:5px 3px; font-size:10px; }
+.navora-app .sidebar .chat-status-icon { width:24px; height:24px; }
+.navora-app .sidebar .subchat-row { min-height:29px; }
+@media(min-width:1101px) {
+  .navora-app .main.file-preview-open > .messages-wrap,.navora-app .main.file-preview-open > .composer { margin-right:var(--preview-width); }
+}
+.navora-app .shell.mobile-layout .file-preview { top:48px; width:100%; }
+
+/* Dock groups own geometry; panel state survives tab and group changes. */
+.navora-app .sidebar .sidebar-dock.dock-layout { flex:1; min-height:0; }
+.navora-app .sidebar .dock-pane > :is(.sidebar-workspace-pane,.sidebar-browser-pane) { flex:1; height:auto; min-height:0; }
+.navora-app .sidebar .dock-pane .sidebar-panel { border:0; border-radius:0; background:transparent; }
+.navora-app .sidebar .dock-pane .chat-toolbar { height:36px; min-height:36px; margin:0; padding:2px 4px; }
+.navora-app .sidebar .dock-pane .chat-list { min-height:0; padding-inline:4px; }
+.navora-app .sidebar .dock-panel-actions .docked-head { min-height:0; padding:0; border:0; margin:0; background:transparent; }
+.navora-app .sidebar .dock-panel-actions .docked-head .icon-btn { width:23px; height:24px; border-radius:6px; }
+.navora-app .sidebar .dock-panel-actions .docked-head .icon-btn svg { width:11px; height:11px; }
+.navora-app .sidebar .dock-pane .batch-list-footer { flex-shrink:0; padding:6px; }
+.navora-app .sidebar .dock-pane .res-body { flex:1; }

@@ -21,6 +21,8 @@
         </div>
       </div>
       <div class="top-actions">
+        <button v-if="hasPendingSettings" type="button" class="settings-discard" title="放弃未应用的修改" :disabled="saving || savingInstant" @click="discardSettings">还原</button>
+        <span class="settings-save-status" role="status">{{ saving || savingInstant ? '保存中…' : hasPendingSettings ? '有未应用更改' : '已保存' }}</span>
         <v-btn
           color="primary"
           variant="tonal"
@@ -47,7 +49,7 @@
       </div>
     </header>
 
-    <div v-if="cfg" class="shell">
+    <div v-if="cfg" class="shell" :inert="saving">
       <Teleport :to="navigationTarget || 'body'" :disabled="!navigationTarget">
       <nav class="nav settings-navigation">
         <div ref="navListEl" class="nav-list">
@@ -247,7 +249,8 @@
                       重置预设
                     </button>
                   </div>
-                  <ul class="provider-list" role="listbox">
+                  <v-select v-if="mobile" :model-value="selectedProviderId" :items="cfg.ai.providers.map(p => ({title:p.label || p.id,value:p.id}))" label="当前服务商" class="mobile-provider-select" :menu-props="selectMenuProps" hide-details @update:model-value="selectProvider" />
+                  <ul v-else class="provider-list" role="listbox" aria-label="模型服务商">
                     <li
                       v-for="p in cfg.ai.providers"
                       :key="p.id"
@@ -258,6 +261,9 @@
                       }"
                       role="option"
                       :aria-selected="p.id === selectedProviderId"
+                      tabindex="0"
+                      @keydown.enter.prevent="selectProvider(p.id)"
+                      @keydown.space.prevent="selectProvider(p.id)"
                       @click="selectProvider(p.id)"
                     >
                       <div class="provider-list-main">
@@ -307,16 +313,15 @@
                       </button>
                     </div>
                   </div>
-                  <div class="form-grid">
-                    <v-text-field
-                      v-model="provider.label"
-                      label="显示名称"
-                      variant="outlined"
-                      density="comfortable"
-                      color="primary"
-                      base-color="#c5d0db"
-                    />
-                    <v-text-field
+                  <div class="form-grid connection-form">
+                    <ProviderConnectionFields :provider="provider" v-model:key-draft="apiKeyDraft" :key-label="apiKeyLabel">
+                      <template #key-actions><button v-if="apiKeyPreview" type="button" class="provider-tool-btn danger" :disabled="clearingApiKey" @click.stop="clearApiKey">清除</button></template>
+                    </ProviderConnectionFields>
+                    <button type="button" class="advanced-toggle span-2" :aria-expanded="advancedModel" @click="advancedModel = !advancedModel"><font-awesome-icon :icon="advancedModel ? 'chevron-down' : 'chevron-right'" />高级连接配置</button>
+                    <DisclosureTransition><div v-if="advancedModel" class="advanced-connection span-2 form-grid">
+                      <v-select v-model="provider.protocol" :items="[{title:'OpenAI Chat Completions', value:'chat_completions'}]" label="API 协议" :menu-props="selectMenuProps" />
+                      <v-select v-model="provider.output_token_param" :items="['max_tokens','max_completion_tokens']" label="输出上限参数" :menu-props="selectMenuProps" />
+                      <v-text-field
                       v-model.number="provider.timeout_ms"
                       type="number"
                       label="超时 (ms)"
@@ -327,56 +332,9 @@
                       color="primary"
                       base-color="#c5d0db"
                     />
-                    <v-text-field
-                      v-model="provider.base_url"
-                      label="Base URL"
-                      variant="outlined"
-                      density="comfortable"
-                      color="primary"
-                      base-color="#c5d0db"
-                      class="span-2"
-                    />
-                    <v-select v-model="provider.protocol" :items="[{title:'OpenAI Chat Completions', value:'chat_completions'}]" label="API 协议" class="span-2" :menu-props="selectMenuProps" />
-                    <v-select v-model="provider.output_token_param" :items="['max_tokens','max_completion_tokens']" label="输出上限参数" class="span-2" :menu-props="selectMenuProps" />
-                    <p v-if="presetHint" class="span-2">{{ presetHint }}</p>
-                    <ModelCatalogEditor :key="provider.id" :provider="provider" />
-                    <v-select
-                      v-model="provider.model"
-                      :items="provider.models"
-                      label="默认模型"
-                      variant="outlined"
-                      density="comfortable"
-                      color="primary"
-                      base-color="#c5d0db"
-                      class="navora-select span-2"
-                      :menu-props="selectMenuProps"
-                      hint="未单独指定时使用"
-                      persistent-hint
-                    />
-                    <v-text-field
-                      v-model="apiKeyDraft"
-                      :label="apiKeyLabel"
-                      type="password"
-                      variant="outlined"
-                      density="comfortable"
-                      color="primary"
-                      base-color="#c5d0db"
-                      class="span-2"
-                      hint="仅保存在本地，不写入配置文件；留空点应用不会改动已保存的 Key"
-                      persistent-hint
-                    >
-                      <template v-if="apiKeyPreview" #append-inner>
-                        <button
-                          type="button"
-                          class="provider-tool-btn danger"
-                          style="margin-right: 2px"
-                          :disabled="clearingApiKey"
-                          @click.stop="clearApiKey"
-                        >
-                          清除
-                        </button>
-                      </template>
-                    </v-text-field>
+
+                    </div></DisclosureTransition>
+                    <ModelCatalogEditor :key="provider.id" :provider="provider" :pending-credentials="!!apiKeyDraft.trim()" />
                   </div>
                 </div>
               </div>
@@ -425,8 +383,8 @@
               <p>Agent 窗口与访问限制</p>
             </header>
             <div class="card">
-              <h3 class="card-title">UA 配置</h3>
-              <div class="ua-form">
+              <button type="button" class="advanced-toggle" :aria-expanded="advancedBrowser" @click="advancedBrowser = !advancedBrowser"><font-awesome-icon :icon="advancedBrowser ? 'chevron-down' : 'chevron-right'" />访问与语言配置</button>
+              <DisclosureTransition><div v-if="advancedBrowser" class="ua-form">
                 <v-select
                   :model-value="cfg.browser.default_ua_preset"
                   :items="uaPresetSelectItems"
@@ -466,7 +424,7 @@
                   color="primary"
                   base-color="#c5d0db"
                 />
-              </div>
+              </div></DisclosureTransition>
             </div>
 
             <div class="card">
@@ -572,13 +530,18 @@
               />
               <p class="perm-toolbar-hint">重选预设会覆盖全部能力档位</p>
             </div>
+            <div class="permission-filters">
+              <v-text-field v-model="permissionSearch" label="搜索能力" density="compact" hide-details clearable />
+              <v-select v-model="permissionGroup" :items="permissionGroups" density="compact" hide-details label="能力分组" :menu-props="selectMenuProps" />
+              <label class="filter-check"><input v-model="permissionModified" type="checkbox" />仅与均衡预设不同</label>
+            </div>
             <div class="card perm-table">
               <div class="perm-table-head">
                 <span>能力</span>
                 <span>标识</span>
                 <span>档位</span>
               </div>
-              <div v-for="(mode, key) in cfg.permissions.modes" :key="key" class="perm-row">
+              <div v-for="(mode, key) in visiblePermissions" :key="key" class="perm-row">
                 <span class="perm-label">{{ permLabel(key) }}</span>
                 <span class="perm-id">{{ key }}</span>
                 <v-select
@@ -594,6 +557,7 @@
                   @update:model-value="(v) => onModeChange(key, v)"
                 />
               </div>
+              <p v-if="!Object.keys(visiblePermissions).length" class="settings-empty">没有匹配的能力</p>
               <p class="perm-toolbar-hint mt-2">
                 「添加/编辑技能」为拒绝时，Agent 不能发起技能弹窗。
               </p>
@@ -719,7 +683,7 @@
             </div>
 
             <div v-if="!skillsList.length" class="card mt-3">
-              <div class="switch-hint">尚无技能，可新建或导入。</div>
+              <div class="settings-empty"><font-awesome-icon icon="book" /><strong>暂无技能</strong><span>新建、导入或从商店添加</span></div>
             </div>
 
             <div v-if="proposals.length && !skillBatchMode" class="card mt-3">
@@ -1053,7 +1017,7 @@
             </div>
 
             <div v-if="!pluginsList.length" class="card mt-2">
-              <div class="switch-hint">暂无插件。可导入插件文件夹，或等待 bundled 同步。</div>
+              <div class="settings-empty"><font-awesome-icon icon="puzzle-piece" /><strong>暂无插件</strong><span>导入插件或从商店添加</span></div>
             </div>
 
             <div
@@ -1551,9 +1515,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { defaultModelCapabilities } from '@shared/model-capabilities'
+import { rebaseSettingsDraft } from '@shared/settings-draft'
+import { settingsDraftSession, settingsCredentialDrafts } from '@/composables/settingsDraftSession'
+import ProviderConnectionFields from '@/components/ProviderConnectionFields.vue'
 import ModelCatalogEditor from '@/components/ModelCatalogEditor.vue'
 import DisclosureTransition from '@/components/motion/DisclosureTransition'
 import {
+  createDefaultConfig,
   createDefaultForkDecision,
   FORK_ASK_TIMEOUT_DEFAULT_MS,
   FORK_ASK_TIMEOUT_LIMITED_MS,
@@ -1568,7 +1537,7 @@ import {
   syncBrowserUaFields,
   type AppConfig,
 } from '@shared/config'
-import { MODEL_PRESETS, findModelPreset } from '@shared/model-presets'
+import { MODEL_PRESETS } from '@shared/model-presets'
 import { findUaPresetByUa, getUaPreset, UA_PRESETS } from '@shared/ua-presets'
 import {
   addProviderFromPresetId,
@@ -1698,7 +1667,23 @@ const askTimeoutSec = computed({
     fork.ask_timeout_ms = nextMs
   },
 })
-const apiKeyDraft = ref('')
+const keyDrafts = settingsCredentialDrafts
+const savedBaseline = ref<AppConfig | null>(null)
+const apiKeyDraft = computed({ get: () => keyDrafts.value[selectedProviderId.value] || '', set: value => { keyDrafts.value[selectedProviderId.value] = value } })
+const advancedModel = ref(false)
+const advancedBrowser = ref(false)
+const permissionSearch = ref('')
+const permissionGroup = ref('all')
+const permissionModified = ref(false)
+const permissionGroups = [{ title: '全部能力', value: 'all' }, { title: '会话与网络', value: 'session' }, { title: '浏览器窗口', value: 'window' }, { title: '文件', value: 'file' }, { title: '其他能力', value: 'other' }]
+const visiblePermissions = computed<Record<string, PermissionMode>>(() => {
+  if (!cfg.value) return {}
+  const baseline = modesForPreset('balanced')
+  return Object.fromEntries(Object.entries(cfg.value.permissions.modes).filter(([key, mode]) => {
+    const group = key.startsWith('session.') ? 'session' : key.startsWith('window.') ? 'window' : key.startsWith('file') ? 'file' : 'other'
+    return (permissionGroup.value === 'all' || permissionGroup.value === group) && (!permissionModified.value || mode !== baseline[key as keyof typeof baseline]) && (permLabel(key) + ' ' + key).toLowerCase().includes(permissionSearch.value.trim().toLowerCase())
+  }))
+})
 const apiKeyPreview = ref('')
 const clearingApiKey = ref(false)
 const keyConfigured = ref<Record<string, boolean>>({})
@@ -2858,31 +2843,10 @@ const modelPresetItems = MODEL_PRESETS.map((p) => ({
   value: p.id,
 }))
 
-const presetHint = computed(() => {
-  const src = provider.value?.source_preset
-  if (src) return findModelPreset(src)?.hint || ''
-  return findModelPreset(matchPresetForProvider(provider.value))?.hint || ''
-})
-
-function matchPresetForProvider(p: { base_url?: string; source_preset?: string } | undefined) {
-  if (!p) return 'custom'
-  if (p.source_preset) return p.source_preset
-  const raw = String(p.base_url || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\/+$/, '')
-  for (const preset of MODEL_PRESETS) {
-    if (preset.id === 'custom') continue
-    const u = preset.base_url.toLowerCase().replace(/\/+$/, '')
-    if (raw === u || raw.startsWith(u) || u.startsWith(raw)) return preset.id
-  }
-  return 'custom'
-}
-
 async function selectProvider(id: string) {
   if (!cfg.value) return
   selectedProviderId.value = id
-  apiKeyDraft.value = ''
+  apiKeyPreview.value = ''
   await refreshApiKeyPreview()
 }
 
@@ -2909,6 +2873,7 @@ async function addCustomProvider() {
 async function removeSelectedProvider() {
   if (!cfg.value || cfg.value.ai.providers.length <= 1 || !provider.value) return
   const id = provider.value.id
+  delete keyDrafts.value[id]
   cfg.value.ai.providers = cfg.value.ai.providers.filter((p) => p.id !== id)
   ensureDefaultProvider(cfg.value.ai)
   await selectProvider(cfg.value.ai.default_provider || cfg.value.ai.providers[0].id)
@@ -2923,35 +2888,42 @@ function setAsDefault() {
 async function resetProviders() {
   if (!cfg.value) return
   if (!window.confirm('将模型列表恢复为内置预设？已保存的 API Key 不会删除。')) return
+  keyDrafts.value = {}
   cfg.value.ai.providers = defaultProviderList()
   cfg.value.ai.default_provider = pickDefaultProviderId(cfg.value.ai.providers)
   await selectProvider(cfg.value.ai.default_provider)
   await refreshAllKeyFlags()
 }
 
+let previewRequest = 0
 async function refreshApiKeyPreview() {
   if (!cfg.value || !window.navora || !provider.value) {
     apiKeyPreview.value = ''
     return
   }
-  const ref = provider.value.api_key_ref
+  const { id, api_key_ref: ref } = provider.value
+  const request = ++previewRequest
   if (!ref) {
     apiKeyPreview.value = ''
     return
   }
-  const st = await window.navora.secrets.getApiKey(ref)
-  apiKeyPreview.value = st.configured ? st.preview : ''
-  keyConfigured.value = { ...keyConfigured.value, [provider.value.id]: st.configured }
+  try {
+    const st = await window.navora.secrets.getApiKey(ref)
+    if (cfg.value?.ai.providers.find(p => p.id === id)?.api_key_ref !== ref) return
+    keyConfigured.value = { ...keyConfigured.value, [id]: st.configured }
+    if (request === previewRequest && provider.value?.id === id) apiKeyPreview.value = st.configured ? st.preview : ''
+  } catch { if (request === previewRequest) apiKeyPreview.value = '' }
 }
 
 async function clearApiKey() {
   if (!cfg.value || !window.navora || !provider.value || clearingApiKey.value) return
-  const ref = provider.value.api_key_ref
+  const { id, api_key_ref: ref } = provider.value
   if (!ref) {
     showToast('当前服务商没有密钥路径', 'error')
     return
   }
   if (!window.confirm('清除该服务商已保存的 API Key？')) return
+  const draftBefore = keyDrafts.value[id]
   clearingApiKey.value = true
   try {
     const res = await window.navora.secrets.clearApiKey(ref)
@@ -2965,7 +2937,7 @@ async function clearApiKey() {
       )
       return
     }
-    apiKeyDraft.value = ''
+    if (keyDrafts.value[id] === draftBefore) delete keyDrafts.value[id]
     await refreshAllKeyFlags()
     await refreshApiKeyPreview()
     showToast('已清除 API Key')
@@ -2976,26 +2948,22 @@ async function clearApiKey() {
   }
 }
 
+let keyFlagsRequest = 0
 async function refreshAllKeyFlags() {
   if (!cfg.value || !window.navora) return
-  const next: Record<string, boolean> = {}
-  await Promise.all(
-    cfg.value.ai.providers.map(async (p) => {
-      if (!p.api_key_ref) {
-        next[p.id] = false
-        return
-      }
-      const st = await window.navora!.secrets.getApiKey(p.api_key_ref)
-      next[p.id] = st.configured
-    }),
-  )
-  keyConfigured.value = next
+  const request = ++keyFlagsRequest
+  const providers = cfg.value.ai.providers.map(p => ({ id:p.id, ref:p.api_key_ref }))
+  const flags = await Promise.all(providers.map(async p => {
+    try { return { ...p, configured: p.ref ? (await window.navora!.secrets.getApiKey(p.ref)).configured : false } }
+    catch { return { ...p, configured: keyConfigured.value[p.id] || false } }
+  }))
+  if (request !== keyFlagsRequest) return
+  keyConfigured.value = Object.fromEntries(flags.filter(p => cfg.value?.ai.providers.some(current => current.id === p.id && current.api_key_ref === p.ref)).map(p => [p.id,p.configured]))
 }
 
 const selectMenuProps = {
   contentClass: 'navora-select-menu',
   offset: 4,
-  transition: 'fade-transition',
 }
 const presetItems = [
   { title: '保守', value: 'conservative' },
@@ -3158,6 +3126,18 @@ function applyInstantPrefs(target: AppConfig, source: AppConfig) {
   target.plugins.dev_mode = s.plugins_dev_mode
 }
 
+function complexSettingsKey(config: AppConfig | null): string {
+  if (!config) return ''
+  const snapshot = JSON.parse(JSON.stringify(config)) as AppConfig
+  applyInstantPrefs(snapshot, createDefaultConfig())
+  for (const p of snapshot.ai.providers) { normalizeProvider(p); p.model_settings ||= {}; for (const id of p.models) p.model_settings[id] ||= defaultModelCapabilities(id) }
+  return JSON.stringify(snapshot, (_key,value) => value && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a],[b]) => a.localeCompare(b))) : value)
+}
+const hasPendingSettings = computed(() => !!cfg.value && (
+  complexSettingsKey(cfg.value) !== complexSettingsKey(savedBaseline.value) ||
+  allowlistText.value !== (savedBaseline.value?.browser.url_allowlist || []).join('\n') ||
+  !!remotePasswordDraft.value.trim() || cfg.value.ai.providers.some(p => !!keyDrafts.value[p.id]?.trim())
+))
 const instantPrefsKey = computed(() => {
   if (!cfg.value) return ''
   return JSON.stringify(readInstantPrefs(cfg.value))
@@ -3166,7 +3146,14 @@ const instantPrefsKey = computed(() => {
 let instantPrefsTimer: ReturnType<typeof setTimeout> | undefined
 let instantPrefsDirty = false
 
-async function persistInstantPrefs() {
+let instantWrite: Promise<void> | null = null
+let disposed = false
+function persistInstantPrefs(): Promise<void> {
+  if (instantWrite) { instantPrefsDirty = true; return instantWrite }
+  instantWrite = writeInstantPrefs().finally(() => { instantWrite = null; if (instantPrefsDirty && !saving.value) { instantPrefsDirty = false; void persistInstantPrefs() } })
+  return instantWrite
+}
+async function writeInstantPrefs() {
   if (!cfg.value || !window.navora || hydrating.value || saving.value) return
   if (savingInstant.value) {
     instantPrefsDirty = true
@@ -3175,12 +3162,14 @@ async function persistInstantPrefs() {
   savingInstant.value = true
   instantPrefsDirty = false
   const snapshotKey = instantPrefsKey.value
+  const snapshot = JSON.parse(JSON.stringify(cfg.value)) as AppConfig
   try {
     const disk = await window.navora.config.get()
-    applyInstantPrefs(disk, cfg.value)
+    applyInstantPrefs(disk, snapshot)
     const saved = await window.navora.config.save(disk)
+    if (savedBaseline.value) applyInstantPrefs(savedBaseline.value, saved)
     // Only sync fields we own; avoid clobbering in-flight edits that landed after snapshot.
-    if (instantPrefsKey.value === snapshotKey) {
+    if (!disposed && instantPrefsKey.value === snapshotKey) {
       applyInstantPrefs(cfg.value, saved)
     }
     try {
@@ -3193,15 +3182,14 @@ async function persistInstantPrefs() {
     showToast(errMessage(e, '开关保存失败'), 'error')
     try {
       const disk = await window.navora.config.get()
-      applyInstantPrefs(cfg.value, disk)
+      if (!disposed && instantPrefsKey.value === snapshotKey) applyInstantPrefs(cfg.value, disk)
     } catch {
       /* ignore */
     }
   } finally {
     savingInstant.value = false
     if (instantPrefsDirty || instantPrefsKey.value !== snapshotKey) {
-      instantPrefsDirty = false
-      void persistInstantPrefs()
+      instantPrefsDirty = true
     }
   }
 }
@@ -3210,6 +3198,7 @@ function schedulePersistInstantPrefs() {
   if (hydrating.value) return
   clearTimeout(instantPrefsTimer)
   instantPrefsTimer = setTimeout(() => {
+    instantPrefsTimer = undefined
     void persistInstantPrefs()
   }, 280)
 }
@@ -3227,11 +3216,21 @@ watch(
   },
 )
 
+function normalizeSettingsModels(config: AppConfig) {
+  for (const p of config.ai.providers) {
+    normalizeProvider(p)
+    p.model_settings ||= {}
+    for (const id of p.models) p.model_settings[id] ||= defaultModelCapabilities(id)
+  }
+}
 async function load() {
   if (!window.navora) return
   hydrating.value = true
   try {
     cfg.value = await window.navora.config.get()
+    normalizeSettingsModels(cfg.value)
+    savedBaseline.value = JSON.parse(JSON.stringify(cfg.value))
+    if (settingsDraftSession.base && settingsDraftSession.draft) cfg.value = rebaseSettingsDraft(settingsDraftSession.base, settingsDraftSession.draft, cfg.value)
     info.value = await window.navora.app.info()
     uaPresetItems.value = await window.navora.config.uaPresets()
     allowlistText.value = (cfg.value.browser.url_allowlist || []).join('\n')
@@ -3240,7 +3239,9 @@ async function load() {
     for (const p of cfg.value.ai.providers) normalizeProvider(p)
     selectedProviderId.value =
       cfg.value.ai.default_provider || cfg.value.ai.providers[0]?.id || ''
-    remotePasswordDraft.value = ''
+    selectedProviderId.value = cfg.value.ai.providers.some(p => p.id === settingsDraftSession.selected) ? settingsDraftSession.selected : selectedProviderId.value
+    remotePasswordDraft.value = settingsDraftSession.password
+    if (settingsDraftSession.draft) allowlistText.value = settingsDraftSession.allowlist
     if (!cfg.value.remote) {
       cfg.value.remote = {
         enabled: false,
@@ -3280,7 +3281,6 @@ async function load() {
     }
     await refreshAllKeyFlags()
     await refreshApiKeyPreview()
-    apiKeyDraft.value = ''
     try {
       remoteStatus.value = await window.navora.remote.status()
     } catch {
@@ -3293,6 +3293,14 @@ async function load() {
   }
 }
 
+async function discardSettings() {
+  if (saving.value || savingInstant.value) return
+  settingsDraftSession.base = null
+  settingsDraftSession.draft = null
+  settingsDraftSession.password = ''
+  keyDrafts.value = {}
+  await load()
+}
 async function pickCustomRoot() {
   if (!cfg.value || !window.navora?.workspace) return
   try {
@@ -3324,7 +3332,9 @@ async function save(exitAfter = false) {
   if (!cfg.value || !window.navora || saving.value) return
   saving.value = true
   savingAndExit.value = exitAfter
+  clearTimeout(instantPrefsTimer)
   try {
+    if (instantWrite) await instantWrite
     cfg.value.browser.url_allowlist = allowlistText.value
       .split(/\r?\n/)
       .map((s) => s.trim())
@@ -3375,36 +3385,24 @@ async function save(exitAfter = false) {
       payload.remote.password = remotePasswordDraft.value.trim()
     }
     // never send empty passwordHash wipe accidentally when draft empty — keep existing hash
-    const selectedId = selectedProviderId.value || provider.value?.id || ''
-    const keyValue = apiKeyDraft.value.trim()
-    const keyRefBefore = provider.value?.api_key_ref || ''
-    cfg.value = await window.navora.config.save(payload)
+    const pendingKeys = cfg.value.ai.providers.flatMap(p => { const draft = keyDrafts.value[p.id] || ''; return draft.trim() ? [{ id: p.id, draft, value: draft.trim() }] : [] })
+    const latest = await window.navora.config.get()
+    normalizeSettingsModels(latest)
+    const merged = savedBaseline.value ? rebaseSettingsDraft(savedBaseline.value, payload, latest) : payload
+    cfg.value = await window.navora.config.save(merged)
+    savedBaseline.value = JSON.parse(JSON.stringify(cfg.value))
     remotePasswordDraft.value = ''
+    settingsDraftSession.password = ''
     ensureDefaultProvider(cfg.value.ai)
     if (!cfg.value.ai.providers.some((p) => p.id === selectedProviderId.value)) {
       selectedProviderId.value = cfg.value.ai.default_provider || cfg.value.ai.providers[0]?.id || ''
     }
-    if (keyValue) {
-      const savedProv =
-        cfg.value.ai.providers.find((p) => p.id === selectedId) ||
-        cfg.value.ai.providers.find((p) => p.id === selectedProviderId.value)
-      const keyRef = savedProv?.api_key_ref || keyRefBefore
-      if (!keyRef) {
-        showToast('API Key 无法保存：缺少密钥路径，请重选模型服务商后再试', 'error')
-        return
-      }
-      const keyRes = await window.navora.secrets.setApiKey(keyRef, keyValue)
-      if (!keyRes?.ok) {
-        const err = (keyRes as { error?: string } | undefined)?.error
-        showToast(
-          err === 'remote_forbidden'
-            ? '远程端不能保存 API Key，请在本机客户端设置'
-            : 'API Key 保存失败',
-          'error',
-        )
-        return
-      }
-      apiKeyDraft.value = ''
+    for (const pending of pendingKeys) {
+      const savedProv = cfg.value.ai.providers.find(p => p.id === pending.id)
+      if (!savedProv?.api_key_ref) throw new Error('API Key 缺少保存路径')
+      const result = await window.navora.secrets.setApiKey(savedProv.api_key_ref, pending.value)
+      if (!result?.ok) throw new Error('API Key 保存失败，请在本机重试')
+      if (keyDrafts.value[pending.id] === pending.draft) delete keyDrafts.value[pending.id]
     }
     await refreshAllKeyFlags()
     await refreshApiKeyPreview()
@@ -3446,6 +3444,16 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (cfg.value) {
+    settingsDraftSession.base = savedBaseline.value ? JSON.parse(JSON.stringify(savedBaseline.value)) : null
+    settingsDraftSession.draft = JSON.parse(JSON.stringify(cfg.value))
+    settingsDraftSession.selected = selectedProviderId.value
+    settingsDraftSession.password = remotePasswordDraft.value
+    settingsDraftSession.allowlist = allowlistText.value
+  }
+  clearTimeout(instantPrefsTimer)
+  if (instantPrefsTimer) void persistInstantPrefs()
+  disposed = true
   unsubProposals?.()
   unsubPlugins?.()
   unsubStoreInstalled?.()

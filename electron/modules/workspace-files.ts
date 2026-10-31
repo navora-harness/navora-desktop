@@ -3,6 +3,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { AppConfig } from '../../shared/config'
+import type { WorkspacePreview } from '../../shared/workspace-preview'
 
 /** True if `child` is `parent` or a path under it (sep-safe). */
 export function isPathInsideOrEqual(parent: string, child: string): boolean {
@@ -236,6 +237,37 @@ export class WorkspaceFiles {
       mtimeMs: st.mtimeMs,
       ctimeMs: st.ctimeMs,
     }
+  }
+
+  /** Bounded UI reads; never executes HTML or exposes files outside the workspace. */
+  async preview(chatId: string, relPath: string): Promise<WorkspacePreview> {
+    const abs = await this.resolveExisting(chatId, relPath)
+    const handle = await fsp.open(abs, 'r')
+    try {
+      const stat = await handle.stat()
+      if (!stat.isFile()) throw new Error('not_a_file')
+      const ext = path.extname(abs).toLowerCase()
+      const imageMime = mimeFromImageExt(ext)
+      const limit = imageMime ? 12_582_912 : 262_144
+      const result = { ok: true, path: this.toRel(chatId, abs), size: stat.size }
+      if (imageMime && stat.size > limit) return { ...result, kind: 'unsupported' }
+      const buf = Buffer.alloc(Math.min(stat.size, limit))
+      let offset = 0
+      while (offset < buf.length) {
+        const { bytesRead } = await handle.read(buf, offset, buf.length - offset, offset)
+        if (!bytesRead) break
+        offset += bytesRead
+      }
+      const bytes = buf.subarray(0, offset)
+      if (imageMime) return { ...result, kind: 'image', mime: imageMime, base64: bytes.toString('base64') }
+      // Binary files remain available through the existing system-open action.
+      const utf16 = bytes[0] === 0xff && bytes[1] === 0xfe
+      if (!utf16 && bytes.includes(0)) return { ...result, kind: 'unsupported' }
+      const content = utf16 ? bytes.subarray(2).toString('utf16le') : new TextDecoder('utf-8').decode(bytes, { stream: stat.size > limit }).replace(/^\uFEFF/, '')
+      const invalid = [...content.slice(0, 4096)].filter(char => char === '\uFFFD').length
+      if (invalid > 8) return { ...result, kind: 'unsupported' }
+      return { ...result, kind: /\.(md|markdown|mdown)$/i.test(ext) ? 'markdown' : 'text', content, truncated: stat.size > limit }
+    } finally { await handle.close() }
   }
 
   async readText(chatId: string, relPath: string, opts?: { offset?: number; maxChars?: number }) {

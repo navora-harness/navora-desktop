@@ -41,7 +41,8 @@
           type="button"
           class="skill-dlg-close"
           aria-label="关闭"
-          @click="emit('update:modelValue', false)"
+          :disabled="busy"
+          @click="onModel(false)"
         >
           <font-awesome-icon icon="xmark" />
         </button>
@@ -64,6 +65,7 @@ import { useMobileLayout } from '@/composables/useMobileLayout'
 const props = withDefaults(
   defineProps<{
     modelValue: boolean
+    busy?: boolean
     title: string
     subtitle?: string
     /** Small uppercase label above the title */
@@ -83,6 +85,7 @@ const { isMobileLayout } = useMobileLayout()
 const dialogMaxWidth = computed(() => (isMobileLayout.value ? undefined : props.maxWidth))
 
 function onModel(v: boolean) {
+  if (!v && props.busy) return
   emit('update:modelValue', v)
 }
 </script>

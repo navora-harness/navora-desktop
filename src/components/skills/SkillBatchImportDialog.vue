@@ -1,5 +1,6 @@
 <template>
   <SkillDialogShell
+    :busy="saving"
     :model-value="modelValue"
     kicker="技能"
     title="批量导入技能"

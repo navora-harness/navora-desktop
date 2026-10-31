@@ -9,6 +9,20 @@ export type ModelCapabilities = {
   reasoning: { enabled: boolean; default: string; levels: ReasoningLevel[] }
 }
 
+export function renameReasoningLevel(reasoning: ModelCapabilities['reasoning'], index: number, name: string): boolean {
+  const level = reasoning.levels[index]
+  const next = name.trim()
+  if (!level || !next || next.length > 40 || reasoning.levels.some((l, i) => i !== index && l.id === next)) return false
+  if (reasoning.default === level.id) reasoning.default = next
+  level.id = next
+  return true
+}
+
+export function removeReasoningLevel(reasoning: ModelCapabilities['reasoning'], index: number): void {
+  const removed = reasoning.levels.splice(index, 1)[0]
+  if (removed?.id === reasoning.default) reasoning.default = reasoning.levels[Math.min(index, reasoning.levels.length - 1)]?.id || ''
+}
+
 export function defaultModelCapabilities(label = ''): ModelCapabilities {
   return {
     label, context_window: 128000, max_output_tokens: 8192, input_types: ['text'],

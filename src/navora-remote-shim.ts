@@ -244,7 +244,10 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
       isMaximized: async () => ({ maximized: false }),
       onMaximized: () => () => {},
     },
-    models: { list: (providerId: string) => invoke<{ ok: boolean; models?: string[]; error?: string }>('navora:models.list', providerId) },
+    models: {
+      list: (providerId: string) => invoke<{ ok: boolean; models?: string[]; error?: string }>('navora:models.list', providerId),
+      probe: (providerId: string, model: string, kind: 'connection' | 'reply') => invoke<{ ok: boolean; text: string; ms?: number }>('navora:models.probe', providerId, model, kind),
+    },
     config: {
       get: () => invoke<AppConfig>('navora:config.get'),
       save: (patch: Partial<AppConfig>) => invoke<AppConfig>('navora:config.save', patch),
@@ -372,6 +375,8 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
       },
     },
     workspace: {
+      preview: (chatId: string, relPath: string) =>
+        invoke<import('../shared/workspace-preview').WorkspacePreview>('navora:workspace.preview', chatId, relPath),
       pickDirectory: () =>
         invoke<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>(
           'navora:workspace.pickDirectory',

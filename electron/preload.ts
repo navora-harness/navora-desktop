@@ -21,7 +21,10 @@ import type {
 import type { SkillDetail, SkillImportPreview, SkillRecord, SkillWriteInput } from '../shared/skills'
 
 const api = {
-  models: { list: (providerId: string): Promise<{ ok: boolean; models?: string[]; error?: string }> => ipcRenderer.invoke('navora:models.list', providerId) },
+  models: {
+    list: (providerId: string): Promise<{ ok: boolean; models?: string[]; error?: string }> => ipcRenderer.invoke('navora:models.list', providerId),
+    probe: (providerId: string, model: string, kind: 'connection' | 'reply'): Promise<{ ok: boolean; text: string; ms?: number }> => ipcRenderer.invoke('navora:models.probe', providerId, model, kind),
+  },
   /**
    * Resolve absolute path for a File from drag-drop / input.
    * Electron removed File.path in renderer; use webUtils.getPathForFile.
@@ -244,6 +247,8 @@ const api = {
       ipcRenderer.invoke('navora:remote.openWindow', windowId),
   },
   workspace: {
+    preview: (chatId: string, relPath: string): Promise<import('../shared/workspace-preview').WorkspacePreview> =>
+      ipcRenderer.invoke('navora:workspace.preview', chatId, relPath),
     pickDirectory: (): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }> =>
       ipcRenderer.invoke('navora:workspace.pickDirectory'),
     info: (

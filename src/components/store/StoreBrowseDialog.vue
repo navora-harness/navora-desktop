@@ -1,5 +1,6 @@
 <template>
   <SkillDialogShell
+    :busy="busy === 'uninstall'"
     :model-value="modelValue"
     :kicker="storeLabel"
     :title="`浏览${storeLabel}`"
@@ -23,7 +24,7 @@
       </div>
       <div v-if="statusLine" class="status-line" :class="{ err: !reachable }">{{ statusLine }}</div>
       <div v-if="!products.length && !busy" class="empty">
-        商店为空或不可达。请确认商店服务状态。
+        {{ !reachable ? '连接失败，可刷新重试' : query?.trim() ? '没有匹配的产品' : '商店暂时没有产品' }}
       </div>
       <div v-else class="product-list">
         <CatalogItemCard
@@ -143,6 +144,7 @@ const { openProductDetail, openInstaller, resolveTitleWarning, lastInstalledAt }
 const busy = ref<'' | 'list' | 'uninstall'>('')
 const query = ref('')
 const products = ref<StoreCatalogProduct[]>([])
+let refreshSequence = 0
 const reachable = ref(true)
 const statusLine = ref('')
 const storeBaseUrl = ref('')
@@ -169,6 +171,8 @@ watch(
   },
 )
 
+watch(() => props.kind, () => { products.value = []; if (props.modelValue) void refresh() })
+
 watch(lastInstalledAt, () => {
   if (props.modelValue) void refresh()
 })
@@ -178,31 +182,34 @@ function canChangeVariantFor(p: StoreCatalogProduct): boolean {
 }
 
 async function refresh() {
+  if (busy.value === 'uninstall') return
+  const request = ++refreshSequence
+  const q = query.value?.trim()
+  const kind = props.kind || 'all'
   if (!window.navora?.store) {
     reachable.value = false
     storeBaseUrl.value = ''
     titleWarning.value = '未知第三方来源（当前商店连接未加密）'
     statusLine.value = '当前环境无商店接口'
-    products.value = []
     return
   }
   busy.value = 'list'
   try {
-    const st = await window.navora.store.status()
+    const [st, warning, res] = await Promise.all([
+      window.navora.store.status(), resolveTitleWarning(), window.navora.store.list({ kind, q: q || undefined }),
+    ])
+    if (request !== refreshSequence) return
     storeBaseUrl.value = st.baseUrl || ''
-    titleWarning.value = await resolveTitleWarning()
-    reachable.value = st.reachable
-    statusLine.value = st.reachable
-      ? `${st.productCount} 个产品`
-      : `商店不可达${st.error ? `（${storeErrorText(st.error)}）` : ''}`
-    const res = await window.navora.store.list({
-      kind: props.kind || 'all',
-      q: query.value || undefined,
-    })
-    products.value = res.ok ? res.products || [] : []
-    if (!res.ok && res.error) statusLine.value = storeErrorText(res.error)
+    titleWarning.value = warning
+    reachable.value = res.ok
+    if (res.ok) { products.value = res.products || []; statusLine.value = products.value.length + ' 个产品' }
+    else statusLine.value = storeErrorText(res.error || '连接失败') + (products.value.length ? ' · 保留上次结果' : '')
+  } catch {
+    if (request !== refreshSequence) return
+    reachable.value = false
+    statusLine.value = '连接失败，请重试' + (products.value.length ? ' · 保留上次结果' : '')
   } finally {
-    busy.value = ''
+    if (request === refreshSequence) busy.value = ''
   }
 }
 

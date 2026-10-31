@@ -23,8 +23,10 @@
     <aside class="sidebar">
       <div class="sidebar-content-stack">
       <Transition name="sidebar-flip">
-      <div v-show="!settingsOpen || isMobileLayout" class="sidebar-chat-face" :class="{ 'resources-only': !sidebarVisible.chats }">
-      <div class="chat-toolbar" :class="{ 'app-drag': showDesktopChrome }">
+      <div v-show="!settingsOpen || isMobileLayout" class="sidebar-chat-face">
+      <SidebarDock :model-value="dockLayout" :panels="sidebarPanels" @update:model-value="setDockLayout">
+        <template #chats>
+      <div class="chat-toolbar">
         <Transition name="toolbar-swap" mode="out-in">
           <div v-if="!chatBatchMode" key="normal" class="chat-toolbar-row">
             <v-btn
@@ -78,10 +80,10 @@
         </Transition>
       </div>
       <Transition name="sidebar-pane">
-      <div v-show="sidebarVisible.chats" class="chat-list" :class="{ 'batch-mode': chatBatchMode }">
+      <div v-show="true" class="chat-list" :class="{ 'batch-mode': chatBatchMode }">
         <template v-for="sec in chatListSections" :key="sec.key">
           <div class="chat-date-label">{{ sec.label }}</div>
-          <template v-for="c in sec.items" :key="c.id">
+          <template v-for="c in sec.items" :key="c.id" v-memo="[c, chats, activeId, chatBatchMode, batchSelectedIds, isMobileLayout, chatSwipeOpenId, chatSwipeDragId, chatSwipeOffset, chatSwipeLockedH, chatMoreOpenId, renamingChatId, renameDraft, chatStatusById, pendingAsks, windowCounts, subchatsByParent, subScrollMetrics, runningChats, exportingChat, Math.floor(nowTick / 60000)]">
             <div
               class="chat-item"
               :class="{
@@ -152,7 +154,7 @@
                     <span
                       v-else
                       class="chat-item-title-text"
-                      :title="displayChatTitle(c.title)"
+                      :title="`${displayChatTitle(c.title)} · ${formatRelative(c.updatedAt)}${windowCounts[c.id] ? ` · ${windowCounts[c.id]} 个窗口` : ''}${subchatCountOf(c.id) ? ` · ${subchatCountOf(c.id)} 个子对话` : ''}`"
                       >{{ displayChatTitle(c.title) }}</span
                     >
                     <button
@@ -411,33 +413,7 @@
       </div>
       </Transition>
 
-      <Transition name="res-slide" mode="out-in">
-        <div v-if="!chatBatchMode" key="resources" class="sidebar-dock">
-          <div v-if="sidebarVisible.chats && (sidebarVisible.workspace || sidebarVisible.browser)" class="sidebar-divider horizontal chat-resource-divider" role="separator" aria-label="调整对话列表高度" aria-orientation="horizontal" tabindex="0" @pointerdown="beginSidebarResize($event, 'chats')" @keydown="sidebarResizeKey($event, 'chats')" />
-          <Transition name="sidebar-pane">
-          <div v-show="sidebarVisible.workspace" class="sidebar-workspace-pane">
-            <WorkspaceFilesPanel :chat-id="activeId || ''" @notify="onPanelNotify" />
-          </div>
-          </Transition>
-          <div v-if="sidebarVisible.workspace && sidebarVisible.browser" class="sidebar-divider horizontal" role="separator" aria-label="调整工作区和浏览器资源高度" aria-orientation="horizontal" tabindex="0" @pointerdown="beginSidebarResize($event, 'resources')" @keydown="sidebarResizeKey($event, 'resources')" />
-          <Transition name="sidebar-pane">
-          <div v-show="sidebarVisible.browser" class="sidebar-browser-pane">
-          <BrowserResourcesPanel
-            ref="browserResources"
-            :chat-id="activeId || ''"
-            :tree="tree"
-            :is-remote="isWebRemote()"
-            :owner-label="treeOwnerLabel"
-            :dnd-mime="DND_MIME"
-            @add-ref="addRef"
-            @ask-close-session="askCloseSession"
-            @remote-view="openRemoteWindow"
-            @notify="onPanelNotify"
-          />
-          </div>
-          </Transition>
-        </div>
-        <div v-else key="batch-actions" class="batch-list-footer">
+        <div v-if="chatBatchMode" key="batch-actions" class="batch-list-footer">
           <v-btn
             size="small"
             variant="tonal"
@@ -461,7 +437,31 @@
             删除{{ batchSelectedCount ? ` ${batchSelectedCount}` : '' }}
           </v-btn>
         </div>
-      </Transition>
+        </template>
+        <template #workspace="slot">
+          <div class="sidebar-workspace-pane" :data-visible="slot.active" :inert="!slot.active">
+            <WorkspaceFilesPanel :chat-id="activeId || ''" :header-target="slot.headerTarget" :header-visible="slot.active" @notify="onPanelNotify" @preview="openFilePreview($event.path)" />
+          </div>
+        </template>
+        <template #browser="slot">
+          <div class="sidebar-browser-pane" :data-visible="slot.active" :inert="!slot.active">
+          <BrowserResourcesPanel
+            ref="browserResources"
+            :header-target="slot.headerTarget"
+            :header-visible="slot.active"
+            :chat-id="activeId || ''"
+            :tree="tree"
+            :is-remote="isWebRemote()"
+            :owner-label="treeOwnerLabel"
+            :dnd-mime="DND_MIME"
+            @add-ref="addRef"
+            @ask-close-session="askCloseSession"
+            @remote-view="openRemoteWindow"
+            @notify="onPanelNotify"
+          />
+          </div>
+        </template>
+      </SidebarDock>
 
       </div>
       </Transition>
@@ -481,9 +481,7 @@
             <button type="button" class="sidebar-icon-btn rail-new-chat" title="开启新对话（Ctrl/⌘ N）" aria-label="开启新对话" @click="createChat"><font-awesome-icon icon="pen-to-square" /></button>
             <button type="button" class="sidebar-icon-btn rail-search" title="搜索对话（Ctrl/⌘ K）" aria-label="搜索对话" @click="openChatSearch"><font-awesome-icon icon="magnifying-glass" /></button>
           </template>
-          <button type="button" class="sidebar-icon-btn" :class="{ selected: !settingsOpen && sidebarVisible.chats }" title="显示/隐藏对话列表" aria-label="显示/隐藏对话列表" :aria-pressed="!settingsOpen && sidebarVisible.chats" @click="toggleSidebarPanel('chats')"><font-awesome-icon icon="comments" /></button>
-          <button type="button" class="sidebar-icon-btn" :class="{ selected: !settingsOpen && sidebarVisible.workspace }" title="显示/隐藏工作区" aria-label="显示/隐藏工作区" :aria-pressed="!settingsOpen && sidebarVisible.workspace" @click="toggleSidebarPanel('workspace')"><font-awesome-icon icon="folder-open" /></button>
-          <button type="button" class="sidebar-icon-btn" :class="{ selected: !settingsOpen && sidebarVisible.browser }" title="显示/隐藏浏览器资源" aria-label="显示/隐藏浏览器资源" :aria-pressed="!settingsOpen && sidebarVisible.browser" @click="toggleSidebarPanel('browser')"><font-awesome-icon icon="window-maximize" /></button>
+          <button v-for="panel in sidebarPanels" :key="panel.id" type="button" class="sidebar-icon-btn" :class="{ selected: !settingsOpen && sidebarSelected[panel.id] }" :data-panel="panel.id" :data-visible="sidebarVisible[panel.id]" :title="railPanelLabel(panel.id, panel.label)" :aria-label="railPanelLabel(panel.id, panel.label)" :aria-pressed="!settingsOpen && sidebarSelected[panel.id]" @click="toggleSidebarPanel(panel.id)"><font-awesome-icon :icon="panel.icon" /></button>
         </div>
         <div class="sidebar-foot">
         <div class="sidebar-foot-actions">
@@ -564,9 +562,9 @@
       <div v-if="!isMobileLayout && (!allSidebarHidden || settingsOpen)" class="sidebar-divider vertical" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarLayout.width" aria-valuemin="250" aria-valuemax="560" tabindex="0" @pointerdown="beginSidebarResize($event, 'width')" @keydown="sidebarResizeKey($event, 'width')" />
     </aside>
 
-    <main class="main">
+    <main class="main" :class="{ 'file-preview-open': previewSelection && !settingsOpen }" :style="{ '--preview-width': `${previewWidth}px` }">
       <div v-if="showDesktopChrome" class="win-drag-main" aria-hidden="true" />
-      <header v-if="isMobileLayout" class="mobile-topbar">
+      <header v-if="isMobileLayout && !settingsOpen" class="mobile-topbar">
         <button
           v-if="active?.kind === 'sub' && active.parentChatId"
           type="button"
@@ -668,7 +666,7 @@
           </div>
           <div v-if="agentRunning" class="agent-live">
             <StatusIcon kind="running" />
-            <span class="agent-live-text">运行中</span>
+            <span class="agent-live-text" :title="phaseLabel">{{ phase === 'awaiting_permission' || phase === 'awaiting_user' || phase === 'awaiting_skill_review' ? '等待确认' : phase === 'calling_tool' ? '执行中' : '生成中' }}</span>
             <span class="agent-elapsed">{{ elapsedLabel }}</span>
             <button type="button" class="quick-stop-btn" title="停止任务（Esc）" aria-label="停止任务" @click="stopAgent"><StatusIcon kind="stopped" />停止</button>
           </div>
@@ -691,7 +689,8 @@
               </div>
             </div>
 
-            <template v-for="block in messageBlocks" :key="block.key">
+            <!-- Sidebar and composer changes must not rebuild unchanged transcript rows. -->
+            <template v-for="block in messageBlocks" :key="block.key" v-memo="[block, activeId, agentRunning, expandedRuns, expandedTools, expandedLogs, expandedReasoning, logOverflowById, toolMediaSrc, chats, showReadPages, readPagesPanelOpen, readPagesPanelFromId, copiedMessageId, Math.floor(nowTick / 60000)]">
               <div v-if="block.type === 'run'" class="msg run" :data-run-key="block.key">
                 <div class="msg-row">
                   <div class="msg-avatar run" aria-hidden="true">
@@ -768,6 +767,38 @@
                                   />
                                 </span>
                               </button>
+                      <div
+                        v-if="isSubchatSpawnTool(item)"
+                        class="subchat-spawn-bar"
+                      >
+                        <div class="subchat-spawn-main">
+                          <span
+                            class="subchat-spawn-status"
+                            :class="spawnStatusOf(item)"
+                            >{{ spawnStatusLabel(item) }}</span
+                          >
+                          <button
+                            type="button"
+                            class="subchat-spawn-goal"
+                            :class="{
+                              deleted: isSpawnSubchatDeleted(item),
+                              link: !isSpawnSubchatDeleted(item) && !!spawnSubChatId(item),
+                            }"
+                            :disabled="
+                              !spawnSubChatId(item) || isSpawnSubchatDeleted(item)
+                            "
+                            :title="
+                              isSpawnSubchatDeleted(item)
+                                ? spawnGoalLabel(item)
+                                : `打开子对话：${spawnGoalLabel(item)}`
+                            "
+                            @click.stop="openSubchatFromTool(item)"
+                          >
+                            {{ spawnGoalLabel(item) }}
+                          </button>
+                        </div>
+                      </div>
+
                               <div
                                 v-if="toolDownloadProgress(item)"
                                 class="tool-dl-progress"
@@ -1196,7 +1227,11 @@
                   </div>
                   </DisclosureTransition>
                 </div>
-
+                <ChatMarkdown
+                  v-if="liveAnswerText && activeId"
+                  :chat-id="activeId"
+                  :content="liveAnswerText"
+                />
               </div>
             </div>
 
@@ -1566,6 +1601,7 @@
           </v-btn>
         </div>
       </div>
+      <FilePreviewPanel v-if="previewSelection && !settingsOpen" :chat-id="previewSelection.chatId" :path="previewSelection.path" :width="previewWidth" @close="previewSelection = null" @resize="setPreviewWidth" @notify="onPanelNotify" />
     </main>
 
     <v-dialog
@@ -1887,6 +1923,9 @@ import { useStoreUi } from '@/composables/useStoreUi'
 import { storeErrorText } from '@shared/store'
 import BrowserDownloadsMenu from '@/components/BrowserDownloadsMenu.vue'
 import WorkspaceFilesPanel from '@/components/sidebar/WorkspaceFilesPanel.vue'
+import FilePreviewPanel from '@/components/FilePreviewPanel.vue'
+import SidebarDock from '@/components/sidebar/SidebarDock.vue'
+import { useSidebarDock } from '@/composables/useSidebarDock'
 import BrowserResourcesPanel from '@/components/sidebar/BrowserResourcesPanel.vue'
 import SidebarContextMenu from '@/components/sidebar/SidebarContextMenu.vue'
 import InChatAskCard from '@/components/chat/InChatAskCard.vue'
@@ -2277,17 +2316,29 @@ const quitDialog = ref(false)
 const quitting = ref(false)
 const exportingChat = ref(false)
 const sidebarMoreOpen = ref(false)
+const previewSelection = ref<{ chatId: string; path: string } | null>(null)
+const previewWidth = ref(400)
+try { const saved = Number(localStorage.getItem('navora.preview.width')); if (saved >= 280 && saved <= 800) previewWidth.value = saved } catch { /* optional persistence */ }
+function setPreviewWidth(width: number) {
+  previewWidth.value = width
+  try { localStorage.setItem('navora.preview.width', String(width)) } catch { /* optional persistence */ }
+}
+function openFilePreview(path: string) {
+  if (!activeId.value) return
+  previewSelection.value = { chatId: activeId.value, path }
+  if (isMobileLayout.value) closeMobileSidebar()
+}
+watch(activeId, () => { previewSelection.value = null })
 const settingsOpen = ref(false)
-const { layout: sidebarLayout, visible: sidebarVisible, style: sidebarStyle, resizing: sidebarResizing, toggle: toggleSidebarVisibility, beginResize: beginSidebarResize, resizeKey: sidebarResizeKey } = useSidebarLayout()
-const allSidebarHidden = computed(() => !sidebarVisible.value.chats && !sidebarVisible.value.workspace && !sidebarVisible.value.browser)
-function toggleSidebarPanel(panel: 'chats' | 'workspace' | 'browser') {
-  if (settingsOpen.value) {
-    settingsOpen.value = false
-    if (!sidebarVisible.value[panel]) toggleSidebarVisibility(panel)
-    return
-  }
-  if (panel === 'chats' && sidebarVisible.value.chats) exitChatBatchMode()
-  toggleSidebarVisibility(panel)
+const { layout: sidebarLayout, style: sidebarStyle, resizing: sidebarResizing, beginResize: beginSidebarResize, resizeKey: sidebarResizeKey } = useSidebarLayout()
+const { layout: dockLayout, panels: sidebarPanels, visible: sidebarVisible, selected: sidebarSelected, activate: activateSidebarPanel, set: setDockLayout } = useSidebarDock()
+const allSidebarHidden = computed(() => sidebarPanels.value.every(panel => !sidebarVisible.value[panel.id]))
+function railPanelLabel(id: string, label: string) { return `显示/隐藏${id === 'chats' ? '对话列表' : id === 'workspace' ? '工作区' : id === 'browser' ? '浏览器资源' : label}` }
+function toggleSidebarPanel(panel: string) {
+  const wasSettings = settingsOpen.value
+  settingsOpen.value = false
+  if (panel === 'chats' && sidebarSelected.value.chats && !wasSettings) exitChatBatchMode()
+  activateSidebarPanel(panel, !wasSettings)
 }
 const docsOpen = ref(false)
 const mobileSidebarOpen = ref(false)
@@ -2531,6 +2582,8 @@ const liveReasoningByChat = ref<
   Record<string, { content: string; status: 'live' | 'done'; round?: number }>
 >({})
 const liveReasoningForced = ref<Record<string, boolean | undefined>>({})
+const liveAnswerByChat = ref<Record<string, string>>({})
+const liveAnswerText = computed(() => activeId.value ? liveAnswerByChat.value[activeId.value] || '' : '')
 const liveReasoningBodyEl = ref<HTMLElement | null>(null)
 const logOverflowById = ref<Record<string, boolean>>({})
 const logMeasureEls = new Map<string, HTMLElement>()
@@ -2607,17 +2660,6 @@ const messageBlocks = computed((): MessageBlock[] => {
       continue
     }
     if (m.role === 'tool') {
-      // Keep subchat orchestration tools as standalone cards (not folded into run groups).
-      const toolName = String(m.meta?.toolName || '')
-      if (
-        toolName === 'agent_spawn_subchat' ||
-        toolName === 'agent_await_subchats' ||
-        toolName === 'agent_subchat_status'
-      ) {
-        flushRun()
-        blocks.push({ type: 'tool', key: m.id, message: m })
-        continue
-      }
       runBuf.push(m)
       continue
     }
@@ -3417,16 +3459,6 @@ function toggleRun(key: string) {
   expandedRuns.value = { ...expandedRuns.value, [key]: !expandedRuns.value[key] }
 }
 
-function expandRunContaining(messageId: string) {
-  if (!collapseToolRuns.value) return
-  for (const b of messageBlocks.value) {
-    if (b.type === 'run' && b.items.some((m) => m.id === messageId)) {
-      expandedRuns.value = { ...expandedRuns.value, [b.key]: true }
-      return
-    }
-  }
-}
-
 function runGroupTools(items: ChatMessage[]): ChatMessage[] {
   return items.filter((m) => m.role === 'tool')
 }
@@ -3504,8 +3536,11 @@ function runGroupErrorSummary(items: ChatMessage[]): string | null {
 }
 
 function runGroupCountLabel(items: ChatMessage[]): string {
-  const toolCount = runGroupTools(items).length
-  if (toolCount) return `${toolCount} 个工具`
+  const tools = runGroupTools(items)
+  const pluginCount = tools.filter(m => toolDisplay(m).kind === 'plugin').length
+  const toolCount = tools.length - pluginCount
+  if (pluginCount) return [toolCount ? toolCount + ' 个工具' : '', pluginCount + ' 个插件'].filter(Boolean).join(' · ')
+  if (toolCount) return toolCount + ' 个工具'
   const logCount = items.filter((m) => m.role === 'log').length
   return logCount ? `${logCount} 条日志` : '操作记录'
 }
@@ -4108,9 +4143,11 @@ watch(chats, (list) => {
   if (changed) batchSelectedIds.value = next
 })
 
+const dateFormatter = new Intl.DateTimeFormat()
+const timestampFormatter = new Intl.DateTimeFormat(undefined, {year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric'})
 function formatTime(ts: number) {
   try {
-    return new Date(ts).toLocaleString()
+    return timestampFormatter.format(ts)
   } catch {
     return ''
   }
@@ -4122,7 +4159,7 @@ function formatRelative(ts: number) {
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
   try {
-    return new Date(ts).toLocaleDateString()
+    return dateFormatter.format(ts)
   } catch {
     return ''
   }
@@ -4997,11 +5034,26 @@ async function copyReply(message: ChatMessage) {
   } catch { showToast('复制失败，请重试') }
 }
 
-function jumpToMessage(id: string) {
-  const element = msgBox.value?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`)
-  if (!element) return
+let messageJump = 0
+let jumpFocusAnimation: Animation | null = null
+async function jumpToMessage(id: string) {
+  const box = msgBox.value
+  const element = box?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`)
+  if (!box || !element) return
+  const request = ++messageJump
   stickToBottom.value = false
-  element.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  jumpFocusAnimation?.cancel()
+  // Large smooth scrolls can drift as deferred rows acquire their real height.
+  // Jump immediately, then align again after Chromium has painted the destination.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (request !== messageJump || !element.isConnected) return
+    element.scrollIntoView({ block:'start', behavior:'instant' })
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    if (Math.abs(element.getBoundingClientRect().top - box.getBoundingClientRect().top) < 1) break
+  }
+  if (request === messageJump && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    jumpFocusAnimation = element.animate([{ opacity:.55 },{ opacity:1 }], {duration:180,easing:'ease-out'})
+  }
 }
 
 async function copyText(text: string) {
@@ -5361,7 +5413,19 @@ onMounted(async () => {
     }
   })
   unsubAgent = window.navora.agent.onEvent(async (ev) => {
+    if (ev.type === 'answer_preview') {
+      const next = { ...liveAnswerByChat.value }
+      if (ev.content) next[ev.chatId] = ev.content
+      else delete next[ev.chatId]
+      liveAnswerByChat.value = next
+      if (ev.chatId === activeId.value) await scrollMessages()
+    }
     if (ev.type === 'status') {
+      if (!ev.running) {
+        const next = { ...liveAnswerByChat.value }
+        delete next[ev.chatId]
+        liveAnswerByChat.value = next
+      }
       setRunning(ev.chatId, ev.running)
     }
     if (ev.type === 'title') {
@@ -5430,14 +5494,12 @@ onMounted(async () => {
           if (status === 'running') {
             expandedTools.value = { ...expandedTools.value, [ev.message.id]: false }
           } else if (status === 'error') {
-            expandedTools.value = { ...expandedTools.value, [ev.message.id]: true }
-            expandRunContaining(ev.message.id)
+            expandedTools.value = { ...expandedTools.value, [ev.message.id]: false }
           }
           void hydrateToolMedia(ev.message, ev.chatId)
         }
       }
       if (ev.message.role === 'log' && isErrorRunLog(ev.message)) {
-        if (isActive) expandRunContaining(ev.message.id)
         // Persist in chatErrors even if the separate `error` event is missed / cleared.
         const detail =
           String(ev.message.meta?.summary || '').trim() ||
@@ -5455,8 +5517,7 @@ onMounted(async () => {
     if (ev.type === 'message_update' && ev.chatId === activeId.value) {
       upsertMessage(ev.message)
       if (ev.message.role === 'tool' && ev.message.meta?.status === 'error') {
-        expandedTools.value = { ...expandedTools.value, [ev.message.id]: true }
-        expandRunContaining(ev.message.id)
+        expandedTools.value = { ...expandedTools.value, [ev.message.id]: false }
       }
       if (ev.message.role === 'tool') void hydrateToolMedia(ev.message, ev.chatId)
       const downloading =

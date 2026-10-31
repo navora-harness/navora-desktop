@@ -1,6 +1,7 @@
 import { AGENT_TOOLS, PLUGIN_DEV_TOOL_NAMES, buildSystemPrompt } from '../../shared/agent-tools'
 import type { AppConfig } from '../../shared/config'
 import { modelCapabilities, reasoningValue } from '../../shared/model-capabilities'
+import { llmStreamPreview } from '../../shared/llm-stream-preview'
 import { needsAgentTools, isSimpleWeatherQuery, directWeatherRequest } from '../../shared/execution-mode'
 import { resolveForkDecision, resolvePluginDevMode, resolveSubchat } from '../../shared/config'
 import { buildPluginDevPromptAppendix } from '../../shared/plugin-dev-mode'
@@ -730,13 +731,39 @@ export class AgentRuntime {
           directWeatherReply ? '正在整理天气数据…' : rounds === 1 ? '等待模型响应…' : `等待模型继续（第 ${rounds}/${budget} 轮）…`,
         )
         let reply: Awaited<ReturnType<OpenAICompatibleClient['chat']>>
+        this.emit({ type: 'answer_preview', chatId, content: '', parentChatId: this.parentIdOf(chatId) })
+        let lastStreamUiAt = 0
+        let streamUiTimer: ReturnType<typeof setTimeout> | undefined
+        let pendingStreamReply: typeof reply | undefined
+        const updateStreamUi = (partial: typeof reply, force = false) => {
+          const now = Date.now()
+          if (!force && now - lastStreamUiAt < 50) {
+            pendingStreamReply = partial
+            streamUiTimer ??= setTimeout(() => {
+              streamUiTimer = undefined
+              if (pendingStreamReply && !ctrl.signal.aborted) updateStreamUi(pendingStreamReply, true)
+            }, 50 - (now - lastStreamUiAt))
+            return
+          }
+          clearTimeout(streamUiTimer)
+          streamUiTimer = undefined
+          pendingStreamReply = undefined
+          lastStreamUiAt = now
+          const preview = llmStreamPreview(partial)
+          this.emitReasoning(chatId, formatRunReasoning([...runReasoningParts, preview.reasoning]), 'live', rounds)
+          this.emit({ type: 'answer_preview', chatId, content: preview.content, parentChatId: this.parentIdOf(chatId) })
+        }
         try {
           // Local models often emit <think> / <tool_call> as plain text instead of
           // structured fields — lift them so tools actually run and CoT stays in the panel.
           reply = directWeatherReply
             ? { content: directWeatherReply, finish_reason: 'stop' }
-            : normalizeLlmReply(await client.chat(messages, useTools && !weatherReady ? this.toolsForConfig(cfg, chatId, weatherTask) : [], ctrl.signal))
+            : normalizeLlmReply(await client.chat(messages, useTools && !weatherReady ? this.toolsForConfig(cfg, chatId, weatherTask) : [], ctrl.signal, {
+              onUpdate: updateStreamUi,
+            }))
+          updateStreamUi(reply, true)
         } catch (e) {
+          clearTimeout(streamUiTimer)
           const msg = e instanceof Error ? e.message : String(e)
           if (ctrl.signal.aborted) throw e
           if (
@@ -783,6 +810,7 @@ export class AgentRuntime {
         }
 
         if (reply.tool_calls?.length) {
+          this.emit({ type: 'answer_preview', chatId, content: '', parentChatId: this.parentIdOf(chatId) })
           // If the provider already rejected the request as high-risk, do not keep
           // feeding page bodies through more tool rounds — fall through to digest retry.
           const earlyReject = normalizeLlmText(reply.content).trim()
@@ -792,6 +820,7 @@ export class AgentRuntime {
             const assistantMsg: ChatMessageParam = {
               role: 'assistant',
               content: reply.content,
+              ...(reply.reasoningContent ? { reasoning_content: reply.reasoningContent } : {}),
               tool_calls: reply.tool_calls,
             }
             messages.push(assistantMsg)
@@ -801,7 +830,7 @@ export class AgentRuntime {
               const m = this.chats.appendMessage(chatId, {
                 role: 'assistant',
                 content: reply.content,
-                meta: { partial: true },
+                meta: { partial: true, ...(reasoningText ? { reasoning: reasoningText } : {}) },
               })
               if (m) this.emit({ type: 'message', chatId, message: m })
             }
@@ -1114,6 +1143,7 @@ export class AgentRuntime {
           content: text,
           meta: {
             durationMs,
+            ...(runReasoningParts.length ? { reasoning: formatRunReasoning(runReasoningParts) } : {}),
             ...(finalSources.length ? { sources: finalSources } : {}),
           },
         })
@@ -1187,6 +1217,7 @@ export class AgentRuntime {
       this.pendingEvents.delete(chatId)
       this.forkChains.delete(chatId)
       this.emitReasoning(chatId, '', 'clear')
+      this.emit({ type: 'answer_preview', chatId, content: '', parentChatId: this.parentIdOf(chatId) })
       this.setPhase(chatId, 'idle')
       // End running UI first — title polish must not leave "Agent 运行中…" on screen.
       this.emit({

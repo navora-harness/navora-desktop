@@ -1,5 +1,6 @@
 <template>
   <SkillDialogShell
+    :busy="busy"
     :model-value="modelValue"
     :kicker="kindLabel"
     title="产品详情"

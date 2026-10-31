@@ -109,8 +109,9 @@ app.on('browser-window-created',(_event,win) => {
         const sidebarWidth = await win.webContents.executeJavaScript(`document.querySelector('aside.sidebar').getBoundingClientRect().width`)
         await drag('.sidebar-divider.vertical',60,0)
         assert.equal(await win.webContents.executeJavaScript(`document.querySelector('aside.sidebar').getBoundingClientRect().width`),sidebarWidth+60)
-        await drag('.sidebar-divider.horizontal',0,25)
-        assert.equal(await win.webContents.executeJavaScript(`JSON.parse(localStorage.getItem('navora.sidebar')).workspace`),130)
+        const oldChatHeight = await win.webContents.executeJavaScript(`document.querySelector('[data-group="group-chats"]').getBoundingClientRect().height`)
+        await drag('.dock-divider',0,25)
+        assert.ok(Math.abs(await win.webContents.executeJavaScript(`document.querySelector('[data-group="group-chats"]').getBoundingClientRect().height`)-oldChatHeight-25)<3,'Generic height divider follows pointer')
         for(const label of ['工作区','浏览器资源','对话列表']) {
           const selector = `[aria-label="显示/隐藏${label}"]`
           await click(selector)
@@ -124,13 +125,13 @@ app.on('browser-window-created',(_event,win) => {
         assert.equal(await win.webContents.executeJavaScript(`getComputedStyle(document.querySelector('.sidebar')).backgroundColor`),'rgb(247, 247, 248)')
         assert.equal(await win.webContents.executeJavaScript(`!!document.querySelector('.activity-rail .rail-brand img') && !document.querySelector('.brand-name')`),true,'Brand is an icon in the rail')
         assert.equal(await win.webContents.executeJavaScript(`(()=>{const r=['.new-chat-btn','.brand-search-btn','.chat-toolbar-icon-btn'].map(s=>document.querySelector(s).getBoundingClientRect());return Math.max(...r.map(a=>a.y+a.height/2))-Math.min(...r.map(a=>a.y+a.height/2))<2})()`),true,'Conversation actions share one aligned row')
-        for(const selector of ['.workspace-panel','.browser-panel']) {
-          await click(selector+' .res-label-btn')
-          assert.ok(await win.webContents.executeJavaScript(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().height <= 38`),'Collapsed resources release their height')
-          await click(selector+' .res-label-btn')
+        for(const panel of ['workspace','browser']) {
+          await click('[data-group="group-'+panel+'"] .dock-collapse')
+          assert.ok(await win.webContents.executeJavaScript(`document.querySelector('[data-group="group-${panel}"]').getBoundingClientRect().height <= 38`),'Collapsed resources release their height')
+          await click('[data-group="group-'+panel+'"] .dock-collapse')
         }
         await click('[aria-label="显示/隐藏对话列表"]')
-        const resourceLayout = await win.webContents.executeJavaScript(`(()=>{const dock=document.querySelector('.sidebar-dock').getBoundingClientRect(),panes=['.sidebar-workspace-pane','.sidebar-browser-pane'].map(s=>document.querySelector(s).getBoundingClientRect());return {height:dock.height,total:panes.reduce((sum,r)=>sum+r.height,0),bottom:panes.at(-1).bottom,dockBottom:dock.bottom}})()`)
+        const resourceLayout = await win.webContents.executeJavaScript(`(()=>{const dock=document.querySelector('.sidebar-dock').getBoundingClientRect(),panes=['[data-group=group-workspace]','[data-group=group-browser]'].map(s=>document.querySelector(s).getBoundingClientRect());return {height:dock.height,total:panes.reduce((sum,r)=>sum+r.height,0),bottom:panes.at(-1).bottom,dockBottom:dock.bottom}})()`)
         assert.ok(resourceLayout.height>600&&Math.abs(resourceLayout.height-resourceLayout.total-8)<3,'Resource-only mode shares the available sidebar height: '+JSON.stringify(resourceLayout))
         await capture('navora-resources-only.png')
         const firstPane = await win.webContents.executeJavaScript(`document.querySelector('.sidebar-workspace-pane').getBoundingClientRect().height`)
@@ -138,7 +139,7 @@ app.on('browser-window-created',(_event,win) => {
         const afterDrag = await win.webContents.executeJavaScript(`document.querySelector('.sidebar-workspace-pane').getBoundingClientRect().height`)
         assert.ok(Math.abs(afterDrag-firstPane-30)<3,'Resource divider follows pointer pixels in proportional mode')
         await click('[aria-label="显示/隐藏浏览器资源"]')
-        assert.equal(await win.webContents.executeJavaScript(`(()=>{const dock=document.querySelector('.sidebar-dock').getBoundingClientRect(),pane=document.querySelector('.sidebar-workspace-pane').getBoundingClientRect();return Math.abs(dock.height-pane.height)<2})()`),true,'A single resource fills the dock')
+        assert.equal(await win.webContents.executeJavaScript(`(()=>{const dock=document.querySelector('.sidebar-dock').getBoundingClientRect(),pane=document.querySelector('.sidebar-workspace-pane').getBoundingClientRect();return Math.abs(dock.height-pane.height-36)<2})()`),true,'A single resource fills the dock')
         await click('[aria-label="显示/隐藏浏览器资源"]')
         await click('[aria-label="显示/隐藏对话列表"]')
         const menuButton = `document.querySelector('.sidebar-foot button[title="更多"]')`
@@ -288,6 +289,7 @@ app.on('browser-window-created',(_event,win) => {
           assert.equal(await win.webContents.executeJavaScript(`document.querySelector('.settings-navigation [aria-current="page"] .nav-label').textContent.trim()`),label,'Settings navigation exposes the current category')
           await assertIconContrast()
           if(label==='模型') {
+            await click('.tier-mapping-toggle')
             assert.equal(await win.webContents.executeJavaScript(`document.querySelectorAll('.reasoning-row').length`),5)
             await capture('navora-model-settings.png')
           }
@@ -337,6 +339,58 @@ app.on('browser-window-created',(_event,win) => {
           await click('.composer-send')
           return start
         }
+        // Withhold completion until the actual renderer displays both stream fields.
+        let finishStream: (() => void) | undefined
+        const streaming = createServer(async (req,res) => {
+          const chunks: Buffer[] = []
+          for await(const part of req) chunks.push(Buffer.from(part))
+          const body = JSON.parse(Buffer.concat(chunks).toString())
+          assert.equal(body.stream,true)
+          res.setHeader('Content-Type','text/event-stream')
+          const event = (delta: object, finish_reason: string | null = null) => `data: ${JSON.stringify({choices:[{index:0,delta,finish_reason}]})}\n\n`
+          res.write(event({reasoning_content:'这是实时思考内容。'}))
+          // Separate writes exercise throttled updates as well as the final flush.
+          const timer = setTimeout(()=>res.write(event({content:'这是逐步显示的正文。'})),10)
+          res.on('close',()=>clearTimeout(timer))
+          finishStream = ()=>res.end(event({content:'回答已完成。'},'stop')+'data: [DONE]\n\n')
+        })
+        await new Promise<void>(resolve=>streaming.listen(0,'127.0.0.1',resolve))
+        const streamPort = (streaming.address() as {port:number}).port
+        try {
+          await win.webContents.executeJavaScript(`(async()=>{const cfg=await window.navora.config.get();cfg.ai.providers.push({id:'stream_fixture',label:'Stream fixture',type:'openai_compatible',base_url:'http://127.0.0.1:${streamPort}/v1',api_key_ref:'secrets/stream-fixture',model:'fixture',models:['fixture']});await window.navora.config.save({ai:cfg.ai,app:{...cfg.app,ai_generate_chat_title:false}})})()`)
+          const id = await win.webContents.executeJavaScript(`(async()=>{const c=await window.navora.chats.create('流式回归');await window.navora.chats.setProvider(c.id,'stream_fixture','fixture');await window.navora.chats.setExecutionMode(c.id,'chat');return c.id})()`)
+          await wait(150)
+          await runComposer(id,'流式回归','你好')
+          for(let i=0;i<30;i++) {
+            if(await win.webContents.executeJavaScript(`document.querySelector('.thinking-bubble')?.textContent.includes('这是逐步显示的正文。')`)) break
+            await wait(50)
+          }
+          assert.equal(await win.webContents.executeJavaScript(`document.querySelector('.thinking-reason-body')?.textContent.trim()`),'这是实时思考内容。')
+          assert.equal(await win.webContents.executeJavaScript(`document.querySelector('.thinking-bubble')?.textContent.includes('这是逐步显示的正文。')`),true,'Answer appears before completion')
+          assert.equal(await win.webContents.executeJavaScript(`window.navora.agent.isRunning(${JSON.stringify(id)})`),true)
+          await capture('navora-streaming.png')
+          finishStream!()
+          for(let i=0;i<30;i++) {
+            if(!await win.webContents.executeJavaScript(`window.navora.agent.isRunning(${JSON.stringify(id)})`)) break
+            await wait(50)
+          }
+          const saved = await win.webContents.executeJavaScript(`(async()=>{const c=await window.navora.chats.get(${JSON.stringify(id)});return c.messages.filter(m=>m.role==='assistant')})()`)
+          assert.equal(saved.length,1,'Streaming previews do not create duplicate persisted replies')
+          assert.equal(saved[0].content,'这是逐步显示的正文。回答已完成。')
+          assert.equal(saved[0].meta.reasoning,'这是实时思考内容。')
+          await wait(100)
+          assert.equal(await win.webContents.executeJavaScript(`!!document.querySelector('.thinking-bubble')`),false)
+          await click('.msg-reasoning-toggle')
+          assert.equal(await win.webContents.executeJavaScript(`document.querySelector('.msg-reasoning-body')?.textContent.trim()`),'这是实时思考内容。')
+          await capture('navora-streaming-complete.png')
+        } finally { streaming.closeAllConnections(); await new Promise<void>(resolve=>streaming.close(()=>resolve())) }
+
+        if(process.env.NAVORA_UI_STREAM_ONLY === '1') {
+          fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reducedMotion,checks:['stream-before-completion','stream-single-final-message','stream-persisted-reasoning','stream-preview-cleanup']}))
+          app.exit(0)
+          return
+        }
+
         // Cancellation is deterministic against a delayed local fixture, with the
         // real UI, preload, Agent and fetch. No slow billable request is needed.
         const delayed = createServer(async (req,res) => { for await(const _chunk of req) { /* drain */ } res.on('close',()=>{}) })
@@ -464,6 +518,7 @@ app.on('browser-window-created',(_event,win) => {
           console.log(JSON.stringify({liveModel:true,model:cloud.model,results,vision:vision.content}))
           await capture('navora-live-model.png')
         }
+        if(await win.webContents.executeJavaScript(`!!document.querySelector('.settings-workspace')`)) await click('.settings-close')
         for(const width of [960,720]) {
           win.setContentSize(width,900)
           await wait(220)

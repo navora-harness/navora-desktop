@@ -1,9 +1,17 @@
 <template>
-  <div class="ws-nodes">
+  <div class="ws-nodes" :role="depth === 0 ? 'tree' : 'group'" :aria-label="depth === 0 ? '工作区文件' : undefined">
     <div v-for="ent in entries" :key="ent.path">
       <button
         type="button"
         class="tree-row"
+        role="treeitem"
+        :tabindex="selected === ent.path || (!hasVisibleSelection && depth === 0 && entries[0]?.path === ent.path) ? 0 : -1"
+        @focus="emit('select', ent)"
+        :aria-level="depth + 1"
+        :aria-expanded="ent.type === 'dir' ? expanded.has(ent.path) : undefined"
+        :aria-selected="selected === ent.path"
+        :data-depth="depth"
+        @keydown="onKeydown($event, ent)"
         :class="{
           dir: ent.type === 'dir',
           open: ent.type === 'dir' && expanded.has(ent.path),
@@ -53,6 +61,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed, nextTick } from 'vue'
 export type WsEntry = {
   path: string
   name: string
@@ -63,7 +72,7 @@ export type WsEntry = {
 
 defineOptions({ name: 'WorkspaceTreeNode' })
 
-defineProps<{
+const props = defineProps<{
   entries: WsEntry[]
   depth: number
   expanded: Set<string>
@@ -72,6 +81,10 @@ defineProps<{
   selected: string
 }>()
 
+const hasVisibleSelection = computed(() => {
+  const visit = (entries:WsEntry[]):boolean => entries.some(ent => ent.path === props.selected || (props.expanded.has(ent.path) && visit(props.children[ent.path] || [])))
+  return visit(props.entries)
+})
 const emit = defineEmits<{
   toggle: [ent: WsEntry]
   open: [ent: WsEntry]
@@ -79,6 +92,29 @@ const emit = defineEmits<{
   menu: [e: MouseEvent, ent: WsEntry]
 }>()
 
+async function onKeydown(event: KeyboardEvent, ent: WsEntry) {
+  const row = event.currentTarget as HTMLElement
+  const tree = row.closest('[role="tree"]')
+  const rows = [...(tree?.querySelectorAll<HTMLElement>('.tree-row') || [])].filter(el => el.checkVisibility())
+  const current = rows.indexOf(row)
+  let target: HTMLElement | undefined
+  if (event.key === 'ArrowDown') target = rows[Math.min(rows.length - 1, current + 1)]
+  else if (event.key === 'ArrowUp') target = rows[Math.max(0, current - 1)]
+  else if (event.key === 'Home') target = rows[0]
+  else if (event.key === 'End') target = rows.at(-1)
+  else if (event.key === 'ArrowRight' && ent.type === 'dir') {
+    if (!props.expanded.has(ent.path)) emit('toggle', ent)
+    else target = rows[current + 1]
+  } else if (event.key === 'ArrowLeft') {
+    if (ent.type === 'dir' && props.expanded.has(ent.path)) emit('toggle', ent)
+    else target = rows.slice(0, current).reverse().find(el => Number(el.dataset.depth) < props.depth)
+  } else if (event.key === 'Enter') {
+    ent.type === 'dir' ? emit('toggle', ent) : emit('open', ent)
+  } else return
+  event.preventDefault()
+  if (target) { target.focus({ preventScroll: true }); target.scrollIntoView({ block: 'nearest' }); }
+  await nextTick()
+}
 function forwardMenu(e: MouseEvent, ent: WsEntry) {
   emit('menu', e, ent)
 }
