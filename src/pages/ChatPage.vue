@@ -6,7 +6,7 @@
       'mobile-layout': isMobileLayout,
       'remote-web': isWebRemote(),
       'sidebar-open': isMobileLayout && mobileSidebarOpen,
-      'sidebar-collapsed': allSidebarHidden && !settingsOpen,
+      'sidebar-collapsed': allSidebarHidden && !settingsOpen && !creatorKind,
       'sidebar-resizing': sidebarResizing,
       frameless: showDesktopChrome,
       'platform-mac': windowPlatform === 'darwin',
@@ -23,7 +23,7 @@
     <aside class="sidebar">
       <div class="sidebar-content-stack">
       <Transition name="sidebar-flip">
-      <div v-show="!settingsOpen || isMobileLayout" class="sidebar-chat-face">
+      <div v-show="(!settingsOpen && !creatorKind) || isMobileLayout" class="sidebar-chat-face">
       <SidebarDock :model-value="dockLayout" :panels="sidebarPanels" @update:model-value="setDockLayout">
         <template #chats>
       <div class="chat-toolbar">
@@ -466,9 +466,10 @@
       </div>
       </Transition>
       <Transition name="sidebar-flip">
-        <div v-show="settingsOpen && !isMobileLayout" class="sidebar-settings-face">
-          <div class="settings-sidebar-heading">设置</div>
-          <div id="settings-sidebar-nav" />
+        <div v-show="(settingsOpen || creatorKind) && !isMobileLayout" class="sidebar-settings-face">
+          <div class="settings-sidebar-heading">{{ creatorKind ? (creatorKind === 'plugin' ? '插件创建器' : '技能创建器') : '设置' }}</div>
+          <div v-show="settingsOpen" id="settings-sidebar-nav" />
+          <div v-show="creatorKind" id="creator-sidebar-nav" />
         </div>
       </Transition>
       </div>
@@ -477,11 +478,11 @@
           <div class="rail-brand" :class="{ 'app-drag': showDesktopChrome }" title="Navora">
             <img src="/app-icon.png" alt="Navora" draggable="false" />
           </div>
-          <template v-if="allSidebarHidden && !settingsOpen">
+          <template v-if="allSidebarHidden && !settingsOpen && !creatorKind">
             <button type="button" class="sidebar-icon-btn rail-new-chat" title="开启新对话（Ctrl/⌘ N）" aria-label="开启新对话" @click="createChat"><font-awesome-icon icon="pen-to-square" /></button>
             <button type="button" class="sidebar-icon-btn rail-search" title="搜索对话（Ctrl/⌘ K）" aria-label="搜索对话" @click="openChatSearch"><font-awesome-icon icon="magnifying-glass" /></button>
           </template>
-          <button v-for="panel in sidebarPanels" :key="panel.id" type="button" class="sidebar-icon-btn" :class="{ selected: !settingsOpen && sidebarSelected[panel.id] }" :data-panel="panel.id" :data-visible="sidebarVisible[panel.id]" :title="railPanelLabel(panel.id, panel.label)" :aria-label="railPanelLabel(panel.id, panel.label)" :aria-pressed="!settingsOpen && sidebarSelected[panel.id]" @click="toggleSidebarPanel(panel.id)"><font-awesome-icon :icon="panel.icon" /></button>
+          <button v-for="panel in sidebarPanels" :key="panel.id" type="button" class="sidebar-icon-btn" :class="{ selected: !settingsOpen && !creatorKind && sidebarSelected[panel.id] }" :data-panel="panel.id" :data-visible="sidebarVisible[panel.id]" :title="railPanelLabel(panel.id, panel.label)" :aria-label="railPanelLabel(panel.id, panel.label)" :aria-pressed="!settingsOpen && !creatorKind && sidebarSelected[panel.id]" @click="toggleSidebarPanel(panel.id)"><font-awesome-icon :icon="panel.icon" /></button>
         </div>
         <div class="sidebar-foot">
         <div class="sidebar-foot-actions">
@@ -559,12 +560,12 @@
         </div>
       </div>
       </nav>
-      <div v-if="!isMobileLayout && (!allSidebarHidden || settingsOpen)" class="sidebar-divider vertical" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarLayout.width" aria-valuemin="250" aria-valuemax="560" tabindex="0" @pointerdown="beginSidebarResize($event, 'width')" @keydown="sidebarResizeKey($event, 'width')" />
+      <div v-if="!isMobileLayout && (!allSidebarHidden || settingsOpen || creatorKind)" class="sidebar-divider vertical" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarLayout.width" aria-valuemin="250" aria-valuemax="560" tabindex="0" @pointerdown="beginSidebarResize($event, 'width')" @keydown="sidebarResizeKey($event, 'width')" />
     </aside>
 
-    <main class="main" :class="{ 'file-preview-open': previewSelection && !settingsOpen }" :style="{ '--preview-width': `${previewWidth}px` }">
-      <div v-if="showDesktopChrome" class="win-drag-main" aria-hidden="true" />
-      <header v-if="isMobileLayout && !settingsOpen" class="mobile-topbar">
+    <main class="main" :class="{ 'file-preview-open': previewSelection && !settingsOpen && !creatorKind }" :style="{ '--preview-width': `${previewWidth}px` }">
+      <div v-if="showDesktopChrome && ((!settingsOpen && !creatorKind) || isMobileLayout)" class="win-drag-main" aria-hidden="true" />
+      <header v-if="isMobileLayout && !settingsOpen && !creatorKind" class="mobile-topbar">
         <button
           v-if="active?.kind === 'sub' && active.parentChatId"
           type="button"
@@ -628,7 +629,8 @@
           </button>
         </div>
       </header>
-      <SettingsPage v-if="settingsOpen" class="settings-workspace" embedded :mobile="isMobileLayout" :navigation-target="isMobileLayout ? undefined : '#settings-sidebar-nav'" @close="settingsOpen = false" />
+      <CreatorWorkspace v-if="creatorKind" :key="creatorKind" :kind="creatorKind" :navigation-target="isMobileLayout ? undefined : '#creator-sidebar-nav'" @close="closeCreator" @trial="openCreatorTrial" @notify="onPanelNotify" />
+      <SettingsPage v-else-if="settingsOpen" class="settings-workspace" :initial-tab="settingsTab" @navigate="settingsTab = $event" embedded :mobile="isMobileLayout" :navigation-target="isMobileLayout ? undefined : '#settings-sidebar-nav'" @close="settingsOpen = false" @create="openCreator" />
       <template v-else-if="active">
         <header
           v-if="!isMobileLayout || agentRunning"
@@ -1410,6 +1412,13 @@
             </div>
             <div class="composer-actions">
               <div class="composer-actions-left">
+                <v-menu location="top start">
+                  <template #activator="{ props: creatorMenuProps }"><button v-bind="creatorMenuProps" type="button" class="composer-perm-btn creator-menu-trigger" title="创建" aria-label="打开创建菜单"><font-awesome-icon icon="plus" /></button></template>
+                  <div class="composer-perm-panel creator-launch-menu" role="menu">
+                    <button type="button" class="composer-perm-item" role="menuitem" @click="openCreator('plugin')"><font-awesome-icon icon="puzzle-piece" class="composer-perm-item-icon" /><span class="composer-perm-item-label">插件创建器</span></button>
+                    <button type="button" class="composer-perm-item" role="menuitem" @click="openCreator('skill')"><font-awesome-icon icon="book" class="composer-perm-item-icon" /><span class="composer-perm-item-label">技能创建器</span></button>
+                  </div>
+                </v-menu>
                 <v-menu location="top start" :disabled="agentRunning">
                   <template #activator="{ props: modeProps }"><button type="button" class="composer-perm-btn execution-mode-button" v-bind="modeProps" :disabled="agentRunning" aria-label="工作模式">{{ executionModeLabel }}<font-awesome-icon icon="chevron-down" /></button></template>
                   <div class="composer-perm-panel" role="menu" aria-label="工作模式">
@@ -1601,7 +1610,7 @@
           </v-btn>
         </div>
       </div>
-      <FilePreviewPanel v-if="previewSelection && !settingsOpen" :chat-id="previewSelection.chatId" :path="previewSelection.path" :width="previewWidth" @close="previewSelection = null" @resize="setPreviewWidth" @notify="onPanelNotify" />
+      <FilePreviewPanel v-if="previewSelection && !settingsOpen && !creatorKind" :chat-id="previewSelection.chatId" :path="previewSelection.path" :width="previewWidth" @close="previewSelection = null" @resize="setPreviewWidth" @notify="onPanelNotify" />
     </main>
 
     <v-dialog
@@ -1924,6 +1933,8 @@ import { storeErrorText } from '@shared/store'
 import BrowserDownloadsMenu from '@/components/BrowserDownloadsMenu.vue'
 import WorkspaceFilesPanel from '@/components/sidebar/WorkspaceFilesPanel.vue'
 import FilePreviewPanel from '@/components/FilePreviewPanel.vue'
+import CreatorWorkspace from '@/components/CreatorWorkspace.vue'
+import type { CreatorKind } from '@shared/creators'
 import SidebarDock from '@/components/sidebar/SidebarDock.vue'
 import { useSidebarDock } from '@/composables/useSidebarDock'
 import BrowserResourcesPanel from '@/components/sidebar/BrowserResourcesPanel.vue'
@@ -2329,12 +2340,31 @@ function openFilePreview(path: string) {
   if (isMobileLayout.value) closeMobileSidebar()
 }
 watch(activeId, () => { previewSelection.value = null })
+const creatorKind = ref<CreatorKind | null>(null)
+let creatorReturnToSettings = false
+function openCreator(kind: CreatorKind) {
+  creatorReturnToSettings = settingsOpen.value
+  settingsOpen.value = false
+  creatorKind.value = kind
+  closeMobileSidebar()
+}
+function closeCreator() { creatorKind.value = null; if (creatorReturnToSettings) settingsOpen.value = true }
+async function openCreatorTrial(result: { chatId: string; prompt: string }) {
+  creatorKind.value = null
+  settingsOpen.value = false
+  await refreshList()
+  await selectChat(result.chatId)
+  draft.value = result.prompt
+}
+const settingsTab = ref('basic')
 const settingsOpen = ref(false)
+watch(settingsOpen, open => { if (open) creatorKind.value = null })
 const { layout: sidebarLayout, style: sidebarStyle, resizing: sidebarResizing, beginResize: beginSidebarResize, resizeKey: sidebarResizeKey } = useSidebarLayout()
 const { layout: dockLayout, panels: sidebarPanels, visible: sidebarVisible, selected: sidebarSelected, activate: activateSidebarPanel, set: setDockLayout } = useSidebarDock()
 const allSidebarHidden = computed(() => sidebarPanels.value.every(panel => !sidebarVisible.value[panel.id]))
 function railPanelLabel(id: string, label: string) { return `显示/隐藏${id === 'chats' ? '对话列表' : id === 'workspace' ? '工作区' : id === 'browser' ? '浏览器资源' : label}` }
 function toggleSidebarPanel(panel: string) {
+  creatorKind.value = null
   const wasSettings = settingsOpen.value
   settingsOpen.value = false
   if (panel === 'chats' && sidebarSelected.value.chats && !wasSettings) exitChatBatchMode()
@@ -4439,6 +4469,7 @@ async function refreshList() {
 let chatSelection = 0
 let chatTransition: Animation | undefined
 async function selectChat(id: string) {
+  creatorKind.value = null
   if (!window.navora) return
   const selection = ++chatSelection
   settingsOpen.value = false
@@ -4511,6 +4542,7 @@ async function selectChat(id: string) {
 
 let creatingChat: Promise<void> | undefined
 async function createChat() {
+  creatorKind.value = null
   if (!window.navora) return
   if (creatingChat) return creatingChat
   // Repeated clicks and shortcuts on an untouched conversation only focus it.

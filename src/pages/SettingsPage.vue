@@ -625,6 +625,7 @@
                   <v-btn color="primary" :disabled="!!skillsBusy" @click="openCreateSkill">
                     新建技能
                   </v-btn>
+                  <v-btn variant="tonal" color="primary" :disabled="!!skillsBusy" class="launch-skill-creator" @click="emit('create', 'skill')">技能创建器</v-btn>
                   <v-btn
                     variant="outlined"
                     color="primary"
@@ -888,22 +889,13 @@
               <h2>插件</h2>
               <p>启用后向 Agent 注册工具；对外链、压缩包或商店安装，下次发消息生效</p>
             </header>
-            <div class="card mb-3">
+            <details class="plugin-development-settings">
+              <summary><font-awesome-icon icon="terminal" />开发设置<font-awesome-icon icon="chevron-down" /></summary>
               <div class="switch-row">
-                <div>
-                  <div class="switch-title">插件开发模式</div>
-                  <div class="switch-hint">
-                    开启后向 Agent 注入插件 SDK 契约；外链插件在 dist 变更后自动重新加载（下次发消息生效）
-                  </div>
-                </div>
-                <v-switch
-                  v-model="cfg.plugins.dev_mode"
-                  color="primary"
-                  hide-details
-                  density="compact"
-                />
+                <div><div class="switch-title">插件开发模式</div><div class="switch-hint">提供 SDK 契约，自动重载外链产物</div></div>
+                <v-switch v-model="cfg.plugins.dev_mode" color="primary" hide-details density="compact" />
               </div>
-            </div>
+            </details>
             <div
               class="card skill-dropzone"
               :class="{ 'skill-drop-active': pluginDropActive }"
@@ -914,39 +906,20 @@
             >
               <div class="d-flex flex-wrap ga-2 align-center">
                 <template v-if="!pluginBatchMode">
-                  <v-btn
-                    variant="outlined"
-                    color="primary"
-                    :loading="pluginsBusy === 'dir'"
-                    :disabled="!!pluginsBusy"
-                    @click="importPlugin('directory')"
-                  >
-                    外链文件夹
-                  </v-btn>
-                  <v-btn
-                    variant="outlined"
-                    color="primary"
-                    :loading="pluginsBusy === 'zip'"
-                    :disabled="!!pluginsBusy"
-                    @click="importPlugin('zip')"
-                  >
-                    导入压缩包
-                  </v-btn>
-                  <v-btn
-                    variant="tonal"
-                    color="primary"
-                    :disabled="!!pluginsBusy"
-                    @click="openBrowse({ kind: 'plugin' })"
-                  >
-                    插件商店
-                  </v-btn>
-                  <v-btn variant="text" :disabled="!!pluginsBusy" @click="reloadPlugins">
-                    重新加载
-                  </v-btn>
+                  <v-btn color="primary" :disabled="!!pluginsBusy" class="launch-plugin-creator" @click="emit('create', 'plugin')">插件创建器</v-btn>
+                  <v-menu location="bottom start">
+                    <template #activator="{ props: importProps }"><v-btn v-bind="importProps" variant="outlined" color="primary" :disabled="!!pluginsBusy" :loading="pluginsBusy === 'dir' || pluginsBusy === 'zip'" class="plugin-import-trigger">导入插件<font-awesome-icon icon="chevron-down" class="ml-2" /></v-btn></template>
+                    <div class="skill-more-panel" role="menu">
+                      <button type="button" class="skill-more-item" role="menuitem" @click="importPlugin('directory')"><font-awesome-icon icon="folder-open" /><span>外链文件夹</span></button>
+                      <button type="button" class="skill-more-item" role="menuitem" @click="importPlugin('zip')"><font-awesome-icon icon="file" /><span>安装 ZIP</span></button>
+                    </div>
+                  </v-menu>
+                  <v-btn variant="text" color="primary" :disabled="!!pluginsBusy" @click="openBrowse({ kind: 'plugin' })">插件商店</v-btn>
+                  <v-btn variant="text" :disabled="!!pluginsBusy" :loading="pluginsBusy === 'reload'" class="plugin-refresh" @click="reloadPlugins"><font-awesome-icon icon="arrow-rotate-right" class="mr-2" />刷新</v-btn>
                 </template>
                 <template v-else>
                   <v-btn variant="tonal" :disabled="!!pluginsBusy" @click="togglePluginBatchSelectAll">
-                    {{ pluginBatchAllSelected ? '取消全选' : '全选' }}
+                    {{ pluginBatchAllSelected ? '取消选择当前结果' : '全选当前结果' }}
                   </v-btn>
                   <v-btn
                     color="error"
@@ -958,15 +931,9 @@
                     卸载{{ pluginBatchSelectedCount ? ` ${pluginBatchSelectedCount}` : '' }}
                   </v-btn>
                   <span class="skill-batch-count" :class="{ ready: pluginBatchSelectedCount > 0 }">
-                    已选 {{ pluginBatchSelectedCount }} / {{ removablePlugins.length }}
+                    已选 {{ pluginBatchSelectedCount }}<span v-if="pluginSelectedOutsideFilter">（筛选外 {{ pluginSelectedOutsideFilter }}）</span>
                   </span>
                 </template>
-              </div>
-              <div v-if="!pluginBatchMode" class="switch-hint mt-3">
-                外链不复制源目录；压缩包 ≤ 200MB，须含 plugin.json + main.cjs；随附插件不可卸载；非 HTTPS 商店来源会提示风险。
-              </div>
-              <div v-else class="switch-hint mt-3">
-                勾选后可批量卸载（不含随附插件）。
               </div>
               <div v-if="pluginDropActive && !pluginChecking" class="skill-drop-hint">
                 松开以导入插件
@@ -987,173 +954,13 @@
               </div>
             </div>
 
-            <div class="list-toolbar mt-3">
-              <div class="list-toolbar-main">
-                <h3 class="list-toolbar-title">插件列表</h3>
-                <v-btn
-                  v-if="pluginBatchMode"
-                  size="small"
-                  variant="text"
-                  class="list-batch-cancel"
-                  :disabled="!!pluginsBusy"
-                  @click="exitPluginBatchMode"
-                >
-                  取消
-                </v-btn>
-                <v-btn
-                  v-else-if="removablePlugins.length"
-                  icon
-                  variant="text"
-                  size="small"
-                  class="list-batch-btn"
-                  aria-label="批量操作"
-                  title="批量操作"
-                  :disabled="!!pluginsBusy"
-                  @click="enterPluginBatchMode"
-                >
-                  <font-awesome-icon icon="list-check" />
-                </v-btn>
-              </div>
-            </div>
-
-            <div v-if="!pluginsList.length" class="card mt-2">
-              <div class="settings-empty"><font-awesome-icon icon="puzzle-piece" /><strong>暂无插件</strong><span>导入插件或从商店添加</span></div>
-            </div>
-
-            <div
-              v-for="p in pluginsList"
-              :key="p.id"
-              class="card mt-2 skill-card"
-              :class="{
-                'skill-batch-mode': pluginBatchMode,
-                'skill-batch-selected': pluginBatchMode && pluginBatchSelectedIds.has(p.id),
-                'plugin-suite-warn': pluginSuiteConflictIds.has(p.id),
-              }"
-              @click="
-                pluginBatchMode && !p.bundled && p.kind !== 'bundled'
-                  ? togglePluginBatchSelect(p.id)
-                  : undefined
-              "
-            >
-              <div class="skill-head">
-                <div class="skill-meta-row">
-                  <span
-                    v-if="pluginBatchMode && !p.bundled && p.kind !== 'bundled'"
-                    class="skill-batch-check"
-                    :class="{ on: pluginBatchSelectedIds.has(p.id) }"
-                    aria-hidden="true"
-                  >
-                    <font-awesome-icon
-                      :icon="pluginBatchSelectedIds.has(p.id) ? 'circle-check' : 'circle'"
-                    />
-                  </span>
-                  <div class="skill-meta">
-                    <div class="skill-name">
-                      {{ p.name }}
-                      <span
-                        v-if="pluginSuiteConflictIds.has(p.id)"
-                        class="plugin-tag warn"
-                        :title="pluginSuiteConflictHint(p)"
-                      >
-                        套件冲突
-                      </span>
-                    </div>
-                    <div class="skill-id">
-                      {{ p.id }}<template v-if="p.version"> · v{{ p.version }}</template>
-                    </div>
-                    <div class="plugin-source" :title="p.sourceDetail || undefined">
-                      来源：{{ p.source || '未知'
-                      }}<template v-if="p.sourceDetail"> · {{ p.sourceDetail }}</template
-                      ><template v-if="p.suite"> · 套件 {{ p.suite }}</template>
-                    </div>
-                  </div>
-                </div>
-                <v-switch
-                  v-if="!pluginBatchMode"
-                  class="skill-enable-switch"
-                  :model-value="p.enabled"
-                  color="primary"
-                  hide-details
-                  density="compact"
-                  :disabled="!!pluginsBusy || !!p.error"
-                  @update:model-value="(v: boolean | null) => togglePlugin(p.id, Boolean(v))"
-                />
-              </div>
-              <div class="skill-body-row">
-                <div class="skill-desc">
-                  {{ p.description }}
-                  <template v-if="p.tools?.length">
-                    <br />
-                    接口：
-                    <code v-for="(t, i) in p.tools" :key="t"
-                      >{{ t }}<template v-if="i < p.tools.length - 1">, </template></code
-                    >
-                  </template>
-                  <template v-if="p.error">
-                    <br />
-                    <span style="color: rgb(var(--v-theme-error))">加载失败：{{ p.error }}</span>
-                  </template>
-                </div>
-                <v-menu
-                  v-if="!pluginBatchMode"
-                  location="bottom end"
-                  :close-on-content-click="true"
-                  content-class="skill-more-menu"
-                >
-                  <template #activator="{ props: menuProps }">
-                    <v-btn
-                      icon
-                      variant="text"
-                      size="small"
-                      class="skill-more-btn"
-                      aria-label="更多操作"
-                      :disabled="!!pluginsBusy"
-                      v-bind="menuProps"
-                    >
-                      <font-awesome-icon icon="ellipsis-vertical" />
-                    </v-btn>
-                  </template>
-                  <div class="skill-more-panel" role="menu">
-                    <button
-                      type="button"
-                      class="skill-more-item"
-                      role="menuitem"
-                      :disabled="!p.hasReadme || !!pluginsBusy"
-                      :title="p.hasReadme ? '查看插件说明' : '该插件未提供说明文件'"
-                      @click="viewPluginDocs(p)"
-                    >
-                      <font-awesome-icon icon="book" />
-                      <span>查看说明</span>
-                    </button>
-                    <button
-                      type="button"
-                      class="skill-more-item"
-                      role="menuitem"
-                      @click="exportPlugin(p.id)"
-                    >
-                      <font-awesome-icon icon="file-export" />
-                      <span>导出压缩包</span>
-                    </button>
-                    <button
-                      type="button"
-                      class="skill-more-item danger"
-                      role="menuitem"
-                      :disabled="p.bundled || p.kind === 'bundled'"
-                      @click="askRemovePlugin(p)"
-                    >
-                      <font-awesome-icon icon="trash" />
-                      <span>{{
-                        p.bundled || p.kind === 'bundled'
-                          ? '随附不可卸载'
-                          : p.kind === 'linked'
-                            ? '取消外链'
-                            : '卸载'
-                      }}</span>
-                    </button>
-                  </div>
-                </v-menu>
-              </div>
-            </div>
+            <PluginLibraryList
+              :records="pluginsList" :busy="!!pluginsBusy" :loading="pluginsLoading" :error="pluginsLoadError"
+              :batch-mode="pluginBatchMode" :selected="pluginBatchSelectedIds" :conflicts="pluginSuiteConflictIds"
+              @batch="$event ? enterPluginBatchMode() : exitPluginBatchMode()" @select="togglePluginBatchSelect"
+              @toggle="togglePlugin" @docs="viewPluginDocs" @export="exportPlugin" @remove="askRemovePlugin"
+              @create="emit('create', 'plugin')" @retry="loadPlugins" @visible="pluginFilteredIds = $event" @notify="showToast"
+            />
 
             <PluginImportDialog
               v-model="pluginImportOpen"
@@ -1559,6 +1366,7 @@ import SkillExportDialog from '../components/skills/SkillExportDialog.vue'
 import SkillDeleteDialog from '../components/skills/SkillDeleteDialog.vue'
 import PluginImportDialog from '../components/plugins/PluginImportDialog.vue'
 import PluginDocsDialog from '../components/plugins/PluginDocsDialog.vue'
+import PluginLibraryList from '../components/plugins/PluginLibraryList.vue'
 import { useOnboarding } from '../composables/useOnboarding'
 import { useStoreUi } from '../composables/useStoreUi'
 
@@ -1568,12 +1376,15 @@ const props = withDefaults(
     embedded?: boolean
     mobile?: boolean
     navigationTarget?: string
+    initialTab?: string
   }>(),
   { embedded: false, mobile: false },
 )
 
 const emit = defineEmits<{
   close: []
+  create: [kind: 'plugin' | 'skill']
+  navigate: [tab: string]
 }>()
 
 const router = useRouter()
@@ -1586,7 +1397,7 @@ function openOnboarding() {
   showOnboarding({ manual: true })
 }
 
-const tab = ref('basic')
+const tab = ref(props.initialTab || 'basic')
 const contentEl = ref<HTMLElement | null>(null)
 const navListEl = ref<HTMLElement | null>(null)
 const cfg = ref<AppConfig | null>(null)
@@ -1600,6 +1411,7 @@ function selectTab(value: string) {
     exitSkillBatchMode()
   }
   tab.value = value
+  emit('navigate', value)
   if (value === 'skills') void loadSkills()
   if (value === 'plugins') void loadPlugins()
   if (value === 'subchat' && cfg.value) ensureSubchat()
@@ -1763,6 +1575,10 @@ let skillDragDepth = 0
 
 const pluginsList = ref<PluginRecord[]>([])
 const pluginsBusy = ref<string | false>(false)
+const pluginsLoading = ref(false)
+const pluginsLoadError = ref('')
+const pluginFilteredIds = ref<string[]>([])
+let pluginLoadSequence = 0
 const pluginChecking = computed(() => pluginsBusy.value === 'parse')
 const pluginBusyTitle = computed(() => {
   if (pluginsBusy.value === 'parse') return '正在检查插件…'
@@ -1797,10 +1613,9 @@ const removablePlugins = computed(() =>
   pluginsList.value.filter((p) => !p.bundled && p.kind !== 'bundled'),
 )
 const pluginBatchSelectedCount = computed(() => pluginBatchSelectedIds.value.size)
-const pluginBatchAllSelected = computed(() => {
-  const n = removablePlugins.value.length
-  return n > 0 && pluginBatchSelectedIds.value.size >= n
-})
+const visibleRemovablePlugins = computed(() => removablePlugins.value.filter(plugin => pluginFilteredIds.value.includes(plugin.id)))
+const pluginSelectedOutsideFilter = computed(() => [...pluginBatchSelectedIds.value].filter(id => !pluginFilteredIds.value.includes(id)).length)
+const pluginBatchAllSelected = computed(() => visibleRemovablePlugins.value.length > 0 && visibleRemovablePlugins.value.every(plugin => pluginBatchSelectedIds.value.has(plugin.id)))
 
 /** Same suite already co-installed (legacy / edge cases). */
 const pluginSuiteConflictIds = computed(() => {
@@ -1821,24 +1636,6 @@ const pluginSuiteConflictIds = computed(() => {
   }
   return ids
 })
-
-function pluginSuiteConflictHint(p: PluginRecord): string {
-  const g = String(p.suite || '')
-    .trim()
-    .toLowerCase()
-  if (!g) return '同套件已安装多个包，请只保留一个'
-  const others = pluginsList.value
-    .filter(
-      (x) =>
-        x.id !== p.id &&
-        String(x.suite || '')
-          .trim()
-          .toLowerCase() === g,
-    )
-    .map((x) => x.name || x.id)
-  if (!others.length) return `套件「${g}」冲突`
-  return `套件「${g}」已同时安装：${others.join('、')}。同套件只能保留一个，请卸载多余包。`
-}
 
 const pluginErrorHints: Record<string, string> = {
   path_not_found: '路径不存在',
@@ -2064,15 +1861,19 @@ function pruneSkillBatchSelection() {
 
 
 async function loadPlugins() {
-  if (!window.navora?.plugins) {
-    pluginsList.value = []
-    return
-  }
+  if (!window.navora?.plugins) return
+  const sequence = ++pluginLoadSequence
+  pluginsLoading.value = true
+  pluginsLoadError.value = ''
   try {
-    pluginsList.value = await window.navora.plugins.list()
+    const records = await window.navora.plugins.list()
+    if (sequence !== pluginLoadSequence) return
+    pluginsList.value = records
     prunePluginBatchSelection()
-  } catch (e) {
-    showToast(e instanceof Error ? e.message : '加载插件失败', 'error')
+  } catch {
+    if (sequence === pluginLoadSequence) pluginsLoadError.value = '插件列表读取失败，已保留现有内容'
+  } finally {
+    if (sequence === pluginLoadSequence) pluginsLoading.value = false
   }
 }
 
@@ -2098,18 +1899,17 @@ function prunePluginBatchSelection() {
 }
 
 async function reloadPlugins() {
-  if (!window.navora?.plugins?.reload) return
+  if (!window.navora?.plugins?.reload || pluginsBusy.value) return
+  pluginLoadSequence++
   pluginsBusy.value = 'reload'
   try {
-    const res = await window.navora.plugins.reload()
-    pluginsList.value = res.plugins || (await window.navora.plugins.list())
-    prunePluginBatchSelection()
-    showToast('已重新加载插件')
-  } catch (e) {
-    showToast(e instanceof Error ? e.message : '重新加载失败', 'error')
-  } finally {
-    pluginsBusy.value = false
-  }
+    await window.navora.plugins.reload()
+    await loadPlugins()
+    if (!pluginsLoadError.value) showToast('已重新加载插件')
+  } catch {
+    pluginsLoadError.value = '插件重新加载失败，已保留现有内容'
+    pluginsLoading.value = false
+  } finally { pluginsBusy.value = false }
 }
 
 async function importPlugin(kind: 'directory' | 'zip' = 'directory') {
@@ -2360,11 +2160,12 @@ function togglePluginBatchSelect(id: string) {
 }
 
 function togglePluginBatchSelectAll() {
-  if (pluginBatchAllSelected.value) {
-    pluginBatchSelectedIds.value = new Set()
-    return
+  const next = new Set(pluginBatchSelectedIds.value)
+  for (const plugin of visibleRemovablePlugins.value) {
+    if (pluginBatchAllSelected.value) next.delete(plugin.id)
+    else next.add(plugin.id)
   }
-  pluginBatchSelectedIds.value = new Set(removablePlugins.value.map((p) => p.id))
+  pluginBatchSelectedIds.value = next
 }
 
 function selectedPluginItems(): Array<{ id: string; name?: string }> {
@@ -3287,6 +3088,7 @@ async function load() {
       remoteStatus.value = null
     }
     if (tab.value === 'skills') await loadSkills()
+    if (tab.value === 'plugins') await loadPlugins()
     await nextTick()
   } finally {
     hydrating.value = false

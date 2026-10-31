@@ -231,6 +231,18 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
     ws.onEvent(event, (payload) => cb(payload as T))
 
   return {
+    creators: {
+      list: (kind) => invoke('navora:creators.list', kind),
+      create: (kind, template) => invoke('navora:creators.create', kind, template),
+      get: (id) => invoke('navora:creators.get', id),
+      save: (id, revision, files, name) => invoke('navora:creators.save', id, revision, files, name),
+      validate: (id, revision) => invoke('navora:creators.validate', id, revision),
+      install: (id, revision) => invoke('navora:creators.install', id, revision),
+      trial: (id, revision, task) => invoke('navora:creators.trial', id, revision, task),
+      generate: (id, revision, request, providerId, model) => invoke('navora:creators.generate', id, revision, request, providerId, model),
+      cancelGenerate: (id) => invoke('navora:creators.cancelGenerate', id),
+      export: (id, revision) => invoke('navora:creators.export', id, revision),
+    } satisfies import('../shared/creators').CreatorApi,
     pathForFile: () => '',
     app: {
       platform: 'web',

@@ -44,7 +44,7 @@ const copied = ref(false)
 const closeButton = ref<HTMLButtonElement | null>(null)
 const maximum = ref(Math.max(280, Math.min(800, innerWidth - 360)))
 const name = computed(() => props.path.split(/[\\/]/).at(-1) || props.path)
-const markdown = computed(() => DOMPurify.sanitize(renderMarkdown(data.value?.content || ''), { FORBID_TAGS: ['img', 'video', 'audio', 'iframe', 'object', 'embed'] }))
+const markdown = computed(() => DOMPurify.sanitize(renderMarkdown(data.value?.content || ''), { FORBID_ATTR: ['style'], FORBID_TAGS: ['img', 'video', 'audio', 'iframe', 'object', 'embed', 'style', 'form', 'input', 'button', 'textarea', 'select'] }))
 let sequence = 0
 let disposed = false
 let copiedTimer: ReturnType<typeof setTimeout> | undefined

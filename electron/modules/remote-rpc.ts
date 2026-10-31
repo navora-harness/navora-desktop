@@ -25,6 +25,9 @@ export class NavoraRpcRegistry {
 
 /** Dangerous / host-local channels blocked for remote WS clients. */
 const REMOTE_FORBIDDEN = new Set([
+  'navora:creators.export',
+  'navora:creators.install',
+  'navora:creators.trial',
   'navora:workspace.pickDirectory',
   'navora:workspace.setChatRoot',
   'navora:secrets.setApiKey',

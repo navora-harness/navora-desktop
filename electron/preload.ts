@@ -21,6 +21,18 @@ import type {
 import type { SkillDetail, SkillImportPreview, SkillRecord, SkillWriteInput } from '../shared/skills'
 
 const api = {
+  creators: {
+    list: (kind) => ipcRenderer.invoke('navora:creators.list', kind),
+    create: (kind, template) => ipcRenderer.invoke('navora:creators.create', kind, template),
+    get: (id) => ipcRenderer.invoke('navora:creators.get', id),
+    save: (id, revision, files, name) => ipcRenderer.invoke('navora:creators.save', id, revision, files, name),
+    validate: (id, revision) => ipcRenderer.invoke('navora:creators.validate', id, revision),
+    install: (id, revision) => ipcRenderer.invoke('navora:creators.install', id, revision),
+    trial: (id, revision, task) => ipcRenderer.invoke('navora:creators.trial', id, revision, task),
+    generate: (id, revision, request, providerId, model) => ipcRenderer.invoke('navora:creators.generate', id, revision, request, providerId, model),
+    cancelGenerate: (id) => ipcRenderer.invoke('navora:creators.cancelGenerate', id),
+    export: (id, revision) => ipcRenderer.invoke('navora:creators.export', id, revision),
+  } satisfies import('../shared/creators').CreatorApi,
   models: {
     list: (providerId: string): Promise<{ ok: boolean; models?: string[]; error?: string }> => ipcRenderer.invoke('navora:models.list', providerId),
     probe: (providerId: string, model: string, kind: 'connection' | 'reply'): Promise<{ ok: boolean; text: string; ms?: number }> => ipcRenderer.invoke('navora:models.probe', providerId, model, kind),
