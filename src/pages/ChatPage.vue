@@ -507,7 +507,7 @@
       <div v-if="!isMobileLayout && (!allSidebarHidden || settingsOpen || creatorKind)" class="sidebar-divider vertical" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarLayout.width" aria-valuemin="250" aria-valuemax="560" tabindex="0" @pointerdown="beginSidebarResize($event, 'width')" @keydown="sidebarResizeKey($event, 'width')" />
     </aside>
 
-    <main class="main" :class="{ 'resource-card-open': resourceOpen && !settingsOpen && !creatorKind }" :style="{ '--preview-width': `${previewWidth}px` }">
+    <main ref="mainElement" class="main" :class="{ 'resource-card-docked': resourceOpen && !resourceOverlay && !settingsOpen && !creatorKind }" :style="{ '--preview-width': `${previewWidth}px` }">
       <div v-if="showDesktopChrome && ((!settingsOpen && !creatorKind) || isMobileLayout)" class="win-drag-main" aria-hidden="true" />
       <header v-if="isMobileLayout && !settingsOpen && !creatorKind" class="mobile-topbar">
         <button
@@ -1555,7 +1555,7 @@
         </div>
       </div>
       <Transition name="resource-card">
-        <ConversationResourcesCard v-if="resourceOpen && activeId && !settingsOpen && !creatorKind" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :preview="previewSelection" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @clear-preview="previewSelection=null" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="jumpToMessage" @open-media="(p) => openLightbox(p.src,p.alt)" />
+        <ConversationResourcesCard v-if="resourceOpen && activeId && !settingsOpen && !creatorKind" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :overlay="resourceOverlay" :available-width="resourceAvailableWidth" :preview="previewSelection" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @clear-preview="previewSelection=null" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="jumpToMessage" @open-media="(p) => openLightbox(p.src,p.alt)" />
       </Transition>
     </main>
 
@@ -1883,6 +1883,7 @@ import { storeErrorText } from '@shared/store'
 import BrowserDownloadsMenu from '@/components/BrowserDownloadsMenu.vue'
 import ConversationResourcesCard from '@/components/ConversationResourcesCard.vue'
 import {useConversationResources} from '@/composables/useConversationResources'
+import {useResourceCardLayout} from '@/composables/useResourceCardLayout'
 import CreatorWorkspace from '@/components/CreatorWorkspace.vue'
 import type { CreatorKind } from '@shared/creators'
 import SidebarDock from '@/components/sidebar/SidebarDock.vue'
@@ -2278,9 +2279,11 @@ const exportingChat = ref(false)
 const sidebarMoreOpen = ref(false)
 const {open:resourceOpen,tab:resourceTab,show:showResources,close:hideResources} = useConversationResources(activeId,tree)
 function closeResources(){hideResources();previewSelection.value=null}
-function toggleResources(){if(resourceOpen.value)closeResources();else showResources()}
+function toggleResources(){if(resourceOpen.value)closeResources();else showResources('overview')}
 const previewSelection = ref<{ chatId: string; path: string } | null>(null)
 const previewWidth = ref(400)
+const mainElement=ref<HTMLElement|null>(null)
+const {overlay:resourceOverlay,availableWidth:resourceAvailableWidth}=useResourceCardLayout(mainElement,previewWidth,isMobileLayout)
 try { const saved = Number(localStorage.getItem('navora.preview.width')); if (saved >= 280 && saved <= 800) previewWidth.value = saved } catch { /* optional persistence */ }
 function setPreviewWidth(width: number) {
   previewWidth.value = width
