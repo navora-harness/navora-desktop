@@ -24,7 +24,7 @@
       <div class="sidebar-content-stack">
       <Transition name="sidebar-flip">
       <div v-show="(!settingsOpen && !creatorKind) || isMobileLayout" class="sidebar-chat-face">
-      <SidebarDock :model-value="dockLayout" :panels="sidebarPanels" :single-selection="true" :class="{'rail-merge-target':railDragging && sidebarRail.active && railDragging !== sidebarRail.active}" @dragover="overSidebarRail" @drop="dropSidebarRail" @close="closeSidebar" @update:model-value="setDockLayout">
+      <SidebarDock :model-value="dockLayout" :panels="sidebarPanels" :single-selection="true" :class="{'rail-merge-target':railDragging && sidebarRail.active && railDragging !== sidebarRail.active}" @panel-dragging="dockDraggingPanels=$event" @dragover="overSidebarRail" @drop="dropSidebarRail" @close="closeSidebar" @update:model-value="setDockLayout">
         <template #chats="slot">
       <Teleport :to="slot.headerTarget" defer><button v-show="slot.active" type="button" class="chat-toolbar-icon-btn chat-batch-trigger" :title="chatBatchMode ? '取消批量操作' : '批量管理对话'" :aria-label="chatBatchMode ? '取消批量操作' : '批量操作'" :aria-pressed="chatBatchMode" @click="chatBatchMode ? exitChatBatchMode() : enterChatBatchMode()"><font-awesome-icon :icon="chatBatchMode ? 'xmark' : 'list-check'" /></button></Teleport>
       <div v-if="chatBatchMode" class="chat-toolbar">
@@ -436,14 +436,14 @@
         </div>
       </Transition>
       </div>
-      <nav class="activity-rail" aria-label="侧栏导航">
+      <nav class="activity-rail" :class="{'rail-detach-ready':!!detachingPanel}" aria-label="侧栏导航" @dragover="overDetachRail" @drop="dropDetachRail">
         <div class="activity-rail-sections">
           <div class="rail-brand" :class="{ 'app-drag': showDesktopChrome }" title="Navora">
             <img src="/app-icon.png" alt="Navora" draggable="false" />
           </div>
           <button type="button" class="sidebar-icon-btn rail-new-chat" title="开启新对话（Ctrl/⌘ N）" aria-label="开启新对话" @click="createChat"><font-awesome-icon icon="pen-to-square" /></button>
           <button type="button" class="sidebar-icon-btn rail-search brand-search-btn" title="搜索对话（Ctrl/⌘ K）" aria-label="搜索对话" @click="openChatSearch"><font-awesome-icon icon="magnifying-glass" /></button>
-          <SidebarRailGroups :panels="sidebarPanels" :state="sidebarRail" :inactive="settingsOpen || !!creatorKind" @activate="toggleSidebarGroup" @merge="mergeSidebarGroups" @split="splitSidebarPanel" @split-all="splitSidebarGroup" @dragging="railDragging=$event" />
+          <SidebarRailGroups :panels="sidebarPanels" :state="sidebarRail" :detaching-panel="detachingPanel" :inactive="settingsOpen || !!creatorKind" @activate="toggleSidebarGroup" @merge="mergeSidebarGroups" @split="splitSidebarPanel" @split-all="splitSidebarGroup" @dragging="railDragging=$event" />
         </div>
         <div class="sidebar-foot">
         <div class="sidebar-foot-actions">
@@ -2326,6 +2326,14 @@ watch(settingsOpen, open => { if (open) creatorKind.value = null })
 const { layout: sidebarLayout, style: sidebarStyle, resizing: sidebarResizing, beginResize: beginSidebarResize, resizeKey: sidebarResizeKey } = useSidebarLayout()
 const { layout: dockLayout, panels: sidebarPanels, visible: sidebarVisible, set: setDockLayout, rail:sidebarRail, activateGroup,mergeGroups,splitPanel:splitSidebarPanel,splitGroup:splitSidebarGroup,close:closeSidebar } = useSidebarDock()
 const railDragging=ref('')
+const dockDraggingPanels=ref<string[]>([])
+const detachingPanel=computed(()=>{
+  if(dockDraggingPanels.value.length!==1)return ''
+  const id=dockDraggingPanels.value[0]!
+  return sidebarPanels.value.some(panel=>panel.id===id)&&sidebarRail.value.groups.some(group=>group.panels.includes(id)&&group.panels.length>1)?id:''
+})
+function overDetachRail(event:DragEvent){if(detachingPanel.value){event.preventDefault();if(event.dataTransfer)event.dataTransfer.dropEffect='move'}}
+function dropDetachRail(event:DragEvent){if(detachingPanel.value){event.preventDefault();splitSidebarPanel(detachingPanel.value);dockDraggingPanels.value=[]}}
 const allSidebarHidden = computed(() => sidebarPanels.value.every(panel => !sidebarVisible.value[panel.id]))
 watch(()=>sidebarVisible.value.chats,visible=>{if(!visible)exitChatBatchMode()})
 function toggleSidebarGroup(id:string){const force=settingsOpen.value||!!creatorKind.value;settingsOpen.value=false;creatorKind.value=null;exitChatBatchMode();activateGroup(id,!force)}
