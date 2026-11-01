@@ -180,7 +180,10 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('document.querySelectorAll(".perm-row").length'),1,'Permission search uses readable names')
       for (const label of ['技能','插件']) {
         await tab(label)
-        assert.equal(await js('document.querySelector(".settings-empty").checkVisibility()'),true,'Empty '+label+' has visible guidance')
+        if(label==='插件') {
+          assert.equal(await js('document.querySelector("[aria-label=插件开发模式]").checkVisibility()'),true,'Plugin settings keeps the development switch')
+          assert.equal(await js('!!document.querySelector(".settings-workspace .plugin-library")'),false,'Plugin management lives outside settings')
+        } else assert.equal(await js('document.querySelector(".settings-empty").checkVisibility()'),true,'Empty '+label+' has visible guidance')
       }
       await click('.settings-close')
       await wait(450)
@@ -476,7 +479,7 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('document.querySelector(".sidebar").getBoundingClientRect().width'),52,'Closing the selected sidebar leaves only the icon rail')
       await js('localStorage.setItem("navora.sidebar.rail",JSON.stringify({version:1,active:"old-combination",groups:[{id:"old-combination",panels:["chats","workspace","browser"]}]}))')
       await win.webContents.reload();await wait(400)
-      assert.equal(await js('document.querySelectorAll(".rail-panel-button").length'),3,'Legacy combinations become independent entries')
+      assert.equal(await js('document.querySelectorAll(".rail-panel-button").length'),4,'Legacy combinations become independent entries with the plugin workspace')
       await click('[data-chat-resource="workspace"]')
       assert.ok(await js('document.querySelectorAll(".file-workspace [role=tab]").length')>=3,'File tab metadata survives reloading the application')
       await click('[aria-label="关闭文件预览"]')

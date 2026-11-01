@@ -8,7 +8,7 @@
 | 插件契约 / CLI | [navora-plugin-sdk](https://github.com/navora-harness/navora-plugin-sdk) |
 | 官方插件 | [navora-plugins](https://github.com/navora-harness/navora-plugins) |
 
-架构说明：[`docs/modules.md`](docs/modules.md) · 规划草案：[`docs/architecture-plan.md`](docs/architecture-plan.md) · 对外摘要：[`docs/project-and-plugin-guide.md`](docs/project-and-plugin-guide.md)
+文档入口：[`docs/README.md`](docs/README.md) · 当前功能：[`docs/current-state.md`](docs/current-state.md) · 开发说明：[`docs/project-and-plugin-guide.md`](docs/project-and-plugin-guide.md) · [插件商店](docs/plugin-store-guide.md)
 
 整体重构规划与阶段验收：[`docs/renovation-plan-2026-10.md`](docs/renovation-plan-2026-10.md)。
 
@@ -22,13 +22,14 @@ License: [MIT](./LICENSE)
 
 ## 本地仓库布局
 
-三个仓库建议并列 checkout：
+宿主、SDK、官方插件与商店建议并列 checkout：
 
 ```text
 navora-harness/
 ├── navora-desktop/         # 本仓库：宿主（加载插件，不负责编译）
 ├── navora-plugin-sdk/      # 类型 + SPEC + navora-plugin CLI
-└── navora-plugins/         # 官方插件源码
+├── navora-plugins/         # 官方插件源码
+└── navora-store/           # 插件与技能静态目录仓
 ```
 
 插件编译：
@@ -72,6 +73,9 @@ npm run electron:dev
 | `npm test` | 单元与契约回归 |
 | `npm run test:browser` | 实际定制 Electron 的浏览器、插件与文件输入回归 |
 | `npm run test:ui` | 完整构建及隔离的桌面/窄屏 UI 回归，包含减少动态效果模式 |
+| `npm run test:ui:plugins` | 插件工作区、安装与更新、搜索及失败恢复 |
+| `npm run test:ui:creators` | 插件/技能创建器与插件工作区的管理列表 |
+| `npm run test:ui:renovation` | 对话、资源、文件管理与输入体验 |
 | `npm run build` | 构建渲染进程 + 主进程 |
 | `npm start` | 启动已构建产物 |
 | `npm run dist` / `dist:nsis` / `dist:all` | Windows 打包 |
@@ -82,10 +86,11 @@ UI 使用仓库内版本化的 `@postpile/ui` 包，复用 Postpile 的材质和
 
 ## 插件（运行时）
 
-1. **设置 → 插件 → 外链文件夹**：指向 `navora-plugins/<id>`（开发热更：build 后「重新加载」）
-2. **导入压缩包**：使用 `navora-plugins/dist/*-plugin.zip`
-3. 插件必须实现 `planPermissions`；执行只允许 `api.registry` / `api.runTool` 等
-4. iframe 点击与主文档点击同属 `click` 能力（经核心 `browser_click` / `browser_flow`）
+1. **左侧插件图标**：搜索插件、已安装插件、插件商店及右侧详情。设置 → 插件仅保留开发模式开关，批量管理位于插件工作区。
+2. **导入 → 外链文件夹**：指向含 plugin.json 和 main.cjs 的构建目录，通常为 `navora-plugins/<id>/dist/<packageId>`；build 后重新加载。
+3. **导入压缩包**：使用标准插件 ZIP；商店复用版本选择、预检与安装确认。
+4. 插件必须实现 `planPermissions`；执行只允许 `api.registry` / `api.runTool` 等
+5. iframe 点击与主文档点击同属 `click` 能力（经核心 `browser_click` / `browser_flow`）
 
 可选：`NAVORA_BUNDLE_PLUGINS=1` 时打包宿主仓 `electron/plugins/` 种子（默认不带任何插件）。
 
@@ -101,7 +106,7 @@ UI 使用仓库内版本化的 `@postpile/ui` 包，复用 Postpile 的材质和
 - `max_parallel`（默认 4，范围 1～8）：同一父对话**同时运行**的子对话上限，**不含**父对话本身。
 - `agent_spawn_subchat` 子对话**看不到**父对话全文；请把 URL / sitekey 等写入 `context`
 - 宿主会尝试从父对话近期消息（含 tool 结果）补全缺失的 http(s) 链接与 Turnstile sitekey
-- 子对话结束会清理其创建的浏览器 Session / 窗口；用户终止时侧栏显示停止图标
+- 浏览器关闭和会话释放由 Agent 按任务判断，子对话结束不自动销毁登录态；用户也可显式关闭或释放。
 
 ## 数据目录
 

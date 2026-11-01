@@ -881,114 +881,15 @@
             />
           </section>
 
-          <!-- 插件 -->
+          <!-- 插件行为 -->
           <section v-if="tab === 'plugins'" class="section">
-            <header class="section-head">
-              <h2>插件</h2>
-              <p>启用后向 Agent 注册工具；对外链、压缩包或商店安装，下次发消息生效</p>
-            </header>
-            <details class="plugin-development-settings">
-              <summary><font-awesome-icon icon="terminal" />开发设置<font-awesome-icon icon="chevron-down" /></summary>
+            <header class="section-head"><h2>插件</h2><p>插件运行与开发选项</p></header>
+            <div class="card">
               <div class="switch-row">
                 <div><div class="switch-title">插件开发模式</div><div class="switch-hint">提供 SDK 契约，自动重载外链产物</div></div>
                 <v-switch aria-label="插件开发模式" v-model="cfg.plugins.dev_mode" color="primary" hide-details density="compact" />
               </div>
-            </details>
-            <div
-              class="card skill-dropzone"
-              :class="{ 'skill-drop-active': pluginDropActive }"
-              @dragenter.prevent="onPluginDragEnter"
-              @dragover.prevent="onPluginDragOver"
-              @dragleave.prevent="onPluginDragLeave"
-              @drop.prevent="onPluginDrop"
-            >
-              <div class="d-flex flex-wrap ga-2 align-center">
-                <template v-if="!pluginBatchMode">
-                  <v-btn color="primary" :disabled="!!pluginsBusy" class="launch-plugin-creator" @click="emit('create', 'plugin')">插件创建器</v-btn>
-                  <v-menu location="bottom start">
-                    <template #activator="{ props: importProps }"><v-btn v-bind="importProps" variant="outlined" color="primary" :disabled="!!pluginsBusy" :loading="pluginsBusy === 'dir' || pluginsBusy === 'zip'" class="plugin-import-trigger">导入插件<font-awesome-icon icon="chevron-down" class="ml-2" /></v-btn></template>
-                    <div class="skill-more-panel" role="menu">
-                      <button type="button" class="skill-more-item" role="menuitem" @click="importPlugin('directory')"><font-awesome-icon icon="folder-open" /><span>外链文件夹</span></button>
-                      <button type="button" class="skill-more-item" role="menuitem" @click="importPlugin('zip')"><font-awesome-icon icon="file" /><span>安装 ZIP</span></button>
-                    </div>
-                  </v-menu>
-                  <v-btn variant="text" color="primary" :disabled="!!pluginsBusy" @click="openBrowse({ kind: 'plugin' })">插件商店</v-btn>
-                  <v-btn variant="text" :disabled="!!pluginsBusy" :loading="pluginsBusy === 'reload'" class="plugin-refresh" @click="reloadPlugins"><font-awesome-icon icon="arrow-rotate-right" class="mr-2" />刷新</v-btn>
-                </template>
-                <template v-else>
-                  <v-btn variant="tonal" :disabled="!!pluginsBusy" @click="togglePluginBatchSelectAll">
-                    {{ pluginBatchAllSelected ? '取消选择当前结果' : '全选当前结果' }}
-                  </v-btn>
-                  <v-btn
-                    color="error"
-                    variant="flat"
-                    :disabled="!pluginBatchSelectedCount || !!pluginsBusy"
-                    @click="askBatchRemovePlugins"
-                  >
-                    <font-awesome-icon icon="trash" class="btn-ic-left" />
-                    卸载{{ pluginBatchSelectedCount ? ` ${pluginBatchSelectedCount}` : '' }}
-                  </v-btn>
-                  <span class="skill-batch-count" :class="{ ready: pluginBatchSelectedCount > 0 }">
-                    已选 {{ pluginBatchSelectedCount }}<span v-if="pluginSelectedOutsideFilter">（筛选外 {{ pluginSelectedOutsideFilter }}）</span>
-                  </span>
-                </template>
-              </div>
-              <div v-if="pluginDropActive && !pluginChecking" class="skill-drop-hint">
-                松开以导入插件
-              </div>
-              <div
-                v-if="pluginChecking"
-                class="plugin-check-overlay"
-                role="status"
-                aria-live="polite"
-              >
-                <div class="plugin-check-card">
-                  <div class="plugin-check-spinner" aria-hidden="true" />
-                  <div class="plugin-check-text">
-                    <div class="plugin-check-title">{{ pluginBusyTitle }}</div>
-                    <div class="plugin-check-sub">{{ pluginBusySub }}</div>
-                  </div>
-                </div>
-              </div>
             </div>
-
-            <PluginLibraryList
-              :records="pluginsList" :busy="!!pluginsBusy" :loading="pluginsLoading" :error="pluginsLoadError"
-              :batch-mode="pluginBatchMode" :selected="pluginBatchSelectedIds" :conflicts="pluginSuiteConflictIds"
-              @batch="$event ? enterPluginBatchMode() : exitPluginBatchMode()" @select="togglePluginBatchSelect"
-              @toggle="togglePlugin" @docs="viewPluginDocs" @export="exportPlugin" @remove="askRemovePlugin"
-              @create="emit('create', 'plugin')" @retry="loadPlugins" @visible="pluginFilteredIds = $event" @notify="showToast"
-            />
-
-            <PluginImportDialog
-              v-model="pluginImportOpen"
-              :preview="pluginImportPreview"
-              :saving="pluginsBusy === 'import'"
-              @confirm="onPluginImportConfirm"
-            />
-            <PluginDocsDialog
-              v-model="pluginDocsOpen"
-              :plugin-id="pluginDocsTarget?.id"
-              :name="pluginDocsTarget?.name"
-              :markdown="pluginDocsMarkdown"
-              :file-name="pluginDocsFileName"
-              :loading="pluginDocsLoading"
-              :error="pluginDocsError"
-            />
-            <SkillDeleteDialog
-              v-model="pluginDeleteOpen"
-              kicker="插件"
-              entity-label="插件"
-              action-verb="卸载"
-              subtitle="卸载后将从本机移除该插件，请确认目标无误"
-              :skill-id="pluginDeleteTarget?.id"
-              :name="pluginDeleteTarget?.name"
-              :description="pluginDeleteTarget?.description"
-              :items="pluginDeleteBatchItems"
-              :saving="pluginsBusy === 'delete'"
-              @confirm="onPluginDeleteConfirm"
-              @cancel="onPluginDeleteCancel"
-            />
           </section>
 
           <!-- 远程访问 -->
@@ -1353,7 +1254,6 @@ import {
   pickDefaultProviderId,
 } from '@shared/model-providers'
 import type { AppInfo, PermissionMode, PermissionPreset } from '@shared/types'
-import type { PluginImportPreview, PluginRecord } from '@shared/plugins'
 import type { SkillImportPreview, SkillRecord } from '@shared/skills'
 import { storeErrorText } from '@shared/store'
 import type { SkillProposal, SkillReviewDraft } from '@shared/types'
@@ -1362,9 +1262,6 @@ import SkillImportDialog from '../components/skills/SkillImportDialog.vue'
 import SkillBatchImportDialog from '../components/skills/SkillBatchImportDialog.vue'
 import SkillExportDialog from '../components/skills/SkillExportDialog.vue'
 import SkillDeleteDialog from '../components/skills/SkillDeleteDialog.vue'
-import PluginImportDialog from '../components/plugins/PluginImportDialog.vue'
-import PluginDocsDialog from '../components/plugins/PluginDocsDialog.vue'
-import PluginLibraryList from '../components/plugins/PluginLibraryList.vue'
 import { useOnboarding } from '../composables/useOnboarding'
 import { useStoreUi } from '../composables/useStoreUi'
 
@@ -1402,16 +1299,12 @@ const cfg = ref<AppConfig | null>(null)
 const info = ref<AppInfo | null>(null)
 
 function selectTab(value: string) {
-  if (tab.value === 'plugins' && value !== 'plugins' && pluginBatchMode.value) {
-    exitPluginBatchMode()
-  }
   if (tab.value === 'skills' && value !== 'skills' && skillBatchMode.value) {
     exitSkillBatchMode()
   }
   tab.value = value
   emit('navigate', value)
   if (value === 'skills') void loadSkills()
-  if (value === 'plugins') void loadPlugins()
   if (value === 'subchat' && cfg.value) ensureSubchat()
   void nextTick(() => {
     contentEl.value?.scrollTo({ top: 0 })
@@ -1555,7 +1448,7 @@ const navItems = [
   { value: 'browser', title: '浏览器', icon: 'window-maximize', desc: 'UA 与超时' },
   { value: 'workspace', title: '工作区', icon: 'folder-open', desc: '文件目录' },
   { value: 'skills', title: '技能', icon: 'book', desc: '创建 · 导入' },
-  { value: 'plugins', title: '插件', icon: 'puzzle-piece', desc: '可选工具包' },
+  { value: 'plugins', title: '插件', icon: 'puzzle-piece', desc: '运行与开发选项' },
   { value: 'remote', title: '远程访问', icon: 'key', desc: '全功能控制' },
   { value: 'permissions', title: '权限', icon: 'shield-halved', desc: 'Agent 能力' },
   { value: 'fork', title: '询问/决策', icon: 'circle-question', desc: '选项确认' },
@@ -1570,124 +1463,6 @@ const skillsBusy = ref<string | false>(false)
 let unsubProposals: (() => void) | undefined
 const skillDropActive = ref(false)
 let skillDragDepth = 0
-
-const pluginsList = ref<PluginRecord[]>([])
-const pluginsBusy = ref<string | false>(false)
-const pluginsLoading = ref(false)
-const pluginsLoadError = ref('')
-const pluginFilteredIds = ref<string[]>([])
-let pluginLoadSequence = 0
-const pluginChecking = computed(() => pluginsBusy.value === 'parse')
-const pluginBusyTitle = computed(() => {
-  if (pluginsBusy.value === 'parse') return '正在检查插件…'
-  return '请稍候…'
-})
-const pluginBusySub = computed(() => {
-  if (pluginsBusy.value === 'parse') return '校验 plugin.json、入口文件与包结构'
-  return ''
-})
-let unsubPlugins: (() => void) | undefined
-const pluginDropActive = ref(false)
-let pluginDragDepth = 0
-
-const pluginImportOpen = ref(false)
-const pluginImportPreview = ref<PluginImportPreview | null>(null)
-const pluginImportPendingPath = ref<string | null>(null)
-
-const pluginDocsOpen = ref(false)
-const pluginDocsTarget = ref<PluginRecord | null>(null)
-const pluginDocsMarkdown = ref('')
-const pluginDocsFileName = ref('')
-const pluginDocsLoading = ref(false)
-const pluginDocsError = ref('')
-
-const pluginDeleteOpen = ref(false)
-const pluginDeleteTarget = ref<PluginRecord | null>(null)
-const pluginDeleteBatchItems = ref<Array<{ id: string; name?: string }> | undefined>(undefined)
-
-const pluginBatchMode = ref(false)
-const pluginBatchSelectedIds = ref<Set<string>>(new Set())
-const removablePlugins = computed(() =>
-  pluginsList.value.filter((p) => !p.bundled && p.kind !== 'bundled'),
-)
-const pluginBatchSelectedCount = computed(() => pluginBatchSelectedIds.value.size)
-const visibleRemovablePlugins = computed(() => removablePlugins.value.filter(plugin => pluginFilteredIds.value.includes(plugin.id)))
-const pluginSelectedOutsideFilter = computed(() => [...pluginBatchSelectedIds.value].filter(id => !pluginFilteredIds.value.includes(id)).length)
-const pluginBatchAllSelected = computed(() => visibleRemovablePlugins.value.length > 0 && visibleRemovablePlugins.value.every(plugin => pluginBatchSelectedIds.value.has(plugin.id)))
-
-/** Same suite already co-installed (legacy / edge cases). */
-const pluginSuiteConflictIds = computed(() => {
-  const bySuite = new Map<string, string[]>()
-  for (const p of pluginsList.value) {
-    const g = String(p.suite || '')
-      .trim()
-      .toLowerCase()
-    if (!g) continue
-    const list = bySuite.get(g) || []
-    list.push(p.id)
-    bySuite.set(g, list)
-  }
-  const ids = new Set<string>()
-  for (const suiteIds of bySuite.values()) {
-    if (suiteIds.length < 2) continue
-    for (const id of suiteIds) ids.add(id)
-  }
-  return ids
-})
-
-const pluginErrorHints: Record<string, string> = {
-  path_not_found: '路径不存在',
-  plugin_json_missing: '缺少 plugin.json',
-  invalid_manifest: 'plugin.json 无效',
-  invalid_main_path: 'main 路径非法',
-  invalid_main_ext: 'main 仅支持 .cjs / .js',
-  plugin_not_found: '插件不存在',
-  readme_not_found: '该插件未提供说明文件',
-  plugin_exists: '插件已存在',
-  plugin_bundled_cannot_remove: '随附插件不可卸载',
-  plugin_bundled_cannot_overwrite: '不可覆盖随附插件',
-  plugin_suite_conflict: '同套件已安装其它包，请先卸载或确认更换',
-  plugin_suite_bundled_conflict: '同套件存在随附插件，无法导入替换',
-  plugin_exclusivity_conflict: '同套件已安装其它包，请先卸载或确认更换',
-  plugin_exclusivity_bundled_conflict: '同套件存在随附插件，无法导入替换',
-  plugin_too_large: '压缩包超过 200MB 上限',
-  zip_empty: '压缩包为空',
-  zip_unsafe_path: '压缩包含不安全路径',
-  invalid_suite_manifest: '套件清单 suite.json 无效',
-  suite_packages_empty: '套件压缩包未包含任何变体',
-  package_not_found: '套件中找不到所选变体',
-  link_path_missing: '外链目录不存在',
-  plugin_path_must_be_dir_or_zip: '请选择插件文件夹或 .zip 压缩包',
-  plugin_permissions_undeclared: '插件未声明权限计划',
-  plugin_permissions_empty: '插件权限计划为空',
-  import_load_failed: '导入后加载失败',
-  invalid_module_exports: '插件入口未导出 tools / execute',
-  remote_unsupported: '远程端不支持文件选择，请在本机客户端操作',
-  remote_forbidden: '远程端禁止此操作',
-  id_required: '缺少插件 id',
-  host_too_old: '当前桌面版本过低，无法安装该版本',
-  invalid_catalog_path: '商店目录路径无效，已拒绝下载',
-  size_mismatch: '下载体积与目录声明不符',
-  download_timeout: '下载超时',
-  checksum_mismatch: '校验和不匹配，已拒绝安装',
-  product_kind_required: '插件与技能同名，请指定类型',
-  product_not_found: '商店中找不到该产品',
-}
-
-function pluginErrorText(code?: string): string {
-  if (!code) return '操作失败'
-  return pluginErrorHints[code] || storeErrorText(code)
-}
-
-function droppedLocalPath(file: File): string {
-  try {
-    const via = window.navora?.pathForFile?.(file)
-    if (via) return via
-  } catch {
-    /* ignore */
-  }
-  return String((file as File & { path?: string }).path || '')
-}
 
 const editorOpen = ref(false)
 const editorId = ref<string | null>(null)
@@ -1858,361 +1633,10 @@ function pruneSkillBatchSelection() {
 }
 
 
-async function loadPlugins() {
-  if (!window.navora?.plugins) return
-  const sequence = ++pluginLoadSequence
-  pluginsLoading.value = true
-  pluginsLoadError.value = ''
-  try {
-    const records = await window.navora.plugins.list()
-    if (sequence !== pluginLoadSequence) return
-    pluginsList.value = records
-    prunePluginBatchSelection()
-  } catch {
-    if (sequence === pluginLoadSequence) pluginsLoadError.value = '插件列表读取失败，已保留现有内容'
-  } finally {
-    if (sequence === pluginLoadSequence) pluginsLoading.value = false
-  }
-}
-
 async function onStoreInstalled() {
   showToast('已从商店安装')
-  await Promise.all([loadPlugins(), loadSkills()])
+  await loadSkills()
 }
-
-function prunePluginBatchSelection() {
-  if (!removablePlugins.value.length && pluginBatchMode.value) {
-    exitPluginBatchMode()
-    return
-  }
-  if (!pluginBatchMode.value || !pluginBatchSelectedIds.value.size) return
-  const alive = new Set(removablePlugins.value.map((p) => p.id))
-  let changed = false
-  const next = new Set<string>()
-  for (const id of pluginBatchSelectedIds.value) {
-    if (alive.has(id)) next.add(id)
-    else changed = true
-  }
-  if (changed) pluginBatchSelectedIds.value = next
-}
-
-async function reloadPlugins() {
-  if (!window.navora?.plugins?.reload || pluginsBusy.value) return
-  pluginLoadSequence++
-  pluginsBusy.value = 'reload'
-  try {
-    await window.navora.plugins.reload()
-    await loadPlugins()
-    if (!pluginsLoadError.value) showToast('已重新加载插件')
-  } catch {
-    pluginsLoadError.value = '插件重新加载失败，已保留现有内容'
-    pluginsLoading.value = false
-  } finally { pluginsBusy.value = false }
-}
-
-async function importPlugin(kind: 'directory' | 'zip' = 'directory') {
-  if (!window.navora?.plugins?.pickParse) {
-    showToast('当前环境不支持导入插件', 'error')
-    return
-  }
-  pluginsBusy.value = kind === 'zip' ? 'zip' : 'dir'
-  try {
-    const res = await window.navora.plugins.pickParse(kind)
-    if (res.canceled) return
-    if (!res.ok || !res.preview) {
-      showToast(pluginErrorText(res.error), 'error')
-      return
-    }
-    pluginImportPreview.value = res.preview
-    pluginImportPendingPath.value = res.path || res.preview.sourcePath
-    pluginImportOpen.value = true
-  } catch (e) {
-    showToast(e instanceof Error ? e.message : '导入失败', 'error')
-  } finally {
-    pluginsBusy.value = false
-  }
-}
-
-async function exportPlugin(id: string) {
-  if (!window.navora?.plugins?.export) {
-    showToast('当前环境不支持导出插件', 'error')
-    return
-  }
-  pluginsBusy.value = 'export'
-  try {
-    const res = await window.navora.plugins.export(id)
-    if (res.canceled) return
-    if (!res.ok) {
-      showToast(pluginErrorText(res.error), 'error')
-      return
-    }
-    showToast(`已导出到 ${res.path || ''}`)
-  } catch (e) {
-    showToast(e instanceof Error ? e.message : '导出失败', 'error')
-  } finally {
-    pluginsBusy.value = false
-  }
-}
-
-async function viewPluginDocs(p: PluginRecord) {
-  if (!p.hasReadme) return
-  if (!window.navora?.plugins?.readReadme) {
-    showToast('当前环境不支持查看插件说明', 'error')
-    return
-  }
-  pluginDocsTarget.value = p
-  pluginDocsMarkdown.value = ''
-  pluginDocsFileName.value = ''
-  pluginDocsError.value = ''
-  pluginDocsLoading.value = true
-  pluginDocsOpen.value = true
-  try {
-    const res = await window.navora.plugins.readReadme(p.id)
-    if (!res.ok) {
-      pluginDocsError.value = pluginErrorText(res.error)
-      return
-    }
-    pluginDocsMarkdown.value = res.markdown || ''
-    pluginDocsFileName.value = res.fileName || 'README.md'
-  } catch (e) {
-    pluginDocsError.value = e instanceof Error ? e.message : '读取说明失败'
-  } finally {
-    pluginDocsLoading.value = false
-  }
-}
-
-async function onPluginImportConfirm(opts: {
-  overwrite: boolean
-  replaceSuite?: boolean
-  replaceExclusivity?: boolean
-  packageId?: string
-}) {
-  if (!window.navora?.plugins || !pluginImportPendingPath.value) return
-  pluginsBusy.value = 'import'
-  try {
-    const res = await window.navora.plugins.import(pluginImportPendingPath.value, {
-      overwrite: opts.overwrite,
-      replaceSuite: opts.replaceSuite ?? opts.replaceExclusivity,
-      packageId: opts.packageId,
-    })
-    if (!res.ok) {
-      showToast(pluginErrorText(res.error), 'error')
-      return
-    }
-    const kind = res.plugin?.kind
-    const label =
-      kind === 'linked' ? '已外链' : kind === 'installed' ? '已安装' : '已导入'
-    showToast(`${label}插件 ${res.plugin?.name || ''}`)
-    pluginImportOpen.value = false
-    pluginImportPreview.value = null
-    pluginImportPendingPath.value = null
-    await loadPlugins()
-  } catch (e) {
-    showToast(e instanceof Error ? e.message : '导入失败', 'error')
-  } finally {
-    pluginsBusy.value = false
-  }
-}
-
-function onPluginDragEnter(e: DragEvent) {
-  if (pluginsBusy.value || pluginBatchMode.value) return
-  pluginDragDepth += 1
-  pluginDropActive.value = true
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
-}
-
-function onPluginDragOver(e: DragEvent) {
-  if (pluginsBusy.value || pluginBatchMode.value) return
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
-  pluginDropActive.value = true
-}
-
-function onPluginDragLeave() {
-  pluginDragDepth = Math.max(0, pluginDragDepth - 1)
-  if (pluginDragDepth === 0) pluginDropActive.value = false
-}
-
-async function onPluginDrop(e: DragEvent) {
-  pluginDragDepth = 0
-  pluginDropActive.value = false
-  if (!window.navora?.plugins || pluginsBusy.value || pluginBatchMode.value) return
-  const files = Array.from(e.dataTransfer?.files || [])
-  if (!files.length) return
-  pluginsBusy.value = 'parse'
-  try {
-    const file = files[0]
-    const filePath = droppedLocalPath(file)
-    if (!filePath || !window.navora.plugins.parsePath) {
-      showToast('请拖入本机插件文件夹或 .zip（需可读取路径）', 'warning')
-      return
-    }
-    const res = await window.navora.plugins.parsePath(filePath)
-    if (!res.ok || !res.preview) {
-      showToast(pluginErrorText(res.error), 'error')
-      return
-    }
-    pluginImportPreview.value = res.preview
-    pluginImportPendingPath.value = res.preview.sourcePath || filePath
-    pluginImportOpen.value = true
-  } catch (err) {
-    showToast(err instanceof Error ? err.message : '导入失败', 'error')
-  } finally {
-    pluginsBusy.value = false
-  }
-}
-
-function askRemovePlugin(p: PluginRecord) {
-  if (p.bundled || p.kind === 'bundled') {
-    showToast('随附插件不可卸载', 'warning')
-    return
-  }
-  pluginDeleteTarget.value = p
-  pluginDeleteBatchItems.value = undefined
-  pluginDeleteOpen.value = true
-}
-
-function onPluginDeleteCancel() {
-  pluginDeleteOpen.value = false
-  pluginDeleteTarget.value = null
-  pluginDeleteBatchItems.value = undefined
-}
-
-async function onPluginDeleteConfirm() {
-  if (!window.navora?.plugins) return
-  const batch = pluginDeleteBatchItems.value
-  if (batch?.length) {
-    pluginsBusy.value = 'delete'
-    try {
-      const ids = batch.map((it) => it.id)
-      const res = window.navora.plugins.removeMany
-        ? await window.navora.plugins.removeMany(ids)
-        : await (async () => {
-            const removed: string[] = []
-            const failed: string[] = []
-            for (const id of ids) {
-              const r = await window.navora!.plugins!.remove(id)
-              if (r.ok) removed.push(id)
-              else failed.push(id)
-            }
-            return { ok: failed.length === 0 && removed.length > 0, removed, failed, error: undefined }
-          })()
-      const removed = res.removed?.length ?? 0
-      const failed = res.failed?.length ?? 0
-      if (removed && !failed) {
-        showToast(`已卸载 ${removed} 个插件`)
-      } else if (removed && failed) {
-        showToast(`已卸载 ${removed} 个，失败 ${failed} 个`, 'warning')
-      } else {
-        showToast(pluginErrorText(res.error) || '卸载失败', 'error')
-        return
-      }
-      pluginDeleteOpen.value = false
-      pluginDeleteTarget.value = null
-      pluginDeleteBatchItems.value = undefined
-      pluginBatchSelectedIds.value = new Set()
-      await loadPlugins()
-      if (!removablePlugins.value.length) exitPluginBatchMode()
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : '卸载失败', 'error')
-    } finally {
-      pluginsBusy.value = false
-    }
-    return
-  }
-
-  if (!pluginDeleteTarget.value) return
-  pluginsBusy.value = 'delete'
-  try {
-    const res = await window.navora.plugins.remove(pluginDeleteTarget.value.id)
-    if (!res.ok) {
-      showToast(pluginErrorText(res.error), 'error')
-      return
-    }
-    showToast('已卸载')
-    pluginDeleteOpen.value = false
-    pluginDeleteTarget.value = null
-    pluginDeleteBatchItems.value = undefined
-    await loadPlugins()
-  } catch (e) {
-    showToast(e instanceof Error ? e.message : '卸载失败', 'error')
-  } finally {
-    pluginsBusy.value = false
-  }
-}
-
-function enterPluginBatchMode() {
-  pluginBatchMode.value = true
-  pluginBatchSelectedIds.value = new Set()
-}
-
-function exitPluginBatchMode() {
-  pluginBatchMode.value = false
-  pluginBatchSelectedIds.value = new Set()
-}
-
-function togglePluginBatchSelect(id: string) {
-  const next = new Set(pluginBatchSelectedIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  pluginBatchSelectedIds.value = next
-}
-
-function togglePluginBatchSelectAll() {
-  const next = new Set(pluginBatchSelectedIds.value)
-  for (const plugin of visibleRemovablePlugins.value) {
-    if (pluginBatchAllSelected.value) next.delete(plugin.id)
-    else next.add(plugin.id)
-  }
-  pluginBatchSelectedIds.value = next
-}
-
-function selectedPluginItems(): Array<{ id: string; name?: string }> {
-  const map = new Map(pluginsList.value.map((p) => [p.id, p]))
-  const items: Array<{ id: string; name?: string }> = []
-  for (const id of pluginBatchSelectedIds.value) {
-    const p = map.get(id)
-    if (p?.bundled || p?.kind === 'bundled') continue
-    items.push({ id, name: p?.name })
-  }
-  return items
-}
-
-function askBatchRemovePlugins() {
-  const items = selectedPluginItems()
-  if (!items.length || pluginsBusy.value) return
-  pluginDeleteTarget.value = null
-  pluginDeleteBatchItems.value = items
-  pluginDeleteOpen.value = true
-}
-
-async function togglePlugin(id: string, enabled: boolean) {
-  if (!window.navora?.plugins || pluginsBusy.value) return
-  pluginsBusy.value = id
-  try {
-    const res = await window.navora.plugins.setEnabled(id, enabled)
-    if (!res.ok) {
-      showToast(pluginErrorText(res.error), 'error')
-      await loadPlugins()
-      return
-    }
-    const disabled = (
-      res as {
-        disabledConflicts?: Array<{ id: string; name: string }>
-      }
-    ).disabledConflicts
-    if (enabled && disabled?.length) {
-      const names = disabled.map((c) => c.name || c.id).join('、')
-      showToast(`已启用；同套件已自动禁用：${names}`, 'warning')
-    }
-    await loadPlugins()
-  } catch (e) {
-    showToast(e instanceof Error ? e.message : '更新失败', 'error')
-    await loadPlugins()
-  } finally {
-    pluginsBusy.value = false
-  }
-}
-
 
 function proposalActionLabel(action: string) {
   if (action === 'create') return '新建'
@@ -3086,7 +2510,6 @@ async function load() {
       remoteStatus.value = null
     }
     if (tab.value === 'skills') await loadSkills()
-    if (tab.value === 'plugins') await loadPlugins()
     await nextTick()
   } finally {
     hydrating.value = false
@@ -3232,10 +2655,6 @@ onMounted(() => {
   unsubStoreInstalled = onStoreUiInstalled(() => {
     void onStoreInstalled()
   })
-  unsubPlugins = window.navora?.plugins?.onChanged?.((payload) => {
-    pluginsList.value = payload.plugins || []
-    prunePluginBatchSelection()
-  })
   unsubProposals = window.navora?.skills?.onProposalsChanged?.((payload) => {
     proposals.value = (payload.proposals || []).filter(
       (p) => p.action === 'create' || p.action === 'update',
@@ -3255,7 +2674,6 @@ onUnmounted(() => {
   if (instantPrefsTimer) void persistInstantPrefs()
   disposed = true
   unsubProposals?.()
-  unsubPlugins?.()
   unsubStoreInstalled?.()
 })
 </script>
@@ -3820,28 +3238,6 @@ onUnmounted(() => {
   flex-wrap: wrap;
   gap: 6px 8px;
 }
-.plugin-tag {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  line-height: 1.4;
-  flex: 0 0 auto;
-  width: max-content;
-  max-width: 100%;
-}
-.plugin-tag.warn {
-  color: #9a4b12;
-  background: #fff1e0;
-  border: 1px solid #f0c9a8;
-}
-.skill-card.plugin-suite-warn {
-  border-color: #f0c9a8;
-  background: #fffbf7;
-}
 .skill-id {
   margin-top: 2px;
   font-size: 0.72rem;
@@ -4058,67 +3454,7 @@ onUnmounted(() => {
 .settings-page.is-mobile .provider-list-item {
   min-height: 48px;
 }
-.plugin-check-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  border-radius: inherit;
-  background: rgba(248, 251, 253, 0.82);
-  backdrop-filter: blur(2px);
-}
-.plugin-check-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: min(100%, 280px);
-  padding: 12px 16px;
-  border-radius: 12px;
-  border: 1px solid #d5e3ef;
-  background: #fff;
-  box-shadow: 0 8px 24px rgba(21, 32, 43, 0.08);
-}
-.plugin-check-spinner {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: 2.5px solid #c5d6e6;
-  border-top-color: #1b4f72;
-  animation: plugin-check-spin 0.75s linear infinite;
-  flex-shrink: 0;
-}
-.plugin-check-title {
-  font-size: 0.9rem;
-  font-weight: 650;
-  color: #15202b;
-}
-.plugin-check-sub {
-  margin-top: 2px;
-  font-size: 0.75rem;
-  color: #6a7c8c;
-}
-@keyframes plugin-check-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
-.plugin-source {
-  margin-top: 3px;
-  font-size: 0.72rem;
-  color: #6b7c8c;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.settings-page.is-mobile .plugin-source {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
 
 .skill-batch-check.on {
   color: #1b4f72;

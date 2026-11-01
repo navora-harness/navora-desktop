@@ -131,7 +131,7 @@
             <div class="card mt">
               <h3 class="card-title">产品与技能 / 插件边界</h3>
               <p class="doc-p">
-                产品只提供通用工具（浏览器、文件、网络、技能管理等）。复杂站点步骤与编排写在<strong>技能</strong>里；需要额外一键工具时用<strong>插件</strong>（设置 → 插件启用）。不在系统提示中写死站点逻辑。
+                产品只提供通用工具（浏览器、文件、网络、技能管理等）。复杂站点步骤与编排写在<strong>技能</strong>里；需要额外一键工具时用<strong>插件</strong>（插件工作区启用）。不在系统提示中写死站点逻辑。
               </p>
             </div>
           </section>
@@ -210,7 +210,7 @@
             <div class="card mt">
               <h3 class="card-title">管理</h3>
               <p class="doc-p">
-                设置 → <strong>插件</strong>：外链文件夹（开发）、导入 zip（分发）、启用 / 关闭、卸载、重新加载。对<strong>下一次发送</strong>生效。
+                左侧图标栏 → <strong>插件</strong>：搜索插件、已安装插件、插件商店；右侧查看概览、工具和版本，进行启停、安装、导入导出与卸载。设置 → 插件仅保留开发模式开关；批量管理移入插件工作区。插件变更对<strong>下一次发送</strong>生效。
               </p>
             </div>
           </section>

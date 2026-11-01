@@ -1,5 +1,7 @@
 # 计划：Electron 原生 JS Dialog API + Navora 对接
 
+> 历史对接草案。核心双后端宿主对接已实现，js-dialog-host.ts 优先探测 setJsDialogHandler，缺失时使用 CDP 降级；本文其它可选设计并非都已实现，原“计划中”指编写时。 当前行为与验证边界见 [当前功能](./current-state.md)，全部文档见 [导航](./README.md)。
+
 | 项 | 内容 |
 |----|------|
 | 状态 | **计划中**（先不实现） |

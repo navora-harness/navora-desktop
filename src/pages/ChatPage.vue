@@ -407,6 +407,7 @@
         <template #browser="slot">
           <GlobalResourcesPanel v-if="loadedResourcePanels.has('browser')" :active="slot.active" kind="browser" :chats="chats" :active-chat-id="activeId || ''" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @select-chat="openResourceChat" />
         </template>
+        <template #plugins><div id="plugins-sidebar-nav" class="plugins-sidebar-host" /></template>
       </SidebarDock>
 
       </div>
@@ -507,9 +508,9 @@
       <div v-if="!isMobileLayout && (!allSidebarHidden || settingsOpen || creatorKind)" class="sidebar-divider vertical" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarLayout.width" aria-valuemin="250" aria-valuemax="560" tabindex="0" @pointerdown="beginSidebarResize($event, 'width')" @keydown="sidebarResizeKey($event, 'width')" />
     </aside>
 
-    <main ref="mainElement" class="main" :class="{ 'resource-card-docked': resourceOpen && !resourceOverlay && !settingsOpen && !creatorKind, 'file-workspace-open': fileWorkspaceVisible }" :style="{ '--preview-width': `${previewWidth}px`, '--file-workspace-reserve':`${fileWorkspaceReserve}px` }">
+    <main ref="mainElement" class="main" :class="{ 'resource-card-docked': resourceOpen && !resourceOverlay && !settingsOpen && !creatorKind && !fileManagerActive && !pluginWorkspaceActive, 'file-workspace-open': fileWorkspaceVisible }" :style="{ '--preview-width': `${previewWidth}px`, '--file-workspace-reserve':`${fileWorkspaceReserve}px` }">
       <div v-if="showDesktopChrome && ((!settingsOpen && !creatorKind) || isMobileLayout)" class="win-drag-main" aria-hidden="true" />
-      <header v-if="isMobileLayout && !settingsOpen && !creatorKind" class="mobile-topbar">
+      <header v-if="isMobileLayout && !settingsOpen && !creatorKind" class="mobile-topbar" :class="{'plugin-mobile-topbar':pluginWorkspaceActive}">
         <button
           v-if="active?.kind === 'sub' && active.parentChatId"
           type="button"
@@ -541,14 +542,14 @@
                   : displayChatTitle(active?.title)
               "
               >{{
-                active?.kind === 'sub'
+                pluginWorkspaceActive ? '插件' : active?.kind === 'sub'
                   ? displaySubchatTitle(active)
                   : displayChatTitle(active?.title)
               }}</span
             >
           </div>
         </div>
-        <div class="mobile-topbar-actions">
+        <div v-if="!pluginWorkspaceActive" class="mobile-topbar-actions">
           <ChatResourcesMenu ref="browserResources" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :open="resourceOpen" :file-workspace-open="fileWorkspaceVisible" :has-file-tabs="fileTabsState.tabs.length>0" @toggle-workspace="toggleFileWorkspace" @notify="onPanelNotify" @toggle-resources="toggleResources" @show-browser="showResources('browser')" />
           <button
             v-if="isWebRemote()"
@@ -578,7 +579,8 @@
       <SettingsPage v-else-if="settingsOpen" class="settings-workspace" :initial-tab="settingsTab" @navigate="settingsTab = $event" embedded :mobile="isMobileLayout" :navigation-target="isMobileLayout ? undefined : '#settings-sidebar-nav'" @close="settingsOpen = false" @create="openCreator" />
       <template v-else>
       <FileManager v-if="fileManagerMounted" v-show="fileManagerActive" :active="fileManagerActive" :class="{'is-active':fileManagerActive}" :chat-id="fileManagerOwner?.id || ''" :title="fileManagerOwner?.title || ''" :directory="fileManagerDirectory" @browse="fileManagerDirectory=$event" @preview="openFilePreview" @back="activateSidebar('chats',false)" @notify="onPanelNotify" />
-      <div v-show="!fileManagerActive" class="conversation-content" :inert="fileManagerActive">
+      <PluginWorkspace v-if="pluginWorkspaceMounted" v-show="pluginWorkspaceActive" :active="pluginWorkspaceActive" :class="{'is-active':pluginWorkspaceActive}" sidebar-target="#plugins-sidebar-nav" @back="activateSidebar('chats',false)" @create="openCreator('plugin')" @selected="closeMobileSidebar" @notify="onPanelNotify" />
+      <div v-show="!fileManagerActive && !pluginWorkspaceActive" class="conversation-content" :inert="fileManagerActive || pluginWorkspaceActive">
       <template v-if="active">
         <header
           v-if="!isMobileLayout || agentRunning"
@@ -1532,7 +1534,7 @@
       </div>
       </template>
       <Transition name="resource-card">
-        <ConversationResourcesCard v-if="resourceOpen && activeId && !settingsOpen && !creatorKind && !fileManagerActive" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :overlay="resourceOverlay" :available-width="resourceAvailableWidth" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="locateResourceMessage({chatId:activeId!,messageId:$event})" @open-media="(p) => openLightbox(p.src,p.alt)" />
+        <ConversationResourcesCard v-if="resourceOpen && activeId && !settingsOpen && !creatorKind && !fileManagerActive && !pluginWorkspaceActive" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :overlay="resourceOverlay" :available-width="resourceAvailableWidth" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="locateResourceMessage({chatId:activeId!,messageId:$event})" @open-media="(p) => openLightbox(p.src,p.alt)" />
       </Transition>
       <Transition name="file-workspace"><FileWorkspace v-if="fileWorkspaceVisible" :tabs="fileTabsState.tabs" :active="activeFileTab" :viewer-chat-id="activeId || ''" :width="fileWorkspaceWidth" :maximum="fileWorkspaceMaximum" :overlay="fileWorkspaceOverlay" :owner-label="treeOwnerLabel" @select="selectFileTab" @close="closeFileTab" @hide="hideFileWorkspace" @open-file="openFilePreview($event.path,$event.chatId)" @locate="locateResourceMessage" @resize="resizeFileWorkspace" @notify="onPanelNotify" /></Transition>
     </main>
@@ -1873,6 +1875,7 @@ import {useFileTabs} from '@/composables/useFileTabs'
 import {useFileWorkspaceLayout} from '@/composables/useFileWorkspaceLayout'
 import FileWorkspace from '@/components/FileWorkspace.vue'
 import FileManager from '@/components/FileManager.vue'
+const PluginWorkspace=lazyPanel(()=>import('@/components/plugins/PluginWorkspace.vue'),'插件')
 const CreatorWorkspace=lazyPanel(()=>import('@/components/CreatorWorkspace.vue'),'创建器')
 import type { CreatorKind } from '@shared/creators'
 import SidebarDock from '@/components/sidebar/SidebarDock.vue'
@@ -2272,7 +2275,8 @@ const {open:resourceOpen,tab:resourceTab,show:showResources,close:hideResources}
 function closeResources(){hideResources()}
 function toggleResources(){if(resourceOpen.value)closeResources();else showResources('overview')}
 const {current:fileTabsState,active:activeFileTab,open:openFileTab,select:selectFileTab,close:closeFileTab,hide:hideFileWorkspace,toggle:toggleFileWorkspace,removeOwner:removeFileOwner}=useFileTabs(activeId)
-const fileWorkspaceVisible=computed(()=>fileTabsState.value.open&&fileTabsState.value.tabs.length>0&&!settingsOpen.value&&!creatorKind.value)
+const pluginWorkspaceMode=ref(false),pluginWorkspaceMounted=ref(false)
+const fileWorkspaceVisible=computed(()=>fileTabsState.value.open&&fileTabsState.value.tabs.length>0&&!settingsOpen.value&&!creatorKind.value&&!pluginWorkspaceMode.value)
 const previewWidth = ref(400)
 const mainElement=ref<HTMLElement|null>(null)
 const {overlay:fileWorkspaceOverlay,maximum:fileWorkspaceMaximum,width:fileWorkspaceWidth,reserve:fileWorkspaceReserve,resize:resizeFileWorkspace}=useFileWorkspaceLayout(mainElement,fileWorkspaceVisible,isMobileLayout)
@@ -2301,6 +2305,7 @@ function closeCreator() { creatorKind.value = null; if (creatorReturnToSettings)
 async function openCreatorTrial(result: { chatId: string; prompt: string }) {
   creatorKind.value = null
   settingsOpen.value = false
+  activateSidebar('chats',false)
   await refreshList()
   await selectChat(result.chatId)
   draft.value = result.prompt
@@ -2311,10 +2316,12 @@ watch(settingsOpen, open => { if (open) creatorKind.value = null })
 const { layout: sidebarLayout, style: sidebarStyle, resizing: sidebarResizing, beginResize: beginSidebarResize, resizeKey: sidebarResizeKey } = useSidebarLayout()
 const { panels: sidebarPanels, visible: sidebarVisible, rail: sidebarRail, activate: activateSidebar, close: closeSidebar } = useSidebarDock()
 const fileManagerMounted=ref(false),fileManagerMode=ref(sidebarRail.value.active==='workspace')
-watch(()=>sidebarRail.value.active,id=>{if(id)fileManagerMode.value=id==='workspace'})
+watch(()=>sidebarRail.value.active,id=>{if(id){fileManagerMode.value=id==='workspace';pluginWorkspaceMode.value=id==='plugins'}},{immediate:true})
 const fileManagerOwnerId=ref(''),fileManagerDirectory=ref('.')
 const fileManagerOwner=computed(()=>chats.value.find(chat=>chat.id===fileManagerOwnerId.value))
 const fileManagerActive=computed(()=>fileManagerMode.value&&!settingsOpen.value&&!creatorKind.value)
+const pluginWorkspaceActive=computed(()=>pluginWorkspaceMode.value&&!settingsOpen.value&&!creatorKind.value)
+watch(pluginWorkspaceActive,visible=>{if(visible){pluginWorkspaceMounted.value=true;hideResources()}},{immediate:true})
 function browseFiles(selection:{chatId:string;path:string}){fileManagerOwnerId.value=selection.chatId;fileManagerDirectory.value=selection.path}
 async function openResourceChat(id:string){await selectChat(id);activateSidebar('chats',false)}
 watch(fileManagerActive,visible=>{if(visible){fileManagerMounted.value=true;hideResources()}},{immediate:true})
@@ -2322,7 +2329,7 @@ const loadedResourcePanels=ref(new Set<string>())
 watch(()=>sidebarRail.value.active,id=>{if(id)loadedResourcePanels.value=new Set([...loadedResourcePanels.value,id])},{immediate:true})
 const allSidebarHidden = computed(() => sidebarPanels.value.every(panel => !sidebarVisible.value[panel.id]))
 watch(()=>sidebarVisible.value.chats,visible=>{if(!visible)exitChatBatchMode()})
-function toggleSidebarGroup(id:string){const force=settingsOpen.value||!!creatorKind.value;settingsOpen.value=false;creatorKind.value=null;exitChatBatchMode();activateSidebar(id,!force)}
+function toggleSidebarGroup(id:string){const force=settingsOpen.value||!!creatorKind.value||(id==='plugins'&&!pluginWorkspaceMode.value)||(id==='workspace'&&!fileManagerMode.value);settingsOpen.value=false;creatorKind.value=null;exitChatBatchMode();if(force){fileManagerMode.value=id==='workspace';pluginWorkspaceMode.value=id==='plugins'}activateSidebar(id,!force)}
 const docsOpen = ref(false)
 const mobileSidebarOpen = ref(false)
 const chatSearchOpen = ref(false)
@@ -4826,6 +4833,7 @@ const chatSearchHits = computed((): ChatSearchHit[] => {
 
 function openChatSearch() {
   fileManagerMode.value=false
+  pluginWorkspaceMode.value=false
   chatSearchQuery.value = ''
   chatSearchOpen.value = true
   void nextTick(() => chatSearchInput.value?.focus())
@@ -5625,6 +5633,9 @@ onUnmounted(() => {
 
 <style scoped>
 .conversation-content{display:contents}
+.plugins-sidebar-host{display:flex;flex:1;flex-direction:column;min-height:0;height:100%}
+.shell:not(.mobile-layout)>.main:has(>.plugin-workspace.is-active){grid-template-rows:minmax(0,1fr)}
+.shell.mobile-layout>.main:has(>.plugin-workspace.is-active){grid-template-rows:auto minmax(0,1fr)}
 .shell:not(.mobile-layout)>.main:has(>.file-manager.is-active){grid-template-rows:minmax(0,1fr)}
 .shell.mobile-layout>.main:has(>.file-manager.is-active){grid-template-rows:auto minmax(0,1fr)}
 .shell {

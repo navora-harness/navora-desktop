@@ -1,5 +1,7 @@
 # Electron 魔改计划：JS 对话框（alert / confirm / prompt / beforeunload）
 
+> 历史内核设计。原表中的 Electron 41 是当时目标，当前宿主使用 45.0.0-cloudbypass.2 及本机修复构建；宿主已按能力探测优先使用原生 Handler，缺失时降级。 当前行为与验证边界见 [当前功能](./current-state.md)，全部文档见 [导航](./README.md)。
+
 | 项 | 内容 |
 |----|------|
 | 状态 | **P0 已实现（JS 层）** — `setJsDialogHandler` / `js-dialog` / `setJsDialogTimeout` |

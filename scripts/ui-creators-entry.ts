@@ -145,12 +145,14 @@ app.on('browser-window-created',(_,win) => {
       await click('[aria-label="退出创建器"]')
       await click('.sidebar-settings-btn')
       await js("[...document.querySelectorAll('.settings-navigation .nav-label')].find(el=>el.textContent.trim()==='插件').closest('button').click()")
-      await click('.launch-plugin-creator')
-      assert.equal(await js('!!document.querySelector(".creator-workspace")'),true,'Settings opens the same workbench')
+      assert.equal(await js('document.querySelectorAll(".settings-workspace .plugin-library,.settings-workspace .plugin-import-trigger,.settings-workspace .launch-plugin-creator").length'),0,'Settings contains only plugin behavior switches')
+      assert.equal(await js('document.querySelector("[aria-label=插件开发模式]").checkVisibility()'),true)
+      await click('[data-panel="plugins"]');await wait(250)
+      await click('[aria-label="创建插件"]');await wait(250)
+      assert.equal(await js('!!document.querySelector(".creator-workspace")'),true,'Plugin management opens the existing workbench')
       await click('[aria-label="退出创建器"]')
-      assert.equal(await js('!!document.querySelector(".settings-workspace")'),true,'Closing returns to settings')
-      assert.equal(await js('document.querySelector(".settings-navigation .nav-item.active .nav-label").textContent.trim()'),'插件','Returning keeps the originating settings category')
-      assert.equal(await js(`(()=>{const el=document.querySelector('.settings-close'),r=el.getBoundingClientRect();return document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('button')===el})()`),true,'Caption drag region never covers the returning settings button')
+      assert.equal(await js('document.querySelector(".plugin-workspace").checkVisibility()'),true,'Closing returns to plugin management')
+      await click('[aria-label="管理已安装插件"]')
       // Populate a mixed library through the real plugin loader.
       for (const item of [
         {id:'library-active',name:'资料整理',enabled:true},
@@ -169,9 +171,9 @@ app.on('browser-window-created',(_,win) => {
       assert.equal(await js('document.querySelectorAll(".plugin-library-row").length'),6)
       assert.equal(await js('document.querySelectorAll(".plugin-library-details").length'),0,'Library details start folded')
       await capture('plugin-library')
-      await text('[aria-label="搜索插件"]','LIBRARY ACTIVE')
+      await text('.plugin-library [aria-label="搜索插件"]','LIBRARY ACTIVE')
       assert.equal(await js('document.querySelectorAll(".plugin-library-row").length'),1,'Search combines ID and tool tokens')
-      await click('[aria-label="清空插件搜索"]')
+      await click('.plugin-library [aria-label="清空插件搜索"]')
       await js("document.querySelector('[aria-label=\"插件来源\"]').value='creator';document.querySelector('[aria-label=\"插件来源\"]').dispatchEvent(new Event('change',{bubbles:true}))")
       assert.equal(await js('document.querySelectorAll(".plugin-library-row").length'),1,'Creator installs have a distinct source filter')
       await js("document.querySelector('[aria-label=\"插件来源\"]').value='all';document.querySelector('[aria-label=\"插件来源\"]').dispatchEvent(new Event('change',{bubbles:true}))")
@@ -180,16 +182,16 @@ app.on('browser-window-created',(_,win) => {
       await click('[data-plugin-id="library-broken"] .plugin-enable')
       assert.equal(await js('document.querySelector("[data-plugin-id=library-broken] .plugin-enable").checked'),false,'An enabled broken plugin can be disabled')
       await click('.library-title-row [aria-label="批量操作"]')
-      await text('[aria-label="搜索插件"]','library active')
-      await js("[...document.querySelectorAll('.skill-dropzone button')].find(button=>button.textContent.includes('全选当前结果')).click()")
+      await text('.plugin-library [aria-label="搜索插件"]','library active')
+      await js("[...document.querySelectorAll('.plugin-batch-toolbar button')].find(button=>button.textContent.includes('全选当前结果')).click()")
       assert.equal(await js('document.querySelectorAll(".plugin-batch-checkbox:checked").length'),1,'Batch selection only selects current results')
-      await text('[aria-label="搜索插件"]','library')
-      await js("[...document.querySelectorAll('.skill-dropzone button')].find(button=>button.textContent.includes('全选当前结果')).click()")
+      await text('.plugin-library [aria-label="搜索插件"]','library')
+      await js("[...document.querySelectorAll('.plugin-batch-toolbar button')].find(button=>button.textContent.includes('全选当前结果')).click()")
       assert.equal(await js('document.querySelector("[data-plugin-id=library-bundled] .plugin-batch-checkbox").checked'),false,'Bundled plugins cannot be selected for uninstall')
-      await text('[aria-label="搜索插件"]','library disabled')
-      assert.ok(await js('document.querySelector(".skill-batch-count").textContent.includes("筛选外")'),'Hidden selections are disclosed')
+      await text('.plugin-library [aria-label="搜索插件"]','library disabled')
+      assert.ok(await js('document.querySelector(".plugin-batch-toolbar > span").textContent.includes("筛选外")'),'Hidden selections are disclosed')
       await click('.library-title-row .library-text-button')
-      await text('[aria-label="搜索插件"]','不存在的插件')
+      await text('.plugin-library [aria-label="搜索插件"]','不存在的插件')
       assert.ok(await js('document.querySelector(".library-empty").textContent.includes("没有匹配")'))
       await click('.library-empty .library-text-button')
       for(const width of [960,650,390]) {
@@ -201,7 +203,7 @@ app.on('browser-window-created',(_,win) => {
       const originalList = PluginStore.prototype.list
       try {
         PluginStore.prototype.list = function () { throw new Error('fixture-list-unavailable') }
-        await click('.plugin-refresh')
+        await click('[aria-label="刷新插件"]')
         assert.ok(await js('document.querySelector(".library-load-error")?.textContent.includes("已保留现有内容")'),'Load failure is visible')
         assert.equal(await js('document.querySelectorAll(".plugin-library-row").length'),6,'Cached plugins survive a load failure')
       } finally { PluginStore.prototype.list = originalList }
@@ -214,7 +216,7 @@ app.on('browser-window-created',(_,win) => {
         const cloud = addProviderFromPresetId('cloudbypass',[])!
         new SecretsStore(root).set(cloud.api_key_ref, fs.readFileSync(keyPath,'utf8').trim())
         await js(`(async()=>{const cfg=await window.navora.config.get();cfg.ai.providers.push(${JSON.stringify(cloud)});cfg.ai.default_provider=${JSON.stringify(cloud.id)};await window.navora.config.save({ai:cfg.ai})})()`)
-        await click('.settings-close')
+        await click('.plugin-back')
         await open('plugin'); await button('新建')
         await text('[aria-label="创建需求"]','创建一个纯本地文本插件，id 为 live-text-helper，工具返回输入字符串的倒序和字符数量，使用 compute.local 权限，不使用网络或文件。请编写完整实现和中文说明。')
         await button('生成草稿')

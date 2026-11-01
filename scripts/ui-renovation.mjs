@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(import.meta.url)
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'navora-ui-renovation-'))
-const suite = process.env.NAVORA_UI_SUITE === 'creators' ? 'ui-creators' : 'ui-renovation'
+const suite = process.env.NAVORA_UI_SUITE === 'creators' ? 'ui-creators' : process.env.NAVORA_UI_SUITE === 'plugins' ? 'ui-plugins' : 'ui-renovation'
 const entry = path.join(root, 'dist-electron', suite+'.mjs')
 const output = path.resolve(process.env.NAVORA_UI_OUTPUT || path.join(root, 'release', suite))
 try {

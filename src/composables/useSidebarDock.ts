@@ -5,6 +5,7 @@ const registry = shallowReactive(new Map<string,SidebarPanelDefinition>([
   ['chats',{id:'chats',label:'对话',icon:'comments'}],
   ['workspace',{id:'workspace',label:'文件',icon:'folder-open'}],
   ['browser',{id:'browser',label:'浏览器',icon:'window-maximize'}],
+  ['plugins',{id:'plugins',label:'插件',icon:'puzzle-piece'}],
 ]))
 export function registerSidebarPanel(definition:SidebarPanelDefinition):()=>void {
   if(!/^[a-zA-Z0-9_-]{1,80}$/.test(definition.id)||registry.has(definition.id)) throw new Error('invalid_or_duplicate_sidebar_panel')
