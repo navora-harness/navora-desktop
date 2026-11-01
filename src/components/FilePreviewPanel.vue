@@ -8,7 +8,7 @@
       <select v-if="data?.kind==='image'" v-model="imageZoom" class="preview-zoom" aria-label="图片缩放"><option value="fit">适应窗口</option><option value="50">50%</option><option value="100">100%</option><option value="150">150%</option><option value="200">200%</option></select>
       <button type="button" title="刷新预览" aria-label="刷新预览" :disabled="loading" @click="load(true)"><font-awesome-icon icon="arrow-rotate-right" /></button>
       <button type="button" title="在系统中打开" aria-label="在系统中打开" @click="systemOpen"><font-awesome-icon icon="arrow-up-right-from-square" /></button>
-      <button v-if="!tabbed" ref="closeButton" type="button" title="关闭预览" aria-label="关闭文件预览" @click="emit('close')"><font-awesome-icon icon="xmark" /></button>
+      <SidebarMoreMenu v-if="!tabbed" label="文件预览" hide-label="隐藏文件侧栏" hide-aria-label="关闭文件预览" @hide="emit('close')" />
     </header>
     <div v-if="data?.ok" class="preview-tools">
       <span>{{ formatSize(data.size || 0) }}</span>
@@ -35,6 +35,7 @@
 import { computed, onBeforeUnmount, onMounted, onActivated, onDeactivated, ref, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { renderMarkdown } from '@/utils/markdown'
+import SidebarMoreMenu from './sidebar/SidebarMoreMenu.vue'
 import {workspaceLinkPath} from '@shared/file-tabs'
 import type { WorkspacePreview } from '../../shared/workspace-preview'
 
@@ -47,7 +48,6 @@ const source = ref(false)
 const imageZoom=ref('fit'),imageNaturalWidth=ref(0)
 let active=true,dirty=false
 const copied = ref(false)
-const closeButton = ref<HTMLButtonElement | null>(null)
 const maximum = ref(Math.max(280, Math.min(800, innerWidth - 360)))
 const name = computed(() => props.path.split(/[\\/]/).at(-1) || props.path)
 const markdown = computed(() => DOMPurify.sanitize(renderMarkdown(data.value?.content || ''), { FORBID_ATTR: ['style'], FORBID_TAGS: ['img', 'video', 'audio', 'iframe', 'object', 'embed', 'style', 'form', 'input', 'button', 'textarea', 'select'] }))

@@ -55,13 +55,8 @@
       </section>
 
       <section class="docs-panel">
-        <div class="docs-bar">
-          <span>产品说明</span>
-          <span v-if="docsFileName" class="docs-bar-hint">{{ docsFileName }}</span>
-          <span v-else-if="docsPackageId" class="docs-bar-hint mono">{{ docsPackageId }}</span>
-        </div>
         <div v-if="docsLoading" class="docs-empty">加载说明…</div>
-        <div v-else-if="docsHtml" class="md-body selectable" v-html="docsHtml" />
+        <PluginMarkdown v-else-if="docsHtml" class="product-doc-viewer" :html="docsHtml" :label="displayProduct.kind==='skill'?'技能说明':'插件说明'" />
         <div v-else class="docs-empty">{{ docsEmptyText }}</div>
       </section>
     </div>
@@ -122,6 +117,7 @@ import type { StoreCatalogPackage, StoreCatalogProduct } from '@shared/store'
 import { compareStoreVersions, latestPackageVersion, storeErrorText } from '@shared/store'
 import SkillDialogShell from '../skills/SkillDialogShell.vue'
 import { renderMarkdown } from '@/utils/markdown'
+import PluginMarkdown from '../plugins/PluginMarkdown.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -141,8 +137,6 @@ const emit = defineEmits<{
 
 const docsLoading = ref(false)
 const docsHtml = ref('')
-const docsFileName = ref('')
-const docsPackageId = ref('')
 const docsError = ref('')
 /** Keep last product for close animation so content does not vanish mid-fade. */
 const displayProduct = ref<StoreCatalogProduct | null>(null)
@@ -210,8 +204,8 @@ function pickDocsPackage(p: StoreCatalogProduct): StoreCatalogPackage | null {
 async function loadDocs(p: StoreCatalogProduct) {
   docsLoading.value = true
   docsHtml.value = ''
-  docsFileName.value = ''
-  docsPackageId.value = ''
+
+
   docsError.value = ''
   try {
     if (!window.navora?.store?.readDocs) {
@@ -224,7 +218,7 @@ async function loadDocs(p: StoreCatalogProduct) {
       return
     }
     const latest = latestPackageVersion(pkg)
-    docsPackageId.value = pkg.id
+
     const res = await window.navora.store.readDocs({
       kind: p.kind,
       packageId: pkg.id,
@@ -234,7 +228,7 @@ async function loadDocs(p: StoreCatalogProduct) {
       docsError.value = storeErrorText(res.error || 'readme_not_found')
       return
     }
-    docsFileName.value = res.fileName || ''
+
     docsHtml.value = renderMarkdown(res.markdown)
   } catch (e) {
     docsError.value = storeErrorText(e instanceof Error ? e.message : String(e))
@@ -363,92 +357,14 @@ async function loadDocs(p: StoreCatalogProduct) {
   overflow: hidden;
   background: #fff;
 }
-.docs-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid #e8eef3;
-  background: #f7fafc;
-  font-size: 0.78rem;
-  font-weight: 650;
-  color: #3d5163;
-}
-.docs-bar-hint {
-  font-weight: 500;
-  color: #8a9aab;
-  font-size: 0.72rem;
-}
 .docs-empty {
   padding: 28px 16px;
   text-align: center;
   color: #8a9aab;
   font-size: 0.9rem;
 }
-.md-body {
-  max-height: min(42vh, 420px);
-  overflow: auto;
-  padding: 14px 16px 18px;
-  font-size: 0.92rem;
-  line-height: 1.55;
-  color: #243447;
-}
-.md-body :deep(h1),
-.md-body :deep(h2),
-.md-body :deep(h3) {
-  margin: 0.85em 0 0.4em;
-  line-height: 1.25;
-  color: #15202b;
-}
-.md-body :deep(h1) {
-  font-size: 1.2rem;
-}
-.md-body :deep(h2) {
-  font-size: 1.05rem;
-}
-.md-body :deep(h3) {
-  font-size: 0.98rem;
-}
-.md-body :deep(p),
-.md-body :deep(ul),
-.md-body :deep(ol) {
-  margin: 0.45em 0;
-}
-.md-body :deep(ul),
-.md-body :deep(ol) {
-  padding-left: 1.3em;
-}
-.md-body :deep(code) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.86em;
-  padding: 0.1em 0.35em;
-  border-radius: 4px;
-  background: #eef3f7;
-}
-.md-body :deep(pre) {
-  overflow: auto;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #f3f7fa;
-  border: 1px solid #e4ebf1;
-}
-.md-body :deep(pre code) {
-  padding: 0;
-  background: transparent;
-}
-.md-body :deep(a) {
-  color: #1f6feb;
-}
-.md-body :deep(table) {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.88rem;
-}
-.md-body :deep(th),
-.md-body :deep(td) {
-  border: 1px solid #e0e7ee;
-  padding: 6px 8px;
-  text-align: left;
+.product-doc-viewer {
+  padding: 20px 22px 26px;
 }
 .footer-installed {
   font-size: 13px;

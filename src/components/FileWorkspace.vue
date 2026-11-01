@@ -12,7 +12,7 @@
         <template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" class="file-workspace-close" aria-label="新增文件标签页" title="选择文件"><font-awesome-icon icon="plus" /></button></template>
         <section class="file-workspace-picker" aria-label="选择工作区文件"><header><span>当前对话文件</span><button type="button" class="file-workspace-close" aria-label="关闭文件选择" @click="pickerOpen=false"><font-awesome-icon icon="xmark" /></button></header><WorkspaceFilePicker :chat-id="viewerChatId" @open="chooseFile" @locate="locateFile" /></section>
       </v-menu>
-      <button type="button" class="file-workspace-close" aria-label="关闭文件预览" title="收起文件侧栏" @click="hidePanel"><font-awesome-icon icon="xmark" /></button>
+      <SidebarMoreMenu label="文件预览" hide-label="隐藏文件侧栏" hide-aria-label="关闭文件预览" @hide="hidePanel"><button type="button" role="menuitem" :disabled="!active" @click="active && closeTab(active.key)"><font-awesome-icon icon="file-lines" />关闭当前标签页</button></SidebarMoreMenu>
     </header>
     <div v-if="active && active.chatId!==viewerChatId" class="file-workspace-owner">来自 {{ ownerLabel(active.chatId) }}</div>
     <div :id="`${uid}-content`" class="file-workspace-content" role="tabpanel" :aria-labelledby="`${uid}-${tabs.findIndex(tab=>tab.key===active?.key)}`">
@@ -25,6 +25,7 @@ import {nextTick,onBeforeUnmount,ref,useId,watch} from 'vue'
 import type {FileTab} from '@shared/file-tabs'
 import FilePreviewPanel from './FilePreviewPanel.vue'
 import WorkspaceFilePicker from './WorkspaceFilePicker.vue'
+import SidebarMoreMenu from './sidebar/SidebarMoreMenu.vue'
 const props=defineProps<{tabs:FileTab[];active:FileTab|null;viewerChatId:string;width:number;maximum:number;overlay:boolean;ownerLabel:(id:string)=>string}>()
 const emit=defineEmits<{select:[key:string];close:[key:string];hide:[];resize:[width:number];openFile:[file:{path:string;chatId:string}];notify:[text:string,color?:string];locate:[payload:{chatId:string;messageId:string}]}>()
 const uid='file-workspace-'+useId(),panel=ref<HTMLElement|null>(null),tabBar=ref<HTMLElement|null>(null)
