@@ -1,0 +1,54 @@
+/* Shared geometry and state treatment; inputs retain their native semantics. */
+:root {
+  --navora-switch-off: #c9d1db;
+  --navora-switch-off-hover: #bcc7d4;
+  --navora-switch-on: #486f93;
+  --navora-switch-on-hover: #3b6287;
+  --navora-switch-edge: #b6c1ce;
+}
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-selection-control { min-height:32px; }
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-selection-control__wrapper { width:36px; height:32px; }
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-switch__track {
+  min-width:36px;width:36px;height:22px;padding:0;border:1px solid var(--navora-switch-edge);border-radius:999px;
+  background:var(--navora-switch-off) !important;opacity:1;transition:background-color 160ms ease,border-color 160ms ease;
+}
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-switch__thumb {
+  width:16px;height:16px;background:#fff;color:#fff;transform:none;box-shadow:0 1px 2px #25354b26;
+}
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-selection-control__input {
+  width:32px;height:32px;transform:translateX(-7px);transition:transform 180ms var(--navora-ease);
+}
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-selection-control--dirty .v-selection-control__input { transform:translateX(7px); }
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch:dir(rtl) .v-selection-control__input { transform:translateX(7px); }
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch:dir(rtl) .v-selection-control--dirty .v-selection-control__input { transform:translateX(-7px); }
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-selection-control--dirty .v-switch__track { background:var(--navora-switch-on) !important;border-color:var(--navora-switch-on); }
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch:not(.v-input--disabled):hover .v-switch__track { background:var(--navora-switch-off-hover) !important; }
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch:not(.v-input--disabled):hover .v-selection-control--dirty .v-switch__track { background:var(--navora-switch-on-hover) !important;border-color:var(--navora-switch-on-hover); }
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-selection-control__input::before,
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-ripple__container { display:none; }
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-selection-control__wrapper:has(input:focus-visible) .v-switch__track { outline:2px solid var(--navora-accent);outline-offset:3px; }
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-selection-control--disabled { opacity:.45; }
+
+.surface-toggle {
+  appearance:none;position:relative;flex-shrink:0;box-sizing:border-box;width:36px;height:22px;margin:0;
+  border:1px solid var(--navora-switch-edge);border-radius:999px;background:var(--navora-switch-off);cursor:pointer;
+  transition:background-color 160ms ease,border-color 160ms ease;
+}
+.surface-toggle::after { content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #25354b26;transition:transform 180ms var(--navora-ease); }
+.surface-toggle:checked { background:var(--navora-switch-on);border-color:var(--navora-switch-on); }
+.surface-toggle:checked::after { transform:translateX(14px); }
+.surface-toggle:hover:not(:disabled) { background:var(--navora-switch-off-hover); }
+.surface-toggle:checked:hover:not(:disabled) { background:var(--navora-switch-on-hover);border-color:var(--navora-switch-on-hover); }
+.surface-toggle:focus-visible { outline:2px solid var(--navora-accent);outline-offset:3px; }
+.surface-toggle:disabled { opacity:.45;cursor:default; }
+.surface-toggle:dir(rtl)::after { left:auto;right:2px; }
+.surface-toggle:checked:dir(rtl)::after { transform:translateX(-14px); }
+@media(prefers-reduced-motion:reduce) {
+  .surface-toggle,.surface-toggle::after,:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch :is(.v-switch__track,.v-selection-control__input) { transition:none; }
+}
+@media(forced-colors:active) {
+  .surface-toggle,:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-switch__track { background:Canvas !important;border-color:ButtonText; }
+  .surface-toggle::after,:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-switch__thumb { background:ButtonText; }
+  .surface-toggle:checked,:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-selection-control--dirty .v-switch__track { background:Highlight !important;border-color:Highlight; }
+  .surface-toggle:checked::after,:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-selection-control--dirty .v-switch__thumb { background:HighlightText; }
+}

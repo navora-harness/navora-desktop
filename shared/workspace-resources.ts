@@ -19,6 +19,7 @@ export type WorkspaceResource = {
 export function associateResourceEvidence(entries:readonly WorkspaceResource[],messages:readonly ChatMessage[]):WorkspaceResource[]{
   const wanted=new Set(entries.map(entry=>entry.path)),records=new Map<string,ResourceEvidence>(),pending=new Map<string,ResourceEvidence>()
   const finals=new Set(finalOutputs(messages).map(message=>message.id))
+  const completedAnswers=new Map<string,string>()
   let turnId:string|undefined
   const safe=(path:unknown)=>{try{return typeof path==='string'?makeFileTab('evidence',path).path:null}catch{return null}}
   const clear=(path:string)=>{for(const key of records.keys())if(key===path||key.startsWith(path+'/')){records.delete(key);pending.delete(key)}}
@@ -28,9 +29,21 @@ export function associateResourceEvidence(entries:readonly WorkspaceResource[],m
       turnId=message.id;pending.clear();continue
     }
     if(finals.has(message.id)){
+      if(message.meta?.runId)completedAnswers.set(message.meta.runId,message.id)
       for(const [path,record] of pending){
         if(record.runId&&message.meta?.runId&&record.runId!==message.meta.runId)continue
         record.answerId=message.id;pending.delete(path)
+      }
+      continue
+    }
+    if(message.role==='log'&&message.meta?.kind==='browser_download'&&message.meta.runId){
+      const download=message.meta.download as {state?:string;path?:string}|undefined
+      const path=safe(download?.path)
+      if(download?.state==='completed'&&path&&wanted.has(path)){
+        const record:ResourceEvidence={messageId:message.id,turnId:message.meta.turnId,runId:message.meta.runId,operation:'browser_download',createdAt:message.createdAt}
+        const answer=completedAnswers.get(message.meta.runId)
+        if(answer)record.answerId=answer
+        records.set(path,record);if(!answer)pending.set(path,record)
       }
       continue
     }

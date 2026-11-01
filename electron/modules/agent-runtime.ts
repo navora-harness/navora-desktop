@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import {pendingBrowserDownloadReply} from '../../shared/browser-download-status'
 import { AGENT_TOOLS, PLUGIN_DEV_TOOL_NAMES, buildSystemPrompt } from '../../shared/agent-tools'
 import type { AppConfig } from '../../shared/config'
 import { modelCapabilities, reasoningValue } from '../../shared/model-capabilities'
@@ -14,6 +15,7 @@ import type {
   AgentEvent,
   AgentPhase,
   BrowserContextRef,
+  BrowserDownloadEntry,
   ChatChangedEvent,
   ChatMessage,
   SkillReviewRequest,
@@ -170,6 +172,8 @@ function parseToolCallArguments(raw: string | undefined): {
   }
 }
 
+type RunContext = {id:string;turnId?:string;sequence:number}
+
 type RunOpts = {
   chatId: string
   userText: string
@@ -211,7 +215,9 @@ const downloadProgressTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 export class AgentRuntime {
   private runs = new Map<string, AbortController>()
-  private runContexts = new Map<string, {id:string; turnId?:string; sequence:number}>()
+  private runContexts = new Map<string, RunContext>()
+  private downloadOrigins = new Map<string,RunContext|null>()
+  private getBrowserDownloads?: (chatId:string)=>BrowserDownloadEntry[]
   private titleController?: AbortController
   private titleTimer?: ReturnType<typeof setTimeout>
   private getConfig: () => AppConfig
@@ -268,6 +274,7 @@ export class AgentRuntime {
     network: BrowserNetworkManager
     files: WorkspaceFiles
     downloads: FileDownloadService
+    getBrowserDownloads?: (chatId:string)=>BrowserDownloadEntry[]
     shell: WorkspaceShell
     gate: PermissionGate
     secrets: SecretsStore
@@ -285,6 +292,7 @@ export class AgentRuntime {
     this.registry = deps.registry
     this.network = deps.network
     this.files = deps.files
+    this.getBrowserDownloads = deps.getBrowserDownloads
     this.downloads = deps.downloads
     this.shell = deps.shell
     this.gate = deps.gate
@@ -298,8 +306,8 @@ export class AgentRuntime {
     this.askSkillReview = deps.askSkillReview
   }
 
-  private appendRunMessage(chatId: string, message: Parameters<ChatStore['appendMessage']>[1]): ChatMessage | null {
-    const context = this.runContexts.get(chatId)
+  private appendRunMessage(chatId: string, message: Parameters<ChatStore['appendMessage']>[1], origin?:RunContext|null): ChatMessage | null {
+    const context = origin === undefined ? this.runContexts.get(chatId) : origin
     if (!context) return this.chats.appendMessage(chatId, message)
     return this.chats.appendMessage(chatId, {
       ...message,
@@ -413,6 +421,31 @@ export class AgentRuntime {
       },
     })
     if (msg) this.emit({ type: 'message', chatId, message: msg })
+  }
+
+  trackBrowserDownload(entry:BrowserDownloadEntry):void {
+    if(!this.downloadOrigins.has(entry.id))this.downloadOrigins.set(entry.id,this.runContexts.get(entry.chatId)||null)
+    // The visible download list is bounded; retain a similarly bounded ownership cache.
+    if(this.downloadOrigins.size>200)this.downloadOrigins.delete(this.downloadOrigins.keys().next().value!)
+  }
+
+  recordBrowserDownload(entry:BrowserDownloadEntry,log:RunLogEntry):void {
+    this.trackBrowserDownload(entry)
+    const origin=this.downloadOrigins.get(entry.id)||null
+    if(origin&&this.runContexts.get(entry.chatId)?.id===origin.id){
+      const pending=this.pendingEvents.get(entry.chatId)||[]
+      pending.push(log.content);this.pendingEvents.set(entry.chatId,pending)
+    }
+    const message=this.appendRunMessage(entry.chatId,{role:'log',content:log.content,meta:{
+      kind:'browser_download',summary:log.summary,...(log.detail?{detail:log.detail}:{}),
+      download:{id:entry.id,state:entry.state,path:entry.relPath,receivedBytes:entry.receivedBytes,totalBytes:entry.totalBytes},
+    }},origin)
+    if(message)this.emit({type:'message',chatId:entry.chatId,message})
+  }
+
+  private currentBrowserDownloads(chatId:string):BrowserDownloadEntry[]{
+    const runId=this.runContexts.get(chatId)?.id
+    return runId?(this.getBrowserDownloads?.(chatId)||[]).filter(entry=>this.downloadOrigins.get(entry.id)?.id===runId):[]
   }
 
   /**
@@ -770,6 +803,9 @@ export class AgentRuntime {
           })
         }
 
+        const browserDownloads=this.currentBrowserDownloads(chatId)
+        const requestMessages=browserDownloads.length?[...messages,{role:'system' as const,content:'[浏览器下载实时状态] 文件存在不代表下载完成。只有 state=completed 才能宣告完成；大小必须使用实际 receivedBytes。\n'+JSON.stringify(browserDownloads.map(entry=>({filename:entry.filename,path:entry.relPath,state:entry.state,receivedBytes:entry.receivedBytes,totalBytes:entry.totalBytes})))}]:messages
+
         // Keep prior-round CoT on screen while this call runs (avoid per-round flash).
         this.setPhase(
           chatId,
@@ -804,7 +840,7 @@ export class AgentRuntime {
           // structured fields — lift them so tools actually run and CoT stays in the panel.
           reply = directWeatherReply
             ? { content: directWeatherReply, finish_reason: 'stop' }
-            : normalizeLlmReply(await client.chat(messages, useTools && !weatherReady ? this.toolsForConfig(cfg, chatId, weatherTask) : [], ctrl.signal, {
+            : normalizeLlmReply(await client.chat(requestMessages, useTools && !weatherReady ? this.toolsForConfig(cfg, chatId, weatherTask) : [], ctrl.signal, {
               onUpdate: updateStreamUi,
             }))
           updateStreamUi(reply, true)
@@ -1183,6 +1219,10 @@ export class AgentRuntime {
         if (!isSub && cfg.app.show_read_pages !== false) {
           text = stripTrailingSourcesSection(text)
         }
+        const nativeDownloads=this.currentBrowserDownloads(chatId)
+        const reportsDownload=/下载|download/iu.test(opts.userText)||nativeDownloads.some(entry=>text.includes(entry.filename)||(entry.relPath&&text.includes(entry.relPath)))
+        const pendingDownloadReply=reportsDownload?pendingBrowserDownloadReply(nativeDownloads):null
+        if(pendingDownloadReply)text=pendingDownloadReply
         const finalSources = [...sourceBag.values()]
         messages.push({ role: 'assistant', content: text })
         this.clearPartialMarkers(chatId)

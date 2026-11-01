@@ -39,7 +39,7 @@ const name=(path:string)=>path.split('/').at(-1)||path
 const notify=(text:string,color?:string)=>emit('notify',text,color)
 function selectedButton(){return tabBar.value?.querySelector<HTMLButtonElement>('[role=tab][aria-selected=true]')}
 watch(()=>props.active?.key,()=>void nextTick(()=>selectedButton()?.scrollIntoView({block:'nearest',inline:'nearest'})))
-function restoreLauncher(){void nextTick(()=>{const target=[...document.querySelectorAll<HTMLButtonElement>('[data-chat-resource=workspace]:not(:disabled),[data-chat-resource=resources]')].filter(el=>el.checkVisibility()).sort((a,b)=>Number(b.dataset.chatResource==='workspace')-Number(a.dataset.chatResource==='workspace'))[0];target?.focus({preventScroll:true})})}
+function restoreLauncher(){void nextTick(()=>{const target=[...document.querySelectorAll<HTMLButtonElement>('[data-chat-resource=workspace]:not(:disabled),[data-chat-resource=resources],.file-manager .file-manager-row.selected .file-manager-entry,[data-resource-kind=files] [role=treeitem][aria-selected=true]')].filter(el=>el.checkVisibility()).sort((a,b)=>Number(b.dataset.chatResource==='workspace')-Number(a.dataset.chatResource==='workspace'))[0];target?.focus({preventScroll:true})})}
 function hidePanel(){emit('hide');restoreLauncher()}
 function closeOnMiddle(event:MouseEvent,key:string){if(event.button===1){event.preventDefault();closeTab(key)}}
 function closeTab(key:string){if(props.tabs.length===1){emit('close',key);restoreLauncher();return}const restore=tabBar.value?.contains(document.activeElement);emit('close',key);if(restore)void nextTick(()=>selectedButton()?.focus({preventScroll:true}))}
@@ -71,7 +71,7 @@ onBeforeUnmount(()=>stopResize?.())
 .file-workspace-enter-active,.file-workspace-leave-active{transition:opacity 180ms ease,transform 180ms ease}.file-workspace-enter-from,.file-workspace-leave-to{opacity:0;transform:translateX(12px)}
 .file-workspace-picker{width:min(360px,calc(100vw - 24px));max-height:420px;display:flex;flex-direction:column;padding:8px 12px 12px;background:#fff;border:1px solid #d8dee7;border-radius:12px;color:#58677b;box-shadow:0 8px 24px #243b581a;font-size:12px}.file-workspace-picker>header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}.file-workspace-picker>.sidebar-panel{margin:0;border:0;padding:0;min-height:0;overflow:auto}.file-workspace-picker .res-body{padding:0;max-height:310px;overflow:auto}.file-workspace-picker .ws-root{font-size:10px;color:#7e8a9a}.file-workspace-picker .res-head{display:none}.file-workspace-picker .res-tree{max-height:none}.file-workspace-picker .tree-row{color:#53657b}.file-workspace-picker .res-empty{padding:20px;color:#7e8a9a}
 .navora-app .main.file-workspace-open{padding-right:var(--file-workspace-reserve)}
-.navora-app .shell.frameless:not(.mobile-layout)>.main.file-workspace-open>.main-top{padding-right:12px}
+.navora-app .shell.frameless:not(.mobile-layout)>.main.file-workspace-open .main-top{padding-right:12px}
 .navora-app .main>.conversation-resource-card{right:calc(var(--file-workspace-reserve,0px) + 12px);max-width:calc(100% - var(--file-workspace-reserve,0px) - 24px)}
 .navora-app .shell.frameless.mobile-layout .file-workspace{top:calc(88px + env(safe-area-inset-top,0px))}.navora-app .shell.mobile-layout:not(.frameless) .file-workspace{top:calc(48px + env(safe-area-inset-top,0px))}
 @media(prefers-reduced-motion:reduce){.file-workspace-enter-active,.file-workspace-leave-active{transition:none}}

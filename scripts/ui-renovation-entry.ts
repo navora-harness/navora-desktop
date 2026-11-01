@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { createDefaultConfig } from '../shared/config'
 import { addProviderFromPresetId } from '../shared/model-providers'
 import { SecretsStore } from '../electron/modules/secrets'
-import { createServer } from 'node:http'
+import { createServer, type ServerResponse } from 'node:http'
 
 const root = process.env.NAVORA_DATA_ROOT!, output = process.env.NAVORA_UI_OUTPUT!
 const reduced = process.env.NAVORA_UI_REDUCED_MOTION === '1'
@@ -86,12 +86,29 @@ app.on('browser-window-created', (_,win) => {
     let modelRequests = 0
     const queuePrompts:string[]=[]
     let releaseQueueFirst:(()=>void)|undefined
+    let nativeWindowId=''
+    let slowDownload:ServerResponse|undefined,releaseAfterDownload:(()=>void)|undefined
+    const nativePayload=Buffer.alloc(32768,65)
     const server = createServer(async (req,res) => {
+      if(req.url==='/native-download'){
+        slowDownload=res;res.writeHead(200,{'Content-Type':'application/octet-stream','X-Content-Type-Options':'nosniff','Content-Disposition':'attachment; filename="native-fixture.txt"','Content-Length':nativePayload.length});res.write(nativePayload.subarray(0,8192));return
+      }
       res.setHeader('Content-Type','application/json')
       if (req.url === '/v1/models') { res.end(JSON.stringify({data:[{id:'qwen38-turbo-q6'}]})); return }
       let body = ''; for await (const part of req) body += part
       const request = JSON.parse(body)
       const lastUser=request.messages?.filter((message:{role:string})=>message.role==='user').at(-1)?.content
+      const task=request.messages?.filter((m:{role:string;content?:unknown})=>m.role==='user'&&typeof m.content==='string'&&m.content.startsWith('UI_')).at(-1)?.content
+      if(task==='UI_NATIVE_DOWNLOAD 下载测试'){
+        const opened=request.messages.some((m:{role:string;tool_call_id?:string})=>m.role==='tool'&&m.tool_call_id==='native-fixture-open')
+        const port=(server.address() as {port:number}).port
+        const reply=opened?{role:'assistant',content:'下载完成，文件大小 140 MB。'}:{role:'assistant',content:'开始本地下载。',tool_calls:[{id:'native-fixture-open',type:'function',function:{name:'browser_navigate',arguments:JSON.stringify({windowId:nativeWindowId,url:`http://127.0.0.1:${port}/native-download`,waitUntil:'none'})}}]}
+        res.end(JSON.stringify({choices:[{message:reply,finish_reason:opened?'stop':'tool_calls'}]}));return
+      }
+      if(task==='UI_AFTER_NATIVE_DOWNLOAD'){
+        await new Promise<void>(resolve=>{releaseAfterDownload=resolve})
+        res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'后续任务正常完成。'},finish_reason:'stop'}]}));return
+      }
       if(typeof lastUser==='string' && lastUser.startsWith('UI_QUEUE_')){
         queuePrompts.push(lastUser)
         if(lastUser==='UI_QUEUE_FIRST')await new Promise<void>(resolve=>{releaseQueueFirst=resolve})
@@ -168,6 +185,10 @@ app.on('browser-window-created', (_,win) => {
       await click('.settings-close')
       await wait(450)
       await click('[data-panel="workspace"]')
+      assert.equal(await js('document.querySelector(".file-manager")?.checkVisibility()'),true,'File navigation opens a dedicated management view beside the sidebar')
+      assert.equal(await js('document.querySelector(".conversation-content").checkVisibility()'),false,'File management does not show the conversation underneath')
+      assert.equal(await js('document.querySelector(".global-resources .res-head").checkVisibility()'),false,'Root folder controls are consolidated in the management view')
+      await capture('file-manager-root')
       await js("document.querySelector('.workspace-panel [role=treeitem]').focus();document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}))")
       await wait(150)
       assert.equal(await js("document.querySelector('.workspace-panel [role=treeitem]').getAttribute('aria-expanded')"),'true','Right arrow expands a real workspace folder')
@@ -256,7 +277,7 @@ app.on('browser-window-created', (_,win) => {
       await click('[data-chat-resource="workspace"]')
       assert.equal(await js('document.querySelectorAll(".file-workspace [role=tab]").length'),3,'Hiding and reopening preserves file tabs')
       await click('[aria-label="关闭文件预览"]')
-      await click('[data-panel="chats"]')
+      if(await js('document.querySelector("[data-panel=chats]").getAttribute("aria-pressed")')!=='true')await click('[data-panel="chats"]')
       assert.equal(await js('document.querySelector(".chat-item").getBoundingClientRect().height'),34,'Chats use single-line compact rows')
       await capture('sidebar-detail')
       await js('document.querySelector(".run-card.error").scrollIntoView({block:"center"})')
@@ -367,11 +388,22 @@ app.on('browser-window-created', (_,win) => {
       await click('[data-panel="workspace"]')
       assert.equal(await js('document.querySelectorAll("[data-resource-kind=files] .resource-owner").length'),2,'Global files hide every empty chat')
       await click('[data-owner-id="chat_renovation118"] .resource-owner-toggle')
+      assert.equal(await js('document.querySelector(".file-manager-title").textContent.includes("118")'),true,'File selection carries its owner without switching the active conversation')
+      assert.equal(await js('document.querySelectorAll(".file-manager-row").length'),1,'Management lists only this owner’s files')
+      await input('.file-manager-search input','other-only')
+      assert.equal(await js('document.querySelectorAll(".file-manager-row").length'),1)
+      await click('[aria-label="网格视图"]')
+      await capture('file-manager-grid')
+      await click('[aria-label="列表视图"]')
+      await click('.file-manager-row .file-manager-entry')
+      assert.equal(await js('document.querySelector(".preview-code")?.textContent'),'From another conversation','Management opens files in the existing tabbed preview')
+      await click('[aria-label="关闭文件预览"]')
       await click('.global-resources .tree-row[title="other-only.txt"]')
       assert.equal(await js('document.querySelector(".preview-code")?.textContent'),'From another conversation','Global preview carries the resource owner, not the active chat')
       assert.equal(await js('document.querySelector(".file-workspace-owner").textContent.includes("118")'),true,'Cross-conversation file tabs display their owner')
       await click('[aria-label="关闭文件预览"]')
       await capture('all-chat-files')
+      await click('.file-manager-back')
       if(await js('!!document.querySelector(".conversation-resource-card")'))await click('[aria-label="关闭资源面板"]')
       const indexed=await js('window.navora.workspace.resources("chat_renovation119",true)')
       assert.ok(indexed.entries.some((entry:{path:string})=>entry.path==='folder/z-guide.md'),'Resource index includes nested files with stable ownership')
@@ -387,7 +419,9 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),true,'Deep file changes automatically reveal resources')
       if(await js('!!document.querySelector(".conversation-resource-card")'))await click('[aria-label="关闭资源面板"]')
       await js('window.navora.workspace.delete("chat_renovation118","other-only.txt")');await wait(300)
+      await click('[data-panel="workspace"]')
       assert.equal(await js('document.querySelectorAll("[data-resource-kind=files] .resource-owner").length'),1,'Deleting the last file removes its conversation from global files')
+      await click('.file-manager-back')
       await js('(async()=>{window.__localSession=await window.navora.browser.createSession("chat_renovation119",{persist:false});window.__otherSession=await window.navora.browser.createSession("chat_renovation118",{persist:false});await window.navora.browser.createWindow(window.__otherSession.sessionId,{url:"about:blank",show:false})})()')
       assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),false,'Another conversation cannot auto-open current resources')
       await js('(async()=>{await window.navora.browser.createWindow(window.__localSession.sessionId,{url:"about:blank",show:false})})()');await wait(220)
@@ -395,6 +429,39 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('document.querySelector(".conversation-resource-card").classList.contains("is-overview")'),true,'New browser discovery shows the compact overview')
       await click('[data-resource-view="browser"]')
       assert.equal(await js('document.querySelectorAll(".conversation-resource-card .tree-sess").length'),1,'Current browser card excludes unrelated sessions')
+      await click('[aria-label="关闭资源面板"]')
+      await click('.model-panel-trigger')
+      assert.equal(await js('!!document.querySelector(".unified-model-panel .model-panel-reasoning")'),true,'Model and reasoning choices share one panel')
+      assert.equal(await js('!!document.querySelector(".reasoning-tier-button,.composer-expand")'),false,'Separate reasoning and manual expansion controls are removed')
+      await input('.model-panel-search input','nothing-matches-fixture')
+      assert.equal(await js('document.querySelectorAll(".model-panel-options [role=radio]").length'),0)
+      await input('.model-panel-search input','')
+      await click('.model-panel-reasoning button:last-child')
+      assert.equal(await js('window.navora.chats.get("chat_renovation119").then(chat=>chat.reasoningLevel)'), 'xhigh')
+      await click('.model-panel-reasoning button:nth-child(2)')
+      await capture('unified-model-panel')
+      await click('[aria-label="关闭模型面板"]')
+      await input('.composer-input textarea','/文件 note')
+      assert.equal(await js('document.querySelectorAll(".composer-resources [role=option]").length'),1,'File commands search existing workspace resources')
+      await js('document.querySelector(".composer-input textarea").dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}))')
+      assert.equal(await js('document.querySelector(".composer-input textarea").value.includes("folder/note.txt")'),true,'Choosing a file inserts its real path without sending')
+      await input('.composer-input textarea','/会话 ')
+      await wait(120)
+      assert.equal(await js('document.querySelectorAll(".composer-resources [role=option]").length'),1,'Session commands only list resources belonging to this chat')
+      await js('document.querySelector(".composer-input textarea").dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}))')
+      assert.equal(await js('document.querySelectorAll(".chip-row .chip.session").length'),1,'Session selection adds the existing structured reference')
+      await click('.chip-clear')
+      await input('.composer-input textarea','/浏览器 ')
+      await wait(100)
+      await capture('composer-context-command')
+      await js('document.querySelector(".composer-input textarea").dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}))')
+      assert.equal(await js('!!document.querySelector(".composer-resources")'),false,'Escape dismisses context suggestions')
+      const singleLineHeight=await js('document.querySelector(".composer-box").getBoundingClientRect().height')
+      await input('.composer-input textarea',Array.from({length:8},(_,index)=>'Automatic growth '+index).join('\n'))
+      await wait(100)
+      assert.ok(await js('document.querySelector(".composer-box").getBoundingClientRect().height')>singleLineHeight+100,'The composer expands automatically for multiline drafts')
+      await input('.composer-input textarea','')
+      await click('[aria-label="当前对话资源"]')
       await capture('current-chat-browser')
       if(await js('!!document.querySelector(".conversation-resource-card")'))await click('[aria-label="关闭资源面板"]')
       await js('(async()=>{const tree=await window.navora.browser.tree("chat_renovation119");await window.navora.browser.setVisible(tree[0].windows[0].windowId,true)})()');await wait(160)
@@ -429,8 +496,11 @@ app.on('browser-window-created', (_,win) => {
       const jumpError = await js(`(()=>{const box=document.querySelector('.messages'),row=box.querySelector('[data-msg-id="u70"]');return Math.abs(row.getBoundingClientRect().top-box.getBoundingClientRect().top)})()`)
       assert.ok(jumpError < 5,'Long conversation jumps stay aligned after deferred painting: '+jumpError)
       const outlinePoint=await js('(()=>{const r=document.querySelector(".outline-step.current").getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()')
+      const outlineWidth=await js('document.querySelector(".outline-list").getBoundingClientRect().width')
       win.webContents.sendInputEvent({type:'mouseMove',...outlinePoint});await wait(220)
       assert.equal(await js('!!document.querySelector(".outline-preview")'),true,'Jump rail exposes an animated preview')
+      assert.equal(await js('document.querySelector(".outline-list").getBoundingClientRect().width'),outlineWidth,'Hovering the jump rail never widens its hit region or pushes content')
+      assert.equal(await js('[...document.querySelectorAll(".outline-step")].filter(el=>el.tabIndex===0).length'),1,'The jump rail has one keyboard entry point')
       await capture('conversation-jump-preview')
       win.webContents.sendInputEvent({type:'mouseMove',x:500,y:450});for(let n=0;n<12;n++){await wait(80);if(!await js('!!document.querySelector(".outline-preview")'))break}
       assert.equal(await js('!!document.querySelector(".outline-preview")'),false,'Jump previews leave without blocking conversation controls')
@@ -458,6 +528,7 @@ app.on('browser-window-created', (_,win) => {
       }
       await click('[data-panel="workspace"]'); await wait(350)
       assert.equal(await js('document.querySelector("#dock-pane-workspace").checkVisibility()'),false,'Hidden pane leaves no intermediate layer')
+      assert.equal(await js('document.querySelector(".file-manager").checkVisibility()'),true,'Collapsing file navigation preserves the current management view')
       await capture('sidebar-interrupted')
       // Narrow settings use their own header; chat header returns on exit.
       for (const width of [1280,960,720,390]) {
@@ -475,6 +546,7 @@ app.on('browser-window-created', (_,win) => {
       await capture('file-preview-narrow')
       await click('[aria-label="关闭文件预览"]')
       win.setContentSize(1440,900);await wait(200)
+      if(await js('document.querySelector(".file-manager")?.checkVisibility()'))await click('.file-manager-back')
       await js('window.navora.agent.submit("chat_renovation119",{content:"UI_QUEUE_FIRST"},"queue")')
       for(let n=0;n<50&&!releaseQueueFirst;n++)await wait(30)
       assert.ok(releaseQueueFirst,'Agent request is in flight')
@@ -530,8 +602,39 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js(`document.querySelector('[data-msg-id="${processTurn.at(-1).id}"] .reply-artifact')?.dataset.outputPath`),'generated-live.md','Real file generation appends its output card below the final answer')
       assert.equal(await js(`!!document.querySelector('.resource-overview [data-resource-path="generated-live.md"]')`),true,'The resource overview updates after an actual file-producing run')
       await capture('conversation-unified-activity')
+      nativeWindowId=await js('(async()=>{const cfg=await window.navora.config.get();await window.navora.chats.setPermissions("chat_renovation119",{preset:"open",modes:Object.fromEntries(Object.keys(cfg.permissions.modes).map(key=>[key,key==="skills.write"?"ask":"allow"]))});const tree=await window.navora.browser.tree("chat_renovation119");return tree.flatMap(s=>s.windows)[0].windowId})()')
+      await js('window.navora.agent.submit("chat_renovation119",{content:"UI_NATIVE_DOWNLOAD 下载测试"},"queue")')
+      for(let n=0;n<160;n++){if(await js('(async()=>{const c=await window.navora.chats.get("chat_renovation119");return !await window.navora.agent.isRunning(c.id)&&c.messages.at(-1)?.meta?.phase==="final"})()'))break;await wait(40)}
+      const pendingNative=await js('(async()=>{const c=await window.navora.chats.get("chat_renovation119");return c.messages.at(-1)})()')
+      assert.ok(slowDownload,'The real browser requested the local attachment')
+      assert.match(pendingNative.content,/下载尚未完成/,'A partial native file never produces a completed-download claim: '+JSON.stringify(await js('window.navora.downloads.list("chat_renovation119")')))
+      assert.doesNotMatch(pendingNative.content,/140 MB/,'Unverified model sizes are replaced by observed native progress')
+      assert.equal(await js(`!!document.querySelector('[data-msg-id="${pendingNative.id}"] .reply-artifact')`),false,'Partial native files are not answer artifacts')
+      const startLogs=await js(`(async()=>{const c=await window.navora.chats.get("chat_renovation119");return c.messages.filter(m=>m.meta?.runId===${JSON.stringify(pendingNative.meta.runId)}&&m.meta?.download?.state==='started').length})()`)
+      assert.equal(startLogs,1,'Native progress does not duplicate the start log')
+      const nativeTool=await js(`(async()=>{const c=await window.navora.chats.get("chat_renovation119");return c.messages.findLast(m=>m.meta?.toolName==='browser_navigate')})()`)
+      assert.equal(nativeTool.meta.result?.downloadDetected,true,'Navigation hands off to a real download without a false tool failure: '+JSON.stringify(nativeTool.meta.result))
+      await capture('native-download-pending')
+      await js('window.navora.agent.submit("chat_renovation119",{content:"UI_AFTER_NATIVE_DOWNLOAD"},"queue")')
+      for(let n=0;n<50&&!releaseAfterDownload;n++)await wait(30)
+      assert.ok(releaseAfterDownload,'A later task is active before download completion')
+      slowDownload!.end(nativePayload.subarray(8192))
+      let completion:any
+      for(let n=0;n<80;n++){
+        completion=await js('(async()=>{const c=await window.navora.chats.get("chat_renovation119");return c.messages.findLast(m=>m.meta?.download?.state==="completed")})()')
+        if(completion)break;await wait(40)
+      }
+      assert.equal(completion?.meta.runId,pendingNative.meta.runId,'Late native completion retains the original run')
+      assert.equal(completion?.meta.download.receivedBytes,nativePayload.length,'Native completion records the real final byte count')
+      releaseAfterDownload!()
+      for(let n=0;n<100;n++){if(!await js('window.navora.agent.isRunning("chat_renovation119")'))break;await wait(40)}
+      for(let n=0;n<60;n++){if(await js(`!!document.querySelector('[data-msg-id="${pendingNative.id}"] .reply-artifact')`))break;await wait(40)}
+      assert.equal(await js(`document.querySelector('[data-msg-id="${pendingNative.id}"] .reply-artifact')?.dataset.outputPath`), 'downloads/native-fixture.txt','A native download finishing during the next task attaches beneath its original reply')
+      const laterNative=await js('(async()=>{const c=await window.navora.chats.get("chat_renovation119");return c.messages.at(-1)})()')
+      assert.equal(laterNative.content,'后续任务正常完成。','A previous download does not replace an unrelated later answer')
+      await capture('native-download-late-artifact')
       assert.deepEqual(errors,[],'No renderer errors')
-      fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reduced,frameMetrics,modelRequests,checks:['runtime-file-answer-association','artifact-associations','artifact-type-filter','lazy-settings-and-creators','nested-resource-index','file-search','nested-markdown-links','stable-file-identities','tab-focus-recovery','process-vs-final-legacy','process-vs-final-runtime','process-reasoning-group','final-resource-filter','provider-drafts','reopen-draft','tier-rename','preview-race','separate-probes','permission-search','visible-empty-states','workspace-keyboard','file-preview','file-preview-source-safety','file-preview-width','file-tab-reuse-and-close','file-tab-state-cache','image-zoom-tabs','file-picker-tabs','file-workspace-hide-restore','compact-chat-rows','native-explorer-current-path','floating-resource-files-browser-outputs','resource-auto-open-dismissal','resource-space-aware-overlay','resource-outside-dismissal','resource-owned-menu','compact-resource-overview','resource-source-links','conversation-scrollbar-window-edge','all-chat-files','all-browser-owners','single-sidebar','old-group-migration','message-queue-edit-delete-insert','main-process-queue-persistence','active-context-insertion','long-conversation-jump','zoom-layout','interrupted-motion','single-mobile-header']},null,2))
+      fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reduced,frameMetrics,modelRequests,checks:['native-browser-download-pending-final','native-download-deduplication','late-native-download-answer-ownership','unified-model-and-reasoning-panel','composer-file-session-browser-commands','composer-automatic-growth','file-management-view','file-list-grid-search','file-view-survives-navigation-collapse','browser-resource-labels','fixed-width-outline','runtime-file-answer-association','artifact-associations','artifact-type-filter','lazy-settings-and-creators','nested-resource-index','file-search','nested-markdown-links','stable-file-identities','tab-focus-recovery','process-vs-final-legacy','process-vs-final-runtime','process-reasoning-group','final-resource-filter','provider-drafts','reopen-draft','tier-rename','preview-race','separate-probes','permission-search','visible-empty-states','workspace-keyboard','file-preview','file-preview-source-safety','file-preview-width','file-tab-reuse-and-close','file-tab-state-cache','image-zoom-tabs','file-picker-tabs','file-workspace-hide-restore','compact-chat-rows','native-explorer-current-path','floating-resource-files-browser-outputs','resource-auto-open-dismissal','resource-space-aware-overlay','resource-outside-dismissal','resource-owned-menu','compact-resource-overview','resource-source-links','conversation-scrollbar-window-edge','all-chat-files','all-browser-owners','single-sidebar','old-group-migration','message-queue-edit-delete-insert','main-process-queue-persistence','active-context-insertion','long-conversation-jump','zoom-layout','interrupted-motion','single-mobile-header']},null,2))
       console.log(JSON.stringify({ok:true,reduced,frameMetrics,modelRequests}))
       server.close(); app.exit(0)
     } catch(error) { console.error(error); await capture('failure'); server.close(); app.exit(1) }

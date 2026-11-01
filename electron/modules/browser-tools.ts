@@ -1631,8 +1631,27 @@ export async function executeAgentTool(
       }
       const timeout = Number(rawArgs.timeoutMs) || cfg.browser.navigation_timeout_ms || 30000
       const wc = rec.win.webContents
+      let detachDownload=()=>{}
       try {
-        await withTimeout(wc.loadURL(url), timeout, 'navigate', ctx.signal)
+        const download=new Promise<{filename:string;url:string}>(resolve=>{
+          const onDownload=(_event:Electron.Event,item:Electron.DownloadItem,source:WebContents)=>{
+            if(source ? source.id!==wc.id : !item.getURLChain().includes(url))return
+            resolve({filename:item.getFilename(),url:item.getURL()})
+          }
+          wc.session.on('will-download',onDownload)
+          detachDownload=()=>wc.session.removeListener('will-download',onDownload)
+        })
+        const navigation=wc.loadURL(url).then(()=>null).catch(async error=>{
+          // Chromium may reject navigation just before emitting will-download.
+          // Only a matching real download can turn that abort into a successful handoff.
+          if(/ERR_(?:ABORTED|FAILED)\b/.test(String(error))){
+            const detected=await withTimeout(download,400,'download_handoff',ctx.signal).catch(()=>null)
+            if(detected)return detected
+          }
+          throw error
+        })
+        const redirected=await withTimeout(Promise.race([navigation,download]),timeout,'navigate',ctx.signal)
+        if(redirected)return {ok:true,windowId,url:redirected.url,downloadDetected:true,download:redirected,note:'导航已转为浏览器下载，完成状态以下载列表为准。'}
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         if (msg.startsWith('timeout:')) {
@@ -1648,7 +1667,7 @@ export async function executeAgentTool(
           }
         }
         throw e
-      }
+      } finally {detachDownload()}
       const waitUntil = resolveWaitUntil(
         rawArgs.waitUntil,
         cfg.browser.wait.load || cfg.browser.wait.network_idle ? 'load' : 'none',

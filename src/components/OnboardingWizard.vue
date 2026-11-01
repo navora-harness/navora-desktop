@@ -150,7 +150,7 @@
               <div class="ob-switch-title">启用远程访问</div>
               <div class="ob-switch-hint">开启后立即监听；账号与端口点「下一步」时保存</div>
             </div>
-            <v-switch
+            <v-switch aria-label="启用远程访问"
               v-model="cfg.remote.enabled"
               color="primary"
               hide-details

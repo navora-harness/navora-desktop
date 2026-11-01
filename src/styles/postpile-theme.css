@@ -223,7 +223,7 @@
 .navora-app .main .thinking-bubble { background: transparent; border: 0; padding: 0; box-shadow: none; min-width: 0; flex: 1; }
 .navora-app .main .thinking-label { color: #687383; font-size: 13px; font-weight: 500; }
 .navora-app .main .thinking-reason { margin-top: 6px; }
-.navora-app .main .composer-input .v-field__input { min-height: 48px; padding-top: 9px; padding-bottom: 8px; }
+.navora-app .main .composer-input .v-field__input:not(.v-textarea__sizer) { min-height: max(48px,var(--v-input-control-height,48px)); padding-top: 9px; padding-bottom: 8px; }
 .navora-app .shell > .main > .settings-workspace { flex: 1; min-height: 0; height: auto; max-height: none; width: 100%; border: 0; border-radius: 0; box-shadow: none; background: #fff; }
 .navora-app .shell:not(.mobile-layout) > .main:has(> .settings-workspace) { grid-template-rows: minmax(0,1fr); }
 .navora-app .shell.frameless > .main > .settings-workspace { margin-top: 40px; }
@@ -264,8 +264,8 @@
 .navora-app .settings-workspace.external-navigation .section-head { display: none; }
 /* One desktop toolbar shares the native caption row. Reserve the system controls
    explicitly; interactive controls sit above the draggable background. */
-.navora-app .shell.frameless:not(.mobile-layout) > .main > .main-top { min-height: 44px; padding: 6px 154px 6px 24px; gap: 18px; position: relative; z-index: 5; -webkit-app-region: drag; }
-.navora-app .shell.frameless:not(.mobile-layout) > .main > .main-top button { -webkit-app-region: no-drag; }
+.navora-app .shell.frameless:not(.mobile-layout) > .main .main-top { min-height: 44px; padding: 6px 154px 6px 24px; gap: 18px; position: relative; z-index: 5; -webkit-app-region: drag; }
+.navora-app .shell.frameless:not(.mobile-layout) > .main .main-top button { -webkit-app-region: no-drag; }
 .navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace { margin-top: 0; }
 .navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace > .top { min-height: 44px; padding: 6px 154px 6px 24px; position: relative; z-index: 5; -webkit-app-region: drag; }
 .navora-app .settings-workspace > .top button { -webkit-app-region: no-drag; }
@@ -307,7 +307,7 @@
 .navora-app .settings-workspace .provider-list-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .navora-app .settings-workspace .provider-list-meta { flex-direction: row; justify-content: flex-start; flex-wrap: wrap; }
 .navora-app .main .settings-workspace.is-mobile .provider-layout { grid-template-columns: 1fr; }
-.navora-app .shell.platform-mac:not(.mobile-layout) > .main > .main-top,
+.navora-app .shell.platform-mac:not(.mobile-layout) > .main .main-top,
 .navora-app .shell.platform-mac:not(.mobile-layout) > .main > .settings-workspace > .top { padding-right: 24px; }
 
 /* Compact navigation: logo in the rail; all conversation actions share a row. */
@@ -428,15 +428,6 @@
 .navora-app .main .settings-workspace .message-display-card .log-fold-row { min-height: 40px; padding: 6px 12px; gap: 12px; }
 .navora-app .message-display-card .log-fold-row .switch-title { font-size: 12px; font-weight: 500; color: #505965; }
 .navora-app .message-display-card .setting-status { font-size: 11px; line-height: 20px; color: #657181; text-align: right; }
-/* Postpile form treatment with the native Vuetify keyboard/checked semantics. */
-:is(.navora-app,.skill-dlg-card,.ob-card) .v-switch.v-switch--inset .v-switch__track { min-width: 36px; height: 20px; background: #c8cdd5; opacity: 1; border-radius: 99px; transition: background-color 200ms ease; }
-:is(.navora-app,.skill-dlg-card,.ob-card) .v-switch.v-switch--inset .v-switch__thumb { width: 14px; height: 14px; background: #fff; color: #fff; transform: none; box-shadow: 0 1px 3px #18283826; }
-:is(.navora-app,.skill-dlg-card,.ob-card) .v-switch.v-switch--inset .v-selection-control--dirty .v-switch__track { background: #438da2; }
-:is(.navora-app,.skill-dlg-card,.ob-card) .v-switch .v-selection-control__input { transform: translateX(-8px); transition: transform 220ms var(--navora-ease); }
-:is(.navora-app,.skill-dlg-card,.ob-card) .v-switch .v-selection-control--dirty .v-selection-control__input { transform: translateX(8px); }
-:is(.navora-app,.skill-dlg-card,.ob-card) .v-switch:dir(rtl) .v-selection-control__input { transform: translateX(8px); }
-:is(.navora-app,.skill-dlg-card,.ob-card) .v-switch:dir(rtl) .v-selection-control--dirty .v-selection-control__input { transform: translateX(-8px); }
-:is(.navora-app,.skill-dlg-card,.ob-card) .v-switch .v-selection-control__input:has(input:focus-visible) { outline: 2px solid #438da2; outline-offset: 2px; }
 .navora-app .settings-page .v-field__outline { transition: color 180ms ease, opacity 180ms ease; }
 @keyframes navora-activity-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 @media(prefers-reduced-motion:reduce) {
@@ -456,10 +447,6 @@
 .skill-dlg-card .skill-dlg-close { width:30px; height:30px; margin:0; border:1px solid #e1e5eb; border-radius:8px; color:#626d7b; }
 .skill-dlg-card .skill-dlg-close:disabled { opacity:.4; cursor:default; }
 .skill-dlg-card .skill-dlg-actions { padding:10px 16px !important; background:#fff; }
-.surface-toggle { appearance:none; flex-shrink:0; position:relative; width:34px; height:20px; border:1px solid transparent; border-radius:20px; background:#c8cdd5; cursor:pointer; transition:background-color .2s; }
-.surface-toggle::after { content:''; position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%; background:#fff; transition:transform .2s var(--navora-ease); }
-.surface-toggle:checked { background:#438da2; }
-.surface-toggle:checked::after { transform:translateX(14px); }
 .navora-app .settings-page .advanced-toggle { display:flex; align-items:center; gap:7px; padding:5px 0; color:#626d7b; background:transparent; border:0; text-align:left; font-size:12px; cursor:pointer; }
 .navora-app .settings-page .advanced-toggle svg { width:10px; }
 .navora-app .settings-page .advanced-connection { padding:10px; background:#f7f8fa; border:1px solid #edf0f4; border-radius:8px; }
@@ -473,7 +460,6 @@
 .filter-check input { accent-color:#438da2; }
 .navora-app .settings-page .provider-list-item:focus-visible { outline:2px solid var(--navora-accent); outline-offset:-2px; }
 @media(pointer:coarse) { .catalog-button,.icon-control,.skill-dlg-card .skill-dlg-close { min-height:36px; min-width:36px; } }
-@media(prefers-reduced-motion:reduce) { .surface-toggle,.surface-toggle::after { transition:none; } }
 
 /* Keep field labels readable on both workspace and teleported surfaces. */
 :is(.navora-app .settings-page,.skill-dlg-card,.ob-card) .v-field .v-field-label { color:#626d7b; opacity:1; }

@@ -94,14 +94,14 @@
                   <div class="switch-title">关闭主窗口时隐藏到托盘</div>
                   <div class="switch-hint">关闭窗口时不退出，最小化到托盘</div>
                 </div>
-                <v-switch v-model="cfg.app.close_to_tray" color="primary" hide-details density="compact" />
+                <v-switch aria-label="关闭主窗口时隐藏到托盘" v-model="cfg.app.close_to_tray" color="primary" hide-details density="compact" />
               </div>
               <div class="switch-row">
                 <div>
                   <div class="switch-title">启动后显示主界面</div>
                   <div class="switch-hint">关闭则启动后仅驻留托盘</div>
                 </div>
-                <v-switch v-model="cfg.app.show_main_on_start" color="primary" hide-details density="compact" />
+                <v-switch aria-label="启动后显示主界面" v-model="cfg.app.show_main_on_start" color="primary" hide-details density="compact" />
               </div>
             </div>
 
@@ -109,14 +109,14 @@
               <h3 class="card-title">对话与标题</h3>
               <div class="switch-row">
                 <div><div class="switch-title">运行中直接插入消息</div><div class="switch-hint">关闭时加入队列</div></div>
-                <v-switch v-model="cfg.app.running_message_mode" true-value="insert" false-value="queue" color="primary" hide-details density="compact" />
+                <v-switch aria-label="运行中直接插入消息" v-model="cfg.app.running_message_mode" true-value="insert" false-value="queue" color="primary" hide-details density="compact" />
               </div>
               <div class="switch-row">
                 <div>
                   <div class="switch-title">回复后显示后续操作建议</div>
                   <div class="switch-hint">显示任务相关的快捷操作，不增加模型请求</div>
                 </div>
-                <v-switch
+                <v-switch aria-label="回复后显示后续操作建议"
                   v-model="cfg.app.show_followup_suggestions"
                   color="primary"
                   hide-details
@@ -128,7 +128,7 @@
                   <div class="switch-title">AI 生成会话标题</div>
                   <div class="switch-hint">首条回复后生成一次短标题，之后不再改</div>
                 </div>
-                <v-switch
+                <v-switch aria-label="AI 生成会话标题"
                   v-model="cfg.app.ai_generate_chat_title"
                   color="primary"
                   hide-details
@@ -162,7 +162,7 @@
                   <div class="switch-title">显示已阅读网页</div>
                   <div class="switch-hint">在回答底部显示来源</div>
                 </div>
-                <v-switch
+                <v-switch aria-label="显示已阅读网页"
                   v-model="cfg.app.show_read_pages"
                   color="primary"
                   hide-details
@@ -432,21 +432,21 @@
                   <div class="switch-title">新建 Agent 窗口默认显示</div>
                   <div class="switch-hint">关闭后窗口在后台运行，可在侧栏切换显示</div>
                 </div>
-                <v-switch v-model="cfg.browser.show_agent_windows" color="primary" hide-details density="compact" />
+                <v-switch aria-label="新建 Agent 窗口默认显示" v-model="cfg.browser.show_agent_windows" color="primary" hide-details density="compact" />
               </div>
               <div class="switch-row">
                 <div>
                   <div class="switch-title">阻止 window.open</div>
                   <div class="switch-hint">拦截页面弹出的新窗口</div>
                 </div>
-                <v-switch v-model="cfg.browser.block_window_open" color="primary" hide-details density="compact" />
+                <v-switch aria-label="阻止 window.open" v-model="cfg.browser.block_window_open" color="primary" hide-details density="compact" />
               </div>
               <div class="switch-row">
                 <div>
                   <div class="switch-title">记录 DataDome 上报</div>
                   <div class="switch-hint">将 captcha-delivery / datadome 请求与 body 写入 logs/datadome-telemetry.jsonl（调试用）</div>
                 </div>
-                <v-switch v-model="cfg.browser.log_datadome_telemetry" color="primary" hide-details density="compact" />
+                <v-switch aria-label="记录 DataDome 上报" v-model="cfg.browser.log_datadome_telemetry" color="primary" hide-details density="compact" />
               </div>
             </div>
 
@@ -478,14 +478,14 @@
                     <div class="switch-title">等待页面 load</div>
                     <div class="switch-hint">导航后等待页面加载完成</div>
                   </div>
-                  <v-switch v-model="cfg.browser.wait.load" color="primary" hide-details density="compact" />
+                  <v-switch aria-label="等待页面 load" v-model="cfg.browser.wait.load" color="primary" hide-details density="compact" />
                 </div>
                 <div class="switch-row">
                   <div>
                     <div class="switch-title">等待 network idle</div>
                     <div class="switch-hint">网络短暂空闲后再继续</div>
                   </div>
-                  <v-switch v-model="cfg.browser.wait.network_idle" color="primary" hide-details density="compact" />
+                  <v-switch aria-label="等待 network idle" v-model="cfg.browser.wait.network_idle" color="primary" hide-details density="compact" />
                 </div>
               </div>
             </div>
@@ -891,7 +891,7 @@
               <summary><font-awesome-icon icon="terminal" />开发设置<font-awesome-icon icon="chevron-down" /></summary>
               <div class="switch-row">
                 <div><div class="switch-title">插件开发模式</div><div class="switch-hint">提供 SDK 契约，自动重载外链产物</div></div>
-                <v-switch v-model="cfg.plugins.dev_mode" color="primary" hide-details density="compact" />
+                <v-switch aria-label="插件开发模式" v-model="cfg.plugins.dev_mode" color="primary" hide-details density="compact" />
               </div>
             </details>
             <div
@@ -1003,7 +1003,7 @@
                   <div class="switch-title">启用远程访问</div>
                   <div class="switch-hint">开启后监听下方端口，需账号密码登录</div>
                 </div>
-                <v-switch v-model="cfg.remote.enabled" color="primary" hide-details density="compact" />
+                <v-switch aria-label="启用远程访问" v-model="cfg.remote.enabled" color="primary" hide-details density="compact" />
               </div>
               <div class="form-grid mt-2" :class="{ muted: !cfg.remote.enabled }">
                 <v-text-field
@@ -1069,7 +1069,7 @@
                   <div class="switch-title">启用询问/决策</div>
                   <div class="switch-hint">路径不明或需确认时在对话中给出选项</div>
                 </div>
-                <v-switch
+                <v-switch aria-label="启用询问/决策"
                   v-model="cfg.fork_decision.enabled"
                   color="primary"
                   hide-details
@@ -1085,7 +1085,7 @@
                   <div class="switch-title">不限时等待</div>
                   <div class="switch-hint">一直等到你选择</div>
                 </div>
-                <v-switch
+                <v-switch aria-label="不限时等待"
                   v-model="askTimeoutUnlimited"
                   color="primary"
                   hide-details
@@ -1124,7 +1124,7 @@
                   <div class="switch-title">允许自定义输入</div>
                   <div class="switch-hint">除预设选项外，可手写答案</div>
                 </div>
-                <v-switch
+                <v-switch aria-label="允许自定义输入"
                   v-model="cfg.fork_decision.allow_custom"
                   color="primary"
                   hide-details
@@ -1137,7 +1137,7 @@
                   <div class="switch-title">选项后果说明</div>
                   <div class="switch-hint">显示选项后果说明</div>
                 </div>
-                <v-switch
+                <v-switch aria-label="选项后果说明"
                   v-model="cfg.fork_decision.option_hints"
                   color="primary"
                   hide-details
@@ -1150,7 +1150,7 @@
                   <div class="switch-title">推荐选项</div>
                   <div class="switch-hint">高亮推荐选项</div>
                 </div>
-                <v-switch
+                <v-switch aria-label="推荐选项"
                   v-model="cfg.fork_decision.recommended"
                   color="primary"
                   hide-details
@@ -1163,7 +1163,7 @@
                   <div class="switch-title">附带页面现场</div>
                   <div class="switch-hint">弹窗显示当前页标题与地址</div>
                 </div>
-                <v-switch
+                <v-switch aria-label="附带页面现场"
                   v-model="cfg.fork_decision.context_evidence"
                   color="primary"
                   hide-details
@@ -1176,7 +1176,7 @@
                   <div class="switch-title">本会话记住选择</div>
                   <div class="switch-hint">相同问题自动沿用上次答案</div>
                 </div>
-                <v-switch
+                <v-switch aria-label="本会话记住选择"
                   v-model="cfg.fork_decision.remember_in_chat"
                   color="primary"
                   hide-details
@@ -1196,7 +1196,7 @@
                   <div class="switch-title">低风险内联选择</div>
                   <div class="switch-hint">低风险询问以消息流呈现</div>
                 </div>
-                <v-switch
+                <v-switch aria-label="低风险内联选择"
                   :model-value="false"
                   color="primary"
                   hide-details
@@ -1209,7 +1209,7 @@
                   <div class="switch-title">允许改口续跑</div>
                   <div class="switch-hint">回改历史决策并从该节点继续</div>
                 </div>
-                <v-switch
+                <v-switch aria-label="允许改口续跑"
                   :model-value="false"
                   color="primary"
                   hide-details
@@ -1232,7 +1232,7 @@
                   <div class="switch-title">启用子对话</div>
                   <div class="switch-hint">允许 Agent 用并行子对话拆分调研等子任务</div>
                 </div>
-                <v-switch
+                <v-switch aria-label="启用子对话"
                   v-model="cfg.subchat.enabled"
                   color="primary"
                   hide-details

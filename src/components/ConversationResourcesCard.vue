@@ -85,12 +85,12 @@ onBeforeUnmount(()=>{stopResize?.();document.removeEventListener('pointerdown',o
 .resource-card-resizer{position:absolute;inset:8px auto 8px -4px;width:8px;cursor:col-resize;touch-action:none;z-index:2;border-radius:4px}.resource-card-resizer:hover{background:#537ab929}.conversation-resource-card button:focus-visible,.resource-card-resizer:focus-visible{outline:2px solid #537ab9;outline-offset:-2px}
 .resource-card-enter-active,.resource-card-leave-active{transition:opacity 180ms ease,transform 180ms ease}.resource-card-enter-from,.resource-card-leave-to{opacity:0;transform:translateX(12px)}
 /* Reserve room in the transcript's padding, keeping its native scrollbar at the window edge. */
-.navora-app .main.resource-card-docked>.composer{margin-right:calc(var(--preview-width) + 24px)}
-.navora-app .main.resource-card-docked>.messages-wrap>.messages{padding-right:calc(var(--preview-width) + 48px)}
-.navora-app .main.resource-card-docked>.messages-wrap>.conversation-outline{right:calc(var(--preview-width) + 32px)}
-.navora-app .main.resource-card-docked>.messages-wrap>.jump-bottom{left:calc((100% - var(--preview-width) - 24px) / 2)}
-@media(min-width:1101px){.navora-app .main.resource-card-docked>.messages-wrap>.messages:has(+ .conversation-outline){padding-right:calc(var(--preview-width) + 72px)}}
-@media(max-width:1100px){.navora-app .main.resource-card-docked>.messages-wrap>.conversation-outline{right:calc(var(--preview-width) + 42px)}}
+.navora-app .main.resource-card-docked .composer{margin-right:calc(var(--preview-width) + 24px)}
+.navora-app .main.resource-card-docked .messages-wrap>.messages{padding-right:calc(var(--preview-width) + 48px)}
+.navora-app .main.resource-card-docked .messages-wrap>.conversation-outline{right:calc(var(--preview-width) + 32px)}
+.navora-app .main.resource-card-docked .messages-wrap>.jump-bottom{left:calc((100% - var(--preview-width) - 24px) / 2)}
+@media(min-width:1101px){.navora-app .main.resource-card-docked .messages-wrap>.messages:has(+ .conversation-outline){padding-right:calc(var(--preview-width) + 72px)}}
+@media(max-width:1100px){.navora-app .main.resource-card-docked .messages-wrap>.conversation-outline{right:calc(var(--preview-width) + 42px)}}
 .conversation-resource-card[data-layout="overlay"]{box-shadow:0 12px 40px #243b5826}
 .navora-app .shell.mobile-layout .conversation-resource-card{top:calc(56px + env(safe-area-inset-top,0px))}
 .navora-app .shell.frameless.mobile-layout .conversation-resource-card{top:calc(96px + env(safe-area-inset-top,0px));max-height:calc(100% - 110px - env(safe-area-inset-top,0px))}

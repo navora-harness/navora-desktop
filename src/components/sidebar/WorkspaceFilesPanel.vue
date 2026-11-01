@@ -1,7 +1,7 @@
 <template>
   <div class="sidebar-panel workspace-panel" :class="{ 'is-collapsed': collapsed }">
     <Teleport :to="headerTarget || 'body'" :disabled="!headerTarget" defer>
-    <div v-show="headerVisible !== false" class="res-head" :class="{ 'docked-head': headerTarget }">
+    <div v-show="headerVisible !== false && !navigationOnly" class="res-head" :class="{ 'docked-head': headerTarget }">
       <button type="button" v-if="!headerTarget && !embedded" class="res-label-btn" :aria-expanded="!collapsed" aria-label="折叠或展开工作区" @click="collapsed = !collapsed">
         <font-awesome-icon icon="chevron-down" class="res-chevron" />
         <span class="res-label">工作区</span>
@@ -30,7 +30,7 @@
     </Teleport>
     <Transition name="resource-body">
     <div v-show="!collapsed" class="res-body" data-ctx-menu="workspace" @contextmenu="onRootMenu">
-      <div v-if="rootLabel" class="ws-root" :title="absoluteRoot">{{ rootLabel }}</div>
+      <div v-if="rootLabel && !navigationOnly" class="ws-root" :title="absoluteRoot">{{ rootLabel }}</div>
       <div v-if="!chatId" class="res-empty">选择对话后查看文件</div>
       <div v-else-if="loadError" class="res-empty res-error">{{ loadError }}</div>
       <div v-else-if="!rootEntries.length" class="res-empty">暂无文件</div>
@@ -104,10 +104,11 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import SidebarContextMenu from './SidebarContextMenu.vue'
 import WorkspaceTreeNode, { type WsEntry } from './WorkspaceTreeNode.vue'
 
-const props = withDefaults(defineProps<{ chatId: string; headerTarget?: string; headerVisible?: boolean; embedded?: boolean }>(), {headerVisible:true})
+const props = withDefaults(defineProps<{ chatId: string; headerTarget?: string; headerVisible?: boolean; embedded?: boolean; navigationOnly?:boolean }>(), {headerVisible:true})
 const emit = defineEmits<{
   notify: [text: string, color?: string]
   preview: [entry: WsEntry]
+  browse: [path:string]
 }>()
 
 const collapsed = ref(false)
@@ -215,6 +216,7 @@ async function reload() {
 }
 
 function toggleDir(ent: WsEntry) {
+  if (props.navigationOnly) emit('browse',ent.path)
   const next = new Set(expanded.value)
   if (next.has(ent.path)) {
     next.delete(ent.path)
@@ -229,6 +231,7 @@ function toggleDir(ent: WsEntry) {
 function selectEntry(ent: WsEntry) {
   selectedPath.value = ent.path
   if (ent.type === 'file') emit('preview', ent)
+  else if(props.navigationOnly) emit('browse',ent.path)
 }
 
 function openFile(ent: WsEntry) {

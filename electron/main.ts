@@ -1,3 +1,4 @@
+import {downloadNeedsLog} from '../shared/browser-download-status'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -1903,38 +1904,18 @@ if (!gotLock) {
         }
       },
       onBrowserDownload: (info) => {
-        const entry = browserDownloads.upsert(info)
+        const before=browserDownloads.stateOf(info)
+        const entry=browserDownloads.upsert(info)
         pushBrowserDownloadsChanged()
-        // intercepted is logged inside agent.promptDownloadConfirm
-        if (info.state === 'intercepted') return entry
-        if (!agent) return entry
-        if (info.state === 'started' && info.relPath) {
-          // Skip noisy progress ticks (same state, only bytes changing).
-          if (typeof info.receivedBytes === 'number' && info.receivedBytes > 0) return entry
-          agent.pushUserOpLog(
-            info.chatId,
-            logBrowserDownloadStarted(info.filename, info.relPath, info.url),
-          )
-          return entry
+        if(!agent||entry.id.startsWith('ignored_'))return entry
+        agent.trackBrowserDownload(entry)
+        if(!downloadNeedsLog(before,entry))return entry
+        if(entry.state==='started'&&entry.relPath)agent.recordBrowserDownload(entry,logBrowserDownloadStarted(entry.filename,entry.relPath,entry.url))
+        if(entry.state==='completed'&&entry.relPath){
+          agent.recordBrowserDownload(entry,logBrowserDownloadCompleted(entry.filename,entry.relPath,entry.receivedBytes))
+          pushWorkspaceChanged(entry.chatId)
         }
-        if (info.state === 'paused') return entry
-        if (info.state === 'completed' && info.relPath) {
-          agent.pushUserOpLog(
-            info.chatId,
-            logBrowserDownloadCompleted(info.filename, info.relPath, info.receivedBytes),
-          )
-          return entry
-        }
-        if (info.state === 'failed' || info.state === 'cancelled') {
-          agent.pushUserOpLog(
-            info.chatId,
-            logBrowserDownloadFailed(
-              info.filename,
-              info.error || info.state,
-              info.relPath,
-            ),
-          )
-        }
+        if(entry.state==='failed'||entry.state==='cancelled')agent.recordBrowserDownload(entry,logBrowserDownloadFailed(entry.filename,entry.error||entry.state,entry.relPath))
         return entry
       },
       bindBrowserDownloadItem: (entryId, item) => {
@@ -2007,6 +1988,7 @@ if (!gotLock) {
     registry.bindPermissionGate(gate)
 
     agent = new AgentRuntime({
+      getBrowserDownloads: (chatId)=>browserDownloads.list(chatId),
       getConfig: () => config.get(),
       updateConfig: async (patch) => {
         const prev = JSON.parse(JSON.stringify(config.get())) as AppConfig

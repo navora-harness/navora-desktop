@@ -12,7 +12,8 @@
         :key="item.id"
         type="button"
         class="outline-step"
-        :class="{ current: activeId === item.id, labelled:index % 10 === 0 && Math.abs(index-(preview?.index ?? activeIndex)) > 2 }"
+        :class="{ current: activeId === item.id }"
+        :tabindex="activeIndex === index ? 0 : -1"
         :data-message-id="item.id"
         :aria-label="`第 ${index + 1} 轮：${item.text}`"
         :aria-current="activeId === item.id ? 'location' : undefined"
@@ -22,11 +23,11 @@
         @focus="showPreview($event, item, index)"
         @blur="hidePreview"
         @click="jump(item.id)"
-      ><span class="outline-step-index" aria-hidden="true">{{ index + 1 }}</span><svg viewBox="0 0 24 12" width="24" height="12" fill="none" aria-hidden="true"><path d="M5 6h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg></button>
+      ><svg viewBox="0 0 24 12" width="24" height="12" fill="none" aria-hidden="true"><path d="M3 6h18" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg></button>
     </div>
     <Teleport to="body">
       <Transition name="outline-preview"><div v-if="preview" :id="tooltipId" class="outline-preview" role="tooltip" :style="preview.style">
-        <span class="outline-preview-index">第 {{ preview.index + 1 }} 轮</span>
+        <span class="outline-preview-index">第 {{ preview.index + 1 }} / {{ items.length }} 轮</span>
         <div>{{ preview.text }}</div>
       </div></Transition>
     </Teleport>
@@ -71,18 +72,19 @@ function updatePosition() {
   activeId.value = items.value[current]!.id
 }
 function schedulePosition() { if (!frame) frame = requestAnimationFrame(updatePosition) }
+function onScroll() { clearTimeout(previewTimer); preview.value = null; schedulePosition() }
 function onViewportResize() { clearTimeout(previewTimer);preview.value = null; schedulePosition() }
 window.addEventListener('resize', onViewportResize)
 watch(() => props.scrollContainer, container => {
   detach()
   preview.value = null
   if (!container) return
-  container.addEventListener('scroll', schedulePosition, { passive: true })
+  container.addEventListener('scroll', onScroll, { passive: true })
   const resize = new ResizeObserver(schedulePosition)
   const content = new MutationObserver(schedulePosition)
   resize.observe(container)
   content.observe(container, { childList: true, subtree: true, characterData: true })
-  detach = () => { container.removeEventListener('scroll', schedulePosition); resize.disconnect(); content.disconnect() }
+  detach = () => { container.removeEventListener('scroll', onScroll); resize.disconnect(); content.disconnect() }
   schedulePosition()
 }, { immediate: true, flush: 'post' })
 watch(() => items.value.map(item => item.id).join(','), () => { preview.value = null; void nextTick(schedulePosition) })
@@ -105,6 +107,7 @@ watch(activeId,()=>void nextTick(()=>{
 function onKeydown(event: KeyboardEvent) {
   if (!['ArrowUp', 'ArrowDown', 'Home', 'End', 'Escape'].includes(event.key)) return
   event.preventDefault()
+  event.stopPropagation()
   if (event.key === 'Escape') { preview.value = null; return }
   const buttons = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('button')]
   const current = buttons.indexOf(document.activeElement as HTMLButtonElement)
@@ -117,18 +120,17 @@ onUnmounted(() => { clearTimeout(previewTimer); detach(); cancelAnimationFrame(f
 
 <style scoped>
 .conversation-outline{position:absolute;right:8px;top:16px;bottom:16px;width:32px;display:flex;align-items:center;z-index:3;pointer-events:none}
-.outline-list{position:absolute;right:0;width:32px;max-height:65%;overflow-y:auto;scrollbar-width:none;padding:6px 4px;border:1px solid transparent;border-radius:12px;pointer-events:auto;transition:width 180ms cubic-bezier(.22,.75,.2,1),background-color 160ms ease,border-color 160ms ease,box-shadow 180ms ease}
-.outline-list:is(:hover,:focus-within){width:58px;background:#fffffff2;border-color:#e1e7ef;box-shadow:0 5px 18px #273c5510}
-.outline-step{position:relative;display:block;width:100%;height:var(--outline-step-height,20px);padding:0;border:0;background:transparent;color:#7b8798;border-radius:4px;cursor:pointer;transition:color 140ms ease,background-color 140ms ease}
-.outline-step svg{position:absolute;right:0;top:50%;width:22px;height:12px;transform:translateY(-50%) scaleX(.58);transition:transform 180ms cubic-bezier(.22,.75,.2,1),color 140ms ease;pointer-events:none}
-.outline-step.current{color:#476e9b;background:#edf2f8}.outline-step.current svg{transform:translateY(-50%) scaleX(1);stroke-width:2.4}
-.outline-step:hover,.outline-step:focus-visible{background:#e8eef6;color:#3b608a}.outline-step:hover svg{transform:translateY(-50%) scaleX(1)}.outline-step:focus-visible{outline:2px solid #6b8eb7;outline-offset:-1px}
-.outline-step-index{position:absolute;left:3px;top:50%;transform:translate(-3px,-50%);opacity:0;pointer-events:none;font:9px/1 'Segoe UI',sans-serif;font-variant-numeric:tabular-nums;transition:opacity 140ms ease,transform 180ms ease}.outline-list:is(:hover,:focus-within) .outline-step:is(.labelled,:hover,:focus-visible) .outline-step-index{opacity:1;transform:translate(0,-50%)}
+.outline-list{position:absolute;right:0;width:32px;max-height:65%;overflow-y:auto;scrollbar-width:none;padding:6px 2px;border:0;border-radius:10px;pointer-events:auto;background:transparent;transition:background-color 160ms ease}
+.outline-list:is(:hover,:focus-within){background:#f4f6f9d9}
+.outline-step{position:relative;display:block;width:100%;height:var(--outline-step-height,20px);padding:0;border:0;background:transparent;color:#7c8796;border-radius:5px;cursor:pointer;transition:color 140ms ease}
+.outline-step svg{position:absolute;right:2px;top:50%;width:24px;height:12px;transform:translateY(-50%) scaleX(.52);transform-origin:right center;transition:transform 180ms cubic-bezier(.22,.75,.2,1),color 140ms ease;pointer-events:none}
+.outline-step.current{color:#3c638e}.outline-step.current svg{transform:translateY(-50%) scaleX(1)}.outline-step.current path{stroke-width:2.6}
+.outline-step:hover,.outline-step:focus-visible{color:#304f76}.outline-step:not(.current):hover svg{transform:translateY(-50%) scaleX(.82)}.outline-step:focus-visible{outline:2px solid #6483a8;outline-offset:-1px}
 .outline-preview{position:fixed;z-index:2400;width:252px;padding:11px 13px;border:1px solid #dce4ee;border-radius:10px;background:#fff;color:#455770;box-shadow:0 8px 28px #263e5e18;font:12px/1.65 -apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;pointer-events:none;transition:top 120ms ease}
 .outline-preview-index{display:block;margin-bottom:4px;color:#8796aa;font-size:10px}.outline-preview>div{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 .outline-preview-enter-active,.outline-preview-leave-active{transition:opacity 140ms ease,transform 160ms cubic-bezier(.22,.75,.2,1)}.outline-preview-enter-from,.outline-preview-leave-to{opacity:0;transform:translateX(5px)}
 .outline-compact{display:none;pointer-events:auto}.outline-directory{width:min(320px,85vw);max-height:360px;overflow:auto;padding:6px;background:#fff;border:1px solid #dce4ee;border-radius:10px}.outline-directory button{display:flex;gap:10px;width:100%;padding:9px;border:0;border-radius:7px;background:transparent;color:#53657c;text-align:left;font-size:12px;cursor:pointer;transition:background-color 140ms ease,color 140ms ease}.outline-directory button.current,.outline-directory button:hover{background:#edf2f8;color:#355b87}.outline-directory button span{color:#8c9bb0;flex-shrink:0;font-variant-numeric:tabular-nums}
 .outline-trigger{display:flex;align-items:center;gap:6px;padding:5px 8px;border:1px solid #dce4ee;border-radius:8px;background:#ffffffed;color:#667a95;font-size:11px;cursor:pointer;transition:background-color 150ms ease,color 150ms ease}.outline-trigger>svg{width:12px}.outline-trigger:hover{background:#edf2f8;color:#355b87}
 @media(max-width:1100px){.conversation-outline{top:8px;right:18px;bottom:auto;width:auto}.outline-list{display:none}.outline-compact{display:block}}
-@media(prefers-reduced-motion:reduce){.outline-list,.outline-preview,.outline-preview-enter-active,.outline-preview-leave-active,.outline-step,.outline-step svg,.outline-step-index,.outline-trigger,.outline-directory button{transition:none}.outline-preview-enter-from,.outline-preview-leave-to{transform:none}}
+@media(prefers-reduced-motion:reduce){.outline-list,.outline-preview,.outline-preview-enter-active,.outline-preview-leave-active,.outline-step,.outline-step svg,.outline-trigger,.outline-directory button{transition:none}.outline-preview-enter-from,.outline-preview-leave-to{transform:none}}
 </style>

@@ -41,6 +41,11 @@ export class BrowserDownloadList {
     return rows.map((e) => this.withCapabilities(e))
   }
 
+  stateOf(info:BrowserDownloadUpsert):BrowserDownloadState|undefined {
+    const key=matchKey(info)
+    return key?this.entries.find(entry=>matchKey(entry)===key)?.state:undefined
+  }
+
   upsert(info: BrowserDownloadUpsert): BrowserDownloadEntry {
     const now = Date.now()
     const key = matchKey(info)

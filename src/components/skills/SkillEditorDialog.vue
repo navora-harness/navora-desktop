@@ -60,7 +60,7 @@
         <div class="switch-item">
           <div class="switch-label">启用</div>
           <div class="switch-hint">关闭后不会注入系统提示</div>
-          <v-switch
+          <v-switch aria-label="启用"
             v-model="local.enabled"
             color="primary"
             hide-details
@@ -71,7 +71,7 @@
         <div class="switch-item">
           <div class="switch-label">需 skill_read</div>
           <div class="switch-hint">仅目录可见，使用前再读全文</div>
-          <v-switch
+          <v-switch aria-label="需 skill_read"
             v-model="local.disableModelInvocation"
             color="primary"
             hide-details

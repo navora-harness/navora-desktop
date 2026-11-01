@@ -402,10 +402,10 @@
         </div>
         </template>
         <template #workspace="slot">
-          <GlobalResourcesPanel v-if="loadedResourcePanels.has('workspace')" :active="slot.active" kind="files" :chats="chats" :active-chat-id="activeId || ''" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @notify="onPanelNotify" @preview="openFilePreview($event.path,$event.chatId)" @select-chat="selectChat" />
+          <GlobalResourcesPanel v-if="loadedResourcePanels.has('workspace')" :active="slot.active" kind="files" :chats="chats" :active-chat-id="activeId || ''" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @notify="onPanelNotify" @preview="openFilePreview($event.path,$event.chatId)" @browse="browseFiles" @select-chat="openResourceChat" />
         </template>
         <template #browser="slot">
-          <GlobalResourcesPanel v-if="loadedResourcePanels.has('browser')" :active="slot.active" kind="browser" :chats="chats" :active-chat-id="activeId || ''" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @select-chat="selectChat" />
+          <GlobalResourcesPanel v-if="loadedResourcePanels.has('browser')" :active="slot.active" kind="browser" :chats="chats" :active-chat-id="activeId || ''" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @select-chat="openResourceChat" />
         </template>
       </SidebarDock>
 
@@ -576,7 +576,10 @@
       </header>
       <CreatorWorkspace v-if="creatorKind" :key="creatorKind" :kind="creatorKind" :navigation-target="isMobileLayout ? undefined : '#creator-sidebar-nav'" @close="closeCreator" @trial="openCreatorTrial" @notify="onPanelNotify" />
       <SettingsPage v-else-if="settingsOpen" class="settings-workspace" :initial-tab="settingsTab" @navigate="settingsTab = $event" embedded :mobile="isMobileLayout" :navigation-target="isMobileLayout ? undefined : '#settings-sidebar-nav'" @close="settingsOpen = false" @create="openCreator" />
-      <template v-else-if="active">
+      <template v-else>
+      <FileManager v-if="fileManagerMounted" v-show="fileManagerActive" :active="fileManagerActive" :class="{'is-active':fileManagerActive}" :chat-id="fileManagerOwner?.id || ''" :title="fileManagerOwner?.title || ''" :directory="fileManagerDirectory" @browse="fileManagerDirectory=$event" @preview="openFilePreview" @back="activateSidebar('chats',false)" @notify="onPanelNotify" />
+      <div v-show="!fileManagerActive" class="conversation-content" :inert="fileManagerActive">
+      <template v-if="active">
         <header
           v-if="!isMobileLayout || agentRunning"
           class="main-top"
@@ -1299,36 +1302,30 @@
             </span>
             <button type="button" class="chip-clear" @click="contextRefs = []">清空</button>
           </div>
-          <div
-            class="composer-box"
-            :class="{ expanded: composerExpanded }"
-          >
+          <div class="composer-box">
+            <ComposerResources ref="resourceCommands" :text="draft" :chat-id="activeId || ''" :files="artifactEntries" @replace="insertComposerResource" />
             <div class="composer-input-row">
               <v-textarea
                 ref="draftField"
                 v-model="draft"
-                :rows="composerExpanded ? 10 : 1"
+                :rows="1"
                 auto-grow
-                :max-rows="composerExpanded ? 10 : 3"
+                :max-rows="10"
                 hide-details
                 variant="solo"
                 flat
                 bg-color="transparent"
                 class="composer-input"
-                :placeholder="agentRunning ? (runningMessageMode === 'insert' ? '补充想法，插入当前任务…' : '继续输入，加入待发送队列…') : '描述任务，或拖入 Session / 窗口…'"
+                :placeholder="agentRunning ? (runningMessageMode === 'insert' ? '补充想法，插入当前任务…' : '继续输入，加入待发送队列…') : '描述任务，输入 / 添加文件或浏览器…'"
                 :disabled="false"
                 :maxlength="maxComposerChars"
                 @keydown="onComposerKeydown"
+                @input="resourceCommands?.onInput($event)"
+                @click="resourceCommands?.onInput($event)"
+                @keyup.left="resourceCommands?.onInput($event)"
+                @keyup.right="resourceCommands?.onInput($event)"
               />
-              <button
-                type="button"
-                class="composer-expand"
-                :title="composerExpanded ? '收起输入框' : '展开输入框'"
-                :aria-label="composerExpanded ? '收起输入框' : '展开输入框'"
-                @click="composerExpanded = !composerExpanded"
-              >
-                <font-awesome-icon :icon="composerExpanded ? 'angles-down' : 'angles-up'" />
-              </button>
+
             </div>
             <div
               v-if="draftNearLimit || draftAtLimit"
@@ -1395,48 +1392,42 @@
               </div>
 
               <div class="composer-actions-right">
-                <v-menu v-if="reasoningLevels.length" location="top end" :disabled="agentRunning">
-                  <template #activator="{ props: tierProps }">
-                    <button type="button" class="composer-perm-btn reasoning-tier-button" v-bind="tierProps" :disabled="agentRunning" aria-label="推理档位">{{ selectedReasoningLevel === 'off' ? '关闭思考' : selectedReasoningLevel }}<font-awesome-icon icon="chevron-down" /></button>
-                  </template>
-                  <div class="composer-perm-panel" role="menu" aria-label="推理档位">
-                    <button v-for="level in reasoningLevels" :key="level.id" type="button" class="composer-perm-item" role="menuitemradio" :aria-checked="selectedReasoningLevel === level.id" @click="applyReasoningLevel(level.id)"><span>{{ level.id === 'off' ? '关闭思考' : level.id }}</span><font-awesome-icon v-if="selectedReasoningLevel === level.id" icon="check" /></button>
-                  </div>
-                </v-menu>
                 <v-menu
                   v-model="modelMenuOpen"
                   location="top end"
-                  :close-on-content-click="true"
+                  :close-on-content-click="false"
                   :disabled="agentRunning"
                   content-class="composer-perm-menu"
                 >
                   <template #activator="{ props: menuProps }">
                     <button
                       type="button"
-                      class="composer-perm-btn"
+                      class="composer-perm-btn model-panel-trigger"
                       v-bind="menuProps"
                       :disabled="agentRunning"
                       title="本会话模型"
                       aria-label="本会话模型"
                     >
                       <font-awesome-icon icon="microchip" />
-                      <span>{{ chatModelLabel }}</span>
+                      <span class="model-trigger-label">{{ chatModelLabel }}</span><span v-if="reasoningLevels.length" class="model-trigger-tier">{{ reasoningLabel(selectedReasoningLevel) }}</span><font-awesome-icon icon="chevron-down" />
                     </button>
                   </template>
-                  <div class="composer-perm-panel" role="menu">
-                    <div class="composer-perm-title">本会话模型</div>
+                  <div class="composer-perm-panel unified-model-panel" role="dialog" aria-label="模型与思考等级">
+                    <div class="model-panel-heading">模型与思考等级<button type="button" aria-label="关闭模型面板" @click="modelMenuOpen=false"><font-awesome-icon icon="xmark" /></button></div>
+                    <label class="model-panel-search"><font-awesome-icon icon="magnifying-glass" /><input v-model="modelQuery" placeholder="搜索模型或服务商" aria-label="搜索模型" @keydown.stop @keydown.esc="modelMenuOpen=false" /></label>
+                    <div class="model-panel-options" role="group" aria-label="选择模型">
                     <button
-                      v-for="opt in modelMenuOptions"
+                      v-for="opt in filteredModelOptions"
                       :key="opt.key"
                       type="button"
                       class="composer-perm-item"
                       :class="{ active: opt.key === chatModelKey }"
-                      role="menuitem"
+                      role="radio" :aria-checked="opt.key === chatModelKey" :disabled="modelSelectionBusy || agentRunning"
                       :title="`${opt.providerLabel} · ${opt.model}${opt.hasKey ? '' : '（未配置 Key，仍可使用）'}`"
                       @click="applyChatModel(opt.providerId, opt.model)"
                     >
                       <font-awesome-icon icon="microchip" class="composer-perm-item-icon" />
-                      <span class="composer-perm-item-label">{{ opt.model }}</span>
+                      <span class="composer-perm-item-label">{{ opt.label }}</span>
                       <span class="composer-perm-item-desc">{{
                         opt.hasKey ? opt.providerLabel : `${opt.providerLabel} · 无 Key`
                       }}</span>
@@ -1446,9 +1437,11 @@
                         class="composer-perm-check"
                       />
                     </button>
-                    <p v-if="!modelMenuOptions.length" class="composer-model-empty">
-                      暂无模型，请到设置添加
+                    <p v-if="!filteredModelOptions.length" class="composer-model-empty">
+                      {{ modelMenuOptions.length ? '没有匹配的模型' : '暂无模型，请到设置添加' }}
                     </p>
+                    </div>
+                    <div v-if="reasoningLevels.length" class="model-panel-reasoning" role="group" aria-label="思考等级"><span>思考等级</span><div><button v-for="level in reasoningLevels" :key="level.id" type="button" :class="{selected:selectedReasoningLevel===level.id}" :aria-pressed="selectedReasoningLevel===level.id" :disabled="modelSelectionBusy || agentRunning" @click="applyReasoningLevel(level.id)">{{ reasoningLabel(level.id) }}</button></div></div>
                   </div>
                 </v-menu>
 
@@ -1536,8 +1529,10 @@
           </v-btn>
         </div>
       </div>
+      </div>
+      </template>
       <Transition name="resource-card">
-        <ConversationResourcesCard v-if="resourceOpen && activeId && !settingsOpen && !creatorKind" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :overlay="resourceOverlay" :available-width="resourceAvailableWidth" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="locateResourceMessage({chatId:activeId!,messageId:$event})" @open-media="(p) => openLightbox(p.src,p.alt)" />
+        <ConversationResourcesCard v-if="resourceOpen && activeId && !settingsOpen && !creatorKind && !fileManagerActive" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :overlay="resourceOverlay" :available-width="resourceAvailableWidth" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="locateResourceMessage({chatId:activeId!,messageId:$event})" @open-media="(p) => openLightbox(p.src,p.alt)" />
       </Transition>
       <Transition name="file-workspace"><FileWorkspace v-if="fileWorkspaceVisible" :tabs="fileTabsState.tabs" :active="activeFileTab" :viewer-chat-id="activeId || ''" :width="fileWorkspaceWidth" :maximum="fileWorkspaceMaximum" :overlay="fileWorkspaceOverlay" :owner-label="treeOwnerLabel" @select="selectFileTab" @close="closeFileTab" @hide="hideFileWorkspace" @open-file="openFilePreview($event.path,$event.chatId)" @locate="locateResourceMessage" @resize="resizeFileWorkspace" @notify="onPanelNotify" /></Transition>
     </main>
@@ -1825,6 +1820,8 @@ import { useWorkspaceResources } from '@/composables/useWorkspaceResources'
 import ReplyArtifacts from '@/components/ReplyArtifacts.vue'
 import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import StatusIcon from '@/components/StatusIcon.vue'
+import ComposerResources from '@/components/ComposerResources.vue'
+import {reasoningLabel} from '@shared/composer-commands'
 import ConversationOutline from '@/components/ConversationOutline.vue'
 import DisclosureTransition from '@/components/motion/DisclosureTransition'
 import { modelCapabilities } from '@shared/model-capabilities'
@@ -1875,6 +1872,7 @@ import {useResourceCardLayout} from '@/composables/useResourceCardLayout'
 import {useFileTabs} from '@/composables/useFileTabs'
 import {useFileWorkspaceLayout} from '@/composables/useFileWorkspaceLayout'
 import FileWorkspace from '@/components/FileWorkspace.vue'
+import FileManager from '@/components/FileManager.vue'
 const CreatorWorkspace=lazyPanel(()=>import('@/components/CreatorWorkspace.vue'),'创建器')
 import type { CreatorKind } from '@shared/creators'
 import SidebarDock from '@/components/sidebar/SidebarDock.vue'
@@ -2002,7 +2000,9 @@ const contextRefs = ref<BrowserContextRef[]>([])
 const agentRunning = ref(false)
 const sending = ref(false)
 const retrying = ref(false)
-const composerExpanded = ref(false)
+const resourceCommands = ref<InstanceType<typeof ComposerResources> | null>(null)
+const modelQuery = ref('')
+const modelSelectionBusy = ref(false)
 const permMenuOpen = ref(false)
 const modelMenuOpen = ref(false)
 const usageMenuOpen = ref(false)
@@ -2310,6 +2310,14 @@ const settingsOpen = ref(false)
 watch(settingsOpen, open => { if (open) creatorKind.value = null })
 const { layout: sidebarLayout, style: sidebarStyle, resizing: sidebarResizing, beginResize: beginSidebarResize, resizeKey: sidebarResizeKey } = useSidebarLayout()
 const { panels: sidebarPanels, visible: sidebarVisible, rail: sidebarRail, activate: activateSidebar, close: closeSidebar } = useSidebarDock()
+const fileManagerMounted=ref(false),fileManagerMode=ref(sidebarRail.value.active==='workspace')
+watch(()=>sidebarRail.value.active,id=>{if(id)fileManagerMode.value=id==='workspace'})
+const fileManagerOwnerId=ref(''),fileManagerDirectory=ref('.')
+const fileManagerOwner=computed(()=>chats.value.find(chat=>chat.id===fileManagerOwnerId.value))
+const fileManagerActive=computed(()=>fileManagerMode.value&&!settingsOpen.value&&!creatorKind.value)
+function browseFiles(selection:{chatId:string;path:string}){fileManagerOwnerId.value=selection.chatId;fileManagerDirectory.value=selection.path}
+async function openResourceChat(id:string){await selectChat(id);activateSidebar('chats',false)}
+watch(fileManagerActive,visible=>{if(visible){fileManagerMounted.value=true;hideResources()}},{immediate:true})
 const loadedResourcePanels=ref(new Set<string>())
 watch(()=>sidebarRail.value.active,id=>{if(id)loadedResourcePanels.value=new Set([...loadedResourcePanels.value,id])},{immediate:true})
 const allSidebarHidden = computed(() => sidebarPanels.value.every(panel => !sidebarVisible.value[panel.id]))
@@ -2770,9 +2778,15 @@ const selectedReasoningLevel = computed(() => {
   return reasoningLevels.value.some(l => l.id === selected) ? selected! : chatModelSettings.value.reasoning.default
 })
 async function applyReasoningLevel(level: string) {
-  if (!window.navora || !activeId.value || agentRunning.value) return
-  const updated = await window.navora.chats.setProvider(activeId.value, chatProviderId.value, chatModelName.value, level)
-  if (updated) { active.value = updated; await refreshList() }
+  if (!window.navora || !activeId.value || agentRunning.value || modelSelectionBusy.value) return
+  modelSelectionBusy.value=true
+  const chatId=activeId.value
+  try{
+    const updated=await window.navora.chats.setProvider(chatId,chatProviderId.value,chatModelName.value,level)
+    if(updated&&activeId.value===chatId)active.value=updated
+    await refreshList()
+  }catch(error){showToast(error instanceof Error?error.message:'切换思考等级失败')}
+  finally{modelSelectionBusy.value=false}
 }
 
 const chatModelKey = computed(() =>
@@ -2786,6 +2800,7 @@ const modelMenuOptions = computed(() => {
     key: string
     providerId: string
     model: string
+    label: string
     providerLabel: string
     hasKey: boolean
   }[] = []
@@ -2797,6 +2812,7 @@ const modelMenuOptions = computed(() => {
         key: `${p.id}::${m}`,
         providerId: p.id,
         model: m,
+        label: modelCapabilities(p,m).label,
         providerLabel: p.label || p.id,
         hasKey: providerKeyOk.value[p.id] === true,
       })
@@ -2804,6 +2820,8 @@ const modelMenuOptions = computed(() => {
   }
   return out
 })
+
+const filteredModelOptions = computed(()=>modelMenuOptions.value.filter(option=>!modelQuery.value.trim()||(option.label+' '+option.model+' '+option.providerLabel).toLocaleLowerCase().includes(modelQuery.value.trim().toLocaleLowerCase())))
 
 const usageChars = computed(() =>
   (active.value?.messages || []).reduce((n, m) => n + (m.content?.length || 0), 0),
@@ -2862,11 +2880,13 @@ async function applyChatPreset(preset: PermissionPreset) {
 }
 
 async function applyChatModel(providerId: string, model: string) {
-  if (!window.navora || !activeId.value || agentRunning.value) return
+  if (!window.navora || !activeId.value || agentRunning.value || modelSelectionBusy.value) return
+  modelSelectionBusy.value=true
+  const chatId=activeId.value
   try {
-    const chat = await window.navora.chats.setProvider(activeId.value, providerId, model, null)
+    const chat = await window.navora.chats.setProvider(chatId, providerId, model, null)
     if (chat) {
-      active.value = chat
+      if(activeId.value===chatId)active.value = chat
       const idx = chats.value.findIndex((c) => c.id === chat.id)
       if (idx >= 0) {
         const next = chats.value.slice()
@@ -2878,7 +2898,7 @@ async function applyChatModel(providerId: string, model: string) {
     console.error(e)
     showToast(e instanceof Error ? e.message : '切换模型失败')
   } finally {
-    modelMenuOpen.value = false
+    modelSelectionBusy.value=false
   }
 }
 
@@ -4212,7 +4232,16 @@ function onMessagesClick(e: MouseEvent) {
   void window.navora?.app.openExternal(href)
 }
 
+async function insertComposerResource(selection:{start:number;end:number;text:string;reference?:BrowserContextRef}) {
+  applyDraftLocally(clampDraftText(draft.value.slice(0,selection.start)+selection.text+draft.value.slice(selection.end)),Date.now())
+  if(selection.reference)addRef(selection.reference)
+  scheduleDraftSave()
+  await nextTick()
+  const input=document.querySelector<HTMLTextAreaElement>('.composer-input textarea')
+  input?.focus();input?.setSelectionRange(selection.start+selection.text.length,selection.start+selection.text.length)
+}
 function onComposerKeydown(e: KeyboardEvent) {
+  if(resourceCommands.value?.handleKeydown(e))return
   if (e.key === 'Escape') {
     if (agentRunning.value) {
       e.preventDefault()
@@ -4373,7 +4402,6 @@ async function selectChat(id: string) {
   contextRefs.value = []
   applyDraftLocally(active.value?.draft || '', active.value?.draftUpdatedAt || 0)
   stickToBottom.value = true
-  composerExpanded.value = false
   void hydrateActiveToolMedia()
   showJumpBottom.value = false
   followupSuggestions.value = followupsByChat.value[id] || []
@@ -4389,6 +4417,7 @@ async function selectChat(id: string) {
 
 let creatingChat: Promise<void> | undefined
 async function createChat() {
+  activateSidebar('chats',false)
   creatorKind.value = null
   if (!window.navora) return
   if (creatingChat) return creatingChat
@@ -4796,6 +4825,7 @@ const chatSearchHits = computed((): ChatSearchHit[] => {
 })
 
 function openChatSearch() {
+  fileManagerMode.value=false
   chatSearchQuery.value = ''
   chatSearchOpen.value = true
   void nextTick(() => chatSearchInput.value?.focus())
@@ -4917,6 +4947,7 @@ async function copyReply(message: ChatMessage) {
 let messageJump = 0
 let jumpFocusAnimation: Animation | null = null
 async function locateResourceMessage(payload:{chatId:string;messageId:string}){
+  activateSidebar('chats',false)
   if(activeId.value!==payload.chatId)await selectChat(payload.chatId)
   if(resourceOverlay.value)closeResources()
   if(fileWorkspaceOverlay.value)hideFileWorkspace()
@@ -4995,7 +5026,6 @@ async function send() {
   const chatId = activeId.value
   applyDraftLocally('', Date.now())
   contextRefs.value = []
-  if (composerExpanded.value) composerExpanded.value = false
   stickToBottom.value = true
   if (chatId) clearFollowups(chatId)
   clearChatError(chatId)
@@ -5219,8 +5249,12 @@ watch(settingsOpen, async (open, wasOpen) => {
 })
 
 // Agent 可能通过工具写入新服务商/模型；打开菜单时再拉一次，避免只靠缓存。
-watch(modelMenuOpen, (open) => {
-  if (open) void refreshAiProviders()
+watch(modelMenuOpen, async (open) => {
+  if (!open)return
+  modelQuery.value=''
+  await refreshAiProviders()
+  await nextTick()
+  requestAnimationFrame(()=>document.querySelector('.model-panel-options [aria-checked=true]')?.scrollIntoView({block:'nearest'}))
 })
 
 watch(agentRunning, (running, wasRunning) => {
@@ -5590,6 +5624,9 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.conversation-content{display:contents}
+.shell:not(.mobile-layout)>.main:has(>.file-manager.is-active){grid-template-rows:minmax(0,1fr)}
+.shell.mobile-layout>.main:has(>.file-manager.is-active){grid-template-rows:auto minmax(0,1fr)}
 .shell {
   display: grid;
   grid-template-columns: clamp(220px, 26vw, 280px) minmax(0, 1fr);
@@ -8349,6 +8386,7 @@ onUnmounted(() => {
   box-shadow: inset 0 0 0 2px #1b4f72;
 }
 .composer-box {
+  position: relative;
   border: 1px solid #d5dde5;
   border-radius: 12px;
   background: #fff;
@@ -8365,7 +8403,7 @@ onUnmounted(() => {
 }
 .composer-input-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 4px;
   padding: 6px 2px 2px 6px;
@@ -8380,25 +8418,6 @@ onUnmounted(() => {
 .composer-limit.danger {
   color: #c0392b;
   font-weight: 600;
-}
-.composer-expand {
-  margin-top: 6px;
-  margin-right: 2px;
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: #7f8c8d;
-  cursor: pointer;
-  display: inline-grid;
-  place-items: center;
-  font-size: 0.78rem;
-  flex-shrink: 0;
-}
-.composer-expand:hover {
-  color: #1b4f72;
-  background: #eaf3fa;
 }
 .composer-input {
   min-width: 0;
@@ -8425,13 +8444,7 @@ onUnmounted(() => {
   user-select: text;
   -webkit-user-select: text;
 }
-.composer-box:not(.expanded) .composer-input :deep(textarea) {
-  max-height: calc(1.45em * 3);
-}
-.composer-box.expanded .composer-input :deep(textarea) {
-  min-height: calc(1.45em * 10);
-  max-height: calc(1.45em * 10);
-}
+.composer-input :deep(textarea) {max-height:min(calc(1.45em * 10),40dvh);}
 .chip-row {
   display: flex;
   flex-wrap: wrap;
@@ -9192,6 +9205,8 @@ onUnmounted(() => {
 .ask-deny:hover {
   color: #922b21;
 }
+
+.model-panel-trigger{max-width:min(350px,40vw);gap:7px}.model-trigger-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.model-trigger-tier{font-size:10px;flex-shrink:0;color:#69809a;background:#e8eef5;border-radius:5px;padding:2px 5px}.unified-model-panel{display:flex;flex-direction:column;max-height:calc(100dvh - 110px);overflow:hidden;width:min(390px,calc(100vw - 24px));max-width:calc(100vw - 24px);padding:10px!important}.model-panel-heading{flex-shrink:0;display:flex;align-items:center;justify-content:space-between;color:#35465a;font-size:13px;font-weight:600;padding:2px 6px 9px}.model-panel-heading>button{width:26px;height:26px;border-radius:6px;color:#718095}.model-panel-heading>button:hover{background:#eaf0f6}.model-panel-search{flex-shrink:0;display:flex;align-items:center;gap:8px;background:#f7f9fb;border:1px solid #ced8e3;border-radius:8px;padding:8px 10px;margin-bottom:8px}.model-panel-search>svg{width:13px;color:#718197}.model-panel-search input{font-size:12px;min-width:0;width:100%;outline:0;color:#35465a}.model-panel-search:focus-within{border-color:#6688ad}.model-panel-options{min-height:0;flex:1;max-height:min(290px,35dvh);overflow:auto}.model-panel-options .composer-perm-item{width:100%;grid-template-columns:18px minmax(0,1fr) auto;text-align:left;gap:4px 9px;padding:9px}.model-panel-options .composer-perm-item-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.model-panel-options .composer-perm-item-desc{grid-column:2;grid-row:2;font-size:11px}.model-panel-options .composer-perm-check{grid-column:3;grid-row:1 / 3}.model-panel-reasoning{flex-shrink:0;border-top:1px solid #d5dee8;margin-top:8px;padding:12px 5px 4px;color:#5e6e82;font-size:12px}.model-panel-reasoning>div{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}.model-panel-reasoning button{padding:5px 10px;border:1px solid #d0d9e3;border-radius:7px;color:#596a80;font-size:12px}.model-panel-reasoning button:hover{background:#edf2f7}.model-panel-reasoning button.selected{color:#355c85;background:#e8f0f8;border-color:#9bb3cc}.unified-model-panel button:focus-visible{outline:2px solid #557ca8;outline-offset:-2px}
 </style>
 
 <style>
@@ -9633,13 +9648,7 @@ onUnmounted(() => {
   min-height: 0;
   width: 100%;
 }
-.shell.mobile-layout .composer-box:not(.expanded) .composer-input :deep(textarea) {
-  max-height: calc(1.45em * 2);
-}
-.shell.mobile-layout .composer-box.expanded .composer-input :deep(textarea) {
-  min-height: calc(1.45em * 5);
-  max-height: calc(1.45em * 5);
-}
+.shell.mobile-layout .composer-input :deep(textarea) {max-height:min(calc(1.45em * 8),32dvh);}
 .shell.mobile-layout .chat-item {
   gap: 0;
   background: transparent;

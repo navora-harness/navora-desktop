@@ -6,6 +6,7 @@
         <font-awesome-icon icon="chevron-down" class="res-chevron" />
         <span class="res-label">浏览器资源</span>
       </button>
+      <span v-if="embedded" class="embedded-browser-title">浏览器会话</span>
       <div class="res-head-actions">
       <button type="button" class="quick-browser-btn icon-btn" :disabled="!chatId || busyQuickOpen" title="打开或复用浏览器（Ctrl/⌘ Shift B）" aria-label="快速打开浏览器" @click="quickOpen"><font-awesome-icon :icon="busyQuickOpen ? 'circle-notch' : 'arrow-up-right-from-square'" :spin="busyQuickOpen" /></button>
       <button
@@ -13,7 +14,7 @@
         class="icon-btn"
         :disabled="!chatId || busySession"
         :class="{ loading: busySession }"
-        title="新建 Session 并打开窗口"
+        title="新建会话并打开窗口"
         @click="createSession"
       >
         <font-awesome-icon icon="plus" />
@@ -30,16 +31,16 @@
           <div
             class="tree-row sess"
             draggable="true"
-            @dragstart="onDragStart($event, sessionRef(s))"
+            @dragstart="onDragStart($event, sessionRef(s))" @dragend="($event.currentTarget as HTMLElement).classList.remove('dragging')"
             @click="emit('add-ref', sessionRef(s))"
             @contextmenu="onSessionMenu($event, s)"
             title="拖到输入框或点击以引用"
           >
             <button type="button" class="tree-name" @click.stop="emit('add-ref', sessionRef(s))">
-              Session #{{ s.sessionIndex }}
+              <span class="session-title">会话 {{ s.sessionIndex }}</span>
               <span v-if="s.chatId !== chatId" class="tree-meta">{{ ownerLabel(s.chatId) }}</span>
-              <span class="tree-meta">{{ s.windows.length }} 个窗口</span>
-              <span v-if="!s.persist" class="tree-meta">临时</span>
+              <span class="tree-meta">{{ s.windows.length ? `${s.windows.length} 个窗口` : '暂无窗口' }}</span>
+              <span class="session-lifetime" :class="{persistent:s.persist}">{{ s.persist ? '已保留' : '临时' }}</span>
             </button>
             <span class="tree-actions" @click.stop>
               <button
@@ -61,7 +62,7 @@
             :key="w.windowId"
             class="tree-row win"
             draggable="true"
-            @dragstart="onDragStart($event, windowRef(s, w))"
+            @dragstart="onDragStart($event, windowRef(s, w))" @dragend="($event.currentTarget as HTMLElement).classList.remove('dragging')"
             @click="emit('add-ref', windowRef(s, w))"
             @contextmenu="onWindowMenu($event, s, w)"
             title="拖到输入框或点击以引用"
@@ -187,6 +188,7 @@ function windowRef(s: BrowserTreeSession, w: BrowserTreeWindow): BrowserContextR
 
 function onDragStart(e: DragEvent, ref: BrowserContextRef) {
   if (!e.dataTransfer) return
+  ;(e.currentTarget as HTMLElement)?.classList.add('dragging')
   e.dataTransfer.effectAllowed = 'copy'
   e.dataTransfer.setData(props.dndMime, JSON.stringify(ref))
   e.dataTransfer.setData('text/plain', ref.kind === 'window' ? `@窗口 ${ref.label}` : `@Session ${ref.label}`)
@@ -365,13 +367,11 @@ async function copyUrl(w: BrowserTreeWindow) {
   border-radius: 6px;
   padding: 4px 6px;
   margin-right: 8px;
-  cursor: grab;
+  cursor: auto;
   font-size: 0.78rem;
   line-height: 1.25;
 }
-.tree-row:active {
-  cursor: grabbing;
-}
+.tree-row.dragging {cursor:grabbing}
 .tree-row:hover {
   background: rgba(255, 255, 255, 0.06);
 }
@@ -439,4 +439,5 @@ async function copyUrl(w: BrowserTreeWindow) {
   opacity: 0.45;
   pointer-events: none;
 }
+.embedded-browser-title{font-size:10px;color:#7d899a;flex:1}.res-head:has(.embedded-browser-title){justify-content:space-between}.tree-row{margin-right:0;min-height:34px;padding:5px 6px;color:#4b5d74;border:1px solid transparent}.tree-row.sess{background:#f0f3f7}.tree-row:hover{background:#e8eef5;border-color:#d5dfeb}.tree-name{text-align:left;display:flex;align-items:center;gap:6px;font-size:12px}.session-title{color:#3e526c;font-weight:500;white-space:nowrap}.tree-meta{font-size:10px;margin:0;color:#7a8798;opacity:1}.session-lifetime{font-size:9px;color:#808b99;white-space:nowrap}.session-lifetime.persistent{color:#60806c}.tree-actions{gap:1px}.tree-actions .icon-btn{width:24px;height:24px;background:transparent;border-radius:6px;color:#6d7e94}.tree-actions .icon-btn.danger:hover{color:#b64747;background:#f8eaea}.tree-row.win .tree-name{display:block}.tree-row.win .tree-meta{margin-left:5px}.res-head-actions .icon-btn{background:transparent}.icon-btn:focus-visible,.tree-name:focus-visible{outline:2px solid #5d80aa;outline-offset:-2px}
 </style>

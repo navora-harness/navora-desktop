@@ -42,3 +42,18 @@ test('only successful known file operations receive turn and answer associations
   }
   assert.equal(associateResourceEvidence(entries,[...messages,{id:'d',role:'tool',content:'{"ok":true,"path":"report.md"}',createdAt:4,meta:{toolName:'file_delete',status:'done'}}])[0]!.evidence,undefined)
 })
+
+
+test('late native download artifacts attach to their original completed reply across a later user turn',()=>{
+  const entries=[{id:'download',ownerChatId:'chat',path:'downloads/setup.exe',name:'setup.exe'}] as WorkspaceResource[]
+  const messages=[
+    {id:'u1',role:'user',content:'Download',createdAt:1},
+    {id:'a1',role:'assistant',content:'Still downloading',createdAt:2,meta:{phase:'final',runId:'run1'}},
+    {id:'u2',role:'user',content:'Next task',createdAt:3},
+    {id:'complete',role:'log',content:'Completed',createdAt:4,meta:{kind:'browser_download',runId:'run1',turnId:'u1',download:{state:'completed',path:'downloads/setup.exe'}}},
+    {id:'a2',role:'assistant',content:'Next answer',createdAt:5,meta:{phase:'final',runId:'run2'}},
+  ] as import('./types').ChatMessage[]
+  assert.equal(replyArtifactGroups(entries,messages).get('a1')?.[0]?.evidence?.turnId,'u1')
+  assert.equal(replyArtifactGroups(entries,messages).has('a2'),false)
+  assert.equal(replyArtifactGroups(entries,messages.map(m=>m.id==='complete'?{...m,meta:{...m.meta,download:{state:'started',path:'downloads/setup.exe'}}}:m)).size,0)
+})

@@ -80,6 +80,23 @@ try {
   assert.match(manualCloseState.pendingEvents.get(titleChat.id)![1]!, /active-session/, 'Session release is still known to the active Agent')
   manualCloseState.runs.delete(titleChat.id)
   manualCloseState.pendingEvents.delete(titleChat.id)
+  const downloadRuntime=lifetimeRuntime as unknown as {runContexts:Map<string,{id:string;turnId?:string;sequence:number}>;pendingEvents:Map<string,string[]>}
+  const origin={id:'download-run',turnId:'download-user',sequence:0}
+  downloadRuntime.runContexts.set(titleChat.id,origin)
+  const nativeDownload={id:'native-fixture',chatId:titleChat.id,sessionId:'download-session',state:'started' as const,url:'http://127.0.0.1/file',filename:'fixture.txt',relPath:'downloads/fixture.txt',createdAt:Date.now(),updatedAt:Date.now()}
+  lifetimeRuntime.trackBrowserDownload(nativeDownload)
+  lifetimeRuntime.recordBrowserDownload(nativeDownload,{summary:'Download started',content:'Download started'})
+  const later={id:'later-run',turnId:'later-user',sequence:0}
+  downloadRuntime.runContexts.set(titleChat.id,later)
+  downloadRuntime.pendingEvents.delete(titleChat.id)
+  lifetimeRuntime.recordBrowserDownload({...nativeDownload,state:'completed',receivedBytes:123},{summary:'Download completed',content:'Download completed'})
+  const terminal=titleChats.get(titleChat.id)!.messages.at(-1)!
+  assert.equal(terminal.meta?.runId,origin.id,'A native download finishing in a later task keeps its original run')
+  assert.equal(terminal.meta?.turnId,origin.turnId)
+  assert.equal(terminal.meta?.runSequence,1,'Late completion continues its original sequence')
+  assert.equal(downloadRuntime.pendingEvents.has(titleChat.id),false,'An old completion never interrupts a new model request')
+  assert.equal((terminal.meta?.download as {receivedBytes:number}).receivedBytes,123)
+  downloadRuntime.runContexts.delete(titleChat.id)
   const parentSession = lifetimeRegistry.createSession(titleChat.id)
   lifetimeRegistry.createWindow(parentSession.sessionId, { show: false })
   const owners = [titleChat.id]
@@ -127,6 +144,7 @@ try {
       addEventListener('message',event=>{if(event.data?.type==='frame-click')window.frameTrusted=event.data.trusted});
     </script>`
   fixtureServer = http.createServer((request, response) => {
+    if(request.url==='/broken'){response.destroy();return}
     response.setHeader('Content-Type','text/html; charset=utf-8')
     if (request.url === '/loading') {
       response.write('<title>Loading fixture</title><p>Partial document')
@@ -147,6 +165,9 @@ try {
   assert.equal(deniedWeather.error, 'fixture_denied')
   assert.deepEqual(checked, ['session.fetch', 'browser.geolocation'], 'Local weather retains BOTH network and location permissions')
   context.gate.check = permissionCheck
+  const downloadListeners=win.webContents.session.listenerCount('will-download')
+  await assert.rejects(call('browser_navigate',{url:fixtureUrl+'/broken',timeoutMs:1200}),/ERR_/,'A real page failure never becomes a successful download')
+  assert.equal(win.webContents.session.listenerCount('will-download'),downloadListeners,'Failed navigation detaches its temporary download observer')
   const loading = win.loadURL(fixtureUrl + '/loading')
   await new Promise(resolve => setTimeout(resolve, 30))
   const listeners = win.webContents.listenerCount('did-fail-load')

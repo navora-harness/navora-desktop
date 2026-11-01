@@ -4,12 +4,14 @@ import 'vuetify/styles'
 import '@mdi/font/css/materialdesignicons.css'
 import '@postpile/ui/styles.css'
 import './styles/postpile-theme.css'
+import './styles/switch-controls.css'
 import './styles/conversation-activity.css'
 import { ButtonMenuTransition, DialogTransition } from './components/motion/SurfaceTransitions'
 import { library } from '@fortawesome/fontawesome-svg-core'
 import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
 import {
   faPlus,
+  faLayerGroup,
   faWandMagicSparkles,
   faTrash,
   faGear,
@@ -76,6 +78,7 @@ import { router } from './router'
 
 library.add(
   faPlus,
+  faLayerGroup,
   faWandMagicSparkles,
   faTrash,
   faGear,
