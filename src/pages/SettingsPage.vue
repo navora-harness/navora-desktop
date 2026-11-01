@@ -1293,6 +1293,7 @@ function openOnboarding() {
 }
 
 const tab = ref(props.initialTab || 'basic')
+watch(()=>props.initialTab,value=>{if(value&&value!==tab.value)selectTab(value)})
 const contentEl = ref<HTMLElement | null>(null)
 const navListEl = ref<HTMLElement | null>(null)
 const cfg = ref<AppConfig | null>(null)
@@ -2676,6 +2677,7 @@ onUnmounted(() => {
   unsubProposals?.()
   unsubStoreInstalled?.()
 })
+defineExpose({apply:()=>save(false)})
 </script>
 
 <style scoped>

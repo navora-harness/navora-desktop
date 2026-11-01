@@ -1,4 +1,4 @@
-export type FileTab={key:string;chatId:string;path:string}
+export type FileTab={key:string;chatId:string;path:string;kind?:'browser';url?:string}
 export type FileTabs={tabs:FileTab[];active:string;open:boolean}
 export const emptyFileTabs=():FileTabs=>({tabs:[],active:'',open:false})
 export function workspaceLinkPath(href:string,baseFile?:string):string|null{
@@ -26,6 +26,11 @@ export function openFileTab(state:FileTabs,chatId:string,path:string):FileTabs{
   if(state.tabs.length>=32&&!state.tabs.some(item=>item.key===tab.key))throw Error('标签页已达上限，请先关闭部分文件')
   return {tabs:state.tabs.some(item=>item.key===tab.key)?state.tabs:[...state.tabs,tab],active:tab.key,open:true}
 }
+export function openBrowserTab(state:FileTabs,chatId:string):FileTabs{
+  if(state.tabs.length>=32)throw Error('标签页已达上限，请先关闭部分标签页')
+  const tab:FileTab={key:`browser:${crypto.randomUUID()}`,chatId,path:'新标签页',kind:'browser',url:'about:blank'}
+  return {tabs:[...state.tabs,tab],active:tab.key,open:true}
+}
 export function removeFileOwner(state:FileTabs,owner:string):FileTabs{
   return state.tabs.filter(tab=>tab.chatId===owner).reduce((next,tab)=>closeFileTab(next,tab.key),state)
 }
@@ -39,7 +44,7 @@ export function restoreFileTabs(value:unknown):FileTabs{
   if(!value||typeof value!=='object')return emptyFileTabs()
   const raw=value as Partial<FileTabs>,tabs:FileTab[]=[]
   if(Array.isArray(raw.tabs))for(const item of raw.tabs.slice(0,32)){
-    try{if(typeof item?.chatId!=='string'||typeof item?.path!=='string')continue;const tab=makeFileTab(item.chatId,item.path);if(!tabs.some(existing=>existing.key===tab.key))tabs.push(tab)}catch{/* Discard invalid stored metadata. */}
+    try{if(typeof item?.chatId!=='string'||typeof item?.path!=='string')continue;const tab=item.kind==='browser'&&/^browser:[\w-]{1,80}$/.test(item.key)&&/^[\w-]{1,128}$/.test(item.chatId)?{key:item.key,chatId:item.chatId,path:item.path.slice(0,160)||'新标签页',kind:'browser' as const,url:typeof item.url==='string'&&/^https?:\/\//i.test(item.url)?item.url:'about:blank'}:makeFileTab(item.chatId,item.path);if(!tabs.some(existing=>existing.key===tab.key))tabs.push(tab)}catch{/* Discard invalid stored metadata. */}
   }
   return {tabs,active:tabs.find(tab=>tab.key===raw.active)?.key||tabs[0]?.key||'',open:raw.open===true&&tabs.length>0}
 }

@@ -626,12 +626,23 @@ async function createWindow(): Promise<void> {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webviewTag: true,
     },
   })
   // Hide native menu; Agent windows manage their own chrome.
   mainWindow.setMenu(null)
   const win = mainWindow
   wireMainWindowExternalLinks(win)
+  win.webContents.on('will-attach-webview',(event,preferences,params)=>{
+    if(!/^navora-panel-[\w-]{1,128}$/.test(params.partition||'')||!/^about:blank$|^https?:\/\//i.test(params.src||'')){event.preventDefault();return}
+    delete preferences.preload
+    preferences.nodeIntegration=false;preferences.contextIsolation=true;preferences.sandbox=true;preferences.webSecurity=true
+  })
+  win.webContents.on('did-attach-webview',(_event,guest)=>{
+    guest.setWindowOpenHandler(({url})=>{openInSystemBrowser(url);return {action:'deny'}})
+    guest.on('will-navigate',(event,url)=>{if(!/^about:blank$|^https?:\/\//i.test(url))event.preventDefault()})
+    guest.on('will-redirect',(event,url)=>{if(!/^https?:\/\//i.test(url))event.preventDefault()})
+  })
   trackWindowState(win, dataRoot)
 
   win.once('ready-to-show', () => {
@@ -1421,6 +1432,18 @@ function registerIpc(): void {
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
+  })
+
+  ipcMain.handle('navora:workspace.saveAs',async(event,chatId:string,relPath:string)=>{
+    if(event.sender!==mainWindow?.webContents)return {ok:false,error:'local_only'}
+    try{
+      const source=await files.resolveExisting(String(chatId),String(relPath))
+      if(!(await fs.promises.stat(source)).isFile())throw Error('not_a_file')
+      const selected=await dialog.showSaveDialog(mainWindow!,{title:'另存为',defaultPath:path.basename(source)})
+      if(selected.canceled||!selected.filePath)return {ok:false,canceled:true}
+      if(path.resolve(source)!==path.resolve(selected.filePath))await fs.promises.copyFile(source,selected.filePath)
+      return {ok:true}
+    }catch(error){return {ok:false,error:error instanceof Error?error.message:String(error)}}
   })
 
   rpcHandle('navora:workspace.list', async (_e, chatId: string, relDir?: string) => {

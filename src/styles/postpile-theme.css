@@ -8,6 +8,15 @@
   --navora-stroke: rgba(30, 43, 66, .08);
   --navora-ease: cubic-bezier(.22, .75, .2, 1);
 }
+.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.main .main-top,
+.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.main>.settings-workspace>.top,
+.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.main .creator-header{padding-right:var(--title-actions-reserve,236px)}
+.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.main.file-workspace-open .main-top{padding-right:12px}
+.navora-app .shell.platform-mac:not(.mobile-layout)>.main .main-top,
+.navora-app .shell.platform-mac:not(.mobile-layout)>.main>.settings-workspace>.top,
+.navora-app .shell:not(.frameless):not(.mobile-layout)>.main .main-top,
+.navora-app .shell:not(.frameless):not(.mobile-layout)>.main>.settings-workspace>.top{padding-right:calc(var(--title-actions-reserve,236px) - 138px)}
+@media(max-width:650px){.global-title-actions [data-chat-resource=files]{display:none}}
 .navora-app { color: var(--navora-ink); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; }
 .navora-app .shell { background: var(--navora-background); }
 .navora-app .shell .sidebar {

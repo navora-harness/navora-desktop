@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {emptyFileTabs,openFileTab,closeFileTab,restoreFileTabs,makeFileTab,workspaceLinkPath,removeFileOwner} from './file-tabs'
+import {emptyFileTabs,openFileTab,openBrowserTab,closeFileTab,restoreFileTabs,makeFileTab,workspaceLinkPath,removeFileOwner} from './file-tabs'
 test('file tabs reuse paths, distinguish resource owners and close to a neighbouring tab',()=>{
   let state=openFileTab(emptyFileTabs(),'a','folder/report.md')
   state=openFileTab(state,'a','./folder\\report.md');assert.equal(state.tabs.length,1)
@@ -16,6 +16,19 @@ test('restoration stores metadata only and rejects unsafe paths',()=>{
   const state=restoreFileTabs({open:true,active:'missing',tabs:[valid,valid,{chatId:'owner',path:'../outside'},{chatId:'owner',path:'C:\\secret'}]})
   assert.deepEqual(state,{tabs:[valid],active:valid.key,open:true})
   assert.throws(()=>makeFileTab('owner','../private'))
+})
+
+test('browser tabs coexist with files and restore only safe navigation metadata',()=>{
+  let state=openBrowserTab(openFileTab(emptyFileTabs(),'owner','report.md'),'owner')
+  const browser=state.tabs[1]!
+  assert.equal(browser.kind,'browser')
+  browser.url='javascript:alert(1)'
+  const restored=restoreFileTabs(state)
+  assert.equal(restored.tabs[1]!.url,'about:blank')
+  state=closeFileTab(restored,browser.key)
+  assert.equal(state.active,state.tabs[0]!.key)
+  assert.equal(state.tabs[0]!.path,'report.md')
+  assert.equal(removeFileOwner(restored,'owner').tabs.length,0)
 })
 test('workspace Markdown links decode local names and never accept traversal or protocols',()=>{
   assert.equal(workspaceLinkPath('./folder/report%20one.md#section'),'folder/report one.md')

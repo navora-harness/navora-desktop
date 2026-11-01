@@ -4,7 +4,7 @@ import vuetify from 'vite-plugin-vuetify'
 import path from 'node:path'
 
 export default defineConfig({
-  plugins: [vue(), vuetify({ autoImport: true })],
+  plugins: [vue({template:{compilerOptions:{isCustomElement:tag=>tag==='webview'}}}), vuetify({ autoImport: true })],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),

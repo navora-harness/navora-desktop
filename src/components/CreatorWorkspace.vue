@@ -205,6 +205,7 @@ onMounted(async () => {
   } catch { /* Model configuration can be added later. */ }
 })
 onBeforeUnmount(() => { disposed = true; cancelGenerate(); clearTimeout(saveTimer); void save() })
+defineExpose({save,export:exportProject})
 </script>
 
 <style scoped>

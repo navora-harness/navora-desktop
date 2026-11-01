@@ -4,30 +4,30 @@
     <header class="file-workspace-head">
       <div ref="tabBar" class="file-workspace-tabs" role="tablist" aria-label="已打开文件" @keydown="onTabsKey">
         <div v-for="(tab,index) in tabs" :key="tab.key" class="file-workspace-tab" :class="{selected:active?.key===tab.key}" role="presentation" @auxclick="closeOnMiddle($event,tab.key)">
-          <button :id="`${uid}-${index}`" type="button" role="tab" :data-file-key="tab.key" :aria-label="`${name(tab.path)}，${ownerLabel(tab.chatId)}，${tab.path}`" :aria-selected="active?.key===tab.key" :aria-controls="`${uid}-content`" :tabindex="active?.key===tab.key?0:-1" :title="`${ownerLabel(tab.chatId)} / ${tab.path}`" @click="emit('select',tab.key)"><font-awesome-icon icon="file-lines" /><span>{{ name(tab.path) }}</span></button>
-          <button type="button" class="file-tab-close" :aria-label="`关闭标签页：${name(tab.path)}`" :title="`关闭 ${tab.path}`" @click="closeTab(tab.key)"><font-awesome-icon icon="xmark" /></button>
+          <button :id="`${uid}-${index}`" type="button" role="tab" :data-file-key="tab.key" :aria-label="`${tab.kind==='browser'?tab.path:name(tab.path)}，${ownerLabel(tab.chatId)}，${tab.path}`" :aria-selected="active?.key===tab.key" :aria-controls="`${uid}-content`" :tabindex="active?.key===tab.key?0:-1" :title="`${ownerLabel(tab.chatId)} / ${tab.path}`" @click="emit('select',tab.key)"><font-awesome-icon :icon="tab.kind==='browser'?'globe':'file-lines'" /><span>{{ tab.kind==='browser'?tab.path:name(tab.path) }}</span></button>
+          <button type="button" class="file-tab-close" :aria-label="`关闭标签页：${tab.kind==='browser'?tab.path:name(tab.path)}`" :title="`关闭 ${tab.path}`" @click="closeTab(tab.key)"><font-awesome-icon icon="xmark" /></button>
         </div>
       </div>
-      <v-menu v-model="pickerOpen" location="bottom end" :close-on-content-click="false" max-width="360" @after-leave="finishLocate">
-        <template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" class="file-workspace-close" aria-label="新增文件标签页" title="选择文件"><font-awesome-icon icon="plus" /></button></template>
-        <section class="file-workspace-picker" aria-label="选择工作区文件"><header><span>当前对话文件</span><button type="button" class="file-workspace-close" aria-label="关闭文件选择" @click="pickerOpen=false"><font-awesome-icon icon="xmark" /></button></header><WorkspaceFilePicker :chat-id="viewerChatId" @open="chooseFile" @locate="locateFile" /></section>
-      </v-menu>
-      <SidebarMoreMenu label="文件预览" hide-label="隐藏文件侧栏" hide-aria-label="关闭文件预览" @hide="hidePanel"><button type="button" role="menuitem" :disabled="!active" @click="active && closeTab(active.key)"><font-awesome-icon icon="file-lines" />关闭当前标签页</button></SidebarMoreMenu>
+      <button type="button" class="file-workspace-close" aria-label="新建浏览器标签页" title="新建浏览器标签页" @click="emit('openBrowser')"><font-awesome-icon icon="plus" /></button>
+      <SidebarMoreMenu label="文件预览" hide-label="隐藏文件侧栏" hide-aria-label="关闭文件预览" @hide="hidePanel"><button type="button" role="menuitem" aria-label="新增文件标签页" @click="pickerOpen=true"><font-awesome-icon icon="folder-open" />打开文件标签页</button><button type="button" role="menuitem" :disabled="!active" @click="active && closeTab(active.key)"><font-awesome-icon icon="file-lines" />关闭当前标签页</button></SidebarMoreMenu>
     </header>
     <div v-if="active && active.chatId!==viewerChatId" class="file-workspace-owner">来自 {{ ownerLabel(active.chatId) }}</div>
     <div :id="`${uid}-content`" class="file-workspace-content" role="tabpanel" :aria-labelledby="`${uid}-${tabs.findIndex(tab=>tab.key===active?.key)}`">
-      <KeepAlive :max="4"><FilePreviewPanel v-if="active" :key="active.key" tabbed embedded :chat-id="active.chatId" :path="active.path" :width="width" @close="hidePanel" @open-file="emit('openFile',{path:$event,chatId:active.chatId})" @notify="notify" /></KeepAlive>
+      <KeepAlive :max="4"><FilePreviewPanel v-if="active && active.kind!=='browser'" :key="active.key" tabbed embedded :chat-id="active.chatId" :path="active.path" :width="width" @close="hidePanel" @open-file="emit('openFile',{path:$event,chatId:active.chatId})" @notify="notify" /></KeepAlive>
+      <BrowserTabPanel v-for="tab in tabs.filter(item=>item.kind==='browser')" v-show="active?.key===tab.key" :key="tab.key" :chat-id="tab.chatId" :url="tab.url" @changed="(title,url)=>emit('browserChanged',tab.key,title,url)" />
     </div>
+    <v-dialog v-model="pickerOpen" max-width="420" @after-leave="finishLocate"><section class="file-workspace-picker" aria-label="选择工作区文件"><header><span>当前对话文件</span><button type="button" class="file-workspace-close" aria-label="关闭文件选择" @click="pickerOpen=false"><font-awesome-icon icon="xmark" /></button></header><WorkspaceFilePicker :chat-id="viewerChatId" @open="chooseFile" @locate="locateFile" /></section></v-dialog>
   </aside>
 </template>
 <script setup lang="ts">
 import {nextTick,onBeforeUnmount,ref,useId,watch} from 'vue'
 import type {FileTab} from '@shared/file-tabs'
 import FilePreviewPanel from './FilePreviewPanel.vue'
+import BrowserTabPanel from './BrowserTabPanel.vue'
 import WorkspaceFilePicker from './WorkspaceFilePicker.vue'
 import SidebarMoreMenu from './sidebar/SidebarMoreMenu.vue'
 const props=defineProps<{tabs:FileTab[];active:FileTab|null;viewerChatId:string;width:number;maximum:number;overlay:boolean;ownerLabel:(id:string)=>string}>()
-const emit=defineEmits<{select:[key:string];close:[key:string];hide:[];resize:[width:number];openFile:[file:{path:string;chatId:string}];notify:[text:string,color?:string];locate:[payload:{chatId:string;messageId:string}]}>()
+const emit=defineEmits<{openBrowser:[];browserChanged:[key:string,title:string,url:string];select:[key:string];close:[key:string];hide:[];resize:[width:number];openFile:[file:{path:string;chatId:string}];notify:[text:string,color?:string];locate:[payload:{chatId:string;messageId:string}]}>()
 const uid='file-workspace-'+useId(),panel=ref<HTMLElement|null>(null),tabBar=ref<HTMLElement|null>(null)
 const pickerOpen=ref(false)
 let pendingLocate:{chatId:string;messageId:string}|undefined

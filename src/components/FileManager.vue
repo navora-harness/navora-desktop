@@ -72,6 +72,7 @@ watch(()=>[props.chatId,props.directory],()=>{generation++;folderEntries.value=[
 watch(()=>props.active,active=>{if(active)void load()})
 onMounted(()=>{unsubscribe=window.navora?.workspace.onChanged(event=>{if(!props.active||event.chatId!==props.chatId)return;clearTimeout(timer);timer=setTimeout(()=>void load(),150)})})
 onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(timer);unsubscribe?.()})
+defineExpose({refresh:refreshAll,openFolder:()=>reveal(props.directory)})
 </script>
 <style scoped>
 .file-manager{container-type:inline-size;display:flex;flex:1;flex-direction:column;min-width:0;min-height:0;height:100%;color:#465467;background:#fff;overflow:hidden}

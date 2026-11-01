@@ -1,7 +1,7 @@
 <template>
   <div
     class="shell"
-    :style="sidebarStyle"
+    :style="[sidebarStyle,{'--title-actions-reserve':pageContext==='chat'?'310px':'236px'}]"
     :class="{
       'mobile-layout': isMobileLayout,
       'remote-web': isWebRemote(),
@@ -20,6 +20,7 @@
       @click="closeMobileSidebar"
     />
     </Transition>
+    <ChatResourcesMenu ref="browserResources" class="global-title-actions" :context="pageContext" :running="agentRunning" @context-action="onPageAction" @new-browser-tab="openBrowserTab" @new-chat="createChat" @search="openChatSearch" @delete="active && askDeleteChat(active)" @stop="stopAgent" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :open="resourceOpen" :file-workspace-open="fileWorkspaceVisible" :has-file-tabs="fileTabsState.tabs.length>0" :pinned="!!active?.pinned" :can-export="!!active?.messages.length" :exporting="exportingChat" @rename="renameCurrentChat" @pin="active && toggleChatPinned(active)" @export="exportActiveChat" @toggle-workspace="toggleRightSidebar" @notify="onPanelNotify" @toggle-resources="toggleResources" @show-browser="showResources('browser')" />
     <aside class="sidebar">
       <div class="sidebar-content-stack">
       <Transition name="sidebar-flip">
@@ -27,6 +28,10 @@
       <SidebarDock :active="sidebarRail.active" :panels="sidebarPanels" @close="closeSidebar">
         <template #chats="slot">
       <Teleport :to="slot.headerTarget" defer><button v-show="slot.active" type="button" class="chat-toolbar-icon-btn chat-batch-trigger" :title="chatBatchMode ? '取消批量操作' : '批量管理对话'" :aria-label="chatBatchMode ? '取消批量操作' : '批量操作'" :aria-pressed="chatBatchMode" @click="chatBatchMode ? exitChatBatchMode() : enterChatBatchMode()"><font-awesome-icon :icon="chatBatchMode ? 'xmark' : 'list-check'" /></button></Teleport>
+      <div class="chat-list-actions" role="group" aria-label="对话操作">
+        <button type="button" class="chat-new-action" title="开启新对话（Ctrl/⌘ N）" aria-label="开启新对话" @click="createChat"><font-awesome-icon icon="pen-to-square" /><span>新对话</span><kbd>{{ windowPlatform==='darwin'?'⌘ N':'Ctrl N' }}</kbd></button>
+        <button type="button" class="chat-search-action" title="搜索对话（Ctrl/⌘ K）" aria-label="搜索对话" @click="openChatSearch"><font-awesome-icon icon="magnifying-glass" /></button>
+      </div>
       <div v-if="chatBatchMode" class="chat-toolbar">
         <Transition name="toolbar-swap" mode="out-in">
           <div key="batch" class="chat-toolbar-row">
@@ -425,8 +430,6 @@
           <div class="rail-brand" :class="{ 'app-drag': showDesktopChrome }" title="Navora">
             <img src="/app-icon.png" alt="Navora" draggable="false" />
           </div>
-          <button type="button" class="sidebar-icon-btn rail-new-chat" title="开启新对话（Ctrl/⌘ N）" aria-label="开启新对话" @click="createChat"><font-awesome-icon icon="pen-to-square" /></button>
-          <button type="button" class="sidebar-icon-btn rail-search brand-search-btn" title="搜索对话（Ctrl/⌘ K）" aria-label="搜索对话" @click="openChatSearch"><font-awesome-icon icon="magnifying-glass" /></button>
           <SidebarNavigation :panels="sidebarPanels" :active="sidebarRail.active" :inactive="settingsOpen || !!creatorKind" @activate="toggleSidebarGroup" />
         </div>
         <div class="sidebar-foot">
@@ -550,7 +553,6 @@
           </div>
         </div>
         <div v-if="!pluginWorkspaceActive" class="mobile-topbar-actions">
-          <ChatResourcesMenu ref="browserResources" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :open="resourceOpen" :file-workspace-open="fileWorkspaceVisible" :has-file-tabs="fileTabsState.tabs.length>0" @toggle-workspace="toggleFileWorkspace" @notify="onPanelNotify" @toggle-resources="toggleResources" @show-browser="showResources('browser')" />
           <button
             v-if="isWebRemote()"
             type="button"
@@ -575,11 +577,11 @@
           </button>
         </div>
       </header>
-      <CreatorWorkspace v-if="creatorKind" :key="creatorKind" :kind="creatorKind" :navigation-target="isMobileLayout ? undefined : '#creator-sidebar-nav'" @close="closeCreator" @trial="openCreatorTrial" @notify="onPanelNotify" />
-      <SettingsPage v-else-if="settingsOpen" class="settings-workspace" :initial-tab="settingsTab" @navigate="settingsTab = $event" embedded :mobile="isMobileLayout" :navigation-target="isMobileLayout ? undefined : '#settings-sidebar-nav'" @close="settingsOpen = false" @create="openCreator" />
+      <CreatorWorkspace ref="creatorWorkspace" v-if="creatorKind" :key="creatorKind" :kind="creatorKind" :navigation-target="isMobileLayout ? undefined : '#creator-sidebar-nav'" @close="closeCreator" @trial="openCreatorTrial" @notify="onPanelNotify" />
+      <SettingsPage ref="settingsWorkspace" v-else-if="settingsOpen" class="settings-workspace" :initial-tab="settingsTab" @navigate="settingsTab = $event" embedded :mobile="isMobileLayout" :navigation-target="isMobileLayout ? undefined : '#settings-sidebar-nav'" @close="settingsOpen = false" @create="openCreator" />
       <template v-else>
-      <FileManager v-if="fileManagerMounted" v-show="fileManagerActive" :active="fileManagerActive" :class="{'is-active':fileManagerActive}" :chat-id="fileManagerOwner?.id || ''" :title="fileManagerOwner?.title || ''" :directory="fileManagerDirectory" @browse="fileManagerDirectory=$event" @preview="openFilePreview" @back="activateSidebar('chats',false)" @notify="onPanelNotify" />
-      <PluginWorkspace v-if="pluginWorkspaceMounted" v-show="pluginWorkspaceActive" :active="pluginWorkspaceActive" :class="{'is-active':pluginWorkspaceActive}" sidebar-target="#plugins-sidebar-nav" @back="activateSidebar('chats',false)" @create="openCreator('plugin')" @selected="closeMobileSidebar" @notify="onPanelNotify" />
+      <FileManager ref="fileManagerWorkspace" v-if="fileManagerMounted" v-show="fileManagerActive" :active="fileManagerActive" :class="{'is-active':fileManagerActive}" :chat-id="fileManagerOwner?.id || ''" :title="fileManagerOwner?.title || ''" :directory="fileManagerDirectory" @browse="fileManagerDirectory=$event" @preview="openFilePreview" @back="activateSidebar('chats',false)" @notify="onPanelNotify" />
+      <PluginWorkspace ref="pluginsWorkspace" v-if="pluginWorkspaceMounted" v-show="pluginWorkspaceActive" :active="pluginWorkspaceActive" :class="{'is-active':pluginWorkspaceActive}" sidebar-target="#plugins-sidebar-nav" @back="activateSidebar('chats',false)" @create="openCreator('plugin')" @selected="closeMobileSidebar" @notify="onPanelNotify" />
       <div v-show="!fileManagerActive && !pluginWorkspaceActive" class="conversation-content" :inert="fileManagerActive || pluginWorkspaceActive">
       <template v-if="active">
         <header
@@ -622,7 +624,6 @@
             <span class="agent-elapsed">{{ elapsedLabel }}</span>
             <button type="button" class="quick-stop-btn" title="停止任务（Esc）" aria-label="停止任务" @click="stopAgent"><StatusIcon kind="stopped" />停止</button>
           </div>
-          <ChatResourcesMenu v-if="!isMobileLayout" ref="browserResources" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :open="resourceOpen" :file-workspace-open="fileWorkspaceVisible" :has-file-tabs="fileTabsState.tabs.length>0" @toggle-workspace="toggleFileWorkspace" @notify="onPanelNotify" @toggle-resources="toggleResources" @show-browser="showResources('browser')" />
         </header>
 
         <div class="messages-wrap">
@@ -1536,7 +1537,7 @@
       <Transition name="resource-card">
         <ConversationResourcesCard v-if="resourceOpen && activeId && !settingsOpen && !creatorKind && !fileManagerActive && !pluginWorkspaceActive" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :overlay="resourceOverlay" :available-width="resourceAvailableWidth" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="locateResourceMessage({chatId:activeId!,messageId:$event})" @open-media="(p) => openLightbox(p.src,p.alt)" />
       </Transition>
-      <Transition name="file-workspace"><FileWorkspace v-if="fileWorkspaceVisible" :tabs="fileTabsState.tabs" :active="activeFileTab" :viewer-chat-id="activeId || ''" :width="fileWorkspaceWidth" :maximum="fileWorkspaceMaximum" :overlay="fileWorkspaceOverlay" :owner-label="treeOwnerLabel" @select="selectFileTab" @close="closeFileTab" @hide="hideFileWorkspace" @open-file="openFilePreview($event.path,$event.chatId)" @locate="locateResourceMessage" @resize="resizeFileWorkspace" @notify="onPanelNotify" /></Transition>
+      <Transition name="file-workspace"><FileWorkspace v-if="fileWorkspaceVisible" :tabs="fileTabsState.tabs" :active="activeFileTab" :viewer-chat-id="activeId || ''" :width="fileWorkspaceWidth" :maximum="fileWorkspaceMaximum" :overlay="fileWorkspaceOverlay" :owner-label="treeOwnerLabel" @open-browser="openBrowserTab" @browser-changed="updateBrowserTab" @select="selectFileTab" @close="closeFileTab" @hide="hideFileWorkspace" @open-file="openFilePreview($event.path,$event.chatId)" @locate="locateResourceMessage" @resize="resizeFileWorkspace" @notify="onPanelNotify" /></Transition>
     </main>
 
     <v-dialog
@@ -1923,6 +1924,25 @@ const showDesktopChrome = computed(
 )
 const windowPlatform = window.navora?.app?.platform || 'web'
 const browserResources = ref<{ quickOpen: () => Promise<void> } | null>(null)
+type PageActionHost={runAction:(action:string)=>unknown}
+const settingsWorkspace=ref<PageActionHost|null>(null),fileManagerWorkspace=ref<{refresh:()=>unknown;openFolder:()=>unknown}|null>(null),pluginsWorkspace=ref<PageActionHost|null>(null),creatorWorkspace=ref<PageActionHost|null>(null)
+const pageContext=computed(()=>creatorKind.value?'creator':settingsOpen.value?'settings':pluginWorkspaceActive.value?'plugins':fileManagerActive.value?'files':'chat')
+function toggleRightSidebar(){
+  const wasVisible=fileWorkspaceVisible.value
+  settingsOpen.value=false;creatorKind.value=null;pluginWorkspaceMode.value=false;fileManagerMode.value=false
+  if(!fileTabsState.value.tabs.length)openBrowserTab()
+  else if(wasVisible)hideFileWorkspace()
+  else if(!fileTabsState.value.open)toggleFileWorkspace()
+}
+function onPageAction(action:string){
+  const context=pageContext.value
+  if(action==='back'){if(creatorKind.value){closeCreator();return}settingsOpen.value=false;activateSidebar('chats',false);return}
+  if(context==='settings'){if(action==='apply')void settingsWorkspace.value?.runAction('apply');else if(action==='models')settingsTab.value='model';else if(action==='plugins'){settingsOpen.value=false;activateSidebar('plugins',false)}}
+  else if(context==='files'){if(action==='refresh')fileManagerWorkspace.value?.refresh();else if(action==='folder')fileManagerWorkspace.value?.openFolder()}
+  else if(context==='plugins'){if(action==='refresh')void pluginsWorkspace.value?.runAction('refresh');else if(action==='manage')pluginsWorkspace.value?.runAction('manage');else if(action==='create')openCreator('plugin')}
+  else if(context==='creator'){if(action==='save')void creatorWorkspace.value?.runAction('save');else if(action==='export')void creatorWorkspace.value?.runAction('export')}
+}
+
 const executionModes = [
   { id: 'auto' as const, label: '自动', hint: '按问题选择问答或工具' },
   { id: 'chat' as const, label: '快速问答', hint: '直接回复，不访问浏览器与文件' },
@@ -2274,7 +2294,7 @@ const sidebarMoreOpen = ref(false)
 const {open:resourceOpen,tab:resourceTab,show:showResources,close:hideResources} = useConversationResources(activeId,tree)
 function closeResources(){hideResources()}
 function toggleResources(){if(resourceOpen.value)closeResources();else showResources('overview')}
-const {current:fileTabsState,active:activeFileTab,open:openFileTab,select:selectFileTab,close:closeFileTab,hide:hideFileWorkspace,toggle:toggleFileWorkspace,removeOwner:removeFileOwner}=useFileTabs(activeId)
+const {current:fileTabsState,active:activeFileTab,open:openFileTab,openBrowser:openBrowserTab,updateBrowser:updateBrowserTab,select:selectFileTab,close:closeFileTab,hide:hideFileWorkspace,toggle:toggleFileWorkspace,removeOwner:removeFileOwner}=useFileTabs(activeId)
 const pluginWorkspaceMode=ref(false),pluginWorkspaceMounted=ref(false)
 const fileWorkspaceVisible=computed(()=>fileTabsState.value.open&&fileTabsState.value.tabs.length>0&&!settingsOpen.value&&!creatorKind.value&&!pluginWorkspaceMode.value)
 const previewWidth = ref(400)
@@ -4504,6 +4524,14 @@ function onRenameInputBlur() {
   void commitRenameChat()
 }
 
+function renameCurrentChat() {
+  if(!active.value)return
+  activateSidebar('chats',false)
+  if(isMobileLayout.value)mobileSidebarOpen.value=true
+  if(chatBatchMode.value)exitChatBatchMode()
+  startRenameChat(active.value)
+}
+
 function startRenameChat(c: ChatSession) {
   closeChatSwipe()
   chatMoreOpenId.value = null
@@ -5639,6 +5667,7 @@ onUnmounted(() => {
 .shell:not(.mobile-layout)>.main:has(>.file-manager.is-active){grid-template-rows:minmax(0,1fr)}
 .shell.mobile-layout>.main:has(>.file-manager.is-active){grid-template-rows:auto minmax(0,1fr)}
 .shell {
+  position: relative;
   display: grid;
   grid-template-columns: clamp(220px, 26vw, 280px) minmax(0, 1fr);
   height: 100vh;
@@ -5787,6 +5816,18 @@ onUnmounted(() => {
   width: 0 !important;
   margin-right: 0 !important;
 }
+.global-title-actions{position:absolute;top:7px;right:12px;z-index:20;}
+.shell.frameless:not(.platform-mac)>.global-title-actions{right:154px}
+.shell.platform-mac>.global-title-actions{right:12px}
+.chat-list-actions { display:flex; align-items:center; gap:6px; flex-shrink:0; padding:3px 0 9px; }
+.chat-list-actions button { height:34px; display:flex; align-items:center; gap:9px; padding:0 10px; border:1px solid #d9e0e9; border-radius:8px; background:#fff; color:#4a607c; font:inherit; font-size:12px; cursor:default; transition:background-color 140ms ease,border-color 140ms ease,color 140ms ease; }
+.chat-list-actions .chat-new-action { flex:1; min-width:0; }
+.chat-list-actions .chat-search-action { justify-content:center; width:34px; padding:0; flex-shrink:0; }
+.chat-list-actions svg { width:14px; height:14px; flex-shrink:0; }
+.chat-list-actions kbd { margin-left:auto; color:#8996a8; font-size:10px;line-height:1.2;font-family:inherit; white-space:nowrap; }
+.chat-list-actions button:hover { background:#eaf0f7; border-color:#bfcede; color:#34577e; }
+.chat-list-actions button:focus-visible { outline:2px solid #537ab9; outline-offset:2px; }
+@media(prefers-reduced-motion:reduce){.chat-list-actions button{transition:none}}
 .new-chat-btn {
   flex: 1;
   min-width: 0;

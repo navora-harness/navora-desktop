@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, webContents, dialog } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import assert from 'node:assert/strict'
@@ -56,7 +56,8 @@ for(let i=0;i<120;i++) {
 app.setPath('userData',root)
 BrowserWindow.prototype.show = function () {}
 BrowserWindow.prototype.focus = function () {}
-const openedPaths:string[]=[],openedUrls:string[]=[]
+const openedPaths:string[]=[],openedUrls:string[]=[],revealedPaths:string[]=[]
+shell.showItemInFolder=target=>{revealedPaths.push(target)}
 shell.openExternal=async url=>{openedUrls.push(url)}
 shell.openPath=async target=>{openedPaths.push(target);return ''}
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve,ms))
@@ -77,8 +78,9 @@ app.on('browser-window-created', (_,win) => {
       win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...point})
       await wait(260)
     }
+    const openFilePicker = async () => { await click('[aria-label="文件预览更多操作"]'); await click('.v-overlay--active [aria-label="新增文件标签页"]') }
     const hideFilePreview = async () => { await click('[aria-label="文件预览更多操作"]'); assert.equal(await js('!!document.querySelector(".file-workspace")'),true,'Opening file actions keeps the preview open'); await click('.v-overlay--active .sidebar-panel-menu [aria-label="关闭文件预览"]') }
-    const hideResourcePanel = async () => { await click('[aria-label="资源面板更多操作"]'); assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),true,'A floating resource card stays open while its actions are used'); await click('.v-overlay--active .sidebar-panel-menu [aria-label="关闭资源面板"]') }
+    const hideResourcePanel = async () => { await click('[aria-label="摘要面板更多操作"]'); assert.equal(await js('!!document.querySelector(".conversation-resource-card")'),true,'A floating resource card stays open while its actions are used'); await click('.v-overlay--active .sidebar-panel-menu [aria-label="关闭资源面板"]') }
     const tab = async (label: string) => { await js(`[...document.querySelectorAll('.settings-navigation .nav-label')].find(el=>el.textContent.trim()===${JSON.stringify(label)}).closest('button').click()`); await wait(100) }
     const input = async (selector: string, value: string, event = 'input') => { await js(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});el.value=${JSON.stringify(value)};el.dispatchEvent(new Event(${JSON.stringify(event)},{bubbles:true}))})()`); await wait(40) }
     const capture = async (name: string) => { await wait(100); fs.writeFileSync(path.join(output,name+'.png'),(await win.webContents.capturePage(undefined,{stayHidden:true})).toPNG()) }
@@ -92,6 +94,7 @@ app.on('browser-window-created', (_,win) => {
     let slowDownload:ServerResponse|undefined,releaseAfterDownload:(()=>void)|undefined
     const nativePayload=Buffer.alloc(32768,65)
     const server = createServer(async (req,res) => {
+      if(req.url==='/sidebar-page'){res.setHeader('Content-Type','text/html; charset=utf-8');res.end('<html><head><title>侧栏测试</title></head><body>侧栏浏览器已加载</body></html>');return}
       if(req.url==='/native-download'){
         slowDownload=res;res.writeHead(200,{'Content-Type':'application/octet-stream','X-Content-Type-Options':'nosniff','Content-Disposition':'attachment; filename="native-fixture.txt"','Content-Length':nativePayload.length});res.write(nativePayload.subarray(0,8192));return
       }
@@ -132,6 +135,13 @@ app.on('browser-window-created', (_,win) => {
       for(let n=0;n<60;n++) { if(await js('!!document.querySelector(".composer")')) break; await wait(100) }
       win.setMinimumSize(0,0); win.setContentSize(1440,900); await wait(150)
       await click('.sidebar-settings-btn'); await tab('模型')
+      assert.equal(await js('document.querySelector(".settings-workspace .save-btn").getBoundingClientRect().right<document.querySelector(".global-title-actions").getBoundingClientRect().left'),true,'Fixed page controls never overlap Apply')
+      await click('[aria-label="页面更多操作"]')
+      assert.equal(await js('document.querySelector(".conversation-actions-menu").textContent.includes("应用设置")'),true,'The persistent menu adapts to settings')
+      assert.equal(await js('!!document.querySelector(".conversation-actions-menu [aria-label=快速打开浏览器]")'),false,'Settings does not inherit conversation actions')
+      await capture('settings-global-actions')
+      await click('[aria-label="页面更多操作"]')
+
       assert.equal(await js('document.querySelectorAll(".model-entry").length'),1,'Only the selected model is mounted')
       assert.equal(await js('document.querySelectorAll(".reasoning-row").length'),0,'Reasoning mappings start folded')
       assert.equal(await js(`(()=>{const key=document.querySelector('input[type="password"]'),p=document.querySelector('.settings-page .content');return key.getBoundingClientRect().bottom<p.getBoundingClientRect().bottom})()`),true,'Key is visible before capabilities')
@@ -150,7 +160,7 @@ app.on('browser-window-created', (_,win) => {
       await selectCloud(); await click('.tier-mapping-toggle')
       await input('.reasoning-row:nth-child(3) input','quick','change')
       assert.equal(await js('document.querySelector(".default-tier select").value'),'quick','Renaming the default tier follows its new name')
-      await click('.save-btn'); await wait(400)
+      await click('[aria-label="页面更多操作"]'); await click('.conversation-actions-menu button:first-of-type'); await wait(400)
       assert.equal(secrets.get(cloud.api_key_ref),'fixture-cloud-key')
       assert.equal(secrets.get(config.ai.providers[0]!.api_key_ref),'fixture-openai-key','Apply stores every provider draft in its own secret')
       const saved = await js('window.navora.config.get()')
@@ -238,14 +248,14 @@ app.on('browser-window-created', (_,win) => {
       await js(`document.querySelector('.messages .msg-md-content img[data-src="image.png"]').click()`);await wait(150)
       assert.equal(await js('!!document.querySelector(".media-lightbox")'),false,'Workspace images open in tabs rather than a separate dialog')
 
-      await click('[aria-label="新增文件标签页"]')
+      await openFilePicker()
       await input('.file-workspace-picker [aria-label="搜索工作区文件"]','preview.md')
       await click('.file-workspace-picker [data-resource-path="preview.md"]')
       assert.equal(await js('document.querySelectorAll(".file-workspace [role=tab]").length'),4,'The file picker reuses an existing tab')
       assert.equal(await js('document.querySelector(".file-workspace [role=tab][aria-selected=true]").textContent.includes("preview.md")'),true,'The plus button can select workspace files')
       await js('[...document.querySelectorAll(".file-workspace [role=tab]")].find(tab=>tab.textContent.includes("image.png")).click()');await wait(100)
 
-      await click('[aria-label="新增文件标签页"]')
+      await openFilePicker()
       await js('[...document.querySelectorAll(".file-workspace-picker .workspace-picker-filters button")].find(button=>button.textContent==="产物").click()');await wait(80)
       assert.equal(await js('document.querySelectorAll(".file-workspace-picker .workspace-picker-file").length'),1,'Artifact filters only include known successful outputs')
       await capture('artifact-filter-and-association')
@@ -253,7 +263,7 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('!!document.querySelector(".file-workspace-picker")'),false,'Locating a related answer dismisses the file picker')
       const relatedJump=await js('(()=>{const row=document.querySelector("[data-msg-id=ui-style-answer-error]"),box=document.querySelector(".messages");return {top:row.getBoundingClientRect().top-box.getBoundingClientRect().top,tail:box.scrollHeight-box.clientHeight-box.scrollTop,height:box.clientHeight,rowHeight:row.getBoundingClientRect().height}})()')
       assert.ok(Math.abs(relatedJump.top)<5||(relatedJump.tail<2&&relatedJump.top>=0&&relatedJump.top+relatedJump.rowHeight<=relatedJump.height),'Artifact links locate their actual final answer: '+JSON.stringify(relatedJump))
-      await click('[aria-label="新增文件标签页"]')
+      await openFilePicker()
       await input('.file-workspace-picker [aria-label="搜索工作区文件"]','folder guide')
       assert.equal(await js('document.querySelectorAll(".file-workspace-picker .workspace-picker-file").length'),1,'Search matches tokens across nested file paths')
       await capture('nested-file-search')
@@ -276,6 +286,28 @@ app.on('browser-window-created', (_,win) => {
       await click('.settings-close')
       assert.equal(await js('document.querySelectorAll(".file-workspace [role=tab]").length'),3,'Returning from settings restores the file workspace')
 
+      const selectedPreviewName=await js('document.querySelector(".file-workspace [role=tab][aria-selected=true]").textContent.trim()')
+      await click('[aria-label="打开文件选项"]')
+      assert.equal(await js('document.querySelector(".v-overlay--active .preview-open-menu").textContent.includes("另存为")'),true,'The file menu includes the native save action')
+      await capture('file-open-options')
+      await js('[...document.querySelectorAll(".v-overlay--active .preview-open-menu button")].find(el=>el.textContent.includes("打开所在文件夹")).click()');await wait(100)
+      assert.equal(path.basename(revealedPaths.at(-1)!), selectedPreviewName,'The file menu reveals the selected file')
+      const savedCopy=path.join(root,'saved-copy.txt'),originalSaveDialog=dialog.showSaveDialog
+      try{dialog.showSaveDialog=(async()=>({canceled:false,filePath:savedCopy})) as typeof dialog.showSaveDialog;await click('[aria-label="下载文件"]');assert.equal(fs.existsSync(savedCopy),true,'Download copies the original file through a save dialog');assert.deepEqual(fs.readFileSync(savedCopy),fs.readFileSync(selectedPreviewName==='note.txt'?path.join(workspaceFixture,selectedPreviewName):path.join(path.dirname(workspaceFixture),selectedPreviewName)));dialog.showSaveDialog=(async()=>({canceled:true,filePath:''})) as typeof dialog.showSaveDialog;assert.equal(await js('window.navora.workspace.saveAs("chat_renovation119","image.png").then(result=>result.canceled)'),true,'Cancel leaves the original file untouched')}finally{dialog.showSaveDialog=originalSaveDialog}
+      const rightToggleX=await js('document.querySelector("[data-chat-resource=workspace]").getBoundingClientRect().x')
+      await click('[aria-label="新建浏览器标签页"]');await wait(350)
+      assert.equal(await js('document.querySelectorAll(".file-workspace [role=tab]").length'),4,'The plus opens a browser tab alongside existing files')
+      assert.equal(await js('!!document.querySelector(".browser-tab-panel webview")'),true,'A browser tab has a real isolated browser surface')
+      await input('[aria-label="浏览器地址"]',`http://127.0.0.1:${(server.address() as {port:number}).port}/sidebar-page`)
+      await click('[aria-label="打开网址"]');await wait(350)
+      const browserGuestId=await js('document.querySelector(".browser-tab-panel webview").getWebContentsId()')
+      const browserGuest=webContents.fromId(browserGuestId)!
+      assert.equal(await browserGuest.executeJavaScript('document.body.textContent.includes("侧栏浏览器已加载")'),true,'Browser tabs navigate and render an actual page')
+      assert.equal(await browserGuest.executeJavaScript('typeof window.navora+":"+typeof process'),'undefined:undefined','Web pages receive neither application APIs nor Node globals')
+      assert.equal(await js('document.querySelector("[data-chat-resource=workspace]").getBoundingClientRect().x'),rightToggleX,'The right sidebar button stays fixed beside the window controls')
+      await capture('sidebar-browser-tab')
+      await click('[aria-label="关闭标签页：侧栏测试"]')
+      assert.equal(await js('document.querySelectorAll(".file-workspace [role=tab]").length'),3,'Closing a browser tab preserves file tabs')
       await hideFilePreview()
       assert.equal(await js('!!document.querySelector(".file-preview")'),false)
       assert.equal(await js('document.activeElement.dataset.chatResource'),'workspace','Hiding the file pane restores focus to its launcher')
@@ -435,6 +467,13 @@ app.on('browser-window-created', (_,win) => {
       await click('[data-resource-view="browser"]')
       assert.equal(await js('document.querySelectorAll(".conversation-resource-card .tree-sess").length'),1,'Current browser card excludes unrelated sessions')
       await hideResourcePanel()
+      await click('[aria-label="页面更多操作"]')
+      assert.equal(await js('document.querySelector(".conversation-actions-menu").textContent.includes("0 个窗口")'),false,'The current conversation reports its own browser windows')
+      assert.equal(await js('document.querySelector(".conversation-actions-menu").textContent.includes("修改标题")'),true)
+      await capture('conversation-global-actions')
+      await click('.conversation-actions-menu [aria-label="快速打开浏览器"]')
+      assert.equal(await js('document.querySelectorAll(".conversation-resource-card .tree-sess").length'),1,'The menu reuses a current-chat browser without opening another session')
+      await hideResourcePanel()
       await click('.model-panel-trigger')
       assert.equal(await js('!!document.querySelector(".unified-model-panel .model-panel-reasoning")'),true,'Model and reasoning choices share one panel')
       assert.equal(await js('!!document.querySelector(".reasoning-tier-button,.composer-expand")'),false,'Separate reasoning and manual expansion controls are removed')
@@ -466,7 +505,7 @@ app.on('browser-window-created', (_,win) => {
       await wait(100)
       assert.ok(await js('document.querySelector(".composer-box").getBoundingClientRect().height')>singleLineHeight+100,'The composer expands automatically for multiline drafts')
       await input('.composer-input textarea','')
-      await click('[aria-label="当前对话资源"]')
+      await click('[aria-label="当前对话摘要"]')
       await capture('current-chat-browser')
       if(await js('!!document.querySelector(".conversation-resource-card")'))await hideResourcePanel()
       await js('(async()=>{const tree=await window.navora.browser.tree("chat_renovation119");await window.navora.browser.setVisible(tree[0].windows[0].windowId,true)})()');await wait(160)
@@ -494,7 +533,7 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(await js('document.querySelector(".batch-delete-btn").disabled'),false)
       await capture('chat-batch-actions')
       await click('.chat-batch-trigger')
-      assert.equal(await js('document.querySelector(".rail-search").closest(".activity-rail")!==null'),true,'Search stays in the rail')
+      assert.equal(await js('document.querySelector(".chat-search-action").closest(".chat-list-actions")!==null'),true,'Search stays above the conversation list')
       assert.equal(await js('document.querySelectorAll(".run-card.open").length'),0,'Tool and plugin groups start collapsed')
       await js('document.querySelectorAll(".outline-step")[70].click()')
       await wait(350)
@@ -639,7 +678,7 @@ app.on('browser-window-created', (_,win) => {
       assert.equal(laterNative.content,'后续任务正常完成。','A previous download does not replace an unrelated later answer')
       await capture('native-download-late-artifact')
       assert.deepEqual(errors,[],'No renderer errors')
-      fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reduced,frameMetrics,modelRequests,checks:['native-browser-download-pending-final','native-download-deduplication','late-native-download-answer-ownership','unified-model-and-reasoning-panel','composer-file-session-browser-commands','composer-automatic-growth','file-management-view','file-list-grid-search','file-view-survives-navigation-collapse','browser-resource-labels','fixed-width-outline','runtime-file-answer-association','artifact-associations','artifact-type-filter','lazy-settings-and-creators','nested-resource-index','file-search','nested-markdown-links','stable-file-identities','tab-focus-recovery','process-vs-final-legacy','process-vs-final-runtime','process-reasoning-group','final-resource-filter','provider-drafts','reopen-draft','tier-rename','preview-race','separate-probes','permission-search','visible-empty-states','workspace-keyboard','file-preview','file-preview-source-safety','file-preview-width','file-tab-reuse-and-close','file-tab-state-cache','image-zoom-tabs','file-picker-tabs','file-workspace-hide-restore','compact-chat-rows','native-explorer-current-path','floating-resource-files-browser-outputs','resource-auto-open-dismissal','resource-space-aware-overlay','resource-outside-dismissal','resource-owned-menu','compact-resource-overview','resource-source-links','conversation-scrollbar-window-edge','all-chat-files','all-browser-owners','single-sidebar','old-group-migration','message-queue-edit-delete-insert','main-process-queue-persistence','active-context-insertion','long-conversation-jump','zoom-layout','interrupted-motion','single-mobile-header']},null,2))
+      fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reduced,frameMetrics,modelRequests,checks:['fixed-contextual-page-actions','browser-tabs-render-isolation','file-save-as-cancel-and-reveal','native-browser-download-pending-final','native-download-deduplication','late-native-download-answer-ownership','unified-model-and-reasoning-panel','composer-file-session-browser-commands','composer-automatic-growth','file-management-view','file-list-grid-search','file-view-survives-navigation-collapse','browser-resource-labels','fixed-width-outline','runtime-file-answer-association','artifact-associations','artifact-type-filter','lazy-settings-and-creators','nested-resource-index','file-search','nested-markdown-links','stable-file-identities','tab-focus-recovery','process-vs-final-legacy','process-vs-final-runtime','process-reasoning-group','final-resource-filter','provider-drafts','reopen-draft','tier-rename','preview-race','separate-probes','permission-search','visible-empty-states','workspace-keyboard','file-preview','file-preview-source-safety','file-preview-width','file-tab-reuse-and-close','file-tab-state-cache','image-zoom-tabs','file-picker-tabs','file-workspace-hide-restore','compact-chat-rows','native-explorer-current-path','floating-resource-files-browser-outputs','resource-auto-open-dismissal','resource-space-aware-overlay','resource-outside-dismissal','resource-owned-menu','compact-resource-overview','resource-source-links','conversation-scrollbar-window-edge','all-chat-files','all-browser-owners','single-sidebar','old-group-migration','message-queue-edit-delete-insert','main-process-queue-persistence','active-context-insertion','long-conversation-jump','zoom-layout','interrupted-motion','single-mobile-header']},null,2))
       console.log(JSON.stringify({ok:true,reduced,frameMetrics,modelRequests}))
       server.close(); app.exit(0)
     } catch(error) { console.error(error); await capture('failure'); server.close(); app.exit(1) }

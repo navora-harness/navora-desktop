@@ -130,6 +130,7 @@ async function confirmImport(options:PluginImportOptions){if(!importPath.value)r
 async function removePlugin(){const target=deleteTarget.value;if(!target||protectedPlugin(target))return;await perform('delete',async()=>{const result=await window.navora!.plugins.remove(target.id);if(!result.ok)throw Error(result.error||'卸载失败');deleteTarget.value=null;await loadLocal();emit('notify',target.kind==='linked'?'已取消外链':'插件已卸载','success')})}
 onMounted(()=>{unsubscribePlugins=window.navora?.plugins?.onChanged(payload=>{++listGeneration;loading.value=false;records.value=payload.plugins;localLoaded=true;listError.value=''});unsubscribeStore=onInstalled(()=>{void loadLocal();if(storeLoaded)void loadStore()})})
 onBeforeUnmount(()=>{disposed=true;++listGeneration;++storeGeneration;++docsGeneration;unsubscribePlugins?.();unsubscribeStore?.()})
+defineExpose({refresh,manage:toggleManage})
 </script>
 
 <style scoped>

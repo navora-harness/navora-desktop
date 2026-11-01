@@ -4,10 +4,12 @@
     <header class="preview-head">
       <font-awesome-icon v-if="!tabbed" icon="file" />
       <div v-if="!tabbed" class="preview-name" :title="path">{{ name }}</div>
-      <span v-if="tabbed" class="preview-name">{{ data?.kind==='image'?'图片':data?.kind==='markdown'?'Markdown':data?.kind==='text'?'文本':'文件' }}</span>
+      <v-menu v-if="tabbed" location="bottom start" origin="auto" :offset="6"><template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" class="preview-type" aria-label="文件显示方式"><font-awesome-icon :icon="data?.kind==='image'?'image':'file-lines'" />{{ data?.kind==='image'?'图像':data?.kind==='markdown'?(source?'源码':'Markdown'):data?.kind==='text'?'文本':'文件' }}<font-awesome-icon icon="chevron-down" /></button></template><div class="preview-open-menu" role="menu"><button v-if="data?.kind==='markdown'" type="button" role="menuitem" @click="source=false">Markdown 预览</button><button v-if="data?.content!==undefined" type="button" role="menuitem" @click="source=true">文本源码</button><span v-if="data?.content===undefined">{{ data?.kind==='image'?'图像预览':'使用默认应用打开此文件' }}</span></div></v-menu>
+      <span v-if="tabbed" class="preview-spacer" />
       <select v-if="data?.kind==='image'" v-model="imageZoom" class="preview-zoom" aria-label="图片缩放"><option value="fit">适应窗口</option><option value="50">50%</option><option value="100">100%</option><option value="150">150%</option><option value="200">200%</option></select>
       <button type="button" title="刷新预览" aria-label="刷新预览" :disabled="loading" @click="load(true)"><font-awesome-icon icon="arrow-rotate-right" /></button>
-      <button type="button" title="在系统中打开" aria-label="在系统中打开" @click="systemOpen"><font-awesome-icon icon="arrow-up-right-from-square" /></button>
+      <div class="preview-open-group"><button type="button" class="preview-open-default" title="使用默认应用打开" aria-label="在系统中打开" @click="systemOpen"><font-awesome-icon icon="folder-open" /><span>打开</span></button><v-menu location="bottom end" origin="auto" :offset="6"><template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" aria-label="打开文件选项"><font-awesome-icon icon="chevron-down" /></button></template><div class="preview-open-menu" role="menu"><button type="button" role="menuitem" @click="systemOpen">默认应用</button><div class="preview-open-rule" /><button type="button" role="menuitem" @click="reveal">打开所在文件夹</button><button type="button" role="menuitem" :disabled="saving" @click="saveAs">另存为…</button></div></v-menu></div>
+      <button type="button" title="下载文件" aria-label="下载文件" :disabled="saving" @click="saveAs"><font-awesome-icon icon="download" /></button>
       <SidebarMoreMenu v-if="!tabbed" label="文件预览" hide-label="隐藏文件侧栏" hide-aria-label="关闭文件预览" @hide="emit('close')" />
     </header>
     <div v-if="data?.ok" class="preview-tools">
@@ -48,6 +50,7 @@ const source = ref(false)
 const imageZoom=ref('fit'),imageNaturalWidth=ref(0)
 let active=true,dirty=false
 const copied = ref(false)
+const saving=ref(false)
 const maximum = ref(Math.max(280, Math.min(800, innerWidth - 360)))
 const name = computed(() => props.path.split(/[\\/]/).at(-1) || props.path)
 const markdown = computed(() => DOMPurify.sanitize(renderMarkdown(data.value?.content || ''), { FORBID_ATTR: ['style'], FORBID_TAGS: ['img', 'video', 'audio', 'iframe', 'object', 'embed', 'style', 'form', 'input', 'button', 'textarea', 'select'] }))
@@ -83,6 +86,8 @@ async function systemOpen() {
     if (!result.ok) throw new Error(result.error)
   } catch { emit('notify', '无法打开此文件') }
 }
+async function reveal(){try{const result=await window.navora!.workspace.reveal(props.chatId,props.path);if(!result.ok)throw Error()}catch{emit('notify','无法打开所在文件夹')}}
+async function saveAs(){if(saving.value)return;saving.value=true;try{const result=await window.navora!.workspace.saveAs(props.chatId,props.path);if(!result.ok&&!result.canceled)emit('notify',result.error==='local_only'?'请在桌面端保存文件':'无法保存此文件')}catch{emit('notify','无法保存此文件')}finally{saving.value=false}}
 async function copy() {
   const content = data.value?.content
   if (content === undefined) return
@@ -162,6 +167,9 @@ onBeforeUnmount(() => { disposed = true; sequence++; stopResize?.(); unsubscribe
 .preview-head > svg { width:14px; margin-right:3px; }
 .preview-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:600; }
 .preview-head button { flex-shrink:0; width:28px; height:28px; padding:6px; display:grid; place-items:center; }
+.preview-head .preview-type{display:flex;gap:7px;width:auto;padding:6px 9px;border-color:#dbe2eb;background:#fff;border-radius:16px;white-space:nowrap}.preview-type svg{width:12px;height:12px}.preview-type svg:last-child{width:9px}
+.preview-open-group{display:flex;align-items:center;flex-shrink:0;border:1px solid #dbe2eb;border-radius:16px;background:white;overflow:hidden}.preview-head .preview-open-default{width:auto;display:flex;gap:6px;padding:5px 9px}.preview-open-group>button{border-radius:0}.preview-open-group svg{width:12px;height:12px}
+.preview-open-menu{min-width:185px;padding:5px;border:1px solid #d5deea;border-radius:10px;background:#fff;box-shadow:0 8px 24px #243b581c;font-size:12px;color:#4a5d76}.preview-open-menu button{display:block;width:100%;padding:9px 11px;text-align:left;border-radius:6px}.preview-open-menu button:hover{background:#eaf0f7}.preview-open-menu>span{display:block;padding:9px 11px;font-size:11px;color:#7d8ba0}.preview-open-rule{height:1px;background:#dfe5ed;margin:5px}.preview-head{flex-wrap:wrap}
 button { border:1px solid transparent; border-radius:7px; color:#596475; transition:background-color 140ms ease,border-color 140ms ease; cursor:pointer; font-size:12px; }
 button:hover:not(:disabled) { background:#eef1f5; border-color:#dfe4eb; color:#293b53; }
 button:focus-visible,.preview-resizer:focus-visible { outline:2px solid #537ab9; outline-offset:-2px; }
