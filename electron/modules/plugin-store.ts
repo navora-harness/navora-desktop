@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import { createRequire } from 'node:module'
@@ -22,6 +23,10 @@ import {
 } from '../../shared/plugins'
 import { isSafeZipEntryName, normalizeStoreSuite } from '../../shared/store'
 import { ensureDir } from '../data-root'
+import { assertPackageCompatible, assertRuntimeFiles, checkRuntimeVersion } from './plugin-package'
+import { assertPlatformPackage } from '../../shared/plugin-platform'
+import { FcurlRuntimeManager } from './fcurl-runtime'
+import { commitPluginInstall, recoverPluginTransactions } from './plugin-install-transaction'
 import { createPluginHostApi } from './plugin-host'
 import type { ToolExecContext } from './browser-tools'
 
@@ -136,6 +141,7 @@ function validatePluginDir(dir: string): {
     throw new Error(e instanceof Error ? e.message : String(e))
   }
   if (!isManifest(raw)) throw new Error('invalid_manifest')
+  assertPackageCompatible(raw, app.getVersion())
   const mainRel = raw.main || 'main.cjs'
   if (mainRel.includes('..') || path.isAbsolute(mainRel)) throw new Error('invalid_main_path')
   const ext = path.extname(mainRel).toLowerCase()
@@ -144,6 +150,7 @@ function validatePluginDir(dir: string): {
   if (!fs.existsSync(mainFile) || !fs.statSync(mainFile).isFile()) {
     throw new Error(`main_missing:${mainRel}`)
   }
+  assertRuntimeFiles(dir, raw)
   return { manifest: raw, mainRel, mainFile }
 }
 
@@ -152,7 +159,16 @@ function zipEntryName(e: ZipEntry): string {
 }
 
 function assertZipEntriesSafe(entries: ZipEntry[]): void {
+  let expanded = 0
+  const names = new Set<string>()
+  if (entries.length > 50_000) throw new Error('zip_too_many_files')
   for (const e of entries) {
+    const name = zipEntryName(e).toLowerCase()
+    if (name.replace(/\/$/, '').split('/').some(p => /[.:\x00-\x1f ]$/.test(p) || /[:\x00-\x1f]/.test(p))) throw new Error('zip_unsafe_path')
+    expanded += e.header.size
+    if (expanded > 1024 * 1024 * 1024 || names.has(name)) throw new Error('zip_expansion_limit')
+    names.add(name)
+    if (((e.attr >>> 16) & 0xf000) === 0xa000) throw new Error('zip_symlink')
     if (!isSafeZipEntryName(zipEntryName(e))) throw new Error('zip_unsafe_path')
   }
 }
@@ -163,6 +179,7 @@ function findZipEntry(entries: ZipEntry[], relPath: string): ZipEntry | undefine
 }
 
 function parseJsonEntry(entry: ZipEntry): unknown {
+  if (entry.header.size > 2 * 1024 * 1024) throw new Error('manifest_too_large')
   return JSON.parse(entry.getData().toString('utf8').replace(/^\uFEFF/, ''))
 }
 
@@ -275,6 +292,7 @@ function peekZip(zipPath: string, opts?: { packageId?: string }): PeekedZip {
       } catch (e) {
         throw new Error(e instanceof Error ? e.message : String(e))
       }
+      if (isManifest(pkgManifest)) assertPlatformPackage(pkgManifest)
       if (!isManifest(pkgManifest) || pkgManifest.id !== id) {
         throw new Error(`invalid_manifest:${id}`)
       }
@@ -307,6 +325,7 @@ function peekZip(zipPath: string, opts?: { packageId?: string }): PeekedZip {
     const manifest = parseJsonEntry(pluginJson) as PluginManifest
     if (!isManifest(manifest)) throw new Error(`invalid_manifest:${packageId}`)
     const mainRel = manifest.main || 'main.cjs'
+    assertPackageCompatible(manifest, app.getVersion())
 
     return {
       kind: 'suite',
@@ -337,6 +356,7 @@ function peekZip(zipPath: string, opts?: { packageId?: string }): PeekedZip {
     throw new Error(e instanceof Error ? e.message : String(e))
   }
   if (!isManifest(raw)) throw new Error('invalid_manifest')
+  assertPackageCompatible(raw, app.getVersion())
   const mainRel = raw.main || 'main.cjs'
   if (mainRel.includes('..') || path.isAbsolute(mainRel)) throw new Error('invalid_main_path')
   const ext = path.extname(mainRel).toLowerCase()
@@ -415,6 +435,7 @@ function bundledPluginsRoot(): string {
  * Loadable plugin store: scans dataRoot/plugins + linked external folders, then require(main).
  */
 export class PluginStore {
+  private runtime: FcurlRuntimeManager
   private root: string
   private indexPath: string
   private index: PluginsIndex = emptyPluginsIndex()
@@ -428,15 +449,21 @@ export class PluginStore {
   private changeScheduled = false
 
   constructor(dataRoot: string) {
+    this.runtime = new FcurlRuntimeManager(path.join(dataRoot, 'plugin-runtime'))
     this.root = path.join(dataRoot, 'plugins')
     this.indexPath = path.join(this.root, 'index.json')
     ensureDir(this.root)
+    recoverPluginTransactions(this.root)
     this.reload()
   }
 
   onChanged(listener: (() => void) | null): void {
     this.changeListener = listener
   }
+
+  cancelChat(chatId: string): void { this.runtime.cancel({ chatId }) }
+
+  dispose(): void { this.runtime.dispose() }
 
   getRoot(): string {
     return this.root
@@ -608,7 +635,7 @@ export class PluginStore {
     // 1) Installed / bundled under dataRoot/plugins (skip ids that are linked)
     if (fs.existsSync(this.root)) {
       for (const dirName of fs.readdirSync(this.root)) {
-        if (dirName === 'index.json') continue
+        if (dirName.startsWith('.') || dirName === 'index.json') continue
         const dirPath = path.join(this.root, dirName)
         let st: fs.Stats
         try {
@@ -782,6 +809,8 @@ export class PluginStore {
         name: loaded.manifest.name,
         description: loaded.manifest.description || '',
         version: loaded.manifest.version,
+        artifactId: loaded.manifest.artifactId,
+        targetLabel: loaded.manifest.artifactId,
         enabled: enabled.has(id),
         bundled: loaded.kind === 'bundled',
         kind: loaded.kind,
@@ -885,6 +914,7 @@ export class PluginStore {
       }
     }
 
+    if (!enabled) this.runtime.cancel({ pluginId: id })
     entry.enabled = Boolean(enabled)
     this.rebuildToolIndex()
     this.persistIndex()
@@ -904,6 +934,7 @@ export class PluginStore {
     if (loaded.kind === 'bundled' || loaded.manifest.bundled) {
       return { ok: false, error: 'plugin_bundled_cannot_remove' }
     }
+    if (this.runtime.isActive(id)) return { ok: false, error: 'plugin_busy' }
     try {
       if (loaded.kind === 'installed') {
         fs.rmSync(loaded.dirPath, { recursive: true, force: true })
@@ -960,10 +991,13 @@ export class PluginStore {
       base: Omit<PluginImportPreview, 'suite' | 'suiteConflicts'>,
       manifest: PluginManifest,
     ): PluginImportPreview => {
+      assertPackageCompatible(manifest, app.getVersion())
       const suite = suiteOf(manifest)
       const conflicts = this.findSuiteConflicts(suite, manifest.id)
       return {
         ...base,
+        artifactId: manifest.artifactId,
+        targetLabel: manifest.artifactId,
         ...(suite ? { suite } : {}),
         ...(conflicts.length
           ? {
@@ -1207,65 +1241,48 @@ export class PluginStore {
 
     opts?.onProgress?.({ phase: 'verify', label: '校验压缩包' })
     const conflicts = this.findSuiteConflicts(suiteOf(manifest), manifest.id)
-    if (conflicts.length) {
-      const replace = opts?.replaceSuite ?? opts?.replaceExclusivity
-      if (!replace) return this.suiteConflictError(conflicts)
-      opts?.onProgress?.({ phase: 'replace_suite', label: '卸载同套件包' })
-      const cleared = this.removeSuiteConflicts(conflicts)
-      if (!cleared.ok) return { ok: false, error: cleared.error }
-    }
-
+    if (conflicts.length && !(opts?.replaceSuite ?? opts?.replaceExclusivity)) return this.suiteConflictError(conflicts)
+    if ([manifest.id, ...conflicts.map(c => c.id)].some(id => this.runtime.isActive(id))) return { ok: false, error: 'plugin_busy' }
     const destName = sanitizePluginDirName(manifest.id)
-    const dest = path.join(this.root, destName)
-    const tmp = path.join(
-      os.tmpdir(),
-      `navora-plugin-${destName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    )
-
+    const stagingRoot = path.join(this.root, '.staging')
+    ensureDir(stagingRoot)
+    const tmp = path.join(stagingRoot, randomUUID())
+    const oldIndex = structuredClone(this.index)
     try {
-      opts?.onProgress?.({ phase: 'extract', label: '解压并写入插件目录' })
+      opts?.onProgress?.({ phase: 'extract', label: '解压并验证插件文件' })
       ensureDir(tmp)
-      if (peeked.kind === 'suite') {
-        extractSuitePackageToDir(zipPath, peeked.selected.packagePrefix, tmp)
-      } else {
-        extractSingleZipToDir(zipPath, tmp, peeked.rootPrefix)
-      }
+      if (peeked.kind === 'suite') extractSuitePackageToDir(zipPath, peeked.selected.packagePrefix, tmp)
+      else extractSingleZipToDir(zipPath, tmp, peeked.rootPrefix)
+      assertRuntimeFiles(tmp, manifest, true)
       validatePluginDir(tmp)
-
-      // Clear previous link + dest
-      this.setLinkPath(manifest.id, undefined)
-      this.index.plugins = this.index.plugins.filter((p) => p.id !== manifest.id)
-      if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true })
-      this.removeInstalledDirForId(manifest.id)
-
-      copyDirSync(tmp, dest)
-      const destManifestPath = path.join(dest, 'plugin.json')
-      const written = readJsonFile(destManifestPath) as PluginManifest
-      written.bundled = false
-      fs.writeFileSync(destManifestPath, JSON.stringify(written, null, 2), 'utf8')
-
-      this.index.plugins.push({
-        id: manifest.id,
-        enabled: existing ? existing.enabled : manifest.defaultEnabled !== false,
-        sourceArchive: path.basename(zipPath),
+      checkRuntimeVersion(tmp, manifest)
+      const candidate = this.loadOne(tmp, destName, 'installed')
+      if (candidate.loadError) throw new Error(candidate.loadError)
+      // V2 includes plugin.json in its integrity list: never rewrite the signed inventory.
+      if (manifest.packageFormatVersion !== 2) {
+        const written = readJsonFile(path.join(tmp, 'plugin.json')) as PluginManifest
+        written.bundled = false
+        fs.writeFileSync(path.join(tmp, 'plugin.json'), JSON.stringify(written, null, 2), 'utf8')
+      } else if (manifest.bundled) throw new Error('plugin_bundled_cannot_import')
+      const affected = [manifest.id, ...conflicts.map(c => c.id)]
+      const removeDirs = [...this.loaded.values()].filter(p => affected.includes(p.manifest.id) && p.kind === 'installed').map(p => p.dirName)
+      opts?.onProgress?.({ phase: 'import', label: '提交并加载插件' })
+      commitPluginInstall(this.root, tmp, destName, removeDirs, () => {
+        this.index.plugins = this.index.plugins.filter(p => !affected.includes(p.id))
+        this.index.plugins.push({ id: manifest.id, enabled: existing ? existing.enabled : manifest.defaultEnabled !== false, sourceArchive: path.basename(zipPath) })
+        this.persistIndex()
+        this.reload()
+        const plugin = this.get(manifest.id)
+        if (!plugin || plugin.error) throw new Error(plugin?.error || 'import_load_failed')
       })
-      this.persistIndex()
+      return { ok: true, plugin: this.get(manifest.id) || undefined }
     } catch (e) {
+      this.index = oldIndex
+      this.reload()
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     } finally {
-      try {
-        fs.rmSync(tmp, { recursive: true, force: true })
-      } catch {
-        /* ignore */
-      }
+      fs.rmSync(tmp, { recursive: true, force: true })
     }
-
-    opts?.onProgress?.({ phase: 'import', label: '加载插件模块' })
-    this.reload()
-    const plugin = this.get(manifest.id)
-    if (!plugin) return { ok: false, error: 'import_load_failed' }
-    if (plugin.error) return { ok: false, error: plugin.error, plugin }
-    return { ok: true, plugin }
   }
 
   /** Pack plugin directory into a .zip at destPath. */
@@ -1341,6 +1358,8 @@ export class PluginStore {
         name: loaded.manifest.name,
         description: loaded.manifest.description || '',
         version: loaded.manifest.version,
+        artifactId: loaded.manifest.artifactId,
+        targetLabel: loaded.manifest.artifactId,
         enabled: true,
         bundled: false,
         kind: 'session',
@@ -1603,7 +1622,7 @@ export class PluginStore {
       const gate = await ctx.gate.check(
         ctx.chatId,
         capability,
-        `${name} ${capability} ${JSON.stringify(args).slice(0, 160)}`,
+        loaded.manifest.runtime?.kind === 'executable-sidecar' ? `${name} ${capability}` : `${name} ${capability} ${JSON.stringify(args).slice(0, 160)}`,
         ctx.signal,
       )
       if (!gate.ok) return { ok: false, error: gate.reason || 'permission_denied' }
@@ -1636,7 +1655,13 @@ export class PluginStore {
     if (!capabilities.length) {
       return { ok: false, error: 'plugin_permissions_empty' }
     }
-    const api = createPluginHostApi(ctx, capabilities)
+    const api = createPluginHostApi(ctx, capabilities, {
+      call: (method, args = {}) => {
+        if (this.resolveScopedLoaded(ctx.pluginScopeChatId || ctx.chatId, name)?.loaded !== loaded) return Promise.resolve({ ok: false, error: 'plugin_no_longer_active' })
+        return this.runtime.call({ pluginId, chatId: ctx.chatId, dir: loaded.dirPath, manifest: loaded.manifest,
+          signal: ctx.signal, capabilities, allowlist: () => ctx.getConfig().browser.url_allowlist || [] }, method, args)
+      },
+    })
     const exec = loaded.mod.execute
     if (typeof exec !== 'function') {
       return { ok: false, error: 'plugin_execute_missing' }

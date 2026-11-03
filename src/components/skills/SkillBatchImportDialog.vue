@@ -34,7 +34,7 @@
           <label class="batch-check">
             <input v-model="it.selected" type="checkbox" class="batch-check-input" />
             <span class="batch-check-box" aria-hidden="true">
-              <font-awesome-icon v-if="it.selected" icon="check" />
+              <AppIcon v-if="it.selected" icon="check" />
             </span>
           </label>
 
@@ -77,7 +77,7 @@
             :title="it.expanded ? '收起预览' : '展开预览'"
             @click="it.expanded = !it.expanded"
           >
-            <font-awesome-icon :icon="it.expanded ? 'chevron-down' : 'chevron-right'" />
+            <AppIcon :icon="it.expanded ? 'chevron-down' : 'chevron-right'" />
           </button>
         </div>
 

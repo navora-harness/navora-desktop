@@ -1,0 +1,117 @@
+/* Shared control geometry. Component selectors deliberately exclude content,
+   system window buttons, switches, and custom-rendered web pages. */
+:root{
+  --ui-title-size:14px;--ui-section-size:16px;--ui-body-size:13px;--ui-label-size:12px;--ui-caption-size:11px;
+  --ui-panel-gap:12px;--ui-panel-padding:20px;--ui-dialog-radius:12px;--form-control-height:40px;
+  --control-height:32px;--control-compact:28px;--control-radius:6px;
+  --control-hover:rgba(30,43,66,.05);--control-selected:rgba(50,105,172,.1);
+  --control-danger:#af3946;--control-focus:var(--navora-accent);
+}
+.tab-dragging{cursor:grabbing}
+.tab-is-dragging{opacity:.38;transform:scale(.97);transition:opacity 120ms ease,transform 120ms ease}
+:is(.file-workspace-tab,.browser-host-tab,.file-host-tab){position:relative}
+:is(.tab-drop-before,.tab-drop-after)::after{content:'';position:absolute;inset:3px auto 3px -3px;width:3px;border-radius:3px;background:var(--navora-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--navora-accent) 14%,transparent);pointer-events:none;z-index:3}
+.tab-drop-after::after{left:auto;right:-3px}
+.tab-drag-preview{position:fixed;left:-10000px;top:-10000px;display:flex;align-items:center;gap:9px;min-width:156px;max-width:280px;height:42px;padding:0 13px;border:1px solid #cbd8e6;border-radius:11px;background:linear-gradient(180deg,#fff,#f7f9fc);color:#30465f;box-shadow:0 8px 24px #18202b2c,0 2px 5px #18202b12;font:550 13px/20px 'Segoe UI','Microsoft YaHei',sans-serif}
+.tab-drag-preview svg,.tab-drag-preview img{width:16px;height:16px;flex:0 0 16px;object-fit:contain;border-radius:3px}.tab-drag-preview span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.navora-app .ui-button,.navora-app .ui-icon-button{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-shrink:0;
+  min-height:var(--control-height);padding:5px 12px;border:1px solid var(--navora-stroke);
+  border-radius:var(--control-radius);background:var(--navora-surface);color:var(--navora-ink);
+  font:inherit;font-size:13px;line-height:20px;white-space:nowrap;cursor:pointer;-webkit-app-region:no-drag;
+}
+.navora-app .ui-icon-button{width:var(--control-height);height:var(--control-height);padding:0;border-color:transparent;background:transparent}
+.navora-app :is(.ui-button,.ui-icon-button)>svg{width:16px;height:16px;flex-shrink:0}
+.navora-app :is(.ui-button,.ui-icon-button):hover:not(:disabled){background:var(--control-hover)}
+.navora-app .ui-button.primary{background:var(--navora-accent);border-color:var(--navora-accent);color:#fff}
+.navora-app .ui-button.primary:hover:not(:disabled){filter:brightness(.94)}
+.navora-app :is(.ui-button,.ui-icon-button)[aria-pressed=true]{background:var(--control-selected);color:var(--navora-accent)}
+.navora-app :is(.ui-button,.ui-icon-button):disabled{opacity:.45;cursor:default}
+.navora-app :is(button,a,input,textarea,select,[tabindex]):focus-visible{outline:2px solid var(--control-focus);outline-offset:-2px}
+/* The menu owns its surface. Reset the library's important overlay material
+   so nested backgrounds and shadows cannot leave a second rounded edge. */
+.v-menu.v-overlay>.v-overlay__content.ui-action-menu-overlay{padding:0;border:0;border-radius:12px;background:transparent!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;overflow:visible}
+.ui-action-menu,.v-menu.v-overlay>.v-overlay__content.ui-action-menu-overlay>.ui-action-menu{display:flex;flex-direction:column;gap:2px;box-shadow:0 4px 12px #18202b0a,0 12px 32px #18202b12;-webkit-app-region:no-drag;min-width:220px;max-width:calc(100vw - 24px);max-height:calc(100dvh - 64px);overflow:auto;overscroll-behavior:contain;padding:6px;background:var(--navora-surface);backdrop-filter:none;border:1px solid rgba(30,43,66,.1);border-radius:12px;color:var(--navora-ink)}
+.ui-action-menu button{display:flex;align-items:center;gap:10px;width:100%;min-height:32px;padding:6px 10px;text-align:left;font:inherit;font-size:13px;border-radius:6px;color:inherit;cursor:pointer}
+.ui-action-menu-overlay.browser-default-cursor .ui-action-menu button{cursor:default}
+.ui-action-menu button>svg{flex-shrink:0;width:14px;height:14px;color:var(--navora-muted)}
+.ui-action-menu button:hover:not(:disabled),.ui-action-menu button:focus-visible{background:var(--control-hover)}
+.ui-action-menu button:focus-visible{outline:2px solid var(--control-focus);outline-offset:-2px}
+.ui-action-menu button:disabled{opacity:.45;cursor:default}
+.ui-action-menu button.danger{color:var(--control-danger)}
+.ui-menu-divider{height:1px;background:var(--navora-stroke);margin:6px 4px}
+.navora-app :is(.chat-resource-button,.file-tab-close,.file-workspace-close,.plugin-square,.file-manager-icon,.creator-back,.settings-back,.chat-search-action,.chat-toolbar-icon-btn){width:var(--control-height);height:var(--control-height);border-radius:var(--control-radius);flex-shrink:0}
+.navora-app :is(.creator-footer-actions,.creator-generation-actions,.plugin-detail-actions,.preview-tools,.top-actions) button:not(.ui-icon-button):not([role=switch]){min-height:var(--control-height);font-size:13px;border-radius:var(--control-radius)}
+.navora-app :is(.settings-page,.creator-workspace,.file-manager,.plugin-workspace) .v-btn{min-height:var(--control-height);border-radius:var(--control-radius);text-transform:none;letter-spacing:normal}
+.navora-app :is(.composer-perm-btn,.chat-resource-button,.file-tab-close,.file-workspace-close,.ui-button,.ui-icon-button){transition:background-color 140ms ease,color 140ms ease,border-color 140ms ease}
+.navora-app .main .composer-box{container:composer / inline-size;border-radius:18px;border:1px solid #e2e4e8;background:#fff;padding:10px 12px;box-shadow:0 2px 8px #18202b05}
+.navora-app .main .composer-box:focus-within{border-color:#aab2bc;box-shadow:0 2px 10px #18202b08}
+/* The outer composer provides the focus indicator; an inner textarea ring
+   would duplicate it and visually divide one input into two boxes. */
+.navora-app .main .composer-input textarea:focus-visible{outline:none}
+.navora-app .main .composer-input-row{padding:0 2px 4px;gap:0}
+.navora-app .main .composer-input .v-field{border-radius:0;background:transparent}
+.navora-app .main .composer-input textarea{font-size:14px;line-height:1.6;color:#252a32;caret-color:#252a32}
+.navora-app .main .composer-input textarea::placeholder{color:#969ba4;opacity:1}
+.navora-app .main .composer-actions{gap:12px;padding:2px 0 0;align-items:center;flex-wrap:nowrap}
+.navora-app .main .composer-actions-left{flex-wrap:nowrap;flex-shrink:0}
+.navora-app .main .composer-actions-right{flex:1;justify-content:flex-end}
+.navora-app .composer-actions-left,.navora-app .composer-actions-right{min-width:0;gap:4px}
+.navora-app .main .composer-perm-btn{min-height:32px;border-radius:8px;font-size:12px;font-weight:400;line-height:20px;color:#666d78;gap:6px;padding:5px 7px}
+.navora-app .main .composer-perm-btn:hover:not(:disabled){background:#f1f2f4;color:#252a32}
+.navora-app .main .composer-perm-btn>svg{width:13px;height:13px;flex-shrink:0}
+.navora-app .main .composer-perm-btn>svg:last-child:not(:first-child){width:9px;height:9px;color:#8a9099}
+.navora-app .main .composer-attach-trigger{width:32px;padding:0;justify-content:center}
+.navora-app .main .composer-attach-trigger>svg{width:15px;height:15px}
+.navora-app .main .model-panel-trigger{min-width:0;max-width:240px;gap:6px}
+.navora-app .main .model-panel-trigger>svg:first-child{display:none}
+.navora-app .main .model-trigger-tier{padding:0;background:transparent;border-radius:0;color:#8a9099;font-size:11px;font-weight:400}
+.navora-app .main .model-trigger-tier::before{content:'·';margin-right:6px}
+.navora-app .main .usage-ring-btn{width:28px;height:32px;flex-shrink:0}
+.navora-app .main .usage-ring{width:21px;height:21px}
+.navora-app .main .usage-ring-track{stroke:#e1e4e8;stroke-width:3}
+.navora-app .main .usage-ring-value{stroke-width:3}
+.navora-app .main .composer-send{display:inline-flex;align-items:center;justify-content:center;flex-direction:row;white-space:nowrap;line-height:1;width:32px;height:32px;font-size:14px;flex-shrink:0;background:#25272c;border-radius:50%}
+.navora-app .main .composer-send>svg{width:15px;height:15px;flex-shrink:0}
+.navora-app .main .composer-send>span{flex-shrink:0;line-height:1}
+.navora-app .main .composer-send:hover:not(:disabled){background:#3b3e45}
+.navora-app .main .composer-send:disabled{background:#eceef1;color:#a1a6ae;opacity:1}
+.navora-app .main .composer-send.stop{background:#f2f3f5;color:#404651;border:1px solid #e2e4e8}
+.navora-app .main .composer-send.stop:hover{background:#e7e9ed}
+.navora-app .model-trigger-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.navora-app .main .composer-send.supplement{width:auto;min-width:60px;padding:0 11px;gap:6px;font-size:12px;border-radius:16px}
+.navora-app .composer-send.stop{background:var(--navora-surface);border:1px solid var(--navora-stroke);color:var(--navora-ink)}
+.navora-app :is(.plugin-primary,.creator-primary){background:var(--navora-accent);border-color:var(--navora-accent);color:#fff}
+.navora-app .settings-page .top .save-btn{height:var(--control-height);min-height:var(--control-height);font-size:13px;border-radius:var(--control-radius)}
+.navora-app :is(.sidebar-more-trigger,.preview-head>button,.dl-act,.file-manager-back,.back-chat,.tool-btn){min-height:var(--control-height);border-radius:var(--control-radius)}
+.navora-app .sidebar-more-trigger{width:var(--control-height);height:var(--control-height)}
+.navora-app :is(.sidebar-panel-menu,.sidebar-ctx-panel,.dl-more-panel,.preview-open-menu,.skill-more-panel) button[role=menuitem]{min-height:var(--control-height);border-radius:var(--control-radius);font-size:13px}
+.navora-app :is(.file-workspace-head,.preview-head,.creator-header,.plugin-workspace-head,.settings-page>.top){gap:8px}
+.navora-app .dl-clear{min-height:32px}
+.navora-app :is(.bridge-page,.remote-home) :is(.tool-btn,.back-chat){display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:6px 12px;border:1px solid var(--navora-stroke);font-size:13px}
+@media(pointer:coarse){
+  :root{--control-height:44px;--control-compact:44px}
+  .ui-action-menu button{min-height:44px}
+  .navora-app .dock-header{height:54px;min-height:54px}
+  .navora-app :is(.composer-perm-btn,.preview-head>button,.queue-item-actions button){min-height:44px;min-width:44px}
+  .navora-app .main :is(.composer-perm-btn,.usage-ring-btn,.composer-send){min-height:44px;min-width:44px}
+  .navora-app .main .composer-actions{flex-wrap:wrap}
+}
+@container composer (max-width:520px){
+  .navora-app .main .composer-actions{gap:4px}
+  .navora-app .main .model-panel-trigger{max-width:180px}
+}
+@media(prefers-reduced-motion:reduce){.navora-app :is(.ui-button,.ui-icon-button,.chat-resource-button,.file-tab-close,.file-workspace-close,.composer-perm-btn){transition:none}}
+/* Shared geometry for controls in lazy panes and teleported dialogs. */
+.navora-app .model-catalog :is(input:not([type=checkbox]),select){height:var(--form-control-height);border-radius:6px;font-size:12px}
+.navora-app .model-catalog .catalog-button{min-height:32px;border-radius:6px}.navora-app .model-catalog .catalog-picker>button{height:var(--form-control-height)}
+.navora-app .model-catalog .icon-control{width:32px;height:32px}
+.navora-app :is(.creator-back,.plugin-square,.settings-back){width:var(--control-height);height:var(--control-height);flex-shrink:0}
+.skill-dlg-card .skill-dlg-close{width:var(--control-height);height:var(--control-height);border-radius:6px}.skill-dlg-card .skill-dlg-close svg{width:14px;height:14px}
+.skill-dlg-card :is(.v-btn,.skill-more-btn){min-height:var(--control-height);font-size:12px;letter-spacing:0;border-radius:6px}.skill-dlg-card.is-mobile .skill-dlg-close{width:44px;height:44px}
+.app-toast.v-snackbar{margin:calc(52px + env(safe-area-inset-top,0px)) 12px 12px}
+.app-toast .v-snackbar__wrapper{min-width:0;min-height:40px;max-width:min(420px,calc(100vw - 24px));border:1px solid #71849c26;border-radius:8px!important;background:#fff;box-shadow:0 4px 18px #23354b14}
+.app-toast .v-snackbar__content{padding:10px 12px;font-size:12px;line-height:1.6;letter-spacing:0;overflow-wrap:anywhere}
+.plugin-import-menu button[role=menuitem],.skill-more-panel .skill-more-item{min-height:32px;padding:6px 10px;border-radius:6px;font-size:12px;line-height:20px}
+.v-dialog .v-card-title{font-size:16px;font-weight:600;line-height:24px;white-space:normal;overflow-wrap:anywhere}
+.v-dialog .v-card-actions{flex-wrap:wrap;gap:8px}.v-dialog .v-card-actions .v-btn{min-height:var(--control-height);font-size:12px;letter-spacing:0}

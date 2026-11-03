@@ -2,15 +2,15 @@
   <div class="remote-home">
     <header class="top">
       <div class="top-row">
-        <h1>远程窗口</h1>
-        <button type="button" class="back-chat" :disabled="refreshing" @click="refresh">{{ refreshing ? '刷新中…' : '刷新' }}</button>
-        <button type="button" class="back-chat" @click="$router.push('/')">返回 Chat</button>
+        <h1>远程页面</h1>
+        <button type="button" class="back-chat" aria-label="刷新远程页面" :disabled="refreshing" @click="refresh"><AppIcon icon="arrow-rotate-right" />{{ refreshing ? '刷新中…' : '刷新' }}</button>
+        <button type="button" class="back-chat" @click="$router.push('/')"><AppIcon icon="comments" />返回对话</button>
       </div>
-      <p>选择一个窗口进行画面查看与操控</p>
+      <p>选择一个页面进行画面查看与操控</p>
     </header>
-    <div v-if="error" class="err">{{ error }}</div>
-    <div v-if="loading" class="muted">加载中…</div>
-    <div v-else-if="!windows.length && !error" class="muted empty">暂无 Agent 浏览器窗口</div>
+    <div v-if="error" class="err" role="alert">{{ error }}</div>
+    <div v-if="loading" class="muted" role="status">加载中…</div>
+    <div v-else-if="!windows.length && !error" class="muted empty" role="status"><AppIcon icon="browser" /><strong>暂无浏览器页面</strong><p>打开网页后，可在这里查看与操控。</p></div>
     <div v-else class="win-list">
       <button
         v-for="w in windows"
@@ -23,8 +23,7 @@
         <div class="url">{{ w.url }}</div>
         <div class="meta">
           <span v-if="w.loading">加载中</span>
-          <span v-else-if="!w.visible">已隐藏</span>
-          <span v-else>可操控</span>
+          <span v-else>可查看</span>
         </div>
       </button>
     </div>
@@ -85,13 +84,16 @@ onUnmounted(() => { disposed = true; clearInterval(timer); controller?.abort(); 
 
 <style scoped>
 .remote-home {
-  min-height: 100dvh;
+  height:100dvh;
+  min-height:0;
+  overflow-y:auto;
+  overscroll-behavior:contain;
   padding:
     calc(20px + env(safe-area-inset-top, 0px))
     calc(16px + env(safe-area-inset-right, 0px))
     calc(24px + env(safe-area-inset-bottom, 0px))
     calc(16px + env(safe-area-inset-left, 0px));
-  background: #eef2f5;
+  background: #f7f9fc;
   box-sizing: border-box;
 }
 .top-row {
@@ -99,10 +101,14 @@ onUnmounted(() => { disposed = true; clearInterval(timer); controller?.abort(); 
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap:wrap;
 }
 .top h1 {
+  min-width:120px;
+  flex:1;
+  white-space:nowrap;
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 18px;
   color: #15202b;
 }
 .top p {
@@ -135,16 +141,18 @@ onUnmounted(() => { disposed = true; clearInterval(timer); controller?.abort(); 
 }
 .win-list {
   display: grid;
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,280px),1fr));
   gap: 10px;
 }
 .win {
+  min-width:0;
   display: grid;
   gap: 4px;
   width: 100%;
   text-align: left;
   border: 1px solid #d5dde5;
   background: #fff;
-  border-radius: 12px;
+  border-radius: 9px;
   padding: 14px 16px;
   cursor: pointer;
   min-height: 44px;
@@ -154,6 +162,7 @@ onUnmounted(() => { disposed = true; clearInterval(timer); controller?.abort(); 
   background: #f7fafc;
 }
 .title {
+  font-size:13px;
   font-weight: 600;
   color: #1b2834;
   overflow: hidden;
@@ -161,7 +170,7 @@ onUnmounted(() => { disposed = true; clearInterval(timer); controller?.abort(); 
   white-space: nowrap;
 }
 .url {
-  font-size: 0.8rem;
+  font-size: 12px;
   color: #7f8c8d;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -172,4 +181,6 @@ onUnmounted(() => { disposed = true; clearInterval(timer); controller?.abort(); 
   color: #1b4f72;
   font-weight: 600;
 }
+.back-chat{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:32px;border-color:#dce4ee;border-radius:6px;font-size:12px;color:#617b9b}.back-chat svg{width:13px;height:13px}.win:hover,.win:focus-visible{border-color:#9bb5d1;background:#fbfdff}.win:focus-visible{outline:2px solid #7096bd;outline-offset:2px}.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:200px;gap:10px;text-align:center}.empty svg{width:28px;height:28px;color:#8da1ba}.empty strong{font-size:14px;font-weight:500}.empty p{font-size:12px;color:#8998aa}.top p{font-size:12px;line-height:1.6}
+@media(max-width:420px){.top-row{gap:8px}.top-row h1{flex-basis:100%;font-size:16px}.top-row .back-chat{flex:1}}
 </style>

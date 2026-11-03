@@ -1,6 +1,6 @@
 # 插件跨平台安装与原生运行时规划
 
-日期：2026-11-01。状态：待实施的设计基线；本文不代表功能已实现。Fastls 实施依赖见 [Fastls 插件规划](./fastls-plugin-plan.md)。
+日期：2026-11-01。状态：首批平台安装与 fcurl 一次性调用已实现并在 Windows 验证；其余阶段按验收推进。实施结果见 [集成进展](./fastls-integration-progress.md)。Fastls 实施依赖见 [Fastls 插件规划](./fastls-plugin-plan.md)。
 
 目标是让同一个插件 ID、同一个版本能交付多种平台产物，安装时自动选择当前宿主能够运行的包，失败时保留已安装的可用版本。用户无需准备 Node、npm 或编译工具。现有纯 JavaScript 插件、套件变体和文件夹开发外链继续可用。
 
@@ -10,7 +10,7 @@
 - `shared/store.ts`、`navora-store/src/types.js` 的版本只有一组 ZIP 路径、大小和摘要；`navora-store/src/ingest.js` 固定写入 `<id>/<version>/package.zip`，相同版本不能独立存储不同平台包。
 - `navora-plugin-sdk/bin/navora-plugin.mjs` 默认 bundle 依赖，仅 external `electron`；打包带依赖时复制开发机的 `node_modules`。桌面内置 `plugin-pack.ts` 有另一套复制和压包实现，需要同步升级。
 - `marketplace-client.ts` 在预览、安装、更新发现和缓存中均按现有版本结构工作；只改下载入口会导致预览、更新提示、缓存命中与实际安装不一致。
-- 插件当前位于 Electron 主进程。进程内原生模块与独立可执行文件必须分别建模。Fastls 后续集成用户开发的 `fastls-curl`，不再使用 npm SDK 路线。
+- 插件当前位于 Electron 主进程。进程内原生模块与独立可执行文件必须分别建模。Fastls 集成已发布的 `FastTLS/fastls-curl v0.2.0`，实际可执行文件名为 `fcurl` / `fcurl.exe`，不再使用 npm SDK 路线。
 
 ## 2. 核心决定
 
@@ -18,14 +18,14 @@
 2. **平台与产品变体分离。** `suite` / `packageId` 仍表示能力变体；`artifactId` 表示同一变体版本的平台产物。不得把 win32、darwin 放进 suite 供用户手选。
 3. **使用实际执行架构。** 第一版以宿主 `process.arch` 选择产物；Rosetta 中运行的 x64 宿主选择 x64 包，不因硬件为 arm64 自动跨架构启动。以后再增加显式模拟执行策略。
 4. **纯 JS 保持简单。** 无平台声明的旧包按 legacy 处理，保留安装能力；不把它自动认证为跨平台兼容。新包显式声明 portable 或平台目标。
-5. **独立可执行文件为通用运行方式。** Fastls 后续集成用户提供的 `fastls-curl`，由宿主管理其进程；进程内原生模块只有在声明兼容且经过真实 Electron 验证后才允许启用。
+5. **独立可执行文件为通用运行方式。** Fastls 使用正式发布的 `fcurl v0.2.0`，按单次调用启动并由宿主管理其进程；进程内原生模块只有在声明兼容且经过真实 Electron 验证后才允许启用。
 6. **静态校验先于执行。** 浏览商店、预览 ZIP、选平台和检查文件完整性都不执行插件入口；安装健康检查在授权安装后运行。
 
 ## 3. 平台与运行时契约
 
 新增共享的目标解析、校验和匹配模块，桌面端与 SDK/商店使用一致规则及同一组契约样例。
 
-目标由 `os`、`arch`、可选 `libc` 和可选 `minOsVersion` / `minLibcVersion` 组成。第一批平台键：`win32-x64`、`darwin-x64`、`darwin-arm64`、`linux-x64-glibc`、`linux-arm64-glibc`。通用机制可以识别 win32-arm64、musl 等目标，识别不等于某个插件存在对应产物。
+目标由 `os`、`arch`、可选 `linkage/libc` 和最低系统、内核及 libc 版本组成。第一批平台键包含 `win32-x64`、`darwin-x64`、`darwin-arm64`、静态 `linux-x64/linux-arm64` 及动态 `linux-x64-glibc/linux-arm64-glibc`。通用机制可以识别 win32-arm64、musl 等目标，识别不等于某个插件存在对应产物。
 
 `libc` 只允许 Linux 使用。最低系统版本取实际二进制及其动态依赖与本项目要求的交集；如包内另带语言运行时，再叠加其要求。检测不到已声明的必要条件时返回 `platform_detection_failed`，不得把未知 libc 当成 glibc。平台检测在主进程完成，结果可供预览 UI 读取，不信任渲染端上报值。
 
@@ -35,19 +35,24 @@
 type ArtifactTarget =
   | { kind: 'portable' }
   | { kind: 'platform'; os: string; arch: string; libc?: 'glibc' | 'musl';
-      minOsVersion?: string; minLibcVersion?: string }
+      minOsVersion?: string; minKernelVersion?: string; minLibcVersion?: string;
+      linkage?: 'static' | 'dynamic' }
 
 type PluginRuntime =
   | { kind: 'electron-main'; nodeRange?: string;
       native?: { binding: 'napi'; minNapi: number }
              | { binding: 'node-abi'; modules: string; electronRange: string } }
   | { kind: 'executable-sidecar'; executable: string; binaryVersion: string;
-      invocation: 'oneshot' | 'persistent'; protocol: string; protocolVersion: string }
+      invocation: 'oneshot' | 'persistent'; adapter: string; protocolVersion: string }
 ```
 
 `PluginManifest` 新增 `packageFormatVersion: 2`、`artifactId`、`target`、`runtime`、`minHostVersion`；构建产物含 `runtime-files.json`，逐项记录相对路径、字节数、SHA-256 和必要执行位。新格式所有运行文件必须被清单覆盖，清单自身除外，ZIP 总摘要覆盖整个清单。
 
 进程内模块匹配使用 Electron 实际 `process.versions.node/modules/napi/electron`。N-API 的数值匹配仅为必要条件，不能代替平台实测。sidecar 校验实际二进制版本、架构、系统依赖和调用协议，不套用 Electron/Node ABI。只有明确携带 Node 的其他插件才校验其 Node 版本。
+
+Fastls 的目标清单为 `win32-x64`、`darwin-x64`、`darwin-arm64`、`linux-x64`、`linux-arm64`。上游归档使用 windows/amd64 等命名，SDK 显式映射到宿主目标。其发布脚本采用 CGO_ENABLED=0；Linux 产物需核对 ELF interpreter/dynamic segment 后才能声明 linkage=static、无 libc 约束，不能机械复用此前 npm 路线的 glibc 后缀。静态二进制仍要求兼容内核、系统证书和可执行挂载；目标中没有 libc 字段表示该产物不依赖 libc，不表示 Linux 环境全部已认证。Windows arm64 不在该版本发布清单。
+
+Linux 可执行产物声明 static 时不得再声明 libc，发布检查需有 ELF 证据；dynamic 目标必须明确实际 libc 需求，不能用省略字段表达“尚未检查”。同版本同架构存在 static 与已匹配的 libc 专属包时，专属约束优先，static 作为明确兼容的备选；同优先级重复声明仍拒绝。
 
 平台包不能声明 portable；依赖 OS 动态库、可执行文件或原生扩展的包必须使用具体目标。新格式缺失目标、非法组合、重复 artifactId、同等优先级重叠目标在发布时拒绝。
 
@@ -109,11 +114,13 @@ macOS 验证包内可执行文件、动态库的签名、公证与 quarantine �
 
 运行时兼容一次调用一个进程与持久进程两种方式，由二进制实际契约确定。优先通过 stdin/stdout 交换机器可读数据，stderr 输出有界脱敏日志；不预先要求 fastls-curl 实现专用帧协议或 HTTP 服务。持久协议若采用帧，需定义版本、请求 ID、调用、取消和关闭语义，并在读入阶段限制帧大小；一次性 CLI 则定义输入、退出码、stdout/stderr 和终止行为。宿主适配器统一向插件暴露结果。
 
-`PluginHostApi` 增加可选 `runtime` 服务，建议提供 `call(method, payload, options?)` 和 `status()`；启动和关闭由宿主生命周期管理。服务实例绑定当前 pluginId、artifactId、chatId、approvedCapabilities 与 AbortSignal，插件不传可执行路径或其他 chatId。call 仅能调用该插件 manifest/SDK 契约声明的方法；返回结构化结果。缺少该 API 的旧宿主由 minHostVersion 在安装前阻止，不在首次执行时才报错。Fastls 的具体方法白名单在 fastls-curl 契约确定后冻结，不假定它已具备会话、Cookie 或持久进程接口。
+针对已发布的 fcurl，适配器采用 stdout 正文流、stderr 诊断、私有目录内 `-D` 头文件，以及 stdin 请求体或头文件输入；不等待结构化 metadata。头文件/临时输入的路径只由宿主分配。`call` 结果包含 exitCode、signal、宿主取消原因、解析元数据和有界正文；一次性命令不伪造握手或原生会话。宿主生成 requestId 用于调用跟踪，而不是假设 CLI 具有该参数。
+
+`PluginHostApi` 增加可选 `runtime` 服务，建议提供 `call(method, payload, options?)` 和 `status()`；启动和关闭由宿主生命周期管理。服务实例绑定当前 pluginId、artifactId、chatId、approvedCapabilities 与 AbortSignal，插件不传可执行路径或其他 chatId。call 仅能调用该插件 manifest/SDK 契约声明的方法；返回结构化结果。缺少该 API 的旧宿主由 minHostVersion 在安装前阻止，不在首次执行时才报错。Fastls 适配器固定为 `fcurl-cli-v0.2`，使用一次性进程，首批映射 status/profiles/request；允许的 CLI 参数由宿主适配器生成，不接受插件传入任意 argv。Cookie 状态上下文在插件层管理，不声明为原生 Session。
 
 通过实际支持的版本/能力查询核对二进制版本与协议，结合平台、架构、目标 artifact 和包摘要验证。环境只透传必要系统变量，不继承 NODE_OPTIONS、NODE_PATH、FASTLS_LIBRARY、用户 API 密钥或自定义动态库注入变量；CA/代理等能力通过结构化配置明确下发。
 
-宿主负责启动超时、请求超时、AbortSignal、崩溃检测和进程回收。持久进程按契约处理空闲退出及父进程 EOF；一次性进程按调用结束或取消清理。插件停用/卸载/更新、会话结束、应用退出均触发生命周期清理；给现有插件模块增加可选 lifecycle，旧插件无需实现。持久模式优先每 chat 独立进程；一次性模式按调用创建进程。最终模式等待 fastls-curl 接口确定。
+宿主负责启动超时、请求超时、AbortSignal、崩溃检测和进程回收。持久进程按契约处理空闲退出及父进程 EOF；一次性进程按调用结束或取消清理。插件停用/卸载/更新、会话结束、应用退出均触发生命周期清理；给现有插件模块增加可选 lifecycle，旧插件无需实现。持久模式优先每 chat 独立进程；一次性模式按调用创建进程。Fastls v0.2.0 固定为一次性模式，不创建常驻 worker 或本地 HTTP 服务。
 
 增加 `plugin-runtime` 本地受控状态目录，安装文件保持只读；不把 cookie、临时响应或日志写回插件版本目录。独立进程隔离原生崩溃，不代表操作系统沙箱，现有插件高信任属性仍成立。
 
@@ -135,14 +142,14 @@ macOS 验证包内可执行文件、动态库的签名、公证与 quarantine �
 
 P0 契约：冻结 target/runtime/artifact 结构、v2 隔离策略、匹配算法和错误码，补齐双方一致的契约样例。通过 legacy、portable、平台包、suite 组合与未知平台的匹配测试后进入下一步。
 
-P1 构建与商店：SDK 能在目标 runner 产出自包含 ZIP；同 ID 同版本五种 artifacts 可共存。v1 老客户端仍能安装现有纯 JS 插件；不会看见 v2 平台包；v2 目录损坏不会静默回落。
+P1 构建与商店：SDK 能在目标 runner 产出自包含 ZIP；同 ID 同版本五种 artifacts 可共存，Linux 静态目标和动态 glibc/musl 目标可分别声明。v1 老客户端仍能安装现有纯 JS 插件；不会看见 v2 平台包；v2 目录损坏不会静默回落。
 
 P2 安装与恢复：预览/本地导入/外链/试用/随附同步一致校验。用下载失败、缺文件、错误摘要、磁盘不足、并发更新及提交中断验证旧版本和 suite 状态完整恢复；验证跨架构缓存隔离。
 
 P3 sidecar：用独立测试可执行文件验证启动、版本查询、取消、崩溃、EOF、停用/卸载/退出清理和更新 drain；按一次性/持久模式分别验收。带空格/中文安装路径及标准用户权限下运行；全程无系统 Node/npm 依赖。
 
-P4 Fastls 试点：等待用户交付 fastls-curl 二进制及调用文档，再按另一份规划完成 Windows x64 闭环；其他平台按其实际发布目标逐一验证。每个平台只有在真实目标环境完成安装、调用、升级、失败回滚和分发验证后才标为支持。
+P4 Fastls 试点：基线固定 fcurl v0.2.0，先完成 Windows x64 插件闭环，再验证已发布的 macOS x64/arm64、Linux x64/arm64 产物。二进制及本地 CLI 冒烟已具备，插件/安装机制仍待实施。每个平台只有在真实目标环境完成安装、调用、升级、失败回滚和分发验证后才标为支持。
 
 通用机制完成不等于所有候选平台已发布。目标二进制存在、宿主能在该平台分发、依赖能加载、核心用例通过是四个独立发布条件。未通过目标留为 planned，不发布“已兼容”标识。
 
-第一版不提供用户机器在线 npm 安装、自动本地编译、自动跨架构模拟、共享全局 Node 缓存或 Fastls 的 Electron 内嵌执行；不开发 fastls-curl 本身，也不把它尚未交付的接口视为已存在。上述功能不是首期交付的前置条件。
+第一版不提供用户机器在线 npm 安装、自动本地编译、自动跨架构模拟、共享全局 Node 缓存或 Fastls 的 Electron 内嵌执行；不开发 fastls-curl 本身；结构化 metadata、持久 Session、HTTP/3 等尚未交付的上游接口不作为首期依赖。上述功能不是首期交付的前置条件。

@@ -1,4 +1,4 @@
-import type { BrowserWindow } from 'electron'
+import type { BrowserPage } from './browser-host'
 import type { WsLiteSocket } from './ws-lite'
 import { dispatchTrustedPointer } from './trusted-input'
 
@@ -31,7 +31,7 @@ export class BridgeRemoteService {
   private capturing = false
   private lastSentAt = new Map<string, number>()
 
-  constructor(private getWindow: (windowId: string) => BrowserWindow | null) {}
+  constructor(private getWindow: (windowId: string) => BrowserPage | null) {}
 
   subscribe(client: WsLiteSocket, windowId: string, fps = 8): void {
     const id = String(windowId || '').trim()
@@ -68,6 +68,7 @@ export class BridgeRemoteService {
     if (!win || win.isDestroyed()) {
       return { ok: false, error: '窗口不存在或已关闭' }
     }
+    if (win.manualControl) return {ok:false,error:'页面已由本机用户接管'}
     const nx = Number(payload.nx)
     const ny = Number(payload.ny)
     if (!Number.isFinite(nx) || !Number.isFinite(ny)) {

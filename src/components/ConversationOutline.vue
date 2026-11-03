@@ -2,7 +2,7 @@
   <nav v-if="items.length > 1" class="conversation-outline" aria-label="对话位置" :style="{'--outline-step-height':stepHeight+'px'}">
     <div class="outline-compact">
       <v-menu location="bottom end" max-height="360" :close-on-content-click="true">
-        <template #activator="{ props: menuProps }"><button type="button" class="outline-trigger" aria-label="对话目录" v-bind="menuProps"><font-awesome-icon icon="list-ul" /><span>{{ activeIndex + 1 }} / {{ items.length }}</span></button></template>
+        <template #activator="{ props: menuProps }"><button type="button" class="outline-trigger" aria-label="对话目录" v-bind="menuProps"><AppIcon icon="list-ul" /><span>{{ activeIndex + 1 }} / {{ items.length }}</span></button></template>
         <div class="outline-directory" role="menu"><button v-for="(item,index) in items" :key="item.id" type="button" role="menuitem" :class="{ current: activeId === item.id }" @click="jump(item.id)"><span>{{ index + 1 }}</span>{{ item.text }}</button></div>
       </v-menu>
     </div>
@@ -13,6 +13,7 @@
         type="button"
         class="outline-step"
         :class="{ current: activeId === item.id }"
+        :style="{ color: markerColor(index) }"
         :tabindex="activeIndex === index ? 0 : -1"
         :data-message-id="item.id"
         :aria-label="`第 ${index + 1} 轮：${item.text}`"
@@ -50,6 +51,17 @@ const activeIndex = computed(() => Math.max(0, items.value.findIndex(item => ite
 const preview = ref<{ text: string; index: number; style: Record<string, string> } | null>(null)
 let frame = 0
 let detach = () => {}
+
+function markerColor(index: number): string {
+  const distance = Math.abs(index - activeIndex.value)
+  const falloff = Math.max(2, Math.min(12, items.value.length * 0.08))
+  const proximity = Math.exp(-distance / falloff)
+  const blend = 0.12 + proximity * 0.88
+  const far = [166, 177, 192]
+  const near = [51, 88, 132]
+  const rgb = near.map((channel, i) => Math.round(far[i]! + (channel - far[i]!) * blend))
+  return `rgb(${rgb.join(' ')})`
+}
 
 function updatePosition() {
   frame = 0
@@ -123,9 +135,9 @@ onUnmounted(() => { clearTimeout(previewTimer); detach(); cancelAnimationFrame(f
 .outline-list{position:absolute;right:0;width:32px;max-height:65%;overflow-y:auto;scrollbar-width:none;padding:6px 2px;border:0;border-radius:10px;pointer-events:auto;background:transparent;transition:background-color 160ms ease}
 .outline-list:is(:hover,:focus-within){background:#f4f6f9d9}
 .outline-step{position:relative;display:block;width:100%;height:var(--outline-step-height,20px);padding:0;border:0;background:transparent;color:#7c8796;border-radius:5px;cursor:pointer;transition:color 140ms ease}
-.outline-step svg{position:absolute;right:2px;top:50%;width:24px;height:12px;transform:translateY(-50%) scaleX(.52);transform-origin:right center;transition:transform 180ms cubic-bezier(.22,.75,.2,1),color 140ms ease;pointer-events:none}
-.outline-step.current{color:#3c638e}.outline-step.current svg{transform:translateY(-50%) scaleX(1)}.outline-step.current path{stroke-width:2.6}
-.outline-step:hover,.outline-step:focus-visible{color:#304f76}.outline-step:not(.current):hover svg{transform:translateY(-50%) scaleX(.82)}.outline-step:focus-visible{outline:2px solid #6483a8;outline-offset:-1px}
+.outline-step svg{position:absolute;right:2px;top:50%;width:20px;height:12px;transform:translateY(-50%) scaleX(.4);transform-origin:right center;transition:transform 180ms cubic-bezier(.22,.75,.2,1),color 140ms ease;pointer-events:none}
+.outline-step.current{color:#3c638e}.outline-step.current svg{transform:translateY(-50%) scaleX(.9)}.outline-step.current path{stroke-width:2.6}
+.outline-step:hover,.outline-step:focus-visible{color:#304f76}.outline-step:not(.current):hover svg{transform:translateY(-50%) scaleX(.68)}.outline-step:focus-visible{outline:2px solid #6483a8;outline-offset:-1px}
 .outline-preview{position:fixed;z-index:2400;width:252px;padding:11px 13px;border:1px solid #dce4ee;border-radius:10px;background:#fff;color:#455770;box-shadow:0 8px 28px #263e5e18;font:12px/1.65 -apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;pointer-events:none;transition:top 120ms ease}
 .outline-preview-index{display:block;margin-bottom:4px;color:#8796aa;font-size:10px}.outline-preview>div{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 .outline-preview-enter-active,.outline-preview-leave-active{transition:opacity 140ms ease,transform 160ms cubic-bezier(.22,.75,.2,1)}.outline-preview-enter-from,.outline-preview-leave-to{opacity:0;transform:translateX(5px)}

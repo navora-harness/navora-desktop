@@ -2,14 +2,13 @@
   <aside class="file-preview" :class="{embedded}" aria-label="文件预览" :style="{ '--preview-width': `${width}px` }">
     <div v-if="!embedded" class="preview-resizer" role="separator" aria-label="调整文件预览宽度" aria-orientation="vertical" :aria-valuenow="width" aria-valuemin="280" aria-valuemax="maximum" tabindex="0" @pointerdown="beginResize" @keydown="resizeKey" />
     <header class="preview-head">
-      <font-awesome-icon v-if="!tabbed" icon="file" />
+      <AppIcon v-if="!tabbed" icon="file" />
       <div v-if="!tabbed" class="preview-name" :title="path">{{ name }}</div>
-      <v-menu v-if="tabbed" location="bottom start" origin="auto" :offset="6"><template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" class="preview-type" aria-label="文件显示方式"><font-awesome-icon :icon="data?.kind==='image'?'image':'file-lines'" />{{ data?.kind==='image'?'图像':data?.kind==='markdown'?(source?'源码':'Markdown'):data?.kind==='text'?'文本':'文件' }}<font-awesome-icon icon="chevron-down" /></button></template><div class="preview-open-menu" role="menu"><button v-if="data?.kind==='markdown'" type="button" role="menuitem" @click="source=false">Markdown 预览</button><button v-if="data?.content!==undefined" type="button" role="menuitem" @click="source=true">文本源码</button><span v-if="data?.content===undefined">{{ data?.kind==='image'?'图像预览':'使用默认应用打开此文件' }}</span></div></v-menu>
+      <v-menu v-if="tabbed" location="bottom start" origin="auto" :offset="6"><template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" class="preview-type" aria-label="文件显示方式"><AppIcon :icon="data?.kind==='image'?'image':'file-lines'" />{{ data?.kind==='image'?'图像':data?.kind==='markdown'?(source?'源码':'Markdown'):data?.kind==='text'?'文本':'文件' }}<AppIcon icon="chevron-down" /></button></template><div class="preview-open-menu" role="menu"><button v-if="data?.kind==='markdown'" type="button" role="menuitem" @click="source=false">Markdown 预览</button><button v-if="data?.content!==undefined" type="button" role="menuitem" @click="source=true">文本源码</button><span v-if="data?.content===undefined">{{ data?.kind==='image'?'图像预览':'使用默认应用打开此文件' }}</span></div></v-menu>
       <span v-if="tabbed" class="preview-spacer" />
       <select v-if="data?.kind==='image'" v-model="imageZoom" class="preview-zoom" aria-label="图片缩放"><option value="fit">适应窗口</option><option value="50">50%</option><option value="100">100%</option><option value="150">150%</option><option value="200">200%</option></select>
-      <button type="button" title="刷新预览" aria-label="刷新预览" :disabled="loading" @click="load(true)"><font-awesome-icon icon="arrow-rotate-right" /></button>
-      <div class="preview-open-group"><button type="button" class="preview-open-default" title="使用默认应用打开" aria-label="在系统中打开" @click="systemOpen"><font-awesome-icon icon="folder-open" /><span>打开</span></button><v-menu location="bottom end" origin="auto" :offset="6"><template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" aria-label="打开文件选项"><font-awesome-icon icon="chevron-down" /></button></template><div class="preview-open-menu" role="menu"><button type="button" role="menuitem" @click="systemOpen">默认应用</button><div class="preview-open-rule" /><button type="button" role="menuitem" @click="reveal">打开所在文件夹</button><button type="button" role="menuitem" :disabled="saving" @click="saveAs">另存为…</button></div></v-menu></div>
-      <button type="button" title="下载文件" aria-label="下载文件" :disabled="saving" @click="saveAs"><font-awesome-icon icon="download" /></button>
+      <button type="button" title="刷新预览" aria-label="刷新预览" :disabled="loading" @click="load(true)"><AppIcon icon="arrow-rotate-right" /></button>
+      <div class="preview-open-group"><button type="button" class="preview-open-default" title="使用默认应用打开" aria-label="在系统中打开" @click="systemOpen"><AppIcon icon="folder-open" /><span>系统打开</span></button><v-menu location="bottom end" origin="auto" :offset="6"><template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" aria-label="打开文件选项"><AppIcon icon="chevron-down" /></button></template><div class="preview-open-menu" role="menu"><button type="button" role="menuitem" @click="reveal">打开所在文件夹</button><button type="button" role="menuitem" :disabled="saving" @click="saveAs">另存为…</button></div></v-menu></div>
       <SidebarMoreMenu v-if="!tabbed" label="文件预览" hide-label="隐藏文件侧栏" hide-aria-label="关闭文件预览" @hide="emit('close')" />
     </header>
     <div v-if="data?.ok" class="preview-tools">
@@ -17,7 +16,7 @@
       <span v-if="loading" role="status">更新中…</span>
       <span v-if="data.truncated">仅显示前 256 KB</span>
       <span class="preview-spacer" />
-      <button v-if="data.kind === 'markdown'" type="button" :aria-pressed="!source" @click="source = !source">{{ source ? '预览' : '源码' }}</button>
+      <button v-if="data.kind === 'markdown' && !tabbed" type="button" :aria-pressed="!source" @click="source = !source">{{ source ? '预览' : '源码' }}</button>
       <button v-if="data.content !== undefined" type="button" @click="copy">{{ copied ? '已复制' : '复制' }}</button>
     </div>
     <div class="preview-content" :aria-busy="loading">
@@ -27,7 +26,7 @@
         <div v-if="data.kind === 'image'" class="preview-image" :class="imageZoom==='fit'?'fit':'zoomed'"><img :style="imageZoom==='fit'?{}:{width:`${imageNaturalWidth*Number(imageZoom)/100}px`,maxWidth:'none'}" @load="imageNaturalWidth=($event.target as HTMLImageElement).naturalWidth" :src="`data:${data.mime};base64,${data.base64}`" :alt="name" @error="error = '无法显示此图片'" /></div>
         <div v-else-if="data.kind === 'markdown' && !source" class="preview-markdown" v-html="markdown" @click="onLink" />
         <pre v-else-if="data.content !== undefined" class="preview-code" tabindex="0"><code>{{ data.content || '（空文件）' }}</code></pre>
-        <div v-else class="preview-empty"><font-awesome-icon icon="file" /><span>此文件暂不支持预览</span><button type="button" @click="systemOpen">在系统中打开</button></div>
+        <div v-else class="preview-empty"><AppIcon icon="file" /><span>此文件暂不支持预览</span><p class="preview-format-hint">{{unsupportedHint}}</p><button type="button" @click="systemOpen">在系统中打开</button></div>
       </template>
     </div>
   </aside>
@@ -52,6 +51,7 @@ let active=true,dirty=false
 const copied = ref(false)
 const saving=ref(false)
 const maximum = ref(Math.max(280, Math.min(800, innerWidth - 360)))
+const unsupportedHint=computed(()=>data.value?.reason==='image_too_large'?'图片超过 12 MB，请使用系统应用打开。':data.value?.reason==='encoding'?'仅支持 UTF-8 和带 BOM 的 UTF-16 文本，请使用系统应用打开此编码。':'支持文本、Markdown 和常见图片；PDF、Office、音视频及压缩包请使用系统应用打开。')
 const name = computed(() => props.path.split(/[\\/]/).at(-1) || props.path)
 const markdown = computed(() => DOMPurify.sanitize(renderMarkdown(data.value?.content || ''), { FORBID_ATTR: ['style'], FORBID_TAGS: ['img', 'video', 'audio', 'iframe', 'object', 'embed', 'style', 'form', 'input', 'button', 'textarea', 'select'] }))
 let sequence = 0
@@ -194,6 +194,7 @@ button:disabled { opacity:.45; cursor:default; }
 .preview-zoom{font-size:11px;border:1px solid #d8dfe8;border-radius:6px;padding:4px 5px;color:#58677b;max-width:110px}
 .preview-empty { min-height:180px; height:100%; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:12px; color:#7c8694; font-size:12px; padding:24px; text-align:center; }
 .preview-empty > svg { width:28px; height:28px; }
+.preview-format-hint{max-width:360px;margin:0;color:var(--navora-muted);font-size:12px;line-height:1.7}
 .preview-empty button { border-color:#dfe4eb; padding:6px 12px; }
 .preview-resizer { position:absolute; inset:0 auto 0 0; width:7px; cursor:col-resize; touch-action:none; z-index:2; }
 .preview-resizer:hover { background:#537ab929; }

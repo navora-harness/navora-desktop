@@ -7,6 +7,9 @@ import { ensureRemoteNavora } from './navora-remote-shim'
 import { getStoredToken, isWebRemote, remoteAuthMe, setStoredToken } from './remote-api'
 
 const desktopRoutes = [
+  {path:'/literature',name:'literature',component:()=>import('./pages/LiteratureSearchPage.vue')},
+  {path:'/file-host',component:()=>import('./pages/FileHostPage.vue')},
+  {path:'/browser-host/:hostId',component:()=>import('./pages/BrowserHostPage.vue')},
   { path: '/', name: 'chat', component: ChatPage },
   { path: '/settings', redirect: { path: '/', query: { settings: '1' } } },
 ]

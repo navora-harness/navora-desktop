@@ -1,12 +1,13 @@
 /** Shared plugin package contract (loadable from disk). */
 
+import type { PlatformPackage } from './plugin-platform'
 import type { ChatCompletionTool } from './openai-types'
 import type { PermissionCapability } from './types'
 
 /** Zip package hard limit (bytes). Folder/link imports are unlimited. */
 export const PLUGIN_ZIP_MAX_BYTES = 200 * 1024 * 1024
 
-export type PluginManifest = {
+export type PluginManifest = PlatformPackage & {
   /** Stable id (unique). */
   id: string
   name: string
@@ -32,6 +33,8 @@ export type PluginManifest = {
 export type PluginInstallKind = 'bundled' | 'installed' | 'linked' | 'session'
 
 export type PluginRecord = {
+  artifactId?: string
+  targetLabel?: string
   id: string
   dirName: string
   name: string
@@ -96,6 +99,8 @@ export type PluginSuiteManifest = {
 }
 
 export type PluginImportPreview = {
+  artifactId?: string
+  targetLabel?: string
   id: string
   name: string
   description: string
@@ -224,6 +229,7 @@ export type PluginHostApi = {
   signal: AbortSignal
   /** Capabilities approved for this invocation (after PermissionGate). */
   approvedCapabilities: readonly PermissionCapability[]
+  runtime?: { call(method: string, args?: Record<string, unknown>): Promise<unknown> }
   helpers: PluginHostHelpers
   getConfig: () => { browser: { url_allowlist?: string[] | null } } & Record<string, unknown>
   registry: PluginHostRegistry

@@ -675,7 +675,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_click',
       description:
-        'Trusted click. Prefer a ref from browser_get(snapshot) or browser_find; existing CSS selectors remain supported. A stale ref requires a fresh snapshot. Inside iframe: iframeSelector plus innerSelector and/or offsets. Returns navigation state; read the new page when needed.',
+        'Trusted click. Prefer browser_get(agent_snapshot/agent_find) targets for iframe, closed-shadow or hidden-window actions; legacy page refs and CSS selectors remain supported. A stale target/ref requires a fresh snapshot. Existing iframeSelector plus innerSelector/offsets remains available.',
       parameters: {
         type: 'object',
         properties: {
@@ -685,6 +685,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
             description: 'Host-page selector, or inner selector when used with iframeSelector. Optional when ref is supplied.',
           },
           ref: { type: 'string', description: 'Exact element ref from the current page snapshot or browser_find' },
+          target: { type:'object', properties:{webContentsId:{type:'number'},processId:{type:'number'},routingId:{type:'number'},documentId:{type:'number'},backendNodeId:{type:'number'}}, description:'Native target from browser_get(agent_snapshot/agent_find). Enables trusted click in iframe/shadow content without activating a hidden window; stale targets must be refreshed.' },
           iframeSelector: {
             type: 'string',
             description:
@@ -837,6 +838,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
           selector: { type: 'string' },
           pierce: { type: 'boolean', description: 'Pierce shadow roots (default true)' },
           acrossDocuments: { type: 'boolean', description: 'Use native querySelectorAcrossDocuments to include iframe documents (default false)' },
+          agentInfo: { type:'boolean', description:'Return the coverage-aware native AgentSnapshot instead of the legacy geometry result (requires acrossDocuments=true).' },
           scrollIntoView: {
             type: 'boolean',
             description: 'Scroll matched element into view before measuring (default false)',
@@ -871,7 +873,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_type',
       description:
-        'Type into an element ref or CSS selector (clears unless append=true). Prefer a ref from browser_get(snapshot) or browser_find. submit=true presses Enter; observe the result before choosing another action.',
+        'Type into an element ref or CSS selector (clears unless append=true). For iframe/shadow fields or hidden windows, pass the current native target from agent_snapshot/agent_find. Re-read the page to verify the result. submit=true presses Enter.',
       parameters: {
         type: 'object',
         properties: {
@@ -879,6 +881,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
           selector: { type: 'string' },
           text: { type: 'string' },
           ref: { type: 'string', description: 'Element ref; use ref or selector' },
+          target: { type:'object', properties:{webContentsId:{type:'number'},processId:{type:'number'},routingId:{type:'number'},documentId:{type:'number'},backendNodeId:{type:'number'}}, description:'Native target from browser_get(agent_snapshot/agent_find); supports trusted typing into iframe/shadow fields in hidden windows.' },
           append: { type: 'boolean' },
           submit: {
             type: 'boolean',
@@ -906,8 +909,34 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
           windowId: { type: 'string' },
           key: { type: 'string' },
           selector: { type: 'string' },
+          target: { type:'object', properties:{webContentsId:{type:'number'},processId:{type:'number'},routingId:{type:'number'},documentId:{type:'number'},backendNodeId:{type:'number'}}, description:'Native target from browser_get(agent_snapshot/agent_find); dispatches the key without activating the window.' },
         },
         required: ['windowId', 'key'],
+      },
+    },
+  },
+  {
+    type:'function',
+    function:{
+      name:'browser_mouse',
+      description:'Dispatch trusted mouse movement, press/release or wheel to a native agent target without activating a hidden window. x/y are CSS-pixel offsets from the target element; keep the same target for down/up sequences.',
+      parameters:{type:'object',properties:{windowId:{type:'string'},target:{type:'object',properties:{webContentsId:{type:'number'},processId:{type:'number'},routingId:{type:'number'},documentId:{type:'number'},backendNodeId:{type:'number'}}},action:{type:'string',enum:['move','down','up','wheel']},x:{type:'number'},y:{type:'number'},button:{type:'string',enum:['left','middle','right','back','forward']},clickCount:{type:'number'},buttons:{type:'number'},modifiers:{type:'number'},deltaX:{type:'number'},deltaY:{type:'number'}},required:['windowId','target','action']},
+    },
+  },
+  {
+    type:'function',
+    function:{
+      name:'browser_touch',
+      description:'Dispatch a trusted touch event to a native agent target in the page. Coordinates are CSS-pixel offsets from the target element. Keep one target throughout a touch sequence; touchEnd/touchCancel use no points.',
+      parameters:{
+        type:'object',
+        properties:{
+          windowId:{type:'string'},
+          target:{type:'object',properties:{webContentsId:{type:'number'},processId:{type:'number'},routingId:{type:'number'},documentId:{type:'number'},backendNodeId:{type:'number'}}},
+          action:{type:'string',enum:['touchStart','touchMove','touchEnd','touchCancel']},
+          touchPoints:{type:'array',items:{type:'object',properties:{x:{type:'number'},y:{type:'number'},id:{type:'number'},radiusX:{type:'number'},radiusY:{type:'number'},force:{type:'number'}},required:['x','y']}},
+        },
+        required:['windowId','target','action'],
       },
     },
   },
@@ -988,20 +1017,25 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_get',
       description:
-        'Read page info. Prefer snapshot for structured content, exact element refs and capability coverage; query filters its element index. text reads prose, dom_summary remains compatible, capabilities probes the running custom Electron APIs. Default wait is a short main-frame load. Do not request full html when a snapshot or text suffices.',
+        'Read page info. Prefer agent_snapshot/agent_find for native DOM and accessibility data across same/cross-origin frames and open/closed shadow roots; inspect complete, frames and truncationReasons before treating absence as proof. Native targets can drive trusted input in hidden windows. Legacy snapshot/text/dom_summary remain available; capabilities probes actual runtime support.',
       parameters: {
         type: 'object',
         properties: {
           windowId: { type: 'string' },
           what: {
             type: 'string',
-            enum: ['title', 'url', 'text', 'html', 'dom_summary', 'snapshot', 'capabilities'],
-            description: 'snapshot returns content and actionable refs; capabilities reports actual native API availability',
+            enum: ['title', 'url', 'text', 'html', 'dom_summary', 'snapshot', 'agent_snapshot', 'agent_find', 'capabilities'],
+            description: 'snapshot returns page-index refs; agent_snapshot and agent_find use native coverage-aware DOM/AX reading across frames and closed shadow roots; capabilities reports actual native API availability',
           },
           selector: { type: 'string', description: 'Optional scope for text/html' },
           query: { type: 'string', description: 'Optional snapshot index query, in Chinese or English' },
           limit: { type: 'number', description: 'Snapshot element limit, 1–80 (default 60)' },
           refresh: { type: 'boolean', description: 'Force rebuilding the page index instead of using a fresh cached index' },
+          agentQuery: { type: 'object', properties: { selector:{type:'string'}, role:{type:'string'}, name:{type:'string'}, text:{type:'string'}, label:{type:'string'}, disabled:{type:'boolean'}, checked:{type:'string'}, selected:{type:'boolean'} }, description:'Native agent_find filter. If omitted, query is treated as text.' },
+          maxNodes: { type:'number', description:'Native snapshot output cap (default 300, max 5000)' },
+          maxFrames: { type:'number', description:'Native frame coverage cap (default 100, max 1000)' },
+          agentTimeoutMs: { type:'number', description:'Native snapshot budget in milliseconds (default 5000, max 30000)' },
+          pierce: { type:'boolean', description:'Include open and closed author shadow roots in native agent snapshots (default true)' },
           waitUntil: {
             type: 'string',
             enum: ['none', 'load', 'text_stable'],
@@ -1675,6 +1709,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
       parameters: {
         type: 'object',
         properties: {
+          target: { type: 'string', description: 'Platform artifact id, e.g. win32-x64, darwin-arm64, linux-x64. Defaults to this host.' },
           id: {
             type: 'string',
             description:
@@ -1705,6 +1740,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
       parameters: {
         type: 'object',
         properties: {
+          target: { type: 'string', description: 'Platform artifact id, e.g. win32-x64, darwin-arm64, linux-x64. Defaults to this host.' },
           id: {
             type: 'string',
             description: 'Project id; optional if workspace plugin.json has id.',
@@ -1734,6 +1770,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
       parameters: {
         type: 'object',
         properties: {
+          target: { type: 'string', description: 'Platform artifact id, e.g. win32-x64, darwin-arm64, linux-x64. Defaults to this host.' },
           id: {
             type: 'string',
             description: 'Project id; omit in single-plugin workspace.',

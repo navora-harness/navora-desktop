@@ -13,6 +13,7 @@
         <p v-if="remainingLabel" class="ask-timeout" :class="{ urgent: remainingUrgent }">
           {{ remainingLabel }}
         </p>
+        <p v-if="pendingCount>1" class="perm-queue" role="status">还有 {{ pendingCount-1 }} 个此对话的授权请求等待处理</p>
         <div
           v-if="remainingLabel"
           class="ask-countdown-bar"
@@ -21,28 +22,29 @@
           <div class="ask-countdown-bar-fill" :style="{ width: `${remainingPct}%` }" />
         </div>
         <div v-if="req.detail" class="perm-detail-card">
-          <div class="perm-detail-text">{{ req.detail }}</div>
+          <div class="perm-detail-label">请求说明</div>
+          <div class="perm-detail-text">{{ displayDetail }}</div>
           <code class="perm-cap">{{ req.capability }}</code>
         </div>
         <div class="perm-group">
-          <div class="perm-group-label">本次操作</div>
+          <div class="perm-group-label">仅处理这一次</div>
           <div class="perm-row">
             <button type="button" class="perm-btn primary" :disabled="busy" @click="emit('decide', 'allow')">
-              允许一次
+              允许这一次
             </button>
             <button type="button" class="perm-btn ghost" :disabled="busy" @click="emit('decide', 'deny')">
-              拒绝
+              拒绝这一次
             </button>
           </div>
         </div>
         <div class="perm-group">
-          <div class="perm-group-label">记住选择</div>
+          <div class="perm-group-label">本次运行中记住（仅此对话）</div>
           <div class="perm-stack">
             <button type="button" class="perm-btn tonal" :disabled="busy" @click="emit('decide', 'allow_chat')">
-              此对话内允许
+              本次运行中，此对话允许
             </button>
             <button type="button" class="perm-btn danger-ghost" :disabled="busy" @click="emit('decide', 'always_deny')">
-              此对话内拒绝
+              本次运行中，此对话拒绝
             </button>
           </div>
         </div>
@@ -53,17 +55,21 @@
 
 <script setup lang="ts">
 import StatusIcon from '@/components/StatusIcon.vue'
+import {computed} from 'vue'
+import {permissionDetailForDisplay} from '@shared/permission-presentation'
 import type { PermissionDecision, PermissionRequest } from '@shared/types'
 
-defineProps<{
+const props=withDefaults(defineProps<{
   req: PermissionRequest
   capabilityLabel: string
   chatTitle?: string
+  pendingCount?: number
   remainingLabel?: string
   remainingUrgent?: boolean
   remainingPct?: number
   busy?: boolean
-}>()
+}>(),{pendingCount:1})
+const displayDetail=computed(()=>permissionDetailForDisplay(props.req.detail))
 
 const emit = defineEmits<{
   decide: [decision: PermissionDecision]
@@ -158,6 +164,11 @@ const emit = defineEmits<{
 .ask-countdown-bar.urgent .ask-countdown-bar-fill {
   background: #c0392b;
 }
+.perm-queue {
+  margin: 8px 0 0;
+  color: #536c80;
+  font-size: 0.78rem;
+}
 .perm-detail-card {
   margin-top: 12px;
   display: flex;
@@ -167,6 +178,11 @@ const emit = defineEmits<{
   border-radius: 10px;
   background: #f4f8fb;
   border: 1px solid #e2ebf2;
+}
+.perm-detail-label {
+  color: #7f8c8d;
+  font-size: 0.7rem;
+  font-weight: 650;
 }
 .perm-detail-text {
   font-size: 0.86rem;

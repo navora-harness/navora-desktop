@@ -1,8 +1,9 @@
 <template>
   <div class="login-page">
-    <div class="card">
+    <form class="card" @submit.prevent="submit">
+      <span class="login-mark"><AppIcon icon="globe" /></span>
       <h1>Navora 远程访问</h1>
-      <p class="sub">登录后可使用 Chat、设置与 Agent 能力；浏览器窗口可通过远程画面查看与操控</p>
+      <p class="sub">登录后查看对话、管理设置与操控浏览器页面。</p>
       <v-text-field
         v-model="username"
         label="用户名"
@@ -21,15 +22,14 @@
         autocomplete="current-password"
         hide-details="auto"
         class="mt-3"
-        @keyup.enter="submit"
       />
       <v-alert v-if="error" type="error" density="compact" class="mt-3" variant="tonal">
         {{ error }}
       </v-alert>
-      <v-btn color="primary" block class="mt-4 login-btn" :loading="loading" @click="submit">
+      <v-btn type="submit" color="primary" block class="mt-4 login-btn" :loading="loading">
         登录
       </v-btn>
-    </div>
+    </form>
   </div>
 </template>
 
@@ -76,39 +76,46 @@ async function submit() {
 
 <style scoped>
 .login-page {
-  min-height: 100dvh;
-  display: grid;
-  place-items: center;
+  height:100dvh;
+  min-height:0;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
   padding:
     calc(24px + env(safe-area-inset-top, 0px))
     calc(20px + env(safe-area-inset-right, 0px))
     calc(24px + env(safe-area-inset-bottom, 0px))
     calc(20px + env(safe-area-inset-left, 0px));
-  background:
-    radial-gradient(900px 420px at 20% -10%, rgba(27, 79, 114, 0.12), transparent 55%),
-    #eef2f5;
+  background:#f7f9fc;
   box-sizing: border-box;
 }
 .card {
+  flex-shrink:0;
+  margin-block:auto;
+  box-sizing:border-box;
   width: min(400px, 100%);
   background: #fff;
-  border: 1px solid #d9e2ea;
-  border-radius: 14px;
+  border: 1px solid #e0e6ee;
+  border-radius: 12px;
   padding: 28px 24px;
-  box-shadow: 0 10px 28px rgba(21, 32, 43, 0.08);
+  box-shadow:0 4px 20px #22395406;
 }
 h1 {
   margin: 0;
-  font-size: 1.35rem;
+  font-size: 20px;
   color: #15202b;
 }
 .sub {
   margin: 8px 0 0;
   color: #5d6d7e;
-  font-size: 0.9rem;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.7;
 }
 .login-btn {
   min-height: 44px;
 }
+.login-mark{display:grid;place-items:center;width:38px;height:38px;border:1px solid #e1e9f3;border-radius:10px;background:#edf3fa;color:#5b7da5;margin-bottom:18px}.login-mark svg{width:20px;height:20px}
+@media(max-width:420px){.card{padding:22px 18px}.login-page{padding-inline:14px}h1{font-size:18px}}
 </style>

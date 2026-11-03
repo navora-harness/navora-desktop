@@ -574,6 +574,10 @@ watch(
 
 <style scoped>
 .ob-card {
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+  max-height:calc(100dvh - 48px);
   background: #fff;
   border-radius: 16px;
   overflow: hidden;
@@ -828,4 +832,5 @@ watch(
     min-height: 40px;
   }
 }
+.ob-card .ob-head{padding:18px 20px 14px;background:#fff}.ob-card .ob-title{font-size:22px;font-weight:600}.ob-card .ob-logo{width:40px;height:40px;border-radius:10px}.ob-card .ob-sub,.ob-card .ob-hint{font-size:12px;line-height:1.7}.ob-card .ob-body{flex:1 1 auto;min-height:0;max-height:none;overflow:auto}.ob-card .ob-foot{gap:8px;padding:12px 16px}.ob-foot-right{flex-wrap:wrap;justify-content:flex-end;min-width:0}.ob-card .ob-skip{min-height:32px;font-size:12px}.ob-card.is-mobile{max-height:100dvh}
 </style>

@@ -9,7 +9,7 @@
           aria-label="关闭"
           @click="emit('close')"
         >
-          <font-awesome-icon icon="xmark" />
+          <AppIcon icon="xmark" />
         </v-btn>
         <div class="top-titles">
           <h1>使用文档</h1>
@@ -20,7 +20,7 @@
     </header>
 
     <div class="shell">
-      <nav class="nav">
+      <nav ref="navEl" class="nav">
         <div class="nav-list">
           <button
             v-for="item in navItems"
@@ -28,7 +28,8 @@
             type="button"
             class="nav-item"
             :class="{ active: tab === item.value }"
-            @click="tab = item.value"
+            :aria-current="tab===item.value?'page':undefined"
+            @click="selectTab(item.value)"
           >
             <span class="nav-label">{{ item.title }}</span>
             <span v-if="!mobile" class="nav-desc">{{ item.desc }}</span>
@@ -37,7 +38,7 @@
       </nav>
 
       <div class="panel">
-        <div class="content">
+        <div ref="contentEl" class="content">
           <section v-show="tab === 'start'" class="section">
             <header class="section-head">
               <h2>快速开始</h2>
@@ -285,7 +286,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref } from 'vue'
 
 defineProps<{
   embedded?: boolean
@@ -297,6 +298,14 @@ const emit = defineEmits<{
 }>()
 
 const tab = ref('start')
+const navEl = ref<HTMLElement | null>(null)
+const contentEl = ref<HTMLElement | null>(null)
+async function selectTab(value: string) {
+  tab.value = value
+  await nextTick()
+  contentEl.value?.scrollTo({ top: 0, behavior: 'instant' })
+  navEl.value?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
+}
 const appVersion = ref('—')
 
 const navItems = [
@@ -322,11 +331,13 @@ onMounted(async () => {
 
 <style scoped>
 .docs-page {
+  container-type:inline-size;
+  min-width:0;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: #eef2f5;
+  background: #f7f9fc;
   color: #15202b;
 }
 .docs-page.is-embedded {
@@ -340,6 +351,9 @@ onMounted(async () => {
 .docs-page.is-mobile.is-embedded {
   height: 100dvh;
   max-height: 100dvh;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
 }
 
 .top {
@@ -558,4 +572,8 @@ onMounted(async () => {
 .docs-page.is-mobile .top {
   padding: 12px 14px;
 }
+.top{flex-shrink:0;background:#fff;backdrop-filter:none;min-height:52px;padding:10px 16px}.top-titles{min-width:0}.top-titles h1{font-size:16px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.top-sub{font-size:11px;line-height:1.6}.close-btn{width:32px;height:32px;min-width:32px!important;border-radius:6px}.close-btn :deep(svg){width:14px;height:14px}.ver-badge{font-size:11px;border-radius:5px;padding:3px 6px;background:#edf2f8;color:#758aa5}.nav-label{font-size:12px;font-weight:500}.nav-desc{font-size:10px}.nav-item{border-radius:6px;min-height:32px}.section-head h2{font-size:16px;font-weight:600}.section-head p,.doc-p,.doc-list{font-size:13px;line-height:1.8}.card-title{font-size:13px;font-weight:600}.card{border-color:#e0e6ee;border-radius:9px}.doc-p,.doc-list{overflow-wrap:anywhere}.docs-page.is-mobile .nav-list{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden}.docs-page.is-mobile .nav-item{flex-shrink:0;white-space:nowrap;border-radius:6px;padding:6px 10px}.docs-page.is-mobile .top{min-height:48px;padding-block:8px}.docs-page.is-mobile .shell{grid-template-rows:auto minmax(0,1fr)}
+@container(max-width:640px){.shell{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);padding:12px;gap:10px}.nav{padding:4px}.nav-list{flex-direction:row;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;flex:none}.nav-item{flex-shrink:0;width:auto;padding:6px 9px;white-space:nowrap}.nav-desc,.top-sub{display:none}.content{padding-right:0}.card{padding:12px 14px}}
+.docs-page.is-mobile .nav-list{scrollbar-width:none;scrollbar-color:transparent transparent}
+.docs-page.is-mobile .nav-list::-webkit-scrollbar{display:none;height:0}
 </style>

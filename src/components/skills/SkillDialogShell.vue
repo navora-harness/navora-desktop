@@ -44,7 +44,7 @@
           :disabled="busy"
           @click="onModel(false)"
         >
-          <font-awesome-icon icon="xmark" />
+          <AppIcon icon="xmark" />
         </button>
       </header>
       <v-card-text class="skill-dlg-body">
@@ -92,7 +92,11 @@ function onModel(v: boolean) {
 
 <style scoped>
 .skill-dlg-card {
-  border-radius: 14px !important;
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+  max-height:calc(100dvh - 48px);
+  border-radius: 12px !important;
   overflow: hidden;
   border: 1px solid #d5dee7;
   background: #fff;
@@ -134,7 +138,7 @@ function onModel(v: boolean) {
   justify-content: space-between;
   gap: 12px;
   padding: 18px 20px 14px;
-  background: linear-gradient(180deg, #f4f8fb 0%, #fff 100%);
+  background: #fff;
   border-bottom: 1px solid #e8eef4;
   flex-shrink: 0;
 }
@@ -161,8 +165,8 @@ function onModel(v: boolean) {
 }
 .skill-dlg-title {
   margin: 0;
-  font-size: 1.15rem;
-  font-weight: 750;
+  font-size: 16px;
+  font-weight: 600;
   color: #15202b;
   line-height: 1.25;
   letter-spacing: -0.01em;
@@ -176,6 +180,7 @@ function onModel(v: boolean) {
 }
 .skill-dlg-title-text {
   min-width: 0;
+  overflow-wrap:anywhere;
 }
 .skill-dlg-title-warn {
   display: inline-flex;
@@ -196,11 +201,11 @@ function onModel(v: boolean) {
 }
 .skill-dlg-close {
   flex-shrink: 0;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   margin-top: -4px;
   border: none;
-  border-radius: 10px;
+  border-radius: 6px;
   background: transparent;
   color: #7a8a99;
   cursor: pointer;
@@ -217,8 +222,10 @@ function onModel(v: boolean) {
   color: #1b4f72;
 }
 .skill-dlg-body {
+  flex:1 1 auto;
+  min-height:0;
   padding: 16px 20px !important;
-  max-height: min(68vh, 620px);
+  max-height: none;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -236,7 +243,7 @@ function onModel(v: boolean) {
   gap: 6px;
   row-gap: 8px;
   flex-wrap: wrap;
-  background: #fafcfd;
+  background: #fbfcfd;
   flex-shrink: 0;
 }
 .skill-dlg-card.is-mobile .skill-dlg-actions {
@@ -249,7 +256,7 @@ function onModel(v: boolean) {
 <style>
 .skill-dialog-content {
   box-shadow: 0 16px 48px rgba(21, 32, 43, 0.16) !important;
-  border-radius: 14px !important;
+  border-radius: 12px !important;
   overflow: hidden;
 }
 .skill-dialog-content--mobile {
@@ -264,4 +271,6 @@ function onModel(v: boolean) {
   height: 100%;
   max-height: 100dvh;
 }
+.skill-dlg-close>svg{width:14px;height:14px}.skill-dlg-close:disabled{opacity:.4;cursor:default}
+@media(pointer:coarse){.skill-dlg-close{width:44px;height:44px}}
 </style>

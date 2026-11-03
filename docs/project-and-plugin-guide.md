@@ -91,6 +91,7 @@ Renderer (Vue)
 - `browser_session_fetch`：走 Session 网络栈（共享 cookie/代理/UA）
 - `browser_load_url_with_response`：在目标 origin 下注入自定义主文档（Turnstile harness 等）
 - iframe 点击：经 `browser_click` / `browser_flow` + `iframeSelector`
+- 原生 Agent DOM：`browser_get(agent_snapshot/agent_find)` 覆盖跨域 iframe 与开放/封闭 Shadow DOM；传回快照的 `target` 可用于隐藏窗口中的可信点击、键入、按键和触摸。检查快照完整性并在操作后回读。
 - URL 白名单（可选）：作用于 navigate / session.fetch；空列表 = 不限制
 
 ### 3.3 权限门闩（PermissionGate）

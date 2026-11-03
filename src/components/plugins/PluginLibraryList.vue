@@ -4,39 +4,39 @@
       <h3>插件<span>{{ records.length }}</span></h3>
       <span v-if="enabledCount" class="library-enabled-count">{{ enabledCount }} 个已启用</span>
       <button v-if="batchMode" type="button" class="library-text-button" :disabled="busy" @click="emit('batch', false)">取消批量操作</button>
-      <button v-else-if="removableCount" type="button" class="library-icon-button" aria-label="批量操作" title="批量操作" :disabled="busy" @click="emit('batch', true)"><font-awesome-icon icon="list-check" /></button>
+      <button v-else-if="removableCount" type="button" class="library-icon-button" aria-label="批量操作" title="批量操作" :disabled="busy" @click="emit('batch', true)"><AppIcon icon="list-check" /></button>
     </header>
     <div v-if="records.length" class="library-filters">
-      <div class="library-search"><font-awesome-icon icon="magnifying-glass" /><input v-model="query" type="search" aria-label="搜索插件" placeholder="搜索名称、用途或工具…" /><button v-if="query" type="button" aria-label="清空插件搜索" @click="query = ''"><font-awesome-icon icon="xmark" /></button></div>
+      <div class="library-search"><AppIcon icon="magnifying-glass" /><input v-model="query" type="search" aria-label="搜索插件" placeholder="搜索名称、用途或工具…" /><button v-if="query" type="button" aria-label="清空插件搜索" @click="query = ''"><AppIcon icon="xmark" /></button></div>
       <select v-model="source" aria-label="插件来源"><option value="all">全部来源</option><option v-for="option in sourceOptions" :key="option.id" :value="option.id">{{ option.label }}</option></select>
     </div>
     <div v-if="records.length" class="library-status-filters" role="group" aria-label="插件状态筛选"><button v-for="option in statuses" :key="option.id" type="button" :class="{ active: status === option.id }" :aria-pressed="status === option.id" @click="status = option.id">{{ option.label }}<span>{{ count(option.id) }}</span></button></div>
-    <div v-if="error" class="library-load-error" role="alert"><font-awesome-icon icon="circle-exclamation" /><span>{{ error }}</span><button type="button" :disabled="busy || loading" @click="emit('retry')">重试</button></div>
-    <div v-if="loading && !records.length" class="library-empty" role="status"><font-awesome-icon icon="circle-notch" :spin="!reducedMotion" /><span>正在读取插件…</span></div>
-    <div v-else-if="!records.length && !error" class="library-empty settings-empty"><font-awesome-icon icon="puzzle-piece" /><strong>暂无插件</strong><span>从模板创建，或导入现有插件</span><button type="button" class="library-text-button" @click="emit('create')">创建插件</button></div>
-    <div v-else-if="records.length && !filtered.length" class="library-empty"><font-awesome-icon icon="magnifying-glass" /><strong>没有匹配的插件</strong><button type="button" class="library-text-button" @click="reset">清空筛选</button></div>
+    <div v-if="error" class="library-load-error" role="alert"><AppIcon icon="circle-exclamation" /><span>{{ error }}</span><button type="button" :disabled="busy || loading" @click="emit('retry')">重试</button></div>
+    <div v-if="loading && !records.length" class="library-empty" role="status"><AppIcon icon="circle-notch" :spin="!reducedMotion" /><span>正在读取插件…</span></div>
+    <div v-else-if="!records.length && !error" class="library-empty settings-empty"><AppIcon icon="puzzle-piece" /><strong>暂无插件</strong><span>从模板创建，或导入现有插件</span><button type="button" class="library-text-button" @click="emit('create')">创建插件</button></div>
+    <div v-else-if="records.length && !filtered.length" class="library-empty"><AppIcon icon="magnifying-glass" /><strong>没有匹配的插件</strong><button type="button" class="library-text-button" @click="reset">清空筛选</button></div>
     <div v-else class="library-rows" :aria-busy="loading || busy">
       <article v-for="plugin in filtered" :key="plugin.id" class="plugin-library-row" :class="{ selected: batchMode && selected.has(plugin.id), attention: pluginLibraryStatus(plugin, conflicts) === 'attention' }" :data-plugin-id="plugin.id">
         <div class="plugin-summary">
           <input v-if="batchMode" type="checkbox" class="plugin-batch-checkbox" :checked="selected.has(plugin.id)" :disabled="busy || protectedPlugin(plugin)" :aria-label="`选择 ${plugin.name}`" @change="emit('select', plugin.id)" />
-          <span v-else class="plugin-identity-icon"><font-awesome-icon icon="puzzle-piece" /></span>
+          <span v-else class="plugin-identity-icon"><AppIcon icon="puzzle-piece" /></span>
           <div class="plugin-summary-copy">
-            <div class="plugin-summary-title"><strong :title="plugin.name">{{ plugin.name }}</strong><span v-if="plugin.version" class="plugin-version">v{{ plugin.version }}</span><span class="plugin-origin" :title="plugin.sourceDetail || plugin.path">{{ pluginLibrarySource(plugin).label }}</span></div>
+            <div class="plugin-summary-title"><strong :title="plugin.name">{{ plugin.name }}</strong><span v-if="plugin.version" class="plugin-version">v{{ plugin.version }}</span><span v-if="plugin.targetLabel" class="plugin-version">{{ plugin.targetLabel }}</span><span class="plugin-origin" :title="plugin.sourceDetail || plugin.path">{{ pluginLibrarySource(plugin).label }}</span></div>
             <p class="plugin-description" :title="plugin.description">{{ plugin.description || plugin.id }}</p>
           </div>
-          <span class="plugin-state" :class="{ enabled: pluginLibraryStatus(plugin, conflicts) === 'enabled', failed: plugin.error, conflict: conflicts.has(plugin.id) && !plugin.error }"><font-awesome-icon v-if="plugin.error || conflicts.has(plugin.id)" icon="circle-exclamation" />{{ plugin.error ? '加载失败' : conflicts.has(plugin.id) ? '套件冲突' : plugin.enabled ? '已启用' : '已停用' }}</span>
+          <span class="plugin-state" :class="{ enabled: pluginLibraryStatus(plugin, conflicts) === 'enabled', failed: plugin.error, conflict: conflicts.has(plugin.id) && !plugin.error }"><AppIcon v-if="plugin.error || conflicts.has(plugin.id)" icon="circle-exclamation" />{{ plugin.error ? '加载失败' : conflicts.has(plugin.id) ? '套件冲突' : plugin.enabled ? '已启用' : '已停用' }}</span>
           <button type="button" class="plugin-tool-count" :aria-expanded="expanded.has(plugin.id)" :aria-controls="`plugin-detail-${plugin.id}`" :title="`查看 ${plugin.tools.length} 个工具与插件详情`" @click="toggleExpanded(plugin.id)">{{ plugin.tools.length }}<span> 个工具</span></button>
           <input v-if="!batchMode" type="checkbox" class="surface-toggle plugin-enable" role="switch" :checked="plugin.enabled" :aria-checked="plugin.enabled" :aria-label="`${plugin.enabled ? '停用' : '启用'} ${plugin.name}`" :disabled="busy || (!!plugin.error && !plugin.enabled)" :title="plugin.error && !plugin.enabled ? '修复入口后可启用' : undefined" @change="emit('toggle', plugin.id, ($event.target as HTMLInputElement).checked)" />
           <v-menu v-if="!batchMode" location="bottom end">
-            <template #activator="{ props: menuProps }"><button v-bind="menuProps" type="button" class="library-icon-button plugin-actions" :aria-label="`${plugin.name}的更多操作`" title="更多操作" :disabled="busy"><font-awesome-icon icon="ellipsis" /></button></template>
+            <template #activator="{ props: menuProps }"><button v-bind="menuProps" type="button" class="library-icon-button plugin-actions" :aria-label="`${plugin.name}的更多操作`" title="更多操作" :disabled="busy"><AppIcon icon="ellipsis" /></button></template>
             <div class="library-action-menu" role="menu">
-              <button type="button" role="menuitem" :disabled="!plugin.hasReadme || busy" @click="emit('docs', plugin)"><font-awesome-icon icon="book" />查看说明</button>
-              <button type="button" role="menuitem" :disabled="busy" @click="emit('export', plugin.id)"><font-awesome-icon icon="file-export" />导出插件</button>
-              <button type="button" role="menuitem" :disabled="busy" @click="copy(plugin.path)"><font-awesome-icon icon="clipboard-list" />复制路径</button>
-              <button type="button" role="menuitem" class="danger" :disabled="protectedPlugin(plugin) || busy" @click="emit('remove', plugin)"><font-awesome-icon icon="trash" />{{ protectedPlugin(plugin) ? '随附不可卸载' : plugin.kind === 'linked' ? '取消外链' : '卸载' }}</button>
+              <button type="button" role="menuitem" :disabled="!plugin.hasReadme || busy" @click="emit('docs', plugin)"><AppIcon icon="book" />查看说明</button>
+              <button type="button" role="menuitem" :disabled="busy" @click="emit('export', plugin.id)"><AppIcon icon="file-export" />导出插件</button>
+              <button type="button" role="menuitem" :disabled="busy" @click="copy(plugin.path)"><AppIcon icon="clipboard-list" />复制路径</button>
+              <button type="button" role="menuitem" class="danger" :disabled="protectedPlugin(plugin) || busy" @click="emit('remove', plugin)"><AppIcon icon="trash" />{{ protectedPlugin(plugin) ? '随附不可卸载' : plugin.kind === 'linked' ? '取消外链' : '卸载' }}</button>
             </div>
           </v-menu>
-          <button type="button" class="library-icon-button plugin-disclosure" :aria-expanded="expanded.has(plugin.id)" :aria-controls="`plugin-detail-${plugin.id}`" :aria-label="`${expanded.has(plugin.id) ? '收起' : '展开'} ${plugin.name}详情`" @click="toggleExpanded(plugin.id)"><font-awesome-icon icon="chevron-down" /></button>
+          <button type="button" class="library-icon-button plugin-disclosure" :aria-expanded="expanded.has(plugin.id)" :aria-controls="`plugin-detail-${plugin.id}`" :aria-label="`${expanded.has(plugin.id) ? '收起' : '展开'} ${plugin.name}详情`" @click="toggleExpanded(plugin.id)"><AppIcon icon="chevron-down" /></button>
         </div>
         <DisclosureTransition>
           <div v-if="expanded.has(plugin.id)" :id="`plugin-detail-${plugin.id}`" class="plugin-library-details">
@@ -45,7 +45,7 @@
             <dl><dt>标识</dt><dd>{{ plugin.id }}</dd><dt>位置</dt><dd class="plugin-location">{{ plugin.path }}</dd><template v-if="plugin.suite"><dt>套件</dt><dd>{{ plugin.suite }}</dd></template></dl>
             <div v-if="plugin.tools.length" class="plugin-tool-list" aria-label="插件工具"><code v-for="tool in plugin.tools" :key="tool">{{ tool }}</code></div>
             <div v-else class="plugin-no-tools">{{ plugin.error ? '修复入口后重新加载插件' : plugin.enabled ? '未注册工具' : '启用后注册工具' }}</div>
-            <button v-if="plugin.hasReadme" type="button" class="library-text-button" :disabled="busy" @click="emit('docs', plugin)">查看说明<font-awesome-icon icon="arrow-up-right-from-square" /></button>
+            <button v-if="plugin.hasReadme" type="button" class="library-text-button" :disabled="busy" @click="emit('docs', plugin)">查看说明<AppIcon icon="arrow-up-right-from-square" /></button>
           </div>
         </DisclosureTransition>
       </article>
@@ -167,5 +167,5 @@ button:focus-visible,select:focus-visible,input:focus-visible { outline:2px soli
   .plugin-origin { display:none; }
   .library-enabled-count { display:none; }
 }
-@media(prefers-reduced-motion:reduce) { .library-icon-button,.plugin-disclosure svg { transition:none; } .library-empty .fa-spin { animation:none; } }
+@media(prefers-reduced-motion:reduce) { .library-icon-button,.plugin-disclosure svg { transition:none; } .library-empty .is-spinning { animation:none; } }
 </style>

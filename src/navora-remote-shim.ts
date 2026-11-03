@@ -1,3 +1,5 @@
+import type {BrowserWorkspaceApi} from '../shared/browser-workspace'
+import type {FileWindowsApi} from '../shared/file-windows'
 import type { NavoraApi } from '../electron/preload'
 import type {
   AgentAskRequest,
@@ -231,6 +233,7 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
     ws.onEvent(event, (payload) => cb(payload as T))
 
   return {
+    fileTabs:new Proxy({onChanged:()=>()=>{},onTransfer:()=>()=>{}} as Partial<FileWindowsApi>,{get:(target,key)=>key in target?Reflect.get(target,key):async()=>{throw Error('文件独立窗口需要桌面端')}}) as FileWindowsApi,
     creators: {
       list: (kind) => invoke('navora:creators.list', kind),
       create: (kind, template) => invoke('navora:creators.create', kind, template),
@@ -343,6 +346,7 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
       onCancel: (cb: (id: string) => void) => on<string>('navora:permission.cancel', cb),
     },
     browser: {
+      workspace: new Proxy({onTabShortcut:()=>()=>{},annotations:(chatId:string)=>invoke('navora:browser.annotations.list',chatId)} as Partial<BrowserWorkspaceApi>,{get:(target,key)=>key in target?Reflect.get(target,key):async()=>{throw Error('此操作需要桌面端浏览器')}}) as BrowserWorkspaceApi,
       treeAll: () => invoke<BrowserTreeSession[]>('navora:browser.treeAll'),
       tree: (chatId: string) => invoke<BrowserTreeSession[]>('navora:browser.tree', chatId),
       windowCounts: () => invoke<Record<string, number>>('navora:browser.windowCounts'),

@@ -1,3 +1,6 @@
+import {BrowserAnnotationService} from '../electron/modules/browser-annotations'
+import {dispatchTrustedPointer} from '../electron/modules/trusted-input'
+import {WorkspaceFiles} from '../electron/modules/workspace-files'
 import { app, BrowserWindow } from 'electron'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -15,6 +18,10 @@ import type { PageSnapshot } from '../shared/page-index'
 const root = process.env.NAVORA_SMOKE_ROOT!
 app.setPath('userData', path.join(root, 'profile'))
 app.commandLine.appendSwitch('disable-gpu')
+app.commandLine.appendSwitch('disable-features','CalculateNativeWinOcclusion')
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
+BrowserWindow.prototype.show=function(){this.setPosition(-30000,-30000);this.showInactive()}
+BrowserWindow.prototype.focus=function(){}
 void app.whenReady().then(async () => {
 console.log('[browser-smoke] Electron ready')
 const titleChats = new ChatStore(path.join(root,'title-regression'))
@@ -51,6 +58,7 @@ const context = {
   registry:{
     assertWindowOwned(chatId: string, windowId: string) { assert.equal(chatId,'fixture');assert.equal(windowId,'window');return {win} },
     getTree() {return []},
+    getWindowRecord(){return undefined},
   },
   gate:{async check(){permissionChecks++;return {ok:true}}},
 } as unknown as ToolExecContext
@@ -60,6 +68,123 @@ const call = async (name: string, args: Record<string, unknown> = {}) => {
 }
 
 try {
+  // Exercise the production page registry with real native WebContentsViews.
+  const embedded=new BrowserRegistry(()=>config),host=new BrowserWindow({show:false,width:1100,height:800})
+  await host.loadURL('data:text/html,<title>Browser host fixture</title>')
+  host.show()
+  const mainHostId=embedded.hosts.bindMain(host)
+  const embeddedSession=embedded.createSession(titleChat.id,{persist:false})
+  const resource=embedded.createWindow(embeddedSession.sessionId,{url:'about:blank',show:false})
+  const page=embedded.assertWindowOwned(titleChat.id,resource.windowId).win,wc=page.webContents
+  embedded.hosts.setLayout(mainHostId,page.id,{x:400,y:100,width:650,height:600})
+  const hiddenResource=embedded.createWindow(embeddedSession.sessionId,{url:'about:blank',show:false}),hiddenPage=embedded.assertWindowOwned(titleChat.id,hiddenResource.windowId).win
+  assert.equal(page.view.getVisible(),true,'Background page creation cannot replace the visible page')
+  assert.equal(hiddenPage.view.getVisible(),false,'A hidden page never flashes at stale bounds')
+  hiddenPage.destroy()
+  embedded.hosts.setLayout(mainHostId,page.id,null)
+  embedded.hosts.present(page)
+  assert.equal(page.view.getVisible(),false,'Present waits for the renderer to confirm its visible region')
+  embedded.hosts.setLayout(mainHostId,page.id,{x:400,y:100,width:650,height:600})
+  assert.equal(page.view.getVisible(),true,'A fresh layout resumes the same native page')
+  await wc.loadURLWithResponse('https://example.com/embedded-fixture',{statusCode:200,headers:{'Content-Type':'text/html'},body:'<title>Embedded fixture</title><style>body{height:2000px}button{margin-top:40px}</style><input id="draft"><button id="annotate">Annotate target</button>'})
+  await wc.executeJavaScript('window.__retained={value:42};document.querySelector("input").value="draft survives";scrollTo(0,50)')
+  const contentsId=wc.id,originalScroll=await wc.executeJavaScript('scrollY')
+  const detachedHost=embedded.hosts.detach(page)
+  assert.notEqual(detachedHost,mainHostId)
+  assert.equal(wc.id,contentsId)
+  assert.equal(await wc.executeJavaScript('window.__retained.value'),42)
+  assert.equal(await wc.executeJavaScript('document.querySelector("input").value'),'draft survives')
+  assert.equal(await wc.executeJavaScript('scrollY'),originalScroll)
+  embedded.hosts.attachMain(page)
+  assert.equal(page.hostId,mainHostId)
+  assert.equal(page.view.getVisible(),false,'Returning to embedded content waits for a fresh renderer layout')
+  embedded.hosts.setLayout(mainHostId,page.id,{x:400,y:100,width:650,height:600})
+  assert.equal(embedded.hosts.getHost(detachedHost),undefined,'Empty detached host is released')
+  assert.throws(()=>embedded.hosts.transfer(page,'missing-host'),/unavailable/)
+  assert.equal(page.hostId,mainHostId,'Invalid transfer keeps original ownership')
+  embedded.hosts.resizePage(page,{x:0,y:0,width:390,height:844})
+  assert.deepEqual(page.getContentSize(),[390,844],'Fixed viewport remains separate from the host clipping area')
+  const annotationFiles=new WorkspaceFiles(path.join(root,'annotations'),()=>config)
+  const annotationService=new BrowserAnnotationService(embedded,annotationFiles)
+  await wc.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+  await wc.capturePage(undefined,{stayHidden:true,stayAwake:true})
+  await wc.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+  await wc.executeJavaScript('scrollTo(0,0)')
+  await annotationService.begin(titleChat.id,page.id,'element')
+  const blocked=await executeAgentTool('browser_get',{windowId:page.id,what:'title'}, {...context,chatId:titleChat.id,registry:embedded}) as {error:string}
+  assert.equal(blocked.error,'browser_manual_control','Selection temporarily pauses agent browser tools')
+  const target=await wc.executeJavaScript('(()=>{const r=document.querySelector("button").getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()')
+  await dispatchTrustedPointer(wc,{action:'move',...target});await dispatchTrustedPointer(wc,{action:'down',...target});await dispatchTrustedPointer(wc,{action:'up',...target})
+  await new Promise(r=>setTimeout(r,80))
+  const collected=await annotationService.collect(titleChat.id,page.id)
+  assert.ok(collected.annotation,'Real pointer selection creates a saved annotation')
+  assert.equal(collected.annotation.selection.text,'Annotate target')
+  const annotation=annotationService.update(titleChat.id,collected.annotation.id,1,{comment:'Align this button',taskState:'pending'})
+  assert.equal(annotation.revision,2)
+  assert.throws(()=>annotationService.update(titleChat.id,annotation.id,1,{comment:'stale write'}),/revision_conflict/)
+  assert.ok(fs.existsSync(annotationFiles.resolve(titleChat.id,annotation.screenshotPath)))
+  assert.equal((await annotationService.collect(titleChat.id,page.id)).annotation,undefined,'Selection is collected once')
+  assert.equal(page.manualControl,false,'Completing selection restores the original AI control state')
+  await annotationService.cancel(titleChat.id,page.id)
+  assert.equal(page.manualControl,false)
+  const resized=await executeAgentTool('browser_window_set_bounds',{windowId:page.id,width:420,height:600},{...context,chatId:titleChat.id,registry:embedded}) as {width:number;height:number}
+  assert.equal(resized.width,420);assert.equal(resized.height,600);assert.deepEqual(page.getContentSize(),[420,600],'Legacy bounds tool commits its viewport before returning')
+  assert.equal(await annotationService.locate(titleChat.id,annotation.id),true,'A matching current element can be highlighted')
+  const annotationRef={kind:'annotation' as const,annotationId:annotation.id,annotationRevision:annotation.revision,windowId:page.id,sessionId:annotation.sessionId,label:annotation.comment}
+  fs.writeFileSync(annotationFiles.resolve(titleChat.id,`browser-annotations/${annotation.id}-r${annotation.revision}.json`),JSON.stringify(annotation))
+  titleChats.appendMessage(titleChat.id,{role:'user',content:'Review the selected button',meta:{refs:[annotationRef]}})
+  annotationService.update(titleChat.id,annotation.id,2,{comment:'A newer unsent edit'})
+  const evidenceRuntime=new AgentRuntime({chats:titleChats,files:annotationFiles,registry:embedded,getConfig:()=>config,emit:()=>{}} as unknown as ConstructorParameters<typeof AgentRuntime>[0])
+  const evidenceMessages:import('../shared/openai-types').ChatMessageParam[]=[]
+  const appendEvidence=(evidenceRuntime as unknown as {appendAnnotationEvidence(chatId:string,messages:typeof evidenceMessages,seen:Set<string>,images:boolean):Promise<void>}).appendAnnotationEvidence.bind(evidenceRuntime)
+  const evidenceSeen=new Set<string>()
+  await appendEvidence(titleChat.id,evidenceMessages,evidenceSeen,true)
+  assert.ok(Array.isArray(evidenceMessages[0]!.content),'Image-capable models receive actual image content')
+  assert.ok(JSON.stringify(evidenceMessages).includes('data:image/png;base64,'))
+  assert.ok(JSON.stringify(evidenceMessages).includes('Align this button'))
+  assert.ok(!JSON.stringify(evidenceMessages).includes('A newer unsent edit'),'Edits never rewrite already-sent evidence')
+  annotationService.markReview(titleChat.id,evidenceSeen)
+  assert.equal(annotationService.get(titleChat.id,annotation.id).taskState,'pending','An old task cannot mark a newer opinion as reviewed')
+  const textOnly:typeof evidenceMessages=[];await appendEvidence(titleChat.id,textOnly,new Set(),false)
+  assert.ok(!JSON.stringify(textOnly).includes('data:image/'),'Text-only models receive an explicit image capability fallback')
+  await annotationService.begin(titleChat.id,page.id,'region')
+  await dispatchTrustedPointer(wc,{action:'down',x:20,y:20});await dispatchTrustedPointer(wc,{action:'move',x:120,y:70,buttons:1});await dispatchTrustedPointer(wc,{action:'up',x:120,y:70})
+  await new Promise(r=>setTimeout(r,80))
+  const region=(await annotationService.collect(titleChat.id,page.id)).annotation
+  assert.equal(region?.selection.kind,'region');assert.ok(Math.abs((region?.selection.rect.width||0)-100)<1)
+  await annotationService.cancel(titleChat.id,page.id)
+
+  page.manualControl=true
+  await annotationService.begin(titleChat.id,page.id,'element')
+  const beforeCancellation=annotationService.list(titleChat.id).length
+  const cancelledPoint=await wc.executeJavaScript('(()=>{const r=document.querySelector("#annotate").getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()')
+  await dispatchTrustedPointer(wc,{action:'down',...cancelledPoint});await dispatchTrustedPointer(wc,{action:'up',...cancelledPoint})
+  assert.equal(await annotationService.cancel(titleChat.id,page.id),true,'Cancelling a selection keeps prior manual control')
+  assert.equal((await annotationService.collect(titleChat.id,page.id)).annotation,undefined,'A queued collection cannot resurrect the cancelled selection')
+  assert.equal(annotationService.list(titleChat.id).length,beforeCancellation)
+  await annotationService.begin(titleChat.id,page.id,'region')
+  await assert.rejects(annotationService.begin(titleChat.id,page.id,'element'),/browser_busy_finish_action_first/)
+  await annotationService.cancel(titleChat.id,page.id,true)
+  assert.equal(page.manualControl,false,'Explicit resume releases manual control')
+
+  assert.equal(wc.debugger.isAttached(),false,'Annotations and migration never attach debugger')
+  await embedded.closeSession(embeddedSession.sessionId,true);host.destroy()
+  const persistenceFile=path.join(root,'browser-workspace.json')
+  const persistentRegistry=new BrowserRegistry(()=>config),persistentHost=new BrowserWindow({show:false})
+  persistentRegistry.hosts.bindMain(persistentHost);persistentRegistry.restorePersistent(persistenceFile,()=>true)
+  const persistentSession=persistentRegistry.createSession(titleChat.id,{persist:true})
+  const persistentPage=persistentRegistry.createWindow(persistentSession.sessionId,{url:'about:blank',show:false})
+  persistentRegistry.getWindowRecord(persistentPage.windowId)!.tabKey='browser:restored-fixture'
+  persistentRegistry.savePersistent();persistentRegistry.shutdown();persistentHost.destroy()
+  const restoredRegistry=new BrowserRegistry(()=>config),restoredHost=new BrowserWindow({show:false})
+  restoredRegistry.hosts.bindMain(restoredHost);restoredRegistry.restorePersistent(persistenceFile,()=>true)
+  const restoredPage=restoredRegistry.getTree(titleChat.id)[0]!.windows[0]!
+  assert.equal(restoredPage.windowId,persistentPage.windowId,'Page identity is recovered from the saved workspace')
+  assert.equal(restoredPage.tabKey,'browser:restored-fixture')
+  assert.equal(restoredRegistry.getTree(titleChat.id)[0]!.partition,persistentSession.partition,'Persistent login partition is retained')
+  restoredRegistry.shutdown();restoredHost.destroy()
+  console.log('[browser-smoke] embedded transfer, retained state, fixed viewport and annotations passed')
+
   // Terminal status must not destroy a retained page or login. Exercise the real
   // finalizer and registry, then explicitly release through the Agent tools.
   const lifetimeRegistry = new BrowserRegistry(() => config)
@@ -294,7 +419,7 @@ try {
   assert.equal(win.webContents.getTitle(),'Native document')
   assert.equal(win.webContents.debugger.isAttached(),false)
   console.log(JSON.stringify({ok:true,electron:process.versions.electron,capabilities:capabilities.value,
-    checks:['agent-controlled-browser-lifetime','terminal-subchat-retains-page-and-cookie','explicit-window-and-session-release','title-provenance-manual-rename','weather-permissions','cancelled-navigation-soft-wait','wait-deadline-listener-cleanup','snapshot','cache','trusted-click','typed-input','open-shadow','closed-shadow-query','cross-origin-frame-query-click','no-arbitrary-frame-click','native-file-input-navigation','native-dialog','native-document-response','semantic-stale-ref','navigation-stale-ref','plugin-load-execute','plugin-permissions','no-debugger'],
+    checks:['embedded-transfer-retains-webcontents-form-js-scroll','transfer-failure-preserves-source','fixed-viewport','annotation-pointer-snapshot-storage-revisions','annotation-manual-control','annotation-region','immutable-annotation-model-image-evidence','text-model-fallback','persistent-workspace-restoration','agent-controlled-browser-lifetime','terminal-subchat-retains-page-and-cookie','explicit-window-and-session-release','title-provenance-manual-rename','weather-permissions','cancelled-navigation-soft-wait','wait-deadline-listener-cleanup','snapshot','cache','trusted-click','typed-input','open-shadow','closed-shadow-query','cross-origin-frame-query-click','no-arbitrary-frame-click','native-file-input-navigation','native-dialog','native-document-response','semantic-stale-ref','navigation-stale-ref','plugin-load-execute','plugin-permissions','no-debugger'],
     captureMs:snapshot.captureMs,permissionChecks,benchmark}))
 } catch(error) {
   console.error(error)

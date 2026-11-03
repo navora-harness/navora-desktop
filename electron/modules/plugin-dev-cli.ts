@@ -72,6 +72,7 @@ export function resolveNavoraPluginCli(): string | null {
  */
 export function runPluginDevCli(opts: {
   action: PluginDevCliAction
+  target?: string
   workspaceRoot: string
   id?: string
   entry?: string
@@ -121,6 +122,7 @@ export function runPluginDevCli(opts: {
   if (resolvedId) args.push(resolvedId)
   if (rootFlag) args.push('--root', rootFlag)
   if (opts.entry?.trim()) args.push('--entry', opts.entry.trim())
+  if (opts.target?.trim()) args.push('--target', opts.target.trim())
 
   const timeoutMs = Math.min(Math.max(opts.timeoutMs || 120_000, 5_000), 600_000)
 

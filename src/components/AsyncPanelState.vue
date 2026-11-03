@@ -12,4 +12,5 @@ const emit=defineEmits<{retry:[];close:[]}>()
 </script>
 <style scoped>
 .async-panel-state{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:240px;color:#708199;background:#fafbfd;font-size:13px}.async-panel-state.overlay{position:fixed;inset:44px 0 0 52px;z-index:1001}.async-panel-state>svg{width:22px;height:22px}.async-panel-state>div{display:flex;gap:8px}.async-panel-state button{border:1px solid #ccd7e4;border-radius:7px;background:#fff;padding:6px 12px;color:#4e6b8e}.async-panel-state button:hover{background:#edf2f7;border-color:#9cb1cb;color:#304d71}.async-panel-state button:focus-visible{outline:2px solid #6487b1;outline-offset:2px}
+.async-panel-state{min-width:0;min-height:0;padding:24px;text-align:center;overflow:auto}.async-panel-state>div{flex-wrap:wrap;justify-content:center}.async-panel-state button{min-height:32px;font-size:12px}
 </style>

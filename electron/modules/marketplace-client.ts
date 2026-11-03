@@ -4,12 +4,14 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { app } from 'electron'
+import { platformHost } from './plugin-package'
 import AdmZip from 'adm-zip'
 import type { AppConfig } from '../../shared/config'
 import type { ConfigService } from './config-service'
 import type { PluginStore } from './plugin-store'
 import type { SkillStore } from './skill-store'
 import {
+  catalogForPlatform,
   STORE_DOWNLOAD_TIMEOUT_MS,
   STORE_ZIP_MAX_BYTES,
   assertCatalogIndex,
@@ -18,6 +20,7 @@ import {
   findCatalogPackage,
   isSafeZipEntryName,
   latestPackageVersion,
+  minimumHostVersion,
   type StoreCatalogIndex,
   type StoreCatalogProduct,
   type StoreInstallAction,
@@ -74,7 +77,7 @@ function normalizeBaseUrl(raw: string): string {
 }
 
 export class MarketplaceClient {
-  private cache: { at: number; catalog: StoreCatalogIndex; etag?: string } | null = null
+  private cache: { endpoint: string; baseUrl: string; at: number; catalog: StoreCatalogIndex; etag?: string } | null = null
   onProgress?: (p: StoreInstallProgress) => void
 
   constructor(
@@ -115,16 +118,25 @@ export class MarketplaceClient {
 
   async fetchCatalog(opts?: { force?: boolean }): Promise<StoreCatalogIndex> {
     const now = Date.now()
+    const baseUrl = this.baseUrl()
+    if (this.cache?.baseUrl !== baseUrl) this.cache = null
     if (!opts?.force && this.cache && now - this.cache.at < 15_000) {
       return this.cache.catalog
     }
-    const baseUrl = this.baseUrl()
-    const fetched = await this.readRemoteText(`${baseUrl}/index.json`, {
-      etag: this.cache?.etag,
-      maxBytes: 8 * 1024 * 1024,
-    })
-    if (fetched.notModified && this.cache) {
-      this.cache = { ...this.cache, at: now }
+    const cached = this.cache
+    let endpoint = 'index-v2.json'
+    let fetched
+    try {
+      fetched = await this.readRemoteText(`${baseUrl}/${endpoint}`, { etag: cached?.endpoint === endpoint ? cached.etag : undefined, maxBytes: 8 * 1024 * 1024 })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : ''
+      if (message !== 'http_404' && !message.includes('ENOENT')) throw error
+      endpoint = 'index.json'
+      fetched = await this.readRemoteText(`${baseUrl}/${endpoint}`, { etag: cached?.endpoint === endpoint ? cached.etag : undefined, maxBytes: 8 * 1024 * 1024 })
+    }
+    if (baseUrl !== this.baseUrl()) throw new Error('store_source_changed')
+    if (fetched.notModified && cached) {
+      this.cache = { ...cached, at: now }
       return this.cache.catalog
     }
     let parsed: unknown
@@ -133,8 +145,10 @@ export class MarketplaceClient {
     } catch {
       throw new Error('invalid_catalog_json')
     }
-    const catalog = assertCatalogIndex(parsed)
-    this.cache = { at: now, catalog, etag: fetched.etag }
+    const validated = assertCatalogIndex(parsed)
+    if (endpoint === 'index-v2.json' && validated.schemaVersion !== 2) throw new Error('invalid_catalog_schema')
+    const catalog = catalogForPlatform(validated, platformHost(this.hostVersion()))
+    this.cache = { endpoint, baseUrl, at: now, catalog, etag: fetched.etag }
     return catalog
   }
 
@@ -190,7 +204,7 @@ export class MarketplaceClient {
 
     let catalog: StoreCatalogIndex
     try {
-      catalog = await this.fetchCatalog()
+      catalog = await this.fetchCatalog({ force: true })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       return { ok: false, error: msg, blockers: ['store_unreachable'] }
@@ -204,11 +218,14 @@ export class MarketplaceClient {
     const wantVer = String(input.version || '').trim()
     const verEntry = wantVer
       ? pkg.versions.find((v) => v.version === wantVer)
-      : latestPackageVersion(pkg)
+      : latestPackageVersion(pkg, { hostVersion: this.hostVersion() })
     if (!verEntry) {
-      return { ok: false, error: 'version_not_found', blockers: ['version_not_found'] }
+      const reason = pkg.versions.some(v => v.status !== 'yanked' && v.compatibilityError) ? 'unsupported_platform' : 'version_not_found'
+      return { ok: false, error: reason, blockers: [reason] }
     }
+    if (verEntry.status === 'yanked') return { ok: false, error: 'version_yanked', blockers: ['version_yanked'], yanked: true }
 
+    if (verEntry.compatibilityError) return { ok: false, error: verEntry.compatibilityError, blockers: [verEntry.compatibilityError] }
     try {
       assertCatalogRelPath(verEntry.downloadPath)
     } catch {
@@ -216,7 +233,7 @@ export class MarketplaceClient {
     }
 
     const blockers: string[] = []
-    const minHost = verEntry.minHostVersion || pkg.minHostVersion
+    const minHost = minimumHostVersion(pkg, verEntry)
     if (minHost && compareStoreVersions(this.hostVersion(), minHost) < 0) {
       blockers.push('host_too_old')
     }
@@ -282,6 +299,9 @@ export class MarketplaceClient {
       kind,
       packageId,
       version: verEntry.version,
+      artifactId: verEntry.artifactId,
+      targetLabel: verEntry.targetLabel,
+      installPlanKey: `${this.baseUrl()}|${packageId}|${verEntry.version}|${verEntry.artifactId || 'legacy'}|${verEntry.sha256}`,
       name: pkg.name,
       description: pkg.description,
       suite: pkg.suite,
@@ -291,14 +311,16 @@ export class MarketplaceClient {
       action,
       needsOverwrite,
       needsReplaceSuite,
-      yanked: verEntry.status === 'yanked',
+      yanked: false,
       minHostVersion: minHost,
       local,
     }
   }
 
   async install(input: StoreInstallInput): Promise<StoreInstallResult> {
+    try { await this.fetchCatalog({ force: true }) } catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'store_unreachable' } }
     const preview = await this.previewInstall(input)
+    if (input.installPlanKey && input.installPlanKey !== preview.installPlanKey) return { ok: false, error: 'install_plan_changed' }
     if (!preview.ok || preview.blockers?.length) {
       return {
         ok: false,
@@ -324,6 +346,7 @@ export class MarketplaceClient {
     const sha256 = preview.sha256!
     const expectSize = preview.size
 
+    const installSource = this.baseUrl()
     let zipPath: string
     try {
       zipPath = await this.downloadArtifact(kind, packageId, version, downloadPath, sha256, expectSize)
@@ -331,7 +354,12 @@ export class MarketplaceClient {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
 
+    if (this.baseUrl() !== installSource) return { ok: false, error: 'store_source_changed' }
     if (kind === 'plugin') {
+      try {
+        const content = this.plugins.parseFromPath(zipPath)
+        if (content.id !== packageId || content.version !== version || content.artifactId !== preview.artifactId) return { ok: false, error: 'artifact_metadata_mismatch' }
+      } catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'invalid_artifact' } }
       const imported = await this.plugins.importFromPath(zipPath, {
         overwrite: Boolean(input.overwrite),
         replaceSuite: Boolean(input.replaceSuite),
@@ -401,7 +429,7 @@ export class MarketplaceClient {
       for (const p of this.plugins.list()) {
         const found = findCatalogPackage(catalog, 'plugin', p.id)
         if (!found) continue
-        const latest = latestPackageVersion(found.pkg)
+        const latest = latestPackageVersion(found.pkg, { hostVersion: this.hostVersion() })
         if (!latest) continue
         if (compareStoreVersions(latest.version, p.version || '0') > 0) {
           updates.push({
@@ -416,7 +444,7 @@ export class MarketplaceClient {
       for (const s of this.skills.list()) {
         const found = findCatalogPackage(catalog, 'skill', s.id)
         if (!found) continue
-        const latest = latestPackageVersion(found.pkg)
+        const latest = latestPackageVersion(found.pkg, { hostVersion: this.hostVersion() })
         if (!latest) continue
         if (compareStoreVersions(latest.version, s.version || '0') > 0) {
           updates.push({
@@ -537,7 +565,7 @@ export class MarketplaceClient {
     expectSize?: number,
   ): Promise<string> {
     const rel = assertCatalogRelPath(downloadPath)
-    const destDir = path.join(this.cacheDir(), kind === 'plugin' ? 'plugins' : 'skills', packageId, version)
+    const destDir = path.join(this.cacheDir(), kind === 'plugin' ? 'plugins' : 'skills', packageId, version, expectSha256)
     ensureDir(destDir)
     const destZip = path.join(destDir, 'package.zip')
     if (fs.existsSync(destZip)) {

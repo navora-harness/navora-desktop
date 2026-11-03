@@ -3,7 +3,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { AppConfig } from '../../shared/config'
-import type { WorkspacePreview } from '../../shared/workspace-preview'
+import {previewTextLimit,previewImageLimit,previewImageMimes,previewBinaryExtensions,type WorkspacePreview} from '../../shared/workspace-preview'
 import {resourceKind,type WorkspaceResourceSnapshot} from '../../shared/workspace-resources'
 
 /** True if `child` is `parent` or a path under it (sep-safe). */
@@ -176,6 +176,8 @@ export class WorkspaceFiles {
           if(visited++>=budget||result.entries.length>=limit){result.truncated=true;break}
           if(entry.isSymbolicLink())continue
           const child=relative==='.'?entry.name:`${relative}/${entry.name}`
+          // Recovery records are internal editing state, not generated deliverables.
+          if(child==='browser-annotations/drafts')continue
           if(entry.isDirectory()){pending.push(child);continue}
           if(!entry.isFile())continue
           try{
@@ -315,9 +317,10 @@ export class WorkspaceFiles {
       if (!stat.isFile()) throw new Error('not_a_file')
       const ext = path.extname(abs).toLowerCase()
       const imageMime = mimeFromImageExt(ext)
-      const limit = imageMime ? 12_582_912 : 262_144
+      const limit = imageMime ? previewImageLimit : previewTextLimit
       const result = { ok: true, path: this.toRel(chatId, abs), size: stat.size }
-      if (imageMime && stat.size > limit) return { ...result, kind: 'unsupported' }
+      if(previewBinaryExtensions.has(ext))return {...result,kind:'unsupported',reason:'file_type'}
+      if (imageMime && stat.size > limit) return { ...result, kind: 'unsupported',reason:'image_too_large' }
       const buf = Buffer.alloc(Math.min(stat.size, limit))
       let offset = 0
       while (offset < buf.length) {
@@ -328,11 +331,11 @@ export class WorkspaceFiles {
       const bytes = buf.subarray(0, offset)
       if (imageMime) return { ...result, kind: 'image', mime: imageMime, base64: bytes.toString('base64') }
       // Binary files remain available through the existing system-open action.
-      const utf16 = bytes[0] === 0xff && bytes[1] === 0xfe
-      if (!utf16 && bytes.includes(0)) return { ...result, kind: 'unsupported' }
-      const content = utf16 ? bytes.subarray(2).toString('utf16le') : new TextDecoder('utf-8').decode(bytes, { stream: stat.size > limit }).replace(/^\uFEFF/, '')
-      const invalid = [...content.slice(0, 4096)].filter(char => char === '\uFFFD').length
-      if (invalid > 8) return { ...result, kind: 'unsupported' }
+      const utf16LE=bytes[0]===0xff&&bytes[1]===0xfe,utf16BE=bytes[0]===0xfe&&bytes[1]===0xff
+      if (!utf16LE&&!utf16BE&&bytes.includes(0)) return { ...result, kind: 'unsupported',reason:'binary' }
+      let content:string
+      try{content=new TextDecoder(utf16LE?'utf-16le':utf16BE?'utf-16be':'utf-8',{fatal:true}).decode(utf16LE||utf16BE?bytes.subarray(2):bytes,{stream:stat.size>limit}).replace(/^\uFEFF/,'')}
+      catch{return {...result,kind:'unsupported',reason:'encoding'}}
       return { ...result, kind: /\.(md|markdown|mdown)$/i.test(ext) ? 'markdown' : 'text', content, truncated: stat.size > limit }
     } finally { await handle.close() }
   }
@@ -502,22 +505,4 @@ function sanitizeSeg(s: string): string {
   return !segment || segment === '.' || segment === '..' ? 'unknown' : segment
 }
 
-function mimeFromImageExt(ext: string): string | null {
-  switch (ext) {
-    case '.png':
-      return 'image/png'
-    case '.jpg':
-    case '.jpeg':
-      return 'image/jpeg'
-    case '.gif':
-      return 'image/gif'
-    case '.webp':
-      return 'image/webp'
-    case '.bmp':
-      return 'image/bmp'
-    case '.svg':
-      return 'image/svg+xml'
-    default:
-      return null
-  }
-}
+function mimeFromImageExt(ext:string):string|null{return previewImageMimes[ext]||null}

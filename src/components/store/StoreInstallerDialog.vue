@@ -96,6 +96,7 @@
             </div>
 
             <dl class="meta-grid">
+              <div v-if="preview?.targetLabel" class="meta-row"><dt>适用系统</dt><dd>{{ preview.targetLabel }}</dd></div>
               <div class="meta-row">
                 <dt>方式</dt>
                 <dd>{{ modeLabel }}</dd>
@@ -165,9 +166,6 @@
               <div class="conflict-title">{{ previewErrorLabel }}</div>
             </div>
 
-            <div v-if="preview?.yanked && preview.ok" class="conflict-box" role="status">
-              <div class="conflict-title">该版本已标记下架，仍可按你的选择安装</div>
-            </div>
           </div>
 
           <div v-if="busy === 'install'" class="progress-panel" role="status" aria-live="polite">
@@ -330,7 +328,8 @@ const versionItems = computed(() => {
         )
       : vers
   return filtered.map((v) => ({
-    title: v.status === 'yanked' ? `${v.version}（已下架）` : v.version,
+    title: v.compatibilityError ? `${v.version}（不支持当前系统）` : v.status === 'yanked' ? `${v.version}（已下架）` : v.version,
+    props: { disabled: Boolean(v.compatibilityError || v.status === 'yanked') },
     value: v.version,
   }))
 })
@@ -663,6 +662,7 @@ async function runInstall() {
       kind: preview.value.kind!,
       packageId: preview.value.packageId!,
       version: preview.value.version,
+      installPlanKey: preview.value.installPlanKey,
       overwrite: Boolean(preview.value.needsOverwrite),
       replaceSuite: Boolean(preview.value.needsReplaceSuite),
     })

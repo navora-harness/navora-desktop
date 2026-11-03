@@ -38,21 +38,28 @@ const origin = ref('top left')
 const panelEl = ref<HTMLElement | null>(null)
 let clickX = 0
 let clickY = 0
+let trigger:HTMLElement|null=null
+let resizeObserver:ResizeObserver|undefined
 
 function show(e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
-  clickX = e.clientX
-  clickY = e.clientY
-  x.value = e.clientX
-  y.value = e.clientY
+  const anchor=e.currentTarget instanceof HTMLElement?e.currentTarget:null
+  trigger=anchor?.matches('button,[tabindex]')?anchor:anchor?.querySelector<HTMLElement>('button,[tabindex]')||document.activeElement as HTMLElement|null
+  const bounds=(anchor||trigger)?.getBoundingClientRect(),keyboard=e.clientX===0&&e.clientY===0
+  clickX = keyboard&&bounds?bounds.left:e.clientX
+  clickY = keyboard&&bounds?bounds.bottom:e.clientY
+  x.value = clickX
+  y.value = clickY
   origin.value = 'top left'
   open.value = true
-  void nextTick(clamp)
+  void nextTick(()=>{clamp();panelEl.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()})
 }
 
 function hide() {
+  if(!open.value)return
   open.value = false
+  if(trigger?.isConnected)trigger.focus({preventScroll:true})
 }
 
 function clamp() {
@@ -61,8 +68,8 @@ function clamp() {
   const pad = 8
   const width = node.offsetWidth
   const height = node.offsetHeight
-  let nx = x.value
-  let ny = y.value
+  let nx = Math.max(pad, clickX)
+  let ny = Math.max(pad, clickY)
   let ox = 'left'
   let oy = 'top'
   if (nx + width > window.innerWidth - pad) {
@@ -73,20 +80,36 @@ function clamp() {
     ny = Math.max(pad, clickY - height)
     oy = 'bottom'
   }
-  x.value = nx
-  y.value = ny
+  x.value = Math.max(pad,Math.min(nx,window.innerWidth-pad-width))
+  y.value = Math.max(pad,Math.min(ny,window.innerHeight-pad-height))
   origin.value = `${oy} ${ox}`
 }
 
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') hide()
+  if (e.key === 'Escape') {e.preventDefault();e.stopPropagation();hide();return}
+  if(e.key==='Tab'){hide();return}
+  if(!['ArrowDown','ArrowUp','Home','End'].includes(e.key))return
+  e.preventDefault();e.stopPropagation()
+  const buttons=[...panelEl.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')||[]]
+  if(!buttons.length)return
+  const at=buttons.indexOf(document.activeElement as HTMLButtonElement)
+  const next=e.key==='Home'?0:e.key==='End'?buttons.length-1:at<0?(e.key==='ArrowDown'?0:buttons.length-1):(at+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length
+  buttons[next]?.focus()
 }
 
-watch(open, (v) => {
-  if (v) window.addEventListener('keydown', onKey)
-  else window.removeEventListener('keydown', onKey)
+watch(open, async (v) => {
+  if (v) {
+    window.addEventListener('keydown', onKey, true)
+    window.addEventListener('resize',clamp)
+    await nextTick()
+    if(open.value&&panelEl.value){resizeObserver ||= new ResizeObserver(clamp);resizeObserver.observe(panelEl.value)}
+  } else {
+    window.removeEventListener('keydown', onKey, true)
+    window.removeEventListener('resize',clamp)
+    resizeObserver?.disconnect()
+  }
 })
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+onBeforeUnmount(() => {window.removeEventListener('keydown', onKey, true);window.removeEventListener('resize',clamp);resizeObserver?.disconnect()})
 
 defineExpose({ show, hide, open })
 </script>

@@ -27,7 +27,7 @@
       <v-spacer />
       <v-btn variant="text" :disabled="saving" @click="emit('cancel')">取消</v-btn>
       <v-btn color="primary" :loading="saving" @click="emit('confirm')">
-        <font-awesome-icon icon="file-export" class="btn-ic" />
+        <AppIcon icon="file-export" class="btn-ic" />
         导出到文件
       </v-btn>
     </template>

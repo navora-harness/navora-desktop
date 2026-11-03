@@ -8,7 +8,7 @@
       @mousedown.prevent.stop
       @click.prevent.stop="minimize"
     >
-      <font-awesome-icon icon="window-minimize" />
+      <AppIcon icon="window-minimize" />
     </button>
     <button
       type="button"
@@ -18,7 +18,7 @@
       @mousedown.prevent.stop
       @click.prevent.stop="toggleMaximize"
     >
-      <font-awesome-icon :icon="maximized ? 'window-restore' : 'window-maximize'" />
+      <AppIcon :icon="maximized ? 'window-restore' : 'window-maximize'" />
     </button>
     <button
       type="button"
@@ -28,7 +28,7 @@
       @mousedown.prevent.stop
       @click.prevent.stop="closeWin"
     >
-      <font-awesome-icon icon="xmark" />
+      <AppIcon icon="xmark" />
     </button>
   </div>
 </template>

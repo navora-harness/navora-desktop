@@ -1,9 +1,9 @@
 <template>
   <div class="reply-artifacts" aria-label="输出文件">
     <button v-for="file in files" :key="file.id" type="button" class="reply-artifact" :data-output-path="file.path" :title="file.path" :aria-label="`预览输出文件 ${file.name}`" @click="emit('open',file.path,file.ownerChatId)">
-      <span class="reply-artifact-icon"><font-awesome-icon :icon="file.kind==='image'?'image':'file-lines'" /></span>
+      <span class="reply-artifact-icon"><AppIcon :icon="file.kind==='image'?'image':'file-lines'" /></span>
       <span class="reply-artifact-info"><strong>{{ file.name }}</strong><small>{{ file.kind==='image'?'图片':'文件' }} · {{ fileSize(file.size) }}</small></span>
-      <font-awesome-icon class="reply-artifact-open" icon="arrow-up-right-from-square" />
+      <AppIcon class="reply-artifact-open" icon="arrow-up-right-from-square" />
     </button>
   </div>
 </template>

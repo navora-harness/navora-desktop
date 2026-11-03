@@ -1,8 +1,13 @@
+import {registerBrowserWorkspace} from './modules/browser-workspace-ipc'
+import {BrowserStartStore} from './modules/browser-start-store'
+import {registerFileWindows} from './modules/file-windows'
+import { registerLiteratureSearch } from './modules/literature-search'
 import {downloadNeedsLog} from '../shared/browser-download-status'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { version as productVersion } from '../package.json'
 import { applyUserDataPath, ensureDir, ensurePortableRoot, isPortableRuntime, PORTABLE_DATA_DIRNAME, resolveDataRoot } from './data-root'
 import { ConfigService } from './modules/config-service'
 import { mainWindowChrome } from './modules/window-chrome'
@@ -103,6 +108,7 @@ let dataRoot = dataRootEarly
 let config!: ConfigService
 let chats!: ChatStore
 let registry!: BrowserRegistry
+let browserStart!:BrowserStartStore
 let network!: BrowserNetworkManager
 let workspaceResourceIndex:WorkspaceResourceIndex|undefined
 let files!: WorkspaceFiles
@@ -118,6 +124,8 @@ let marketplace!: MarketplaceClient
 let gate!: PermissionGate
 let agent!: AgentRuntime
 let remote!: RemoteServer
+let browserAnnotations:ReturnType<typeof registerBrowserWorkspace>|undefined
+let fileWindows:ReturnType<typeof registerFileWindows>|undefined
 const rpc = new NavoraRpcRegistry()
 
 function rpcHandle(channel: string, handler: (...args: any[]) => any): void {
@@ -377,8 +385,8 @@ function pushBrowserDownloadsChanged(): void {
   downloadsPushTimer = setTimeout(() => {
     downloadsPushTimer = null
     const payload = { downloads: listDownloads() }
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('navora:downloads.changed', payload)
+    for(const win of BrowserWindow.getAllWindows()){
+      if(!win.isDestroyed()&&(win===mainWindow||registry?.hosts.hostForSender(win.webContents)))win.webContents.send('navora:downloads.changed',payload)
     }
     remote?.broadcast('navora:downloads.changed', payload)
   }, 100)
@@ -626,23 +634,15 @@ async function createWindow(): Promise<void> {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      webviewTag: true,
+      webviewTag: false,
     },
   })
   // Hide native menu; Agent windows manage their own chrome.
   mainWindow.setMenu(null)
   const win = mainWindow
   wireMainWindowExternalLinks(win)
-  win.webContents.on('will-attach-webview',(event,preferences,params)=>{
-    if(!/^navora-panel-[\w-]{1,128}$/.test(params.partition||'')||!/^about:blank$|^https?:\/\//i.test(params.src||'')){event.preventDefault();return}
-    delete preferences.preload
-    preferences.nodeIntegration=false;preferences.contextIsolation=true;preferences.sandbox=true;preferences.webSecurity=true
-  })
-  win.webContents.on('did-attach-webview',(_event,guest)=>{
-    guest.setWindowOpenHandler(({url})=>{openInSystemBrowser(url);return {action:'deny'}})
-    guest.on('will-navigate',(event,url)=>{if(!/^about:blank$|^https?:\/\//i.test(url))event.preventDefault()})
-    guest.on('will-redirect',(event,url)=>{if(!/^https?:\/\//i.test(url))event.preventDefault()})
-  })
+  registry.hosts.bindMain(win)
+  registry.restorePersistent(path.join(dataRoot,'browser-workspace.json'),id=>!!chats.get(id))
   trackWindowState(win, dataRoot)
 
   win.once('ready-to-show', () => {
@@ -670,13 +670,14 @@ async function createWindow(): Promise<void> {
   const devUrl = process.env.VITE_DEV_SERVER_URL
   if (devUrl) {
     await win.loadURL(devUrl)
-    win.webContents.openDevTools({ mode: 'detach' })
+    if (process.env.NAVORA_OPEN_DEVTOOLS === '1') win.webContents.openDevTools({ mode: 'detach' })
   } else {
     await win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
   }
 }
 
 function registerIpc(): void {
+  registerLiteratureSearch(ipcMain)
   const creatorCall = async <T>(operation: () => T | Promise<T>) => {
     try { return { ok: true as const, ...await operation() } }
     catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : 'creator_failed' } }
@@ -715,7 +716,7 @@ function registerIpc(): void {
   })
   rpcHandle('navora:app.info', (): AppInfo => ({
     name: 'Navora',
-    version: app.getVersion(),
+    version: app.isPackaged ? app.getVersion() : productVersion,
     electron: process.versions.electron,
     chrome: process.versions.chrome,
     dataRoot,
@@ -729,6 +730,7 @@ function registerIpc(): void {
     isQuitting = true
     abortAllAsks({ preservePersistedUnlimited: true })
     agent?.stopAll()
+    registry?.shutdown()
     app.quit()
     return { ok: true as const }
   })
@@ -1640,6 +1642,7 @@ function registerIpc(): void {
       agent.clearChatState(id)
       gate.clearChat(id)
       await registry.clearChat(id)
+      plugins.cancelChat(id)
       const ok = chats.delete(id)
       if (ok) pushChatChanged({ type: 'removed', chatId: id })
     }
@@ -1821,6 +1824,7 @@ function registerIpc(): void {
     },
   )
 
+  rpcHandle('navora:browser.annotations.list',(_e,chatId:string)=>{if(!chats.get(chatId))throw Error('chat_not_found');return browserAnnotations?.list(chatId)||[]})
   rpcHandle('navora:browser.tree', (_e, chatId: string) => displayBrowserTree(chatId))
   rpcHandle('navora:browser.treeAll', () => chats.list().flatMap(chat => registry.getTree(chat.id)))
   rpcHandle('navora:browser.windowCounts', () => displayWindowCounts())
@@ -1855,8 +1859,7 @@ function registerIpc(): void {
 
   rpcHandle('navora:browser.window.close', (_e, windowId: string) => {
     const ownerChatId = registry.getWindowRecord(windowId)?.chatId
-    registry.closeWindow(windowId)
-    if (ownerChatId) agent?.notifyWindowClosed(ownerChatId, windowId)
+    registry.requestCloseWindow(windowId)
     return true
   })
 }
@@ -1907,7 +1910,9 @@ if (!gotLock) {
     marketplace.onProgress = (p) => pushStoreProgress(p)
     browserDownloads = new BrowserDownloadList()
 
+    browserStart=new BrowserStartStore(path.join(dataRoot,'browser-start.json'))
     registry = new BrowserRegistry(() => config.get(), {
+      onVisit:info=>browserStart.visit(info),
       onTreeChanged: (chatId) => pushBrowserTree(chatId),
       onWindowClosedByUser: (info) => {
         pushBrowserTree(info.chatId)
@@ -2209,7 +2214,18 @@ if (!gotLock) {
     void remote.syncFromConfig().catch((e) => console.warn('[remote] sync', e))
 
     registerIpc()
+    browserAnnotations=registerBrowserWorkspace({registry,files,start:browserStart,getConfig:()=>config.get(),chatExists:id=>!!chats.get(id),getMain:()=>mainWindow,
+      preload:path.join(__dirname,'preload.js'),loadHost:(win,id)=>{
+        const route=`/browser-host/${id}`
+        if(process.env.VITE_DEV_SERVER_URL)void win.loadURL(process.env.VITE_DEV_SERVER_URL+'#'+route)
+        else void win.loadFile(path.join(__dirname,'..','dist','index.html'),{hash:route})
+      }})
 
+    fileWindows=registerFileWindows({files,getMain:()=>mainWindow,chatExists:id=>!!chats.get(id),preload:path.join(__dirname,'preload.js'),load:win=>{
+      const route='/file-host'
+      if(process.env.VITE_DEV_SERVER_URL)void win.loadURL(process.env.VITE_DEV_SERVER_URL+'#'+route)
+      else void win.loadFile(path.join(__dirname,'..','dist','index.html'),{hash:route})
+    }})
     tray = createAppTray({
       getMainWindow: () => mainWindow,
       createWindow,
@@ -2238,9 +2254,13 @@ if (!gotLock) {
   })
 
   app.on('before-quit', () => {
+    try{browserStart?.flush()}catch(error){console.warn('[browser-start] quit save failed',error)}
+    fileWindows?.dispose()
+    plugins.dispose()
     isQuitting = true
     abortAllAsks({ preservePersistedUnlimited: true })
     agent?.stopAll()
+    registry?.shutdown()
     try {
       chats?.flushAll()
     } catch (e) {

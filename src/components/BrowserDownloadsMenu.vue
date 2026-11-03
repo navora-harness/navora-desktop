@@ -1,20 +1,20 @@
 <template>
-  <v-menu
-    v-model="open"
-    :location="location"
-    :close-on-content-click="false"
-    content-class="browser-downloads-menu"
-  >
+  <v-menu v-model="open" :location="location" origin="auto" :offset="6" :close-on-content-click="false" content-class="browser-downloads-menu">
     <template #activator="{ props: menuProps }">
       <button
         type="button"
         :class="btnClass"
-        title="下载列表"
-        aria-label="下载列表"
+        class="browser-downloads-trigger"
+        :title="activeCount ? `下载列表，${activeCount} 项活动下载` : '下载列表'"
+        :aria-label="activeCount ? `下载列表，${activeCount} 项活动下载` : '下载列表'"
         v-bind="menuProps"
       >
-        <font-awesome-icon icon="download" />
-        <span v-if="activeCount > 0" class="dl-badge" aria-hidden="true">{{
+        <svg class="dl-progress-ring" :class="{'has-progress':progressItems.length>0,indeterminate:progressItems.length>0&&progressPercent===null,paused:!progressItems.some(item=>item.state==='started')}" viewBox="0 0 24 24" aria-hidden="true">
+          <circle class="dl-progress-track" cx="12" cy="12" r="9" />
+          <circle v-if="progressItems.length" class="dl-progress-value" cx="12" cy="12" r="9" :stroke-dasharray="56.55" :stroke-dashoffset="progressPercent===null?42:56.55*(1-progressPercent/100)" />
+        </svg>
+        <AppIcon icon="download" />
+        <span v-if="activeCount > 0 && (!progressItems.length || activeCount > 1)" class="dl-badge" aria-hidden="true">{{
           activeCount > 99 ? '99+' : activeCount
         }}</span>
       </button>
@@ -29,10 +29,10 @@
           type="button"
           class="dl-clear"
           :disabled="!finishedCount"
-          :title="finishedCount ? '清除已结束的下载' : '没有可清除的已结束项'"
+          :title="finishedCount ? '清除已结束的下载记录，保留文件' : '没有可清除的已结束项'"
           @click="clearFinished"
         >
-          清空已结束
+          清除已结束记录
         </button>
       </div>
       <div v-if="!items.length" class="dl-empty">暂无下载</div>
@@ -109,19 +109,19 @@
               打开
             </button>
             <button v-if="item.source === 'tool' && item.state === 'started'" type="button" class="dl-act danger" title="停止此下载所在的任务" @click="stopToolTask(item.chatId)">停止任务</button>
-            <v-menu v-if="item.source !== 'tool' || isTerminal(item.state)" location="bottom end" :close-on-content-click="true">
+            <v-menu v-if="item.source !== 'tool' || isTerminal(item.state)" location="bottom end" origin="auto" :offset="6" content-class="browser-download-actions" :close-on-content-click="true">
               <template #activator="{ props: moreProps }">
                 <button
                   type="button"
                   class="dl-act dl-more"
                   title="更多"
-                  aria-label="更多"
+                  aria-label="下载更多操作"
                   v-bind="moreProps"
                 >
-                  <font-awesome-icon icon="ellipsis" />
+                  <AppIcon icon="ellipsis" />
                 </button>
               </template>
-              <div class="dl-more-panel" role="menu">
+              <div class="dl-more-panel" role="menu" aria-label="下载更多操作">
                 <button
                   v-if="item.state === 'completed'"
                   type="button"
@@ -151,7 +151,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import type { VMenu } from 'vuetify/components'
+import { VMenu } from 'vuetify/components'
 import type { BrowserDownloadEntry, BrowserDownloadState } from '../../shared/types'
 
 const props = withDefaults(
@@ -171,6 +171,8 @@ const props = withDefaults(
 )
 
 const open = ref(false)
+const emit=defineEmits<{open:[value:boolean]}>()
+watch(open,value=>{emit('open',value);if(value)void refresh()})
 const items = ref<BrowserDownloadEntry[]>([])
 let offChanged: (() => void) | null = null
 
@@ -180,6 +182,13 @@ const activeCount = computed(
       (d) => d.state === 'intercepted' || d.state === 'started' || d.state === 'paused',
     ).length,
 )
+const progressItems=computed(()=>items.value.filter(item=>item.state==='started'||item.state==='paused'))
+const progressPercent=computed(()=>{
+  if(!progressItems.value.length||progressItems.value.some(item=>progressPct(item)===null))return null
+  const total=progressItems.value.reduce((sum,item)=>sum+Number(item.totalBytes||0),0)
+  const received=progressItems.value.reduce((sum,item)=>sum+Number(item.receivedBytes||0),0)
+  return total>0?Math.max(0,Math.min(100,Math.round(received/total*100))):null
+})
 
 const finishedCount = computed(
   () => items.value.filter((d) => isTerminal(d.state)).length,
@@ -338,6 +347,19 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.browser-downloads-trigger{position:relative;flex-shrink:0;color:#65717e;transition:background-color 140ms ease,color 140ms ease}
+.browser-downloads-trigger:hover:not(:disabled){color:#3d4957}
+.browser-downloads-trigger>.dl-progress-ring:not(.has-progress){display:none}
+.browser-downloads-trigger>.dl-progress-ring{position:absolute;inset:6px;width:20px;height:20px;overflow:visible;pointer-events:none}
+.dl-progress-ring circle{fill:none;stroke-width:2}
+.dl-progress-ring .dl-progress-track{stroke:#e2e5e9}
+.dl-progress-ring .dl-progress-value{stroke:#737c86;stroke-linecap:round;transform:rotate(-90deg);transform-origin:12px 12px;transition:stroke-dashoffset 180ms ease}
+.dl-progress-ring.indeterminate{animation:dl-ring-rotate 1.1s linear infinite}
+.dl-progress-ring.indeterminate .dl-progress-value{stroke-dasharray:14 42}
+.dl-progress-ring.indeterminate.paused{animation:none}
+.browser-downloads-trigger>.app-icon{position:relative;z-index:1;width:16px;height:16px}
+@keyframes dl-ring-rotate{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.dl-progress-ring.indeterminate{animation:none}}
 .dl-badge {
   position: absolute;
   top: 2px;
@@ -346,7 +368,7 @@ onUnmounted(() => {
   height: 14px;
   padding: 0 3px;
   border-radius: 999px;
-  background: #e67e22;
+  background: var(--navora-accent);
   color: #fff;
   font-size: 9px;
   line-height: 14px;
@@ -355,23 +377,26 @@ onUnmounted(() => {
   pointer-events: none;
 }
 .dl-panel {
-  width: min(380px, 92vw);
-  max-height: min(420px, 70vh);
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(420px, calc(100dvh - 80px));
   display: flex;
   flex-direction: column;
-  background: #fff;
-  color: #1b2631;
-  border-radius: 10px;
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+  background: var(--navora-surface);
+  color: var(--navora-ink);
+  border-radius: 12px;
+  border: 1px solid var(--navora-stroke);
+  box-shadow: 0 4px 12px #18202b0a, 0 12px 32px #18202b12;
   overflow: hidden;
 }
 .dl-panel-head {
+  flex-wrap: wrap;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   padding: 12px 12px 10px;
-  border-bottom: 1px solid #e8edf2;
+  border-bottom: 1px solid var(--navora-stroke);
 }
 .dl-panel-titles {
   display: flex;
@@ -380,25 +405,26 @@ onUnmounted(() => {
   min-width: 0;
 }
 .dl-panel-titles strong {
-  font-size: 0.92rem;
+  font-size: 14px;
 }
 .dl-panel-titles span {
-  font-size: 0.72rem;
-  color: #7f8c8d;
+  font-size: 12px;
+  color: var(--navora-muted);
 }
 .dl-clear {
+  min-height: 32px;
   border: 0;
   background: transparent;
-  color: #5d6d7e;
-  font-size: 0.78rem;
+  color: var(--navora-muted);
+  font-size: 12px;
   cursor: pointer;
   padding: 4px 6px;
   border-radius: 6px;
   white-space: nowrap;
 }
 .dl-clear:hover:not(:disabled) {
-  background: #f0f3f6;
-  color: #1b2631;
+  background: var(--control-hover);
+  color: var(--navora-ink);
 }
 .dl-clear:disabled {
   opacity: 0.4;
@@ -407,10 +433,12 @@ onUnmounted(() => {
 .dl-empty {
   padding: 28px 16px;
   text-align: center;
-  color: #95a5a6;
-  font-size: 0.85rem;
+  color: var(--navora-muted);
+  font-size: 13px;
 }
 .dl-list {
+  min-height: 0;
+  overscroll-behavior: contain;
   list-style: none;
   margin: 0;
   padding: 6px;
@@ -424,7 +452,7 @@ onUnmounted(() => {
   gap: 8px;
   padding: 10px;
   border-radius: 8px;
-  background: #f7f9fb;
+  background: var(--navora-background);
 }
 .dl-item-main {
   flex: 1;
@@ -434,24 +462,25 @@ onUnmounted(() => {
   gap: 4px;
 }
 .dl-name {
-  font-size: 0.84rem;
+  font-size: 13px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .dl-meta {
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.72rem;
-  color: #7f8c8d;
+  font-size: 12px;
+  color: var(--navora-muted);
 }
 .dl-state[data-state='intercepted'] {
   color: #d68910;
 }
 .dl-state[data-state='started'] {
-  color: #1b4f72;
+  color: var(--navora-accent);
 }
 .dl-state[data-state='paused'] {
   color: #b9770e;
@@ -460,33 +489,33 @@ onUnmounted(() => {
   color: #1e8449;
 }
 .dl-state[data-state='failed'] {
-  color: #c0392b;
+  color: var(--control-danger);
 }
 .dl-state[data-state='cancelled'] {
-  color: #7f8c8d;
+  color: var(--navora-muted);
 }
 .dl-path {
-  font-size: 0.7rem;
-  color: #95a5a6;
+  font-size: 11px;
+  color: var(--navora-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .dl-error {
-  font-size: 0.7rem;
-  color: #c0392b;
+  font-size: 11px;
+  color: var(--control-danger);
 }
 .dl-bar {
   height: 4px;
   border-radius: 999px;
-  background: #dde4ea;
+  background: var(--navora-stroke);
   overflow: hidden;
   margin-top: 2px;
 }
 .dl-bar-fill {
   display: block;
   height: 100%;
-  background: #1b4f72;
+  background: var(--navora-accent);
   border-radius: inherit;
 }
 .dl-bar.indeterminate .dl-bar-fill {
@@ -505,24 +534,25 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 .dl-act {
+  min-height: 28px;
   border: 0;
-  background: #fff;
-  color: #1b4f72;
-  font-size: 0.72rem;
+  background: var(--navora-surface);
+  color: var(--navora-accent);
+  font-size: 12px;
   padding: 4px 8px;
   border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
 }
 .dl-act:hover:not(:disabled) {
-  background: #e8eef3;
+  background: var(--control-hover);
 }
 .dl-act:disabled {
   opacity: 0.4;
   cursor: default;
 }
 .dl-act.danger {
-  color: #c0392b;
+  color: var(--control-danger);
 }
 .dl-act.danger:hover:not(:disabled) {
   background: #fdecea;
@@ -534,12 +564,12 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #7f8c8d;
+  color: var(--navora-muted);
 }
 .dl-more-panel {
   min-width: 148px;
   padding: 4px;
-  background: #fff;
+  background: var(--navora-surface);
   border-radius: 8px;
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.16);
 }
@@ -551,15 +581,15 @@ onUnmounted(() => {
   text-align: left;
   padding: 8px 10px;
   border-radius: 6px;
-  font-size: 0.78rem;
-  color: #1b2631;
+  font-size: 12px;
+  color: var(--navora-ink);
   cursor: pointer;
 }
 .dl-more-item:hover {
-  background: #f0f3f6;
+  background: var(--control-hover);
 }
 .dl-more-item.danger {
-  color: #c0392b;
+  color: var(--control-danger);
 }
 .dl-more-item.danger:hover {
   background: #fdecea;
@@ -572,6 +602,9 @@ onUnmounted(() => {
     transform: translateX(320%);
   }
 }
+.dl-panel :is(button):focus-visible,.dl-more-panel button:focus-visible{outline:2px solid var(--control-focus);outline-offset:-2px}
+@media(prefers-reduced-motion:reduce){.dl-bar.indeterminate .dl-bar-fill{animation:none;width:100%;opacity:.55}}
+@media(pointer:coarse){.dl-panel button,.dl-more-panel button{min-height:44px}}
 </style>
 
 <style>
@@ -583,6 +616,9 @@ onUnmounted(() => {
 .browser-downloads-menu {
   z-index: 2600 !important;
 }
+.v-menu.v-overlay>.v-overlay__content:is(.browser-downloads-menu,.browser-download-actions){padding:0;border:0;border-radius:12px;background:transparent!important;box-shadow:none!important;backdrop-filter:none!important;overflow:visible}
+.v-menu.v-overlay>.v-overlay__content.browser-downloads-menu>.dl-panel,.v-menu.v-overlay>.v-overlay__content.browser-download-actions>.dl-more-panel{background:var(--navora-surface);border:1px solid var(--navora-stroke);border-radius:12px;box-shadow:0 4px 12px #18202b0a,0 12px 32px #18202b12;backdrop-filter:none}
+.browser-downloads-menu button,.browser-download-actions button{cursor:default}
 .dl-more-panel {
   z-index: 2700;
 }

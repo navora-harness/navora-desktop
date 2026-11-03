@@ -1,17 +1,24 @@
 <template>
   <div
     class="shell"
-    :style="[sidebarStyle,{'--title-actions-reserve':pageContext==='chat'?'310px':'236px'}]"
+    :style="[sidebarStyle,{'--title-actions-reserve':pageContext==='chat'?'258px':'202px','--workspace-caption-reserve':isMobileLayout?'12px':showDesktopChrome && windowPlatform!=='darwin'?'202px':'64px'}]"
     :class="{
       'mobile-layout': isMobileLayout,
       'remote-web': isWebRemote(),
       'sidebar-open': isMobileLayout && mobileSidebarOpen,
-      'sidebar-collapsed': allSidebarHidden && !settingsOpen && !creatorKind,
+      'sidebar-collapsed': (allSidebarHidden || sidebarAutoCollapsed) && !settingsOpen && !creatorKind,
       'sidebar-resizing': sidebarResizing,
       frameless: showDesktopChrome,
       'platform-mac': windowPlatform === 'darwin',
     }"
   >
+    <header v-if="showDesktopChrome && !isMobileLayout" class="window-titlebar" aria-label="Navora 窗口标题栏">
+      <div class="window-titlebar-brand" aria-hidden="true">
+        <img src="/app-icon.png" alt="" draggable="false" />
+        <span>Navora</span>
+      </div>
+      <div class="window-titlebar-drag" aria-hidden="true" />
+    </header>
     <Transition name="sidebar-backdrop">
     <div
       v-if="isMobileLayout && mobileSidebarOpen"
@@ -20,17 +27,16 @@
       @click="closeMobileSidebar"
     />
     </Transition>
-    <ChatResourcesMenu ref="browserResources" class="global-title-actions" :context="pageContext" :running="agentRunning" @context-action="onPageAction" @new-browser-tab="openBrowserTab" @new-chat="createChat" @search="openChatSearch" @delete="active && askDeleteChat(active)" @stop="stopAgent" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :open="resourceOpen" :file-workspace-open="fileWorkspaceVisible" :has-file-tabs="fileTabsState.tabs.length>0" :pinned="!!active?.pinned" :can-export="!!active?.messages.length" :exporting="exportingChat" @rename="renameCurrentChat" @pin="active && toggleChatPinned(active)" @export="exportActiveChat" @toggle-workspace="toggleRightSidebar" @notify="onPanelNotify" @toggle-resources="toggleResources" @show-browser="showResources('browser')" />
     <aside class="sidebar">
       <div class="sidebar-content-stack">
       <Transition name="sidebar-flip">
       <div v-show="(!settingsOpen && !creatorKind) || isMobileLayout" class="sidebar-chat-face">
       <SidebarDock :active="sidebarRail.active" :panels="sidebarPanels" @close="closeSidebar">
         <template #chats="slot">
-      <Teleport :to="slot.headerTarget" defer><button v-show="slot.active" type="button" class="chat-toolbar-icon-btn chat-batch-trigger" :title="chatBatchMode ? '取消批量操作' : '批量管理对话'" :aria-label="chatBatchMode ? '取消批量操作' : '批量操作'" :aria-pressed="chatBatchMode" @click="chatBatchMode ? exitChatBatchMode() : enterChatBatchMode()"><font-awesome-icon :icon="chatBatchMode ? 'xmark' : 'list-check'" /></button></Teleport>
+      <Teleport :to="slot.headerTarget" defer><button v-show="slot.active" type="button" class="chat-toolbar-icon-btn chat-batch-trigger" :title="chatBatchMode ? '取消批量操作' : '批量管理对话'" :aria-label="chatBatchMode ? '取消批量操作' : '批量操作'" :aria-pressed="chatBatchMode" @click="chatBatchMode ? exitChatBatchMode() : enterChatBatchMode()"><AppIcon :icon="chatBatchMode ? 'xmark' : 'list-check'" /></button></Teleport>
       <div class="chat-list-actions" role="group" aria-label="对话操作">
-        <button type="button" class="chat-new-action" title="开启新对话（Ctrl/⌘ N）" aria-label="开启新对话" @click="createChat"><font-awesome-icon icon="pen-to-square" /><span>新对话</span><kbd>{{ windowPlatform==='darwin'?'⌘ N':'Ctrl N' }}</kbd></button>
-        <button type="button" class="chat-search-action" title="搜索对话（Ctrl/⌘ K）" aria-label="搜索对话" @click="openChatSearch"><font-awesome-icon icon="magnifying-glass" /></button>
+        <button type="button" class="chat-new-action" title="开启新对话（Ctrl/⌘ N）" aria-label="开启新对话" @click="createChat"><AppIcon icon="pen-to-square" /><span>新对话</span><kbd>{{ windowPlatform==='darwin'?'⌘ N':'Ctrl N' }}</kbd></button>
+        <button type="button" class="chat-search-action" title="搜索对话（Ctrl/⌘ K）" aria-label="搜索对话" @click="openChatSearch"><AppIcon icon="magnifying-glass" /></button>
       </div>
       <div v-if="chatBatchMode" class="chat-toolbar">
         <Transition name="toolbar-swap" mode="out-in">
@@ -49,7 +55,7 @@
       </div>
       <Transition name="sidebar-pane">
       <div v-show="true" class="chat-list" :class="{ 'batch-mode': chatBatchMode }">
-        <template v-for="sec in chatListSections" :key="sec.key">
+        <template v-for="sec in visibleChatListSections" :key="sec.key">
           <div class="chat-date-label">{{ sec.label }}</div>
           <template v-for="c in sec.items" :key="c.id" v-memo="[c, chats, activeId, chatBatchMode, batchSelectedIds, isMobileLayout, chatSwipeOpenId, chatSwipeDragId, chatSwipeOffset, chatSwipeLockedH, chatMoreOpenId, renamingChatId, renameDraft, chatStatusById, pendingAsks, windowCounts, subchatsByParent, subScrollMetrics, runningChats, exportingChat, Math.floor(nowTick / 60000)]">
             <div
@@ -73,7 +79,7 @@
               tabindex="-1"
               @click.stop="askDeleteChat(c)"
             >
-              <font-awesome-icon icon="trash" />
+              <AppIcon icon="trash" />
               <span>删除</span>
             </button>
             <div
@@ -93,14 +99,14 @@
                     :class="{ on: batchSelectedIds.has(c.id) }"
                     aria-hidden="true"
                   >
-                    <font-awesome-icon
+                    <AppIcon
                       :icon="batchSelectedIds.has(c.id) ? 'circle-check' : 'circle'"
                     />
                   </span>
                 </Transition>
                 <div class="chat-item-body">
                   <div class="chat-item-title">
-                    <font-awesome-icon
+                    <AppIcon
                       v-if="c.pinned"
                       icon="thumbtack"
                       class="chat-pin-icon"
@@ -162,7 +168,7 @@
                           :title="`${windowCounts[c.id]} 个窗口`"
                           :aria-label="`${windowCounts[c.id]} 个窗口`"
                         >
-                          <font-awesome-icon icon="window-maximize" />
+                          <AppIcon icon="window-maximize" />
                           <span class="chat-stat-num">{{ windowCounts[c.id] }}</span>
                         </span>
                         <span
@@ -171,7 +177,7 @@
                           :title="`${subchatCountOf(c.id)} 个子对话`"
                           :aria-label="`${subchatCountOf(c.id)} 个子对话`"
                         >
-                          <font-awesome-icon icon="sitemap" />
+                          <AppIcon icon="sitemap" />
                           <span class="chat-stat-num">{{ subchatCountOf(c.id) }}</span>
                         </span>
                       </span>
@@ -211,7 +217,7 @@
                         v-bind="menuProps"
                         @click.stop
                       >
-                        <font-awesome-icon icon="ellipsis" />
+                        <AppIcon icon="ellipsis" />
                       </button>
                     </template>
                     <div class="chat-more-panel" role="menu">
@@ -221,7 +227,7 @@
                         role="menuitem"
                         @click="startRenameChat(c)"
                       >
-                        <font-awesome-icon icon="pen-to-square" />
+                        <AppIcon icon="pen-to-square" />
                         <span>修改标题</span>
                       </button>
                       <button
@@ -230,7 +236,7 @@
                         role="menuitem"
                         @click="toggleChatPinned(c)"
                       >
-                        <font-awesome-icon icon="thumbtack" />
+                        <AppIcon icon="thumbtack" />
                         <span>{{ c.pinned ? '取消置顶' : '置顶' }}</span>
                       </button>
                       <button
@@ -240,7 +246,7 @@
                         :disabled="exportingChat || !c.messages?.length"
                         @click="exportChatById(c.id)"
                       >
-                        <font-awesome-icon icon="file-export" />
+                        <AppIcon icon="file-export" />
                         <span>导出对话</span>
                       </button>
                       <button
@@ -249,7 +255,7 @@
                         role="menuitem"
                         @click="askDeleteChat(c)"
                       >
-                        <font-awesome-icon icon="trash" />
+                        <AppIcon icon="trash" />
                         <span>删除</span>
                       </button>
                     </div>
@@ -338,7 +344,7 @@
                           v-bind="menuProps"
                           @click.stop
                         >
-                          <font-awesome-icon icon="ellipsis" />
+                          <AppIcon icon="ellipsis" />
                         </button>
                       </template>
                       <div class="chat-more-panel" role="menu">
@@ -348,7 +354,7 @@
                           role="menuitem"
                           @click="startRenameChat(sub)"
                         >
-                          <font-awesome-icon icon="pen-to-square" />
+                          <AppIcon icon="pen-to-square" />
                           <span>修改标题</span>
                         </button>
                         <button
@@ -358,7 +364,7 @@
                           :disabled="exportingChat || !sub.messages?.length"
                           @click="exportChatById(sub.id)"
                         >
-                          <font-awesome-icon icon="file-export" />
+                          <AppIcon icon="file-export" />
                           <span>导出对话</span>
                         </button>
                         <button
@@ -367,7 +373,7 @@
                           role="menuitem"
                           @click="askDeleteChat(sub)"
                         >
-                          <font-awesome-icon icon="trash" />
+                          <AppIcon icon="trash" />
                           <span>删除</span>
                         </button>
                       </div>
@@ -378,6 +384,14 @@
             </div>
           </template>
         </template>
+        <button
+          v-if="chatListRemainingCount > 0 && !chatBatchMode"
+          type="button"
+          class="chat-list-load-more"
+          @click="loadMoreChats"
+        >
+          显示更早的对话 · 还有 {{ chatListRemainingCount }} 个
+        </button>
       </div>
       </Transition>
 
@@ -390,7 +404,7 @@
             :loading="batchPinning"
             @click="batchPinSelected"
           >
-            <font-awesome-icon icon="thumbtack" class="batch-pin-icon" />
+            <AppIcon icon="thumbtack" class="batch-pin-icon" />
             {{ batchSelectionAllPinned ? '取消置顶' : '置顶'
             }}
           </v-btn>
@@ -402,7 +416,7 @@
             :disabled="!batchSelectedCount"
             @click="askBatchDeleteChats"
           >
-            <font-awesome-icon icon="trash" class="batch-delete-icon" />删除
+            <AppIcon icon="trash" class="batch-delete-icon" />删除
           </v-btn>
         </div>
         </template>
@@ -427,7 +441,7 @@
       </div>
       <nav class="activity-rail" aria-label="侧栏导航">
         <div class="activity-rail-sections">
-          <div class="rail-brand" :class="{ 'app-drag': showDesktopChrome }" title="Navora">
+          <div v-if="!showDesktopChrome || isMobileLayout" class="rail-brand" :class="{ 'app-drag': showDesktopChrome }" title="Navora">
             <img src="/app-icon.png" alt="Navora" draggable="false" />
           </div>
           <SidebarNavigation :panels="sidebarPanels" :active="sidebarRail.active" :inactive="settingsOpen || !!creatorKind" @activate="toggleSidebarGroup" />
@@ -448,17 +462,27 @@
                 aria-label="更多"
                 v-bind="menuProps"
               >
-                <font-awesome-icon icon="ellipsis" />
+                <AppIcon icon="ellipsis" />
               </button>
             </template>
             <div class="sidebar-more-panel" role="menu">
+              <button
+                v-if="!isWebRemote()"
+                type="button"
+                class="sidebar-more-item"
+                role="menuitem"
+                @click="router.push('/literature')"
+              >
+                <AppIcon icon="book" />
+                <span>文献检索</span>
+              </button>
               <button
                 type="button"
                 class="sidebar-more-item"
                 role="menuitem"
                 @click="onMoreDocs"
               >
-                <font-awesome-icon icon="book" />
+                <AppIcon icon="book" />
                 <span>使用文档</span>
               </button>
               <button
@@ -468,7 +492,7 @@
                 role="menuitem"
                 @click="openRemoteWindows"
               >
-                <font-awesome-icon icon="window-maximize" />
+                <AppIcon icon="window-maximize" />
                 <span>远程窗口</span>
               </button>
               <button
@@ -478,7 +502,7 @@
                 :disabled="!activeId || exportingChat"
                 @click="onMoreExport"
               >
-                <font-awesome-icon icon="file-export" />
+                <AppIcon icon="file-export" />
                 <span>导出对话</span>
               </button>
               <button
@@ -488,13 +512,12 @@
                 role="menuitem"
                 @click="onMoreQuit"
               >
-                <font-awesome-icon icon="right-from-bracket" />
+                <AppIcon icon="right-from-bracket" />
                 <span>退出程序</span>
               </button>
             </div>
           </v-menu>
           <div class="sidebar-foot-end">
-            <BrowserDownloadsMenu :chat-id="activeId" />
             <button
               type="button"
               class="sidebar-icon-btn sidebar-settings-btn"
@@ -502,16 +525,16 @@
               title="设置"
               @click="settingsOpen = true"
             >
-              <font-awesome-icon icon="gear" />
+              <AppIcon icon="gear" />
             </button>
           </div>
         </div>
       </div>
       </nav>
-      <div v-if="!isMobileLayout && (!allSidebarHidden || settingsOpen || creatorKind)" class="sidebar-divider vertical" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarLayout.width" aria-valuemin="250" aria-valuemax="560" tabindex="0" @pointerdown="beginSidebarResize($event, 'width')" @keydown="sidebarResizeKey($event, 'width')" />
+      <div v-if="!isMobileLayout && (!allSidebarHidden || settingsOpen || creatorKind)" class="sidebar-divider vertical" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarLayout.width" aria-valuemin="250" :aria-valuemax="sidebarWidthMaximum" tabindex="0" @pointerdown="beginSidebarResize($event, 'width')" @keydown="sidebarResizeKey($event, 'width')" />
     </aside>
 
-    <main ref="mainElement" class="main" :class="{ 'resource-card-docked': resourceOpen && !resourceOverlay && !settingsOpen && !creatorKind && !fileManagerActive && !pluginWorkspaceActive, 'file-workspace-open': fileWorkspaceVisible }" :style="{ '--preview-width': `${previewWidth}px`, '--file-workspace-reserve':`${fileWorkspaceReserve}px` }">
+    <main ref="mainElement" class="main" :class="{ 'resource-card-docked': resourceOpen && !resourceOverlay && !settingsOpen && !creatorKind && !fileManagerActive && !pluginWorkspaceActive && !browserWorkspaceActive, 'file-workspace-open': fileWorkspaceVisible }" :style="{ '--preview-width': `${previewWidth}px`, '--file-workspace-reserve':`${fileWorkspaceReserve}px` }">
       <div v-if="showDesktopChrome && ((!settingsOpen && !creatorKind) || isMobileLayout)" class="win-drag-main" aria-hidden="true" />
       <header v-if="isMobileLayout && !settingsOpen && !creatorKind" class="mobile-topbar" :class="{'plugin-mobile-topbar':pluginWorkspaceActive}">
         <button
@@ -521,7 +544,7 @@
           aria-label="返回"
           @click="selectChat(active.parentChatId)"
         >
-          <font-awesome-icon icon="arrow-left" />
+          <AppIcon icon="arrow-left" />
         </button>
         <button
           v-else
@@ -530,9 +553,9 @@
           aria-label="打开菜单"
           @click="openMobileSidebar"
         >
-          <font-awesome-icon icon="bars" />
+          <AppIcon icon="bars" />
         </button>
-        <div class="mobile-topbar-center">
+        <div v-if="!browserWorkspaceActive && !pluginWorkspaceActive" class="mobile-topbar-center">
           <span v-if="isWebRemote()" class="remote-badge">远程</span>
           <span v-if="active?.kind === 'sub'" class="remote-badge">子任务</span>
           <div class="mobile-topbar-titles">
@@ -545,14 +568,14 @@
                   : displayChatTitle(active?.title)
               "
               >{{
-                pluginWorkspaceActive ? '插件' : active?.kind === 'sub'
+                active?.kind === 'sub'
                   ? displaySubchatTitle(active)
                   : displayChatTitle(active?.title)
               }}</span
             >
           </div>
         </div>
-        <div v-if="!pluginWorkspaceActive" class="mobile-topbar-actions">
+        <div v-if="!pluginWorkspaceActive && !browserWorkspaceActive" class="mobile-topbar-actions">
           <button
             v-if="isWebRemote()"
             type="button"
@@ -560,7 +583,7 @@
             aria-label="远程窗口"
             @click="openRemoteWindows"
           >
-            <font-awesome-icon icon="window-maximize" />
+            <AppIcon icon="window-maximize" />
           </button>
           <BrowserDownloadsMenu
             :chat-id="activeId"
@@ -573,7 +596,7 @@
             aria-label="设置"
             @click="settingsOpen = true"
           >
-            <font-awesome-icon icon="gear" />
+            <AppIcon icon="gear" />
           </button>
         </div>
       </header>
@@ -582,11 +605,11 @@
       <template v-else>
       <FileManager ref="fileManagerWorkspace" v-if="fileManagerMounted" v-show="fileManagerActive" :active="fileManagerActive" :class="{'is-active':fileManagerActive}" :chat-id="fileManagerOwner?.id || ''" :title="fileManagerOwner?.title || ''" :directory="fileManagerDirectory" @browse="fileManagerDirectory=$event" @preview="openFilePreview" @back="activateSidebar('chats',false)" @notify="onPanelNotify" />
       <PluginWorkspace ref="pluginsWorkspace" v-if="pluginWorkspaceMounted" v-show="pluginWorkspaceActive" :active="pluginWorkspaceActive" :class="{'is-active':pluginWorkspaceActive}" sidebar-target="#plugins-sidebar-nav" @back="activateSidebar('chats',false)" @create="openCreator('plugin')" @selected="closeMobileSidebar" @notify="onPanelNotify" />
-      <div v-show="!fileManagerActive && !pluginWorkspaceActive" class="conversation-content" :inert="fileManagerActive || pluginWorkspaceActive">
+      <div v-show="!fileManagerActive && !pluginWorkspaceActive && !browserWorkspaceActive" class="conversation-content" :inert="fileManagerActive || pluginWorkspaceActive || browserWorkspaceActive">
       <template v-if="active">
         <header
           v-if="!isMobileLayout || agentRunning"
-          class="main-top"
+          class="main-top conversation-title-header"
           :class="{ compact: isMobileLayout }"
         >
           <div v-if="!isMobileLayout" class="main-top-text">
@@ -597,7 +620,7 @@
                 :disabled="!active.parentChatId"
                 @click="active.parentChatId && selectChat(active.parentChatId)"
               >
-                <font-awesome-icon icon="arrow-left" />
+                <AppIcon icon="arrow-left" />
                 返回
               </button>
               <span class="subchat-banner-label">子任务</span>
@@ -619,7 +642,7 @@
             </h1>
           </div>
           <div v-if="agentRunning" class="agent-live">
-            <StatusIcon kind="running" />
+            <StatusIcon kind="running" :spin="false" />
             <span class="agent-live-text" :title="phaseLabel">{{ phase === 'awaiting_permission' || phase === 'awaiting_user' || phase === 'awaiting_skill_review' ? '等待确认' : phase === 'calling_tool' ? '执行中' : '生成中' }}</span>
             <span class="agent-elapsed">{{ elapsedLabel }}</span>
             <button type="button" class="quick-stop-btn" title="停止任务（Esc）" aria-label="停止任务" @click="stopAgent"><StatusIcon kind="stopped" />停止</button>
@@ -648,7 +671,7 @@
               <div v-if="block.type === 'run'" class="msg run" :data-run-key="block.key">
                 <div class="msg-row">
                   <div class="msg-avatar run" aria-hidden="true">
-                    <font-awesome-icon icon="wrench" />
+                    <AppIcon icon="wrench" />
                   </div>
                   <div class="msg-main">
                     <div class="msg-role">
@@ -672,11 +695,11 @@
                         @click="toggleRun(block.key)"
                       >
                         <span class="run-status">
-                          <StatusIcon :kind="runGroupLive(block.items) ? 'running' : runGroupHasError(block.items) ? 'error' : runGroupWasAborted(block.items) ? 'stopped' : 'success'" />
+                          <StatusIcon :kind="runGroupLive(block.items) ? 'running' : runGroupHasError(block.items) ? 'error' : runGroupWasAborted(block.items) ? 'stopped' : 'success'" :spin="false" />
                         </span>
                         <span class="run-card-text">{{ runGroupSummary(block.items) }}</span>
                         <span class="run-card-chevron">
-                          <font-awesome-icon
+                          <AppIcon
                             icon="chevron-right"
                           />
                         </span>
@@ -685,7 +708,7 @@
                       <div v-if="isRunExpanded(block.key)" :id="`run-details-${block.key}`" class="run-card-body activity-detail">
                         <div v-if="block.reasoning" class="msg-reasoning activity-group" :class="{open:isReasoningExpanded(block.key)}">
                           <button type="button" class="msg-reasoning-toggle activity-trigger" :aria-expanded="isReasoningExpanded(block.key)" @click="toggleReasoning(block.key)">
-                            <StatusIcon kind="thought" /><span>思考过程</span><font-awesome-icon class="msg-reasoning-chevron" icon="chevron-right" />
+                            <StatusIcon kind="thought" /><span>思考过程</span><AppIcon class="msg-reasoning-chevron" icon="chevron-right" />
                           </button>
                           <DisclosureTransition><div v-if="isReasoningExpanded(block.key)" class="msg-reasoning-body activity-detail">{{ block.reasoning }}</div></DisclosureTransition>
                         </div>
@@ -711,7 +734,7 @@
                                 @click="toggleTool(item.id)"
                               >
                                 <span class="tool-status" :class="effectiveToolStatus(item)">
-                                  <StatusIcon :kind="effectiveToolStatus(item) === 'aborted' ? 'stopped' : effectiveToolStatus(item) === 'running' ? 'running' : effectiveToolStatus(item) === 'error' ? 'error' : 'success'" />
+                                  <StatusIcon :kind="effectiveToolStatus(item) === 'aborted' ? 'stopped' : effectiveToolStatus(item) === 'running' ? 'running' : effectiveToolStatus(item) === 'error' ? 'error' : 'success'" :spin="false" />
                                 </span>
                                 <span class="tool-kind-chip" :class="toolDisplay(item).kind">{{
                                   toolDisplay(item).label
@@ -728,7 +751,7 @@
                                 >
                                 <span class="tool-head-spacer" aria-hidden="true" />
                                 <span class="tool-chevron">
-                                  <font-awesome-icon
+                                  <AppIcon
                                     icon="chevron-right"
                                   />
                                 </span>
@@ -868,7 +891,7 @@
                           >{{ logFullText(block.message) }}</span
                         >
                         <span v-if="logCanExpand(block.message)" class="log-card-chevron">
-                          <font-awesome-icon
+                          <AppIcon
                             icon="chevron-right"
                           />
                         </span>
@@ -890,7 +913,7 @@
                     :class="toolDisplay(block.message).kind"
                     aria-hidden="true"
                   >
-                    <font-awesome-icon :icon="toolDisplay(block.message).icon" />
+                    <AppIcon :icon="toolDisplay(block.message).icon" />
                   </div>
                   <div class="msg-main">
                     <div class="msg-role">
@@ -912,7 +935,7 @@
                         }}</span>
                         <span class="tool-head-spacer" aria-hidden="true" />
                         <span class="tool-chevron">
-                          <font-awesome-icon
+                          <AppIcon
                             icon="chevron-right"
                           />
                         </span>
@@ -1018,7 +1041,7 @@
                   <div class="msg-avatar" :class="block.message.role" aria-hidden="true">
                     <img v-if="block.message.role === 'assistant'" src="/app-icon.png" alt="" />
                     <span v-else-if="block.message.role === 'user'">你</span>
-                    <font-awesome-icon v-else icon="clipboard-list" />
+                    <AppIcon v-else icon="clipboard-list" />
                   </div>
                   <div class="msg-main">
                     <div class="msg-role">
@@ -1055,13 +1078,13 @@
                               :aria-expanded="readPagesPanelOpen && readPagesPanelFromId === block.message.id"
                               @click="toggleReadPagesPanel(block.message.id, messageSources(block.message))"
                             >
-                              <font-awesome-icon icon="book" />
+                              <AppIcon icon="book" />
                               <span>{{ messageSources(block.message).length }} 个来源</span>
-                              <font-awesome-icon icon="chevron-down" class="read-pages-chevron" />
+                              <AppIcon icon="chevron-down" class="read-pages-chevron" />
                             </button>
                             <button type="button" class="reply-copy-btn" :title="copiedMessageId === block.message.id ? '已复制' : '复制回答'" :aria-label="copiedMessageId === block.message.id ? '已复制' : '复制回答'" @click="copyReply(block.message)">
                               <StatusIcon v-if="copiedMessageId === block.message.id" kind="success" />
-                              <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2" /><path d="M15 5V4a1 1 0 0 0-1-1H5a2 2 0 0 0-2 2v9a1 1 0 0 0 1 1h1" /></svg>
+                              <AppIcon v-else icon="copy" />
                             </button>
                             <span v-if="assistantElapsedLabel(block.message)" class="msg-elapsed">{{ assistantElapsedLabel(block.message) }}</span>
                           </div>
@@ -1087,7 +1110,8 @@
                 :remaining-label="permRemainingLabel"
                 :remaining-urgent="permRemainingUrgent"
                 :remaining-pct="permRemainingPct"
-                :busy="permBusy"
+                :pending-count="permPendingCount"
+                :busy="permBusyId===permReq?.id"
                 @decide="respondPerm"
               />
               <InChatAskCard
@@ -1108,7 +1132,7 @@
               class="thinking-row"
               aria-live="polite"
             >
-              <StatusIcon kind="running" class="thinking-activity" />
+              <StatusIcon kind="running" class="thinking-activity" spinAlways />
               <div class="thinking-bubble">
                 <div class="thinking-label">{{ phaseLabel }}</div>
                 <div
@@ -1149,7 +1173,7 @@
                         liveReasoningRoundLabel
                       }}</span>
                     </span>
-                    <font-awesome-icon class="thinking-reason-chevron" icon="chevron-right" />
+                    <AppIcon class="thinking-reason-chevron" icon="chevron-right" />
                   </button>
                   <DisclosureTransition>
                   <div
@@ -1177,7 +1201,7 @@
                 title="重新执行上次提问"
                 @click="retryLast"
               >
-                <font-awesome-icon icon="arrow-rotate-right" class="mr-1" />
+                <AppIcon icon="arrow-rotate-right" class="mr-1" />
                 {{ retrying ? '重试中…' : '重试' }}
               </button>
             </div>
@@ -1236,7 +1260,7 @@
             aria-label="回到底部"
             @click="jumpToBottom"
           >
-            <font-awesome-icon icon="arrow-down" />
+            <AppIcon icon="arrow-down" />
           </button>
         </div>
 
@@ -1300,7 +1324,7 @@
             <span v-for="r in contextRefs" :key="refKey(r)" class="chip editable" :class="r.kind">
               <span class="chip-text">{{ chipLabel(r) }}</span>
               <button type="button" class="chip-x" aria-label="移除" @click="removeRef(r)">
-                <font-awesome-icon icon="xmark" />
+                <AppIcon icon="xmark" />
               </button>
             </span>
             <button type="button" class="chip-clear" @click="contextRefs = []">清空</button>
@@ -1323,8 +1347,10 @@
                 :disabled="false"
                 :maxlength="maxComposerChars"
                 @keydown="onComposerKeydown"
-                @input="resourceCommands?.onInput($event)"
-                @click="resourceCommands?.onInput($event)"
+                @input="onComposerInput"
+                @click="updateComposerSelection"
+                @mouseup="updateComposerSelection"
+                @keyup="updateComposerSelection"
                 @keyup.left="resourceCommands?.onInput($event)"
                 @keyup.right="resourceCommands?.onInput($event)"
               />
@@ -1339,15 +1365,32 @@
             </div>
             <div class="composer-actions">
               <div class="composer-actions-left">
+                <button
+                  type="button"
+                  class="composer-perm-btn composer-link-btn"
+                  title="给选中文本添加或编辑链接"
+                  aria-label="给选中文本添加或编辑链接"
+                  :disabled="!hasComposerLinkSelection"
+                  @click="openComposerLinkEditor"
+                ><AppIcon icon="link" /></button>
+                <button
+                  type="button"
+                  class="composer-perm-btn composer-link-btn"
+                  title="移除选中文本的链接"
+                  aria-label="移除选中文本的链接"
+                  :disabled="!hasComposerLinkAtSelection"
+                  @click="removeComposerLink"
+                ><AppIcon icon="xmark" /></button>
                 <v-menu location="top start">
-                  <template #activator="{ props: creatorMenuProps }"><button v-bind="creatorMenuProps" type="button" class="composer-perm-btn creator-menu-trigger" title="创建" aria-label="打开创建菜单"><font-awesome-icon icon="plus" /></button></template>
-                  <div class="composer-perm-panel creator-launch-menu" role="menu">
-                    <button type="button" class="composer-perm-item" role="menuitem" @click="openCreator('plugin')"><font-awesome-icon icon="puzzle-piece" class="composer-perm-item-icon" /><span class="composer-perm-item-label">插件创建器</span></button>
-                    <button type="button" class="composer-perm-item" role="menuitem" @click="openCreator('skill')"><font-awesome-icon icon="book" class="composer-perm-item-icon" /><span class="composer-perm-item-label">技能创建器</span></button>
+                  <template #activator="{ props: attachMenuProps }"><button v-bind="attachMenuProps" type="button" class="composer-perm-btn composer-attach-trigger" title="附加上下文" aria-label="附加上下文"><AppIcon icon="paperclip" /></button></template>
+                  <div class="composer-perm-panel composer-attach-menu" role="menu" aria-label="附加上下文">
+                    <button type="button" class="composer-perm-item" role="menuitem" @click="attachContext('文件')"><AppIcon icon="file" class="composer-perm-item-icon" /><span class="composer-perm-item-label">引用对话文件</span></button>
+                    <button type="button" class="composer-perm-item" role="menuitem" @click="attachContext('浏览器')"><AppIcon icon="globe" class="composer-perm-item-icon" /><span class="composer-perm-item-label">引用浏览器页面</span></button>
+                    <button type="button" class="composer-perm-item" role="menuitem" @click="attachContext('会话')"><AppIcon icon="layer-group" class="composer-perm-item-icon" /><span class="composer-perm-item-label">引用浏览器会话</span></button>
                   </div>
                 </v-menu>
                 <v-menu location="top start" :disabled="agentRunning">
-                  <template #activator="{ props: modeProps }"><button type="button" class="composer-perm-btn execution-mode-button" v-bind="modeProps" :disabled="agentRunning" aria-label="工作模式">{{ executionModeLabel }}<font-awesome-icon icon="chevron-down" /></button></template>
+                  <template #activator="{ props: modeProps }"><button type="button" class="composer-perm-btn execution-mode-button" v-bind="modeProps" :disabled="agentRunning" aria-label="工作模式">{{ executionModeLabel }}<AppIcon icon="chevron-down" /></button></template>
                   <div class="composer-perm-panel" role="menu" aria-label="工作模式">
                     <button v-for="mode in executionModes" :key="mode.id" type="button" class="composer-perm-item" role="menuitemradio" :aria-checked="(active?.executionMode || 'auto') === mode.id" @click="applyExecutionMode(mode.id)"><span class="composer-perm-item-label">{{ mode.label }}</span><span class="composer-perm-item-desc">{{ mode.hint }}</span></button>
                   </div>
@@ -1366,7 +1409,7 @@
                       title="本会话权限预设"
                       aria-label="本会话权限预设"
                     >
-                      <font-awesome-icon :icon="permPresetIcon" />
+                      <AppIcon :icon="permPresetIcon" />
                       <span>{{ permPresetLabel }}</span>
                     </button>
                   </template>
@@ -1381,10 +1424,10 @@
                       role="menuitem"
                       @click="applyChatPreset(opt.value)"
                     >
-                      <font-awesome-icon :icon="opt.icon" class="composer-perm-item-icon" />
+                      <AppIcon :icon="opt.icon" class="composer-perm-item-icon" />
                       <span class="composer-perm-item-label">{{ opt.title }}</span>
                       <span class="composer-perm-item-desc">{{ opt.desc }}</span>
-                      <font-awesome-icon
+                      <AppIcon
                         v-if="chatPermissions.preset === opt.value"
                         icon="check"
                         class="composer-perm-check"
@@ -1408,16 +1451,16 @@
                       class="composer-perm-btn model-panel-trigger"
                       v-bind="menuProps"
                       :disabled="agentRunning"
-                      title="本会话模型"
+                      :title="`${chatModelLabel}${reasoningLevels.length?' · '+reasoningLabel(selectedReasoningLevel):''}`"
                       aria-label="本会话模型"
                     >
-                      <font-awesome-icon icon="microchip" />
-                      <span class="model-trigger-label">{{ chatModelLabel }}</span><span v-if="reasoningLevels.length" class="model-trigger-tier">{{ reasoningLabel(selectedReasoningLevel) }}</span><font-awesome-icon icon="chevron-down" />
+                      <AppIcon icon="microchip" />
+                      <span class="model-trigger-label">{{ chatModelLabel }}</span><span v-if="reasoningLevels.length" class="model-trigger-tier">{{ reasoningLabel(selectedReasoningLevel) }}</span><AppIcon icon="chevron-down" />
                     </button>
                   </template>
                   <div class="composer-perm-panel unified-model-panel" role="dialog" aria-label="模型与思考等级">
-                    <div class="model-panel-heading">模型与思考等级<button type="button" aria-label="关闭模型面板" @click="modelMenuOpen=false"><font-awesome-icon icon="xmark" /></button></div>
-                    <label class="model-panel-search"><font-awesome-icon icon="magnifying-glass" /><input v-model="modelQuery" placeholder="搜索模型或服务商" aria-label="搜索模型" @keydown.stop @keydown.esc="modelMenuOpen=false" /></label>
+                    <div class="model-panel-heading">模型与思考等级<button type="button" aria-label="关闭模型面板" @click="modelMenuOpen=false"><AppIcon icon="xmark" /></button></div>
+                    <label class="model-panel-search"><AppIcon icon="magnifying-glass" /><input v-model="modelQuery" placeholder="搜索模型或服务商" aria-label="搜索模型" @keydown.stop @keydown.esc="modelMenuOpen=false" /></label>
                     <div class="model-panel-options" role="group" aria-label="选择模型">
                     <button
                       v-for="opt in filteredModelOptions"
@@ -1429,12 +1472,12 @@
                       :title="`${opt.providerLabel} · ${opt.model}${opt.hasKey ? '' : '（未配置 Key，仍可使用）'}`"
                       @click="applyChatModel(opt.providerId, opt.model)"
                     >
-                      <font-awesome-icon icon="microchip" class="composer-perm-item-icon" />
+                      <AppIcon icon="microchip" class="composer-perm-item-icon" />
                       <span class="composer-perm-item-label">{{ opt.label }}</span>
                       <span class="composer-perm-item-desc">{{
                         opt.hasKey ? opt.providerLabel : `${opt.providerLabel} · 无 Key`
                       }}</span>
-                      <font-awesome-icon
+                      <AppIcon
                         v-if="opt.key === chatModelKey"
                         icon="check"
                         class="composer-perm-check"
@@ -1459,8 +1502,8 @@
                       type="button"
                       class="usage-ring-btn"
                       v-bind="menuProps"
-                      title="Content 用量"
-                      aria-label="Content 用量"
+                      :title="`上下文估算 ${usagePctLabel}`"
+                      :aria-label="`查看上下文估算，约占 ${usagePctLabel}`"
                     >
                       <svg class="usage-ring" viewBox="0 0 36 36" aria-hidden="true">
                         <circle class="usage-ring-track" cx="18" cy="18" r="14" fill="none" />
@@ -1478,21 +1521,29 @@
                     </button>
                   </template>
                   <div class="composer-usage-panel">
-                    <div class="composer-usage-title">Content 用量</div>
-                    <div class="composer-usage-row">
-                      <span>字符</span>
-                      <strong>{{ usageChars.toLocaleString() }}</strong>
+                    <div class="composer-usage-heading">
+                      <span>上下文估算 <b>{{ usagePctLabel }}</b></span>
+                      <strong>~{{ formatUsageCount(usageTokensEst) }} / {{ formatUsageCount(chatModelSettings.context_window) }}</strong>
                     </div>
-                    <div class="composer-usage-row">
-                      <span>约估 token</span>
-                      <strong>{{ usageTokensEst.toLocaleString() }}</strong>
+                    <div class="composer-usage-track" role="progressbar" :aria-valuenow="Math.min(100, Math.round(usageRatio * 100))" aria-valuemin="0" aria-valuemax="100" :aria-label="`对话内容估算占上下文 ${usagePctLabel}`">
+                      <span class="composer-usage-fill" :class="usageTone" :style="{ width: `${Math.min(100, usageRatio * 100)}%` }"></span>
                     </div>
-                    <div class="composer-usage-row">
-                      <span>占比</span>
-                      <strong>{{ usagePctLabel }}</strong>
+                    <div class="composer-usage-breakdown">
+                      <div class="composer-usage-row">
+                        <span><i class="usage-dot system"></i>系统提示词</span>
+                        <strong>未计入</strong>
+                      </div>
+                      <div class="composer-usage-row">
+                        <span><i class="usage-dot tools"></i>工具定义</span>
+                        <strong>未计入</strong>
+                      </div>
+                      <div class="composer-usage-row">
+                        <span><i class="usage-dot messages"></i>对话消息</span>
+                        <strong>~{{ formatUsageCount(usageTokensEst) }}</strong>
+                      </div>
                     </div>
                     <p class="composer-usage-note">
-                      按消息字符粗略估算；模型上下文 {{ chatModelSettings.context_window.toLocaleString() }} token，输出上限 {{ chatModelSettings.max_output_tokens.toLocaleString() }} token。实际用量以服务端分词为准。
+                      按对话文本粗略估算，不含系统提示词、工具定义、图片和文件；实际 token 数以模型服务返回为准。输出上限 {{ chatModelSettings.max_output_tokens.toLocaleString() }} token。
                     </p>
                   </div>
                 </v-menu>
@@ -1500,13 +1551,15 @@
                 <button
                   type="button"
                   class="composer-send"
+                  :class="{supplement:agentRunning}"
                   :disabled="!canSend || sending"
                   :aria-busy="sending"
                   :title="agentRunning ? (runningMessageMode === 'insert' ? '插入当前任务' : '加入队列') : '发送'"
                   :aria-label="agentRunning ? (runningMessageMode === 'insert' ? '插入当前任务' : '加入队列') : '发送'"
                   @click="send"
                 >
-                  <font-awesome-icon :icon="agentRunning && runningMessageMode === 'queue' ? 'list-ul' : 'arrow-up'" />
+                  <AppIcon :icon="agentRunning && runningMessageMode === 'queue' ? 'list-ul' : 'arrow-up'" />
+                  <span v-if="agentRunning">{{ runningMessageMode === 'insert' ? '插入' : '排队' }}</span>
                 </button>
                 <button
                   v-if="agentRunning"
@@ -1516,7 +1569,7 @@
                   aria-label="停止"
                   @click="stopAgent"
                 >
-                  <font-awesome-icon icon="stop" />
+                  <AppIcon icon="stop" />
                 </button>
               </div>
             </div>
@@ -1527,7 +1580,7 @@
         <div class="empty-card">
           <div class="empty-title">还没有选中的 Chat</div>
           <v-btn color="primary" size="small" @click="createChat">
-            <font-awesome-icon icon="pen-to-square" class="new-chat-icon" />
+            <AppIcon icon="pen-to-square" class="new-chat-icon" />
             开启新对话
           </v-btn>
         </div>
@@ -1535,9 +1588,9 @@
       </div>
       </template>
       <Transition name="resource-card">
-        <ConversationResourcesCard v-if="resourceOpen && activeId && !settingsOpen && !creatorKind && !fileManagerActive && !pluginWorkspaceActive" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :overlay="resourceOverlay" :available-width="resourceAvailableWidth" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="locateResourceMessage({chatId:activeId!,messageId:$event})" @open-media="(p) => openLightbox(p.src,p.alt)" />
+        <ConversationResourcesCard v-if="resourceOpen && activeId && !settingsOpen && !creatorKind && !fileManagerActive && !pluginWorkspaceActive && !browserWorkspaceActive" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :overlay="resourceOverlay" :available-width="resourceAvailableWidth" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="locateResourceMessage({chatId:activeId!,messageId:$event})" @open-media="(p) => openLightbox(p.src,p.alt)" />
       </Transition>
-      <Transition name="file-workspace"><FileWorkspace v-if="fileWorkspaceVisible" :tabs="fileTabsState.tabs" :active="activeFileTab" :viewer-chat-id="activeId || ''" :width="fileWorkspaceWidth" :maximum="fileWorkspaceMaximum" :overlay="fileWorkspaceOverlay" :owner-label="treeOwnerLabel" @open-browser="openBrowserTab" @browser-changed="updateBrowserTab" @select="selectFileTab" @close="closeFileTab" @hide="hideFileWorkspace" @open-file="openFilePreview($event.path,$event.chatId)" @locate="locateResourceMessage" @resize="resizeFileWorkspace" @notify="onPanelNotify" /></Transition>
+    <Transition name="file-workspace"><FileWorkspace v-if="fileWorkspaceVisible || browserWorkspaceActive" :full-page="browserWorkspaceActive" :tabs="browserWorkspaceActive?browserWorkspaceTabs:fileTabsState.tabs" :active="browserWorkspaceActive?browserWorkspaceTab:activeFileTab" :viewer-chat-id="activeId || ''" :width="fileWorkspaceWidth" :maximum="fileWorkspaceMaximum" :overlay="fileWorkspaceOverlay" :expanded="browserExpanded" :owner-label="treeOwnerLabel" @open-browser="openBrowserTab" @browser-changed="updateBrowserTab" @reorder="reorderBrowserTab" @expand="toggleBrowserExpand" @select="selectFileTab" @close="closeFileTab" @hide="browserWorkspaceActive?activateSidebar('chats',false):hideFileWorkspace()" @open-file="openFilePreview($event.path,$event.chatId)" @locate="locateResourceMessage" @resize="resizeFileWorkspace" @notify="onPanelNotify" /></Transition>
     </main>
 
     <v-dialog
@@ -1554,7 +1607,7 @@
             <p>{{ readPagesPanelList.length }} 个来源</p>
           </div>
           <button type="button" class="read-pages-dialog-close" title="关闭" @click="closeReadPagesPanel">
-            <font-awesome-icon icon="xmark" />
+            <AppIcon icon="xmark" />
           </button>
         </header>
         <div class="read-pages-dialog-list">
@@ -1643,7 +1696,7 @@
     <SidebarContextMenu ref="pageCtxMenu">
       <template v-if="pageCtx?.kind === 'chat' || pageCtx?.kind === 'sub'">
         <button type="button" class="sidebar-more-item" role="menuitem" @click="startRenameChat(pageCtx.chat)">
-          <font-awesome-icon icon="pen-to-square" />
+          <AppIcon icon="pen-to-square" />
           <span>修改标题</span>
         </button>
         <button
@@ -1653,7 +1706,7 @@
           role="menuitem"
           @click="toggleChatPinned(pageCtx.chat)"
         >
-          <font-awesome-icon icon="thumbtack" />
+          <AppIcon icon="thumbtack" />
           <span>{{ pageCtx.chat.pinned ? '取消置顶' : '置顶' }}</span>
         </button>
         <button
@@ -1663,11 +1716,11 @@
           :disabled="exportingChat || !pageCtx.chat.messages?.length"
           @click="exportChatById(pageCtx.chat.id)"
         >
-          <font-awesome-icon icon="file-export" />
+          <AppIcon icon="file-export" />
           <span>导出对话</span>
         </button>
         <button type="button" class="sidebar-more-item danger" role="menuitem" @click="askDeleteChat(pageCtx.chat)">
-          <font-awesome-icon icon="trash" />
+          <AppIcon icon="trash" />
           <span>删除</span>
         </button>
       </template>
@@ -1680,7 +1733,7 @@
             role="menuitem"
             @click="copyText(pageCtx.selected)"
           >
-            <font-awesome-icon icon="clipboard-list" />
+            <AppIcon icon="clipboard-list" />
             <span>复制</span>
           </button>
           <button
@@ -1689,7 +1742,7 @@
             role="menuitem"
             @click="quoteToComposer(pageCtx.selected)"
           >
-            <font-awesome-icon icon="pen-to-square" />
+            <AppIcon icon="pen-to-square" />
             <span>引用到输入框</span>
           </button>
         </template>
@@ -1708,7 +1761,7 @@
             role="menuitem"
             @click="copyText(pageCtx.messageText)"
           >
-            <font-awesome-icon icon="clipboard-list" />
+            <AppIcon icon="clipboard-list" />
             <span>复制本条</span>
           </button>
           <button
@@ -1718,7 +1771,7 @@
             role="menuitem"
             @click="quoteToComposer(pageCtx.messageText)"
           >
-            <font-awesome-icon icon="pen-to-square" />
+            <AppIcon icon="pen-to-square" />
             <span>引用本条到输入框</span>
           </button>
           <button
@@ -1728,7 +1781,7 @@
             role="menuitem"
             @click="copyEntireChat"
           >
-            <font-awesome-icon icon="comments" />
+            <AppIcon icon="comments" />
             <span>复制全部对话</span>
           </button>
           <button
@@ -1739,17 +1792,30 @@
             :disabled="exportingChat"
             @click="exportActiveChat"
           >
-            <font-awesome-icon icon="file-export" />
+            <AppIcon icon="file-export" />
             <span>导出对话</span>
           </button>
         </template>
       </template>
     </SidebarContextMenu>
 
+    <v-dialog v-model="composerLinkDialog" max-width="440" content-class="composer-link-dialog" aria-label="编辑文本链接" @after-enter="composerLinkInput?.focus()">
+      <form class="composer-link-panel" @submit.prevent="applyComposerLink">
+        <h2>{{ composerLinkTarget?.url ? '编辑链接' : '添加链接' }}</h2>
+        <p>文本：{{ composerLinkTarget?.label }}</p>
+        <label for="composer-link-url">链接地址</label>
+        <input id="composer-link-url" ref="composerLinkInput" v-model="composerLinkUrl" type="text" inputmode="url" placeholder="https://example.com" required />
+        <div class="composer-link-actions">
+          <button type="button" @click="composerLinkDialog=false">取消</button>
+          <button type="submit">保存链接</button>
+        </div>
+      </form>
+    </v-dialog>
+
     <v-dialog v-model="chatSearchOpen" max-width="600" content-class="chat-search-dialog" aria-label="搜索对话" @after-enter="chatSearchInput?.focus()">
         <div class="chat-search-panel">
           <div class="chat-search-box">
-            <font-awesome-icon icon="magnifying-glass" class="chat-search-lead" />
+            <AppIcon icon="magnifying-glass" class="chat-search-lead" />
             <input
               ref="chatSearchInput"
               v-model="chatSearchQuery"
@@ -1766,7 +1832,7 @@
               title="关闭"
               @click="closeChatSearch"
             >
-              <font-awesome-icon icon="xmark" />
+              <AppIcon icon="xmark" />
             </button>
           </div>
           <div class="chat-search-results">
@@ -1799,23 +1865,26 @@
         @keydown.esc.prevent="closeLightbox"
       >
         <button type="button" class="media-lightbox-close" title="关闭" @click="closeLightbox">
-          <font-awesome-icon icon="xmark" />
+          <AppIcon icon="xmark" />
         </button>
         <img :src="lightbox.src" :alt="lightbox.alt" />
         <p v-if="lightbox.alt" class="media-lightbox-cap">{{ lightbox.alt }}</p>
       </div>
     </Teleport>
 
+    <ChatResourcesMenu v-show="pageContext !== 'browser' && pageContext !== 'plugins'" ref="browserResources" class="global-title-actions" :context="pageContext" :running="agentRunning" @context-action="onPageAction" @new-browser-tab="openBrowserTab" @new-chat="createChat" @search="openChatSearch" @delete="active && askDeleteChat(active)" @stop="stopAgent" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :open="resourceOpen" :file-workspace-open="fileWorkspaceVisible" :has-file-tabs="fileTabsState.tabs.length>0" :pinned="!!active?.pinned" :can-export="!!active?.messages.length" :exporting="exportingChat" @rename="renameCurrentChat" @pin="active && toggleChatPinned(active)" @export="exportActiveChat" @toggle-workspace="toggleRightSidebar" @notify="onPanelNotify" @toggle-resources="toggleResources" @show-browser="showResources('browser')" />
+
     <DocsDialog v-if="docsOpen" v-model="docsOpen" />
     <SkillReviewHost />
 
-    <v-snackbar v-model="toast.show" :color="toast.color" timeout="2800" location="bottom">
+    <v-snackbar v-model="toast.show" :color="toast.color" timeout="2800" location="top end" variant="tonal" class="app-toast">
       {{ toast.text }}
     </v-snackbar>
   </div>
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/icons/AppIcon.vue'
 defineOptions({ name: 'ChatPage' })
 import { transcriptBlocks, executionSummary } from '@shared/message-presentation'
 import { replyArtifactGroups } from '@shared/workspace-resources'
@@ -1841,6 +1910,7 @@ import type {
   PermissionPreset,
   PermissionRequest,
 } from '@shared/types'
+import {permissionRequestsForChat} from '@shared/permission-request-queue'
 import {
   detectPermissionPreset,
   FORK_ASK_TIMEOUT_DEFAULT_MS,
@@ -1924,23 +1994,23 @@ const showDesktopChrome = computed(
 )
 const windowPlatform = window.navora?.app?.platform || 'web'
 const browserResources = ref<{ quickOpen: () => Promise<void> } | null>(null)
-type PageActionHost={runAction:(action:string)=>unknown}
+type PageActionHost={apply?:()=>unknown;refresh?:()=>unknown;manage?:()=>unknown;save?:()=>unknown;export?:()=>unknown}
 const settingsWorkspace=ref<PageActionHost|null>(null),fileManagerWorkspace=ref<{refresh:()=>unknown;openFolder:()=>unknown}|null>(null),pluginsWorkspace=ref<PageActionHost|null>(null),creatorWorkspace=ref<PageActionHost|null>(null)
-const pageContext=computed(()=>creatorKind.value?'creator':settingsOpen.value?'settings':pluginWorkspaceActive.value?'plugins':fileManagerActive.value?'files':'chat')
+const pageContext=computed(()=>creatorKind.value?'creator':settingsOpen.value?'settings':pluginWorkspaceActive.value?'plugins':fileManagerActive.value?'files':browserWorkspaceActive.value?'browser':'chat')
 function toggleRightSidebar(){
   const wasVisible=fileWorkspaceVisible.value
-  settingsOpen.value=false;creatorKind.value=null;pluginWorkspaceMode.value=false;fileManagerMode.value=false
-  if(!fileTabsState.value.tabs.length)openBrowserTab()
-  else if(wasVisible)hideFileWorkspace()
-  else if(!fileTabsState.value.open)toggleFileWorkspace()
+  settingsOpen.value=false;creatorKind.value=null;pluginWorkspaceMode.value=false;fileManagerMode.value=false;browserWorkspaceMode.value=false
+  if(wasVisible)hideFileWorkspace()
+  else showFileWorkspace()
 }
 function onPageAction(action:string){
   const context=pageContext.value
   if(action==='back'){if(creatorKind.value){closeCreator();return}settingsOpen.value=false;activateSidebar('chats',false);return}
-  if(context==='settings'){if(action==='apply')void settingsWorkspace.value?.runAction('apply');else if(action==='models')settingsTab.value='model';else if(action==='plugins'){settingsOpen.value=false;activateSidebar('plugins',false)}}
+  if(context==='settings'){if(action==='apply')void settingsWorkspace.value?.apply?.();else if(action==='models')settingsTab.value='model';else if(action==='plugins'){settingsOpen.value=false;activateSidebar('plugins',false)}else if(action==='create-skill')openCreator('skill')}
+  else if(context==='browser'){if(action==='new-browser')openBrowserTab()}
   else if(context==='files'){if(action==='refresh')fileManagerWorkspace.value?.refresh();else if(action==='folder')fileManagerWorkspace.value?.openFolder()}
-  else if(context==='plugins'){if(action==='refresh')void pluginsWorkspace.value?.runAction('refresh');else if(action==='manage')pluginsWorkspace.value?.runAction('manage');else if(action==='create')openCreator('plugin')}
-  else if(context==='creator'){if(action==='save')void creatorWorkspace.value?.runAction('save');else if(action==='export')void creatorWorkspace.value?.runAction('export')}
+  else if(context==='plugins'){if(action==='refresh')void pluginsWorkspace.value?.refresh?.();else if(action==='manage')pluginsWorkspace.value?.manage?.();else if(action==='create')openCreator('plugin')}
+  else if(context==='creator'){if(action==='save')void creatorWorkspace.value?.save?.();else if(action==='export')void creatorWorkspace.value?.export?.()}
 }
 
 const executionModes = [
@@ -1991,6 +2061,7 @@ const PERM_LABELS: Record<string, string> = {
   evaluate: '执行页面脚本',
   screenshot: '页面截图',
   'desktop.screenshot': '桌面截图',
+  'network.request': '独立网络请求',
   'network.observe': '观察网络请求',
   'network.modify': '修改网络请求',
   'network.block': '拦截网络请求',
@@ -2065,8 +2136,11 @@ const stickToBottom = ref(true)
 const showJumpBottom = ref(false)
 const toolMediaSrc = ref<Record<string, string>>({})
 const lightbox = ref<{ src: string; alt: string }>({ src: '', alt: '' })
-const permReq = ref<PermissionRequest | null>(null)
-const permBusy = ref(false)
+const pendingPermRequests = ref<PermissionRequest[]>([])
+const visiblePermRequests = computed(() => permissionRequestsForChat(pendingPermRequests.value,activeId.value,chats.value))
+const permReq = computed(() => visiblePermRequests.value[0] || null)
+const permPendingCount = computed(() => visiblePermRequests.value.length)
+const permBusyId = ref('')
 const askBusy = ref(false)
 const permCapabilityLabel = computed(
   () => PERM_LABELS[permReq.value?.capability || ''] || permReq.value?.capability || '权限确认',
@@ -2137,6 +2211,42 @@ const chatListSections = computed((): ChatListSection[] => {
   }
   return sections
 })
+
+const CHAT_LIST_INITIAL_LIMIT = 60
+const CHAT_LIST_PAGE_SIZE = 60
+const chatListLimit = ref(CHAT_LIST_INITIAL_LIMIT)
+
+const visibleChatListSections = computed((): ChatListSection[] => {
+  const sections = chatListSections.value
+  const total = sections.reduce((sum, section) => sum + section.items.length, 0)
+  let offset = 0
+  let activeIndex = -1
+  for (const section of sections) {
+    const localIndex = section.items.findIndex((chat) => chat.id === activeId.value)
+    if (localIndex >= 0) {
+      activeIndex = offset + localIndex
+      break
+    }
+    offset += section.items.length
+  }
+  const limit = chatBatchMode.value ? total : Math.max(chatListLimit.value, activeIndex + 1)
+  let remaining = Math.min(total, limit)
+  return sections.flatMap((section) => {
+    if (remaining <= 0) return []
+    const items = section.items.slice(0, remaining)
+    remaining -= items.length
+    return items.length ? [{ ...section, items }] : []
+  })
+})
+
+const chatListRemainingCount = computed(() =>
+  Math.max(0, chatListSections.value.reduce((sum, section) => sum + section.items.length, 0)
+    - visibleChatListSections.value.reduce((sum, section) => sum + section.items.length, 0)),
+)
+
+function loadMoreChats() {
+  chatListLimit.value += CHAT_LIST_PAGE_SIZE
+}
 
 const subchatsByParent = computed(() => {
   const map = new Map<string, ChatSession[]>()
@@ -2294,12 +2404,36 @@ const sidebarMoreOpen = ref(false)
 const {open:resourceOpen,tab:resourceTab,show:showResources,close:hideResources} = useConversationResources(activeId,tree)
 function closeResources(){hideResources()}
 function toggleResources(){if(resourceOpen.value)closeResources();else showResources('overview')}
-const {current:fileTabsState,active:activeFileTab,open:openFileTab,openBrowser:openBrowserTab,updateBrowser:updateBrowserTab,select:selectFileTab,close:closeFileTab,hide:hideFileWorkspace,toggle:toggleFileWorkspace,removeOwner:removeFileOwner}=useFileTabs(activeId)
-const pluginWorkspaceMode=ref(false),pluginWorkspaceMounted=ref(false)
-const fileWorkspaceVisible=computed(()=>fileTabsState.value.open&&fileTabsState.value.tabs.length>0&&!settingsOpen.value&&!creatorKind.value&&!pluginWorkspaceMode.value)
+const {current:fileTabsState,active:activeFileTab,open:openFileTab,openBrowser:openBrowserTab,updateBrowser:updateBrowserTab,syncBrowser:syncBrowserTabs,present:presentBrowserTab,reorder:reorderBrowserTab,select:selectFileTab,close:closeFileTab,hide:hideFileWorkspace,show:showFileWorkspace,removeOwner:removeFileOwner,transfer:transferFileTab}=useFileTabs(activeId)
+const pluginWorkspaceMode=ref(false),pluginWorkspaceMounted=ref(false),browserWorkspaceMode=ref(false)
+const fileWorkspaceVisible=computed(()=>fileTabsState.value.open&&!settingsOpen.value&&!creatorKind.value&&!pluginWorkspaceMode.value&&!browserWorkspaceMode.value)
+const browserExpanded=ref(false)
+function toggleBrowserExpand(){browserExpanded.value=!browserExpanded.value}
 const previewWidth = ref(400)
 const mainElement=ref<HTMLElement|null>(null)
-const {overlay:fileWorkspaceOverlay,maximum:fileWorkspaceMaximum,width:fileWorkspaceWidth,reserve:fileWorkspaceReserve,resize:resizeFileWorkspace}=useFileWorkspaceLayout(mainElement,fileWorkspaceVisible,isMobileLayout)
+const { layout: sidebarLayout, style: sidebarStyle, resizing: sidebarResizing, maxWidth: sidebarWidthMaximum, beginResize: beginSidebarResize, resizeKey: sidebarResizeKey } = useSidebarLayout()
+const {mainWidth:fileWorkspaceMainWidth,overlay:fileWorkspaceOverlay,maximum:fileWorkspaceMaximum,width:fileWorkspaceWidth,reserve:fileWorkspaceReserve,resize:resizeFileWorkspace}=useFileWorkspaceLayout(mainElement,fileWorkspaceVisible,isMobileLayout,browserExpanded)
+const sidebarAutoCollapsed=ref(false)
+const sidebarAutoExpanded=ref(false)
+let sidebarAutoCollapseViewportWidth=window.innerWidth
+function updateSidebarAutoCollapse(mainWidth=fileWorkspaceMainWidth.value,reserve=fileWorkspaceReserve.value,mobile=isMobileLayout.value){
+  if(mobile){sidebarAutoCollapsed.value=false;return}
+  if(sidebarAutoExpanded.value)return
+  // mainWidth is measured after the sidebar is laid out. Add back the space
+  // reclaimed by auto-collapse so the decision does not oscillate at the breakpoint.
+  const available=mainWidth-reserve-(sidebarAutoCollapsed.value?Math.max(0,sidebarLayout.value.width-52):0)
+  if(!sidebarAutoCollapsed.value&&available<640)sidebarAutoCollapsed.value=true
+  else if(sidebarAutoCollapsed.value&&available>840)sidebarAutoCollapsed.value=false
+}
+watch([fileWorkspaceMainWidth,fileWorkspaceReserve,isMobileLayout],([mainWidth,reserve,mobile])=>updateSidebarAutoCollapse(mainWidth,reserve,mobile),{immediate:true})
+function onSidebarAutoCollapseViewportResize(){
+  if(window.innerWidth!==sidebarAutoCollapseViewportWidth){
+    sidebarAutoCollapseViewportWidth=window.innerWidth
+    sidebarAutoExpanded.value=false
+    updateSidebarAutoCollapse()
+  }
+}
+window.addEventListener('resize',onSidebarAutoCollapseViewportResize)
 const {overlay:resourceOverlay,availableWidth:resourceAvailableWidth}=useResourceCardLayout(mainElement,previewWidth,isMobileLayout,fileWorkspaceReserve)
 try { const saved = Number(localStorage.getItem('navora.preview.width')); if (saved >= 280 && saved <= 800) previewWidth.value = saved } catch { /* optional persistence */ }
 watch(fileWorkspaceVisible,async()=>{const follow=stickToBottom.value;await nextTick();if(follow)void scrollMessages(true)})
@@ -2333,23 +2467,26 @@ async function openCreatorTrial(result: { chatId: string; prompt: string }) {
 const settingsTab = ref('basic')
 const settingsOpen = ref(false)
 watch(settingsOpen, open => { if (open) creatorKind.value = null })
-const { layout: sidebarLayout, style: sidebarStyle, resizing: sidebarResizing, beginResize: beginSidebarResize, resizeKey: sidebarResizeKey } = useSidebarLayout()
 const { panels: sidebarPanels, visible: sidebarVisible, rail: sidebarRail, activate: activateSidebar, close: closeSidebar } = useSidebarDock()
 const fileManagerMounted=ref(false),fileManagerMode=ref(sidebarRail.value.active==='workspace')
-watch(()=>sidebarRail.value.active,id=>{if(id){fileManagerMode.value=id==='workspace';pluginWorkspaceMode.value=id==='plugins'}},{immediate:true})
+watch(()=>sidebarRail.value.active,id=>{if(id){fileManagerMode.value=id==='workspace';pluginWorkspaceMode.value=id==='plugins';browserWorkspaceMode.value=id==='browser'}},{immediate:true})
 const fileManagerOwnerId=ref(''),fileManagerDirectory=ref('.')
 const fileManagerOwner=computed(()=>chats.value.find(chat=>chat.id===fileManagerOwnerId.value))
 const fileManagerActive=computed(()=>fileManagerMode.value&&!settingsOpen.value&&!creatorKind.value)
+const browserWorkspaceActive=computed(()=>browserWorkspaceMode.value&&!settingsOpen.value&&!creatorKind.value)
+const browserWorkspaceTabs=computed(()=>fileTabsState.value.tabs.filter(tab=>tab.kind==='browser'))
+const browserWorkspaceTab=computed(()=>activeFileTab.value?.kind==='browser'?activeFileTab.value:browserWorkspaceTabs.value[0]||null)
+watch(browserWorkspaceActive,visible=>{if(visible)hideResources()})
 const pluginWorkspaceActive=computed(()=>pluginWorkspaceMode.value&&!settingsOpen.value&&!creatorKind.value)
 watch(pluginWorkspaceActive,visible=>{if(visible){pluginWorkspaceMounted.value=true;hideResources()}},{immediate:true})
 function browseFiles(selection:{chatId:string;path:string}){fileManagerOwnerId.value=selection.chatId;fileManagerDirectory.value=selection.path}
 async function openResourceChat(id:string){await selectChat(id);activateSidebar('chats',false)}
-watch(fileManagerActive,visible=>{if(visible){fileManagerMounted.value=true;hideResources()}},{immediate:true})
+watch(fileManagerActive,visible=>{if(visible){fileManagerMounted.value=true;hideResources();if(activeFileTab.value?.kind==='browser')hideFileWorkspace()}},{immediate:true})
 const loadedResourcePanels=ref(new Set<string>())
 watch(()=>sidebarRail.value.active,id=>{if(id)loadedResourcePanels.value=new Set([...loadedResourcePanels.value,id])},{immediate:true})
 const allSidebarHidden = computed(() => sidebarPanels.value.every(panel => !sidebarVisible.value[panel.id]))
 watch(()=>sidebarVisible.value.chats,visible=>{if(!visible)exitChatBatchMode()})
-function toggleSidebarGroup(id:string){const force=settingsOpen.value||!!creatorKind.value||(id==='plugins'&&!pluginWorkspaceMode.value)||(id==='workspace'&&!fileManagerMode.value);settingsOpen.value=false;creatorKind.value=null;exitChatBatchMode();if(force){fileManagerMode.value=id==='workspace';pluginWorkspaceMode.value=id==='plugins'}activateSidebar(id,!force)}
+function toggleSidebarGroup(id:string){const force=settingsOpen.value||!!creatorKind.value||(id==='plugins'&&!pluginWorkspaceMode.value)||(id==='workspace'&&!fileManagerMode.value)||(id==='browser'&&!browserWorkspaceMode.value);if(sidebarAutoCollapsed.value){sidebarAutoCollapsed.value=false;sidebarAutoExpanded.value=true}settingsOpen.value=false;creatorKind.value=null;exitChatBatchMode();if(force){fileManagerMode.value=id==='workspace';pluginWorkspaceMode.value=id==='plugins';browserWorkspaceMode.value=id==='browser'}activateSidebar(id,!force)}
 const docsOpen = ref(false)
 const mobileSidebarOpen = ref(false)
 const chatSearchOpen = ref(false)
@@ -2488,22 +2625,27 @@ const permChatTitle = computed(() => {
   return c?.title || permReq.value.chatId
 })
 
-const permExpiresAt = ref(0)
-const permTimeoutTotalMs = ref(0)
+const permExpiryById = ref<Record<string,{expiresAt:number;totalMs:number}>>({})
+const permExpiresAt = computed(() => permReq.value ? permExpiryById.value[permReq.value.id]?.expiresAt || 0 : 0)
+const permTimeoutTotalMs = computed(() => permReq.value ? permExpiryById.value[permReq.value.id]?.totalMs || 0 : 0)
 
 function trackPermExpiry(req: PermissionRequest) {
   const ms = typeof req.timeoutMs === 'number' ? req.timeoutMs : 120000
   if (!(ms > 0)) {
-    clearPermExpiry()
+    clearPermExpiry(req.id)
     return
   }
-  permTimeoutTotalMs.value = ms
-  permExpiresAt.value = Date.now() + ms
+  permExpiryById.value = {...permExpiryById.value,[req.id]:{totalMs:ms,expiresAt:Date.now()+ms}}
 }
 
-function clearPermExpiry() {
-  permExpiresAt.value = 0
-  permTimeoutTotalMs.value = 0
+function clearPermExpiry(id:string) {
+  if(!(id in permExpiryById.value))return
+  const next={...permExpiryById.value};delete next[id];permExpiryById.value=next
+}
+
+function removePermRequest(id:string) {
+  pendingPermRequests.value=pendingPermRequests.value.filter(request=>request.id!==id)
+  clearPermExpiry(id)
 }
 
 const permRemainingLabel = computed(() => {
@@ -2528,6 +2670,9 @@ const permRemainingPct = computed(() => {
 function showToast(text: string, color = 'error') {
   toast.value = { show: true, text, color }
 }
+let unsubFileTransfer:(()=>void)|undefined
+let unsubBrowserPresent:(()=>void)|undefined
+let browserPresentRequest=0
 let unsubTree: (() => void) | undefined
 let unsubAgent: (() => void) | undefined
 let unsubChats: (() => void) | undefined
@@ -2850,17 +2995,26 @@ const modelMenuOptions = computed(() => {
 
 const filteredModelOptions = computed(()=>modelMenuOptions.value.filter(option=>!modelQuery.value.trim()||(option.label+' '+option.model+' '+option.providerLabel).toLocaleLowerCase().includes(modelQuery.value.trim().toLocaleLowerCase())))
 
-const usageChars = computed(() =>
-  (active.value?.messages || []).reduce((n, m) => n + (m.content?.length || 0), 0),
-)
-const usageTokensEst = computed(() => Math.max(0, Math.ceil(usageChars.value / 2)))
-const usageRatio = computed(() =>
-  Math.min(1, usageTokensEst.value / chatModelSettings.value.context_window),
-)
-const usagePctLabel = computed(() => `${Math.round(usageRatio.value * 1000) / 10}%`)
+const usageTokensEst = computed(() => {
+  const messages = active.value?.messages || []
+  let estimate = 0
+  for (const message of messages) {
+    const content = message.content || ''
+    const cjkChars = content.match(/[\u3400-\u9fff\uf900-\ufaff]/g)?.length || 0
+    estimate += cjkChars + (content.length - cjkChars) / 4
+  }
+  return Math.ceil(estimate)
+})
+const usageRatio = computed(() => usageTokensEst.value / Math.max(1, chatModelSettings.value.context_window))
+const usagePctLabel = computed(() => `${Math.round(usageRatio.value * 100)}%`)
+function formatUsageCount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1).replace(/\.0$/, '')}M`
+  if (value >= 100_000) return `${Math.round(value / 1_000)}K`
+  return value.toLocaleString()
+}
 const USAGE_RING_LEN = 2 * Math.PI * 14
 const usageDash = computed(
-  () => `${(usageRatio.value * USAGE_RING_LEN).toFixed(2)} ${USAGE_RING_LEN.toFixed(2)}`,
+  () => `${(Math.min(1, usageRatio.value) * USAGE_RING_LEN).toFixed(2)} ${USAGE_RING_LEN.toFixed(2)}`,
 )
 const usageTone = computed(() => {
   if (usageRatio.value >= 0.85) return 'hot'
@@ -4266,6 +4420,139 @@ async function insertComposerResource(selection:{start:number;end:number;text:st
   await nextTick()
   const input=document.querySelector<HTMLTextAreaElement>('.composer-input textarea')
   input?.focus();input?.setSelectionRange(selection.start+selection.text.length,selection.start+selection.text.length)
+  updateComposerSelection()
+}
+
+type ComposerMarkdownLink = { start: number; end: number; label: string; url: string }
+type ComposerLinkTarget = { start: number; end: number; label: string; url?: string }
+const composerSelection = ref({ start: 0, end: 0 })
+const composerLinkDialog = ref(false)
+const composerLinkInput = ref<HTMLInputElement | null>(null)
+const composerLinkUrl = ref('')
+const composerLinkTarget = ref<ComposerLinkTarget | null>(null)
+
+function composerTextarea() {
+  return document.querySelector<HTMLTextAreaElement>('.composer-input textarea')
+}
+
+function updateComposerSelection() {
+  const input = composerTextarea()
+  if (input) composerSelection.value = { start: input.selectionStart, end: input.selectionEnd }
+}
+
+function findComposerMarkdownLink(text: string, start: number, end: number): ComposerMarkdownLink | null {
+  const pattern = /\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(text))) {
+    const matchStart = match.index
+    const matchEnd = matchStart + match[0].length
+    const labelStart = matchStart + 1
+    const labelEnd = labelStart + match[1]!.length
+    const containsCaret = start === end && start >= labelStart && start <= labelEnd
+    const overlapsLabel = start < labelEnd && end > labelStart
+    const selectsWholeLink = start <= matchStart && end >= matchEnd
+    if (!containsCaret && !overlapsLabel && !selectsWholeLink) continue
+    return { start: matchStart, end: matchEnd, label: match[1]!, url: match[2]! }
+  }
+  return null
+}
+
+const hasComposerLinkAtSelection = computed(() =>
+  Boolean(findComposerMarkdownLink(draft.value, composerSelection.value.start, composerSelection.value.end)),
+)
+const hasComposerLinkSelection = computed(() => {
+  if (hasComposerLinkAtSelection.value) return true
+  if (composerSelection.value.end <= composerSelection.value.start) return false
+  return Boolean(draft.value.slice(composerSelection.value.start, composerSelection.value.end).trim())
+})
+
+function onComposerInput(event: Event) {
+  updateComposerSelection()
+  resourceCommands.value?.onInput(event)
+}
+
+function openComposerLinkEditor() {
+  updateComposerSelection()
+  const { start, end } = composerSelection.value
+  const existing = findComposerMarkdownLink(draft.value, start, end)
+  if (!existing && end <= start) {
+    showToast('先选中要添加链接的文本', 'warning')
+    return
+  }
+  const label = existing?.label || draft.value.slice(start, end)
+  if (!label.trim()) {
+    showToast('先选中要添加链接的文本', 'warning')
+    return
+  }
+  composerLinkTarget.value = existing
+    ? { start: existing.start, end: existing.end, label: existing.label, url: existing.url }
+    : { start, end, label }
+  composerLinkUrl.value = existing?.url || ''
+  composerLinkDialog.value = true
+}
+
+function normalizeComposerLinkUrl(value: string): string | null {
+  const raw = value.trim()
+  if (!raw || /[\u0000-\u0020]/.test(raw)) return null
+  if (/^(?:#|\.\.?\/)/.test(raw)) return raw
+  const candidate = /^mailto:/i.test(raw)
+    ? raw
+    : /^https?:\/\//i.test(raw)
+      ? raw
+      : `https://${raw}`
+  try {
+    const parsed = new URL(candidate)
+    return ['http:', 'https:', 'mailto:'].includes(parsed.protocol) ? parsed.href : null
+  } catch {
+    return null
+  }
+}
+
+function replaceComposerRange(start: number, end: number, replacement: string) {
+  const next = draft.value.slice(0, start) + replacement + draft.value.slice(end)
+  if (next.length > maxComposerChars.value) {
+    showToast('链接会超过输入长度上限，请缩短链接地址', 'warning')
+    return false
+  }
+  applyDraftLocally(next, Date.now())
+  scheduleDraftSave()
+  void nextTick(() => {
+    const input = composerTextarea()
+    const caret = start + replacement.length
+    input?.focus()
+    input?.setSelectionRange(caret, caret)
+    updateComposerSelection()
+  })
+  return true
+}
+
+function applyComposerLink() {
+  const target = composerLinkTarget.value
+  if (!target) return
+  const url = normalizeComposerLinkUrl(composerLinkUrl.value)
+  if (!url) {
+    showToast('请输入有效的 http、https、mailto 或相对链接', 'warning')
+    return
+  }
+  const label = target.label.replace(/\\/g, '\\\\').replace(/\]/g, '\\]')
+  if (!replaceComposerRange(target.start, target.end, `[${label}](${url})`)) return
+  composerLinkDialog.value = false
+}
+
+function removeComposerLink() {
+  updateComposerSelection()
+  const { start, end } = composerSelection.value
+  const link = findComposerMarkdownLink(draft.value, start, end)
+  if (!link) return
+  replaceComposerRange(link.start, link.end, link.label)
+}
+
+async function attachContext(kind:'文件'|'浏览器'|'会话'){
+  const input=document.querySelector<HTMLTextAreaElement>('.composer-input textarea')
+  const start=input?.selectionStart??draft.value.length,end=input?.selectionEnd??start
+  const text=(start>0&&!/\s/.test(draft.value[start-1]||'')?' ':'')+'/'+kind+' '
+  await insertComposerResource({start,end,text})
+  resourceCommands.value?.openAt(start+text.length)
 }
 function onComposerKeydown(e: KeyboardEvent) {
   if(resourceCommands.value?.handleKeydown(e))return
@@ -4288,7 +4575,7 @@ function onComposerKeydown(e: KeyboardEvent) {
 }
 
 function refKey(r: BrowserContextRef) {
-  return r.kind === 'window' ? `w:${r.windowId}` : `s:${r.sessionId}`
+  return r.kind==='annotation'?`a:${r.annotationId}:${r.annotationRevision}`:r.kind === 'window' ? `w:${r.windowId}` : `s:${r.sessionId}`
 }
 
 /** Strip Vue proxies so refs survive Electron IPC structured clone. */
@@ -4299,6 +4586,8 @@ function plainContextRefs(list: BrowserContextRef[]): BrowserContextRef[] {
       sessionId: String(r.sessionId || ''),
       label: String(r.label || ''),
     }
+    if(r.annotationId)out.annotationId=String(r.annotationId)
+    if(r.annotationRevision)out.annotationRevision=Number(r.annotationRevision)
     if (r.windowId) out.windowId = String(r.windowId)
     if (r.url) out.url = String(r.url)
     if (typeof r.sessionIndex === 'number' && Number.isFinite(r.sessionIndex)) {
@@ -4309,6 +4598,7 @@ function plainContextRefs(list: BrowserContextRef[]): BrowserContextRef[] {
 }
 
 function chipLabel(r: BrowserContextRef) {
+  if(r.kind==='annotation')return `@批注 ${r.label}`
   return r.kind === 'window' ? `@窗口 ${r.label}` : `@Session ${r.label}`
 }
 
@@ -4393,6 +4683,7 @@ async function selectChat(id: string) {
   if (selection !== chatSelection) return
   active.value = nextChat
   tree.value = nextTree
+  syncBrowserTabs(nextTree)
   if (
     active.value?.pendingAsk &&
     active.value.pendingAsk.timeoutMs <= 0 &&
@@ -4694,6 +4985,7 @@ async function confirmCloseSession() {
     contextRefs.value = contextRefs.value.filter((r) => r.sessionId !== sessionId)
     if (activeId.value) {
       tree.value = await window.navora.browser.tree(activeId.value)
+      syncBrowserTabs(tree.value)
       windowCounts.value = await window.navora.browser.windowCounts()
     }
     closeSessionDialog.value = false
@@ -4862,6 +5154,7 @@ const chatSearchHits = computed((): ChatSearchHit[] => {
 function openChatSearch() {
   fileManagerMode.value=false
   pluginWorkspaceMode.value=false
+  browserWorkspaceMode.value=false
   chatSearchQuery.value = ''
   chatSearchOpen.value = true
   void nextTick(() => chatSearchInput.value?.focus())
@@ -5134,14 +5427,15 @@ async function stopAgent() {
 }
 
 async function respondPerm(decision: PermissionDecision) {
-  if (!window.navora || !permReq.value) return
-  permBusy.value = true
+  const request=permReq.value
+  if (!window.navora || !request || permBusyId.value) return
+  permBusyId.value = request.id
   try {
-    await window.navora.permission.respond(permReq.value.id, decision)
-    permReq.value = null
-    clearPermExpiry()
+    const delivered=await window.navora.permission.respond(request.id, decision)
+    removePermRequest(request.id)
+    if(!delivered)showToast('授权请求已失效，请重新发起操作。','warning')
   } finally {
-    permBusy.value = false
+    if(permBusyId.value===request.id)permBusyId.value = ''
   }
 }
 
@@ -5259,6 +5553,7 @@ watch(activeId, async (id, _previous, onCleanup) => {
   const [nextTree,running]=await Promise.all([window.navora?.browser.tree(id),window.navora?.agent.isRunning(id)])
   if(stale)return
   tree.value=nextTree||[]
+  syncBrowserTabs(tree.value)
   agentRunning.value=running||false
 })
 
@@ -5319,13 +5614,32 @@ onMounted(async () => {
     console.warn('Navora API unavailable (open via Electron)')
     return
   }
+  if(!isWebRemote())unsubFileTransfer=window.navora.fileTabs.onTransfer(async event=>{
+    try{
+      transferFileTab(event)
+      if(event.kind==='open'){if(event.viewerChatId!==activeId.value)await selectChat(event.viewerChatId);settingsOpen.value=false;creatorKind.value=null;browserWorkspaceMode.value=false;pluginWorkspaceMode.value=false}
+      if(event.requestId)await window.navora!.fileTabs.completeTransfer(event.requestId)
+    }catch(e){if(event.requestId)await window.navora!.fileTabs.completeTransfer(event.requestId,String(e))}
+  })
+  if(!isWebRemote())unsubBrowserPresent=window.navora.browser.workspace.onPresent(async payload=>{
+    if(payload.hidden){const displayed=browserWorkspaceActive.value?browserWorkspaceTab.value:activeFileTab.value;if(displayed?.pageId===payload.pageId){browserPresentRequest++;hideFileWorkspace();if(browserWorkspaceActive.value)activateSidebar('chats',false)}return}
+    const request=++browserPresentRequest
+    if(payload.chatId!==activeId.value){if(browserWorkspaceActive.value)await selectChat(payload.chatId);else await openResourceChat(payload.chatId)}
+    if(request!==browserPresentRequest||payload.chatId!==activeId.value)return
+    const selection=chatSelection
+    if(!tree.value.some(session=>session.windows.some(page=>page.windowId===payload.pageId&&page.presentation==='embedded'))){const nextTree=await window.navora!.browser.tree(payload.chatId);if(request!==browserPresentRequest||selection!==chatSelection||payload.chatId!==activeId.value)return;tree.value=nextTree}
+    syncBrowserTabs(tree.value);presentBrowserTab(payload.pageId)
+    if(payload.annotation){activateSidebar('chats',false);addRef(payload.annotation)}
+  })
   unsubTree = window.navora.browser.onTreeUpdated((payload) => {
     windowCounts.value = payload.counts
     if (payload.chatId === activeId.value) {
       tree.value = payload.tree
+      syncBrowserTabs(payload.tree)
       const winIds = new Set(payload.tree.flatMap((s) => s.windows.map((w) => w.windowId)))
       const sessIds = new Set(payload.tree.map((s) => s.sessionId))
       contextRefs.value = contextRefs.value.filter((r) => {
+        if (r.kind === 'annotation') return true
         if (r.kind === 'session') return sessIds.has(r.sessionId)
         return !!r.windowId && winIds.has(r.windowId)
       })
@@ -5549,19 +5863,17 @@ onMounted(async () => {
     }
   })
   unsubPerm = window.navora.permission.onRequest((req) => {
-    permReq.value = req
+    if(!pendingPermRequests.value.some(request=>request.id===req.id))pendingPermRequests.value=[...pendingPermRequests.value,req]
     trackPermExpiry(req)
-    if (req.chatId === activeId.value) {
+    const requestChat=chats.value.find(chat=>chat.id===req.chatId)
+    if (req.chatId === activeId.value || requestChat?.kind==='sub'&&requestChat.parentChatId===activeId.value) {
       phase.value = 'awaiting_permission'
       phaseDetail.value = `等待授权：${req.capability}`
       scrollToInlineDecision()
     }
   })
   unsubPermCancel = window.navora.permission.onCancel((id) => {
-    if (permReq.value?.id === id) {
-      permReq.value = null
-      clearPermExpiry()
-    }
+    removePermRequest(id)
   })
   unsubAsk = window.navora.agent.onAsk((req) => {
     rememberPendingAsk(req)
@@ -5638,9 +5950,12 @@ onUnmounted(() => {
   chatSelection++
   chatTransition?.cancel()
   window.removeEventListener('keydown', onAppShortcut)
+  window.removeEventListener('resize', onSidebarAutoCollapseViewportResize)
   void flushDraftSave(activeId.value)
   clearTimeout(draftSaveTimer)
   unsubTree?.()
+  unsubBrowserPresent?.()
+  unsubFileTransfer?.()
   unsubConfig?.()
   unsubAgent?.()
   unsubChats?.()
@@ -5816,6 +6131,7 @@ onUnmounted(() => {
   width: 0 !important;
   margin-right: 0 !important;
 }
+/* Keep the action strip after caption drag regions in DOM order: native hit testing uses that order. */
 .global-title-actions{position:absolute;top:7px;right:12px;z-index:20;}
 .shell.frameless:not(.platform-mac)>.global-title-actions{right:154px}
 .shell.platform-mac>.global-title-actions{right:12px}
@@ -5951,6 +6267,29 @@ onUnmounted(() => {
 }
 .chat-list.batch-mode {
   flex: 1 1 auto;
+}
+.chat-list-load-more {
+  flex-shrink: 0;
+  min-height: 38px;
+  margin: 4px 8px 10px 0;
+  padding: 0 10px;
+  border: 1px solid rgba(94, 125, 164, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.52);
+  color: #61748d;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.chat-list-load-more:hover {
+  border-color: rgba(94, 125, 164, 0.36);
+  background: #fff;
+  color: #34577e;
+}
+.chat-list-load-more:focus-visible {
+  outline: 2px solid #537ab9;
+  outline-offset: 2px;
 }
 .chat-date-label {
   flex-shrink: 0;
@@ -6245,7 +6584,7 @@ onUnmounted(() => {
   background: rgba(15, 118, 110, 0.24);
   border-color: rgba(45, 212, 191, 0.22);
 }
-.chat-stat .svg-inline--fa {
+.chat-stat .app-icon {
   font-size: 0.58rem;
   opacity: 0.92;
 }
@@ -6894,7 +7233,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-height: 0;
   min-width: 0;
   flex: 1;
@@ -9347,6 +9686,105 @@ onUnmounted(() => {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.conversation-title-header:not(.compact) {
+  padding-top: 48px;
+}
+.shell.frameless .conversation-title-header:not(.compact) {
+  padding-top: 56px;
+}
+.conversation-title-header:not(.compact) .main-title {
+  transform: translateY(12px);
+}
+.content-titlebar-spacer {
+  height: 44px;
+  min-height: 44px;
+  flex: 0 0 44px;
+}
+.shell.frameless .content-titlebar-spacer {
+  height: 56px;
+  min-height: 56px;
+  flex-basis: 56px;
+}
+.composer-link-btn {
+  width: 30px;
+  height: 30px;
+  max-width: 30px;
+  flex: 0 0 30px;
+  justify-content: center;
+  padding: 0;
+  font-size: 0.88rem;
+}
+.composer-link-panel {
+  display: grid;
+  gap: 9px;
+  padding: 18px;
+  border: 1px solid #dbe3ed;
+  border-radius: 12px;
+  background: #fff;
+  color: #40536d;
+  box-shadow: 0 16px 42px rgba(30, 48, 72, 0.18);
+}
+.composer-link-panel h2 {
+  margin: 0;
+  color: #263b55;
+  font-size: 15px;
+  font-weight: 650;
+}
+.composer-link-panel p {
+  margin: 0;
+  overflow: hidden;
+  color: #75849a;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-link-panel label {
+  color: #667991;
+  font-size: 11px;
+  font-weight: 600;
+}
+.composer-link-panel input {
+  min-width: 0;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid #ccd6e3;
+  border-radius: 7px;
+  outline: 0;
+  color: #354c68;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+}
+.composer-link-panel input:focus {
+  border-color: #6485ad;
+  box-shadow: 0 0 0 3px rgba(83, 122, 185, 0.13);
+}
+.composer-link-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 3px;
+}
+.composer-link-actions button {
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid #d4dde8;
+  border-radius: 7px;
+  color: #62758d;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.composer-link-actions button[type='submit'] {
+  border-color: #426b98;
+  color: #fff;
+  background: #426b98;
+}
+.composer-link-actions button:focus-visible {
+  outline: 2px solid #6487b1;
+  outline-offset: 2px;
+}
 .composer-usage-row {
   display: flex;
   justify-content: space-between;
@@ -9361,11 +9799,30 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
 }
 .composer-usage-note {
-  margin: 4px 8px 2px;
-  font-size: 0.72rem;
-  color: #95a5a6;
-  line-height: 1.4;
+  margin: 12px 2px 1px;
+  font-size: 11px;
+  color: #8993a0;
+  line-height: 1.5;
 }
+.composer-usage-menu{max-width:calc(100vw - 20px)!important;border:1px solid #e6e9ee;border-radius:18px!important;background:#fff!important}
+.composer-usage-panel{box-sizing:border-box;width:min(396px,calc(100vw - 20px));min-width:0;max-width:none;padding:16px 18px 14px;border-radius:18px}
+.composer-usage-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#737c88;font-size:14px;line-height:1.3}
+.composer-usage-heading>span{white-space:nowrap}
+.composer-usage-heading b{margin-left:5px;color:#202631;font-size:15px;font-weight:650;font-variant-numeric:tabular-nums}
+.composer-usage-heading>strong{color:#202631;font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.composer-usage-track{height:6px;margin:17px 0 13px;overflow:hidden;border-radius:999px;background:#edf0f2}
+.composer-usage-fill{display:block;height:100%;min-width:0;border-radius:inherit;background:#4b8dff;transition:width 180ms ease,background-color 180ms ease}
+.composer-usage-fill.warm{background:#e9a43b}
+.composer-usage-fill.hot{background:#df5d58}
+.composer-usage-breakdown{display:grid;gap:1px}
+.composer-usage-row{min-height:31px;padding:4px 0;font-size:14px;color:#68717d}
+.composer-usage-row>span{display:inline-flex;align-items:center;gap:9px}
+.composer-usage-row strong{font-size:14px;font-weight:500;color:#252b33}
+.usage-dot{width:11px;height:11px;flex:0 0 11px;border-radius:3px;background:#aeb5bd}
+.usage-dot.tools{background:#a787ff}
+.usage-dot.messages{background:#4b8dff}
+.composer-usage-panel .composer-usage-note{border-top:1px solid #eef0f2;padding-top:9px}
+@media(max-width:420px){.composer-usage-panel{padding:14px}.composer-usage-heading{font-size:13px}.composer-usage-heading>strong{font-size:12px}}
 
 /* 搜索对话：teleport 到 body */
 .chat-search-overlay {
@@ -9670,6 +10127,7 @@ onUnmounted(() => {
 .shell.mobile-layout .messages {
   width: 100%;
   max-width: 100%;
+  gap: 8px;
   padding-inline: 12px;
 }
 .shell.mobile-layout .msg,

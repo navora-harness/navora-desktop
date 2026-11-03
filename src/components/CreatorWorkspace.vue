@@ -1,18 +1,17 @@
 <template>
-  <section class="creator-workspace" @keydown.ctrl.s.prevent="save()" @keydown.meta.s.prevent="save()">
+  <section class="creator-workspace" :aria-label="`${label}创建器`" @keydown.ctrl.s.prevent="save()" @keydown.meta.s.prevent="save()">
+    <div v-if="navigationTarget" class="creator-titlebar-spacer" aria-hidden="true" />
     <header class="creator-header">
-      <button type="button" class="creator-back" aria-label="退出创建器" title="返回" :disabled="!!busy && busy !== 'generate'" @click="close"><font-awesome-icon icon="arrow-left" /></button>
-      <font-awesome-icon :icon="kind === 'plugin' ? 'puzzle-piece' : 'book'" />
-      <h1>{{ label }}创建器</h1>
+      <button type="button" class="creator-back" aria-label="退出创建器" title="返回" :disabled="!!busy && busy !== 'generate'" @click="close"><AppIcon icon="arrow-left" /></button>
       <span class="creator-save-state" :class="{ error: saveError }" role="status">{{ saveError ? '保存失败' : saving ? '保存中' : dirty ? '待保存' : project ? '已保存' : '' }}</span>
-      <button v-if="saveError" type="button" @click="save()">重试保存</button>
+      <button v-if="saveError" type="button" class="creator-save-retry" @click="save()">重试保存</button>
     </header>
     <div class="creator-layout" :class="{ 'external-navigation': navigationTarget }">
       <Teleport :to="navigationTarget || 'body'" :disabled="!navigationTarget" defer>
       <nav class="creator-library" aria-label="创建器草稿">
         <div class="creator-new">
           <select v-model="template" aria-label="创建模板" :disabled="!!busy"><option value="basic">基础模板</option><option v-if="kind === 'plugin'" value="text">文本处理工具</option><option v-else value="research">资料研究技能</option></select>
-          <button type="button" class="creator-primary" :disabled="!!busy" @click="create"><font-awesome-icon icon="plus" />新建</button>
+          <button type="button" class="creator-primary" :disabled="!!busy" @click="create"><AppIcon icon="plus" />新建</button>
         </div>
         <div v-if="loadingList" class="creator-hint" role="status">正在读取…</div>
         <button v-for="item in projects" :key="item.id" type="button" class="creator-draft" :class="{ selected: project?.id === item.id }" :disabled="!!busy" :title="`${item.name} · 修订 ${item.revision}`" @click="choose(item.id)"><span>{{ item.name }}</span><span class="creator-draft-state">{{ item.installedRevision === item.revision ? '已安装' : item.installedId ? '待更新' : '草稿' }}</span></button>
@@ -20,19 +19,20 @@
       </nav>
       </Teleport>
       <div class="creator-editor-area">
-        <div v-if="error" class="creator-error" role="alert"><span>{{ error }}</span><button type="button" aria-label="关闭提示" @click="error = ''"><font-awesome-icon icon="xmark" /></button></div>
+        <div v-if="error" class="creator-error" role="alert"><span>{{ error }}</span><button type="button" aria-label="关闭提示" @click="error = ''"><AppIcon icon="xmark" /></button></div>
         <template v-if="project">
           <div class="creator-project-head">
             <input v-model="name" class="creator-name" maxlength="80" aria-label="草稿名称" :readonly="!!busy" placeholder="草稿名称" />
             <span class="creator-version">修订 {{ project.revision }}</span>
+            <span class="creator-body-save-state" :class="{error:saveError}">{{ saveError ? '保存失败' : saving ? '保存中' : dirty ? '待保存' : '已保存' }}</span>
           </div>
           <div class="creator-generation">
             <textarea v-model="request" aria-label="创建需求" rows="2" maxlength="6000" :readonly="!!busy" :placeholder="`描述${label}的用途、输入和预期结果…`" />
             <div class="creator-generation-actions">
               <select v-model="modelSelection" aria-label="创建器模型" :disabled="!!busy"><option v-for="option in models" :key="option.value" :value="option.value">{{ option.label }}</option><option v-if="!models.length" value="">请先配置模型</option></select>
               <button v-if="previousGeneration" type="button" :disabled="!!busy" @click="undoGeneration">撤销生成</button>
-              <button v-if="busy === 'generate'" type="button" class="creator-stop" @click="cancelGenerate"><font-awesome-icon icon="stop" />停止生成</button>
-              <button v-else type="button" class="creator-primary" :disabled="!!busy || !request.trim() || !models.length" @click="generate"><font-awesome-icon icon="wand-magic-sparkles" />生成草稿</button>
+              <button v-if="busy === 'generate'" type="button" class="creator-stop" @click="cancelGenerate"><AppIcon icon="stop" />停止生成</button>
+              <button v-else type="button" class="creator-primary" :disabled="!!busy || !request.trim() || !models.length" @click="generate"><AppIcon icon="wand-magic-sparkles" />生成草稿</button>
             </div>
           </div>
           <div class="creator-file-bar">
@@ -42,20 +42,20 @@
           <div v-if="preview && canPreview" class="creator-rendered" v-html="previewHtml" @click.prevent />
           <textarea v-else v-model="files[selectedFile]" class="creator-code" :aria-label="`编辑 ${selectedFile}`" spellcheck="false" autocapitalize="off" autocomplete="off" :readonly="!!busy" @input="previousGeneration = null" @keydown.tab="indent" />
           <div v-if="validation" class="creator-validation" :class="{ failed: !validation.ok }" role="status">
-            <div class="creator-validation-title"><font-awesome-icon :icon="validation.ok ? 'circle-check' : 'circle-exclamation'" /><span>{{ validation.ok ? '校验通过' : '需要修复' }}</span><span class="creator-checks">{{ validation.checks.join(' · ') }}</span></div>
+            <div class="creator-validation-title"><AppIcon :icon="validation.ok ? 'circle-check' : 'circle-exclamation'" /><span>{{ validation.ok ? '校验通过' : '需要修复' }}</span><span class="creator-checks">{{ validation.checks.join(' · ') }}</span></div>
             <button v-for="(issue,index) in validation.issues" :key="index" type="button" :class="issue.level" @click="selectedFile = issue.file || selectedFile">{{ issue.file }}{{ issue.file ? '：' : '' }}{{ issue.message }}</button>
           </div>
           <footer class="creator-footer">
             <input v-model="testTask" aria-label="试用任务" placeholder="试用任务（可选）" maxlength="6000" :readonly="!!busy" />
             <div class="creator-footer-actions">
-              <button type="button" :disabled="!!busy" @click="check"><font-awesome-icon icon="list-check" />{{ busy === 'check' ? '校验中…' : '校验' }}</button>
-              <button type="button" :disabled="!!busy || !desktop" title="导出 ZIP" @click="exportProject"><font-awesome-icon icon="download" />导出</button>
+              <button type="button" :disabled="!!busy" @click="check"><AppIcon icon="list-check" />{{ busy === 'check' ? '校验中…' : '校验' }}</button>
               <button type="button" :disabled="!!busy || !desktop" :title="desktop ? '' : '仅桌面端可用'" @click="trial">打开试用对话</button>
               <button type="button" class="creator-primary" :disabled="!!busy || !desktop || (!dirty && project.installedRevision === project.revision)" @click="install">{{ busy === 'install' ? '处理中…' : project.installedId ? '更新' : '安装到本机' }}</button>
+              <ActionMenu label="创建器更多操作" :disabled="!!busy || !desktop" :items="[{id:'export',label:'导出 ZIP',icon:'file-export'}]" @select="exportProject" />
             </div>
           </footer>
         </template>
-        <div v-else class="creator-empty"><font-awesome-icon :icon="kind === 'plugin' ? 'puzzle-piece' : 'book'" /><h2>创建可复用的{{ label }}</h2><p>选择模板开始，再按需生成和编辑内容。</p><button type="button" class="creator-primary" :disabled="!!busy" @click="create">从模板开始</button></div>
+        <div v-else class="creator-empty"><AppIcon :icon="kind === 'plugin' ? 'puzzle-piece' : 'book'" /><h2>创建可复用的{{ label }}</h2><p>选择模板开始，再按需生成和编辑内容。</p><button type="button" class="creator-primary" :disabled="!!busy" @click="create">从模板开始</button></div>
       </div>
     </div>
   </section>
@@ -64,6 +64,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import DOMPurify from 'dompurify'
+import ActionMenu from './ActionMenu.vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { creatorError, type CreatorFiles, type CreatorKind, type CreatorProject, type CreatorSummary, type CreatorValidation } from '../../shared/creators'
 const props = defineProps<{ kind: CreatorKind; navigationTarget?: string }>()
@@ -209,13 +210,15 @@ defineExpose({save,export:exportProject})
 </script>
 
 <style scoped>
-.creator-workspace { display:flex; flex-direction:column; min-height:0; height:100%; background:#fff; color:#344052; animation:creator-enter 180ms ease-out; }
+.creator-workspace { container-type:inline-size;display:flex; flex-direction:column; min-width:0;min-height:0; height:100%; background:#fff; color:#344052; animation:creator-enter 180ms ease-out; }
+.creator-titlebar-spacer{height:44px;min-height:44px;flex:0 0 44px}
 .creator-header { height:46px; min-height:46px; display:flex; align-items:center; gap:10px; padding:6px 20px; border-bottom:1px solid #e9edf2; }
 .creator-header > svg { width:15px; color:#69798e; }
 h1 { font-size:14px; font-weight:600; }
 .creator-back { width:28px; height:28px; padding:6px; display:grid; place-items:center; }
 .creator-save-state { margin-left:auto; font-size:11px; color:#7e8999; }
 .creator-save-state.error { color:#ad4350; }
+.creator-header>.creator-save-state{margin-left:auto}
 .creator-layout { display:grid; grid-template-columns:190px minmax(0,1fr); flex:1; min-height:0; }
 .creator-layout.external-navigation { grid-template-columns:minmax(0,1fr); }
 .creator-library { padding:12px; background:#f8f9fb; border-right:1px solid #e9edf2; overflow:auto; }
@@ -295,4 +298,8 @@ button:focus-visible,select:focus-visible,textarea:focus-visible { outline:2px s
   .creator-file-bar { padding-inline:8px; }
 }
 @media(prefers-reduced-motion:reduce) { .creator-workspace { animation:none; } button,select { transition:none; } }
+.creator-header{height:44px;min-height:44px;flex-shrink:0}.creator-header h1{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:20px}.creator-save-state{white-space:nowrap;flex-shrink:0}.creator-body-save-state{display:none;font-size:10px;color:#8793a4;white-space:nowrap}.creator-body-save-state.error{color:#ad4350}.creator-project-head,.creator-generation,.creator-file-bar,.creator-validation,.creator-footer{flex-shrink:0}.creator-name{font-size:14px}.creator-footer input{border:1px solid #e0e6ee;border-radius:6px;padding:7px 9px;margin-bottom:8px;background:#fbfcfd;min-height:32px}.creator-footer-actions button{min-height:32px}.creator-empty h2{font-size:16px}.creator-empty{max-width:100%;overflow-wrap:anywhere}.creator-validation-title{flex-wrap:wrap}
+@container(max-width:640px){.creator-project-head{padding:10px 14px;gap:8px}.creator-generation{margin:0 14px 10px}.creator-generation-actions{flex-wrap:wrap;gap:6px}.creator-generation-actions select{max-width:100%;flex:1 1 130px;min-height:28px}.creator-code,.creator-rendered{padding:14px}.creator-footer{padding:10px 14px}.creator-footer-actions{flex-wrap:wrap;gap:6px}.creator-validation{padding:8px 14px}.creator-checks{display:none}.creator-version{font-size:10px}.creator-header>.creator-save-state{display:none}.creator-body-save-state{display:inline}.creator-save-retry{font-size:10px;padding:4px}.creator-file-bar{padding-inline:8px}}
+@media(min-width:641px){:global(.navora-app .shell.frameless:not(.mobile-layout) .creator-titlebar-spacer){height:56px;min-height:56px;flex-basis:56px}}
+@media(max-height:650px){.creator-editor-area{overflow-y:auto}.creator-code,.creator-rendered{flex:1 0 120px;min-height:120px}.creator-generation>textarea{min-height:40px;max-height:70px}.creator-footer{padding-block:8px}}
 </style>

@@ -1,21 +1,37 @@
 <template>
-  <section v-if="entries.length" class="message-queue" aria-label="待发送消息">
+  <section v-if="entries.length" ref="root" class="message-queue" aria-label="待发送消息">
     <header><span>待发送 <b>{{ entries.length }}</b></span><button v-if="paused" type="button" :disabled="busy" @click="emit('resume')">继续队列</button><span v-else class="queue-hint">当前任务结束后发送</span></header>
     <ol>
       <li v-for="entry in entries" :key="entry.id" :data-queue-id="entry.id">
-        <template v-if="editing === entry.id"><textarea v-model="text" rows="2" :maxlength="maxChars" aria-label="编辑待发送消息" @keydown.esc.prevent="editing=''" @keydown.ctrl.enter.prevent="save(entry.id)" /><div class="queue-edit-actions"><button type="button" @click="editing=''">取消</button><button type="button" :disabled="busy||(!text.trim()&&!entry.refs?.length)" @click="save(entry.id)">保存</button></div></template>
-        <template v-else><p :title="entry.content">{{ entry.content || '附带浏览器上下文' }}</p><div class="queue-item-actions"><button type="button" title="编辑" aria-label="编辑队列消息" :disabled="busy" @click="editing=entry.id;text=entry.content"><font-awesome-icon icon="pen-to-square" /></button><button type="button" title="直接插入" aria-label="直接插入队列消息" :disabled="busy" @click="emit('insert',entry.id)"><font-awesome-icon icon="arrow-up" /></button><button type="button" title="删除" aria-label="删除队列消息" :disabled="busy" @click="emit('remove',entry.id)"><font-awesome-icon icon="xmark" /></button></div><span v-if="entry.error" class="queue-error">发送失败，可编辑后继续</span></template>
+        <template v-if="editing === entry.id"><textarea v-model="text" rows="2" :maxlength="maxChars" :readonly="busy||saving" aria-label="编辑待发送消息" @keydown="onEditorKey($event,entry.id)" /><div class="queue-edit-actions"><button type="button" @click="editing=''">取消</button><button type="button" :disabled="busy||saving||(!text.trim()&&!entry.refs?.length)" @click="save(entry.id)">保存</button></div></template>
+        <template v-else><p :title="entry.content">{{ entry.content || '附带浏览器上下文' }}</p><div class="queue-item-actions"><button type="button" title="编辑" aria-label="编辑队列消息" :disabled="busy" @click="editing=entry.id;text=entry.content"><AppIcon icon="pen-to-square" /></button><button type="button" title="直接插入" aria-label="直接插入队列消息" :disabled="busy" @click="emit('insert',entry.id)"><AppIcon icon="arrow-up" /></button><button type="button" title="删除" aria-label="删除队列消息" :disabled="busy" @click="emit('remove',entry.id)"><AppIcon icon="xmark" /></button></div><span v-if="entry.error" class="queue-error">发送失败，可编辑后继续</span></template>
       </li>
     </ol>
   </section>
 </template>
 <script setup lang="ts">
-import {ref,watch} from 'vue'
+import {nextTick,ref,watch} from 'vue'
 import type {QueuedMessage} from '@shared/types'
 const props=defineProps<{entries:QueuedMessage[];paused:boolean;busy:boolean;maxChars:number}>()
 const emit=defineEmits<{edit:[id:string,content:string];insert:[id:string];remove:[id:string];resume:[]}>()
-const editing=ref(''),text=ref(''),saving=ref(false)
-function save(id:string){saving.value=true;emit('edit',id,text.value)}
+const editing=ref(''),text=ref(''),saving=ref(false),root=ref<HTMLElement>()
+function save(id:string){
+  const entry=props.entries.find(entry=>entry.id===id)
+  if(props.busy||saving.value||!entry||editing.value!==id||(!text.value.trim()&&!entry.refs?.length)||text.value.length>props.maxChars)return
+  saving.value=true;emit('edit',id,text.value)
+}
+function onEditorKey(event:KeyboardEvent,id:string){
+  if(event.isComposing||event.keyCode===229)return
+  if(event.key==='Escape'){event.preventDefault();event.stopPropagation();editing.value=''}
+  else if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();event.stopPropagation();save(id)}
+}
+watch(editing,async(id,previous)=>{
+  const restore=!!root.value?.contains(document.activeElement)
+  await nextTick()
+  if(editing.value!==id)return
+  if(id){const field=root.value?.querySelector('textarea');field?.focus({preventScroll:true});field?.setSelectionRange(field.value.length,field.value.length)}
+  else if(previous&&restore)root.value?.querySelector<HTMLButtonElement>(`[data-queue-id="${CSS.escape(previous)}"] [aria-label="编辑队列消息"]`)?.focus({preventScroll:true})
+})
 watch([()=>props.entries,()=>props.busy],()=>{
   const entry=props.entries.find(entry=>entry.id===editing.value)
   if(!entry)editing.value=''

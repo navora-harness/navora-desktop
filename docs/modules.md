@@ -207,7 +207,7 @@ Renderer (Vue) ──preload/WS──► Main IPC/RPC
 |------|------|
 | `browser_navigate` / `_back` / `_forward` / `_reload` | 导航 |
 | `browser_wait` | load / network idle / delay |
-| `browser_click` / `_hover` / `_scroll` / `_type` / `_press` / `_select` / `_upload` | 交互 |
+| `browser_click` / `_mouse` / `_hover` / `_scroll` / `_type` / `_press` / `_touch` / `_select` / `_upload` | 交互 |
 | `browser_flow` | 多步流程 |
 | `browser_find` / `_query_deep` | 查找 / 深查 |
 | `browser_dialog` | 对话框 |

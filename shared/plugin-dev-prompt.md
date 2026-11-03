@@ -61,3 +61,9 @@ export default plugin
 - `planPermissions` 决定工具实际权限；勿声明用不到的能力。
 - `api.runTool` 走宿主权限门控；不要直接操作未授权 BrowserWindow/Session。
 - 查已装插件：`plugin_list` / `plugin_read`（不是 skill_*）。
+
+### 平台二进制插件
+
+`plugin_build`、`plugin_check`、`plugin_pack` 支持 `target`（如 win32-x64、darwin-arm64、linux-x64）。声明 build.targets 的项目产物位于 `dist/<packageId>/<target>/`；自动外链也使用该目录。先在构建环境准备已校验的目标二进制，再构建和打包；用户安装时不运行 npm 或编译器。packageFormatVersion=2 的目标、runtime 与 runtime-files.json 必须完整匹配，不要手动改名冒充其他平台。
+
+宿主 runtime.call 只接收已注册适配器的结构化方法，不能执行任意命令。fcurl 的 request 使用 network.request 权限，status/profiles 使用 compute.local。平台文件不匹配、校验失败或宿主过旧时先修复产物，不绕过安装检查。

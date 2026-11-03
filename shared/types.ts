@@ -26,6 +26,7 @@ export type PermissionCapability =
   | 'evaluate'
   | 'screenshot'
   | 'desktop.screenshot'
+  | 'network.request'
   | 'network.observe'
   | 'network.modify'
   | 'network.block'
@@ -50,10 +51,12 @@ export type PermissionPreset = 'conservative' | 'balanced' | 'open' | 'custom'
 
 export type ChatMessageRole = 'user' | 'assistant' | 'system' | 'tool' | 'log'
 
-export type BrowserContextKind = 'session' | 'window'
+export type BrowserContextKind = 'session' | 'window' | 'annotation'
 
 /** Dragged / mentioned browser object for Agent context (reference chips). */
 export type BrowserContextRef = {
+  annotationId?: string
+  annotationRevision?: number
   kind: BrowserContextKind
   sessionId: string
   windowId?: string
@@ -149,9 +152,23 @@ export type ChatSession = {
 export type QueuedMessage = {id:string;content:string;refs?:BrowserContextRef[];createdAt:number;error?:string}
 
 export type BrowserTreeWindow = {
+  viewport?: {width:number;height:number}|null
+  zoomFactor?:number
+  canGoBack?:boolean
+  canGoForward?:boolean
+  crashed?:boolean
+  loadError?:import('./browser-workspace').BrowserLoadError
+  annotationSelecting?:boolean
+  tabKey?: string
+  pageId?: string
+  hostWindowId?: string
+  presentation?: 'embedded' | 'detached'
+  selected?:boolean
+  manualControl?: boolean
   windowId: string
   sessionId: string
   title: string
+  faviconUrl?: string
   url: string
   visible: boolean
   loading: boolean

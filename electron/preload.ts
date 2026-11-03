@@ -1,3 +1,6 @@
+import type {BrowserWorkspaceApi} from '../shared/browser-workspace'
+import type {FileWindowsApi,FileTransfer} from '../shared/file-windows'
+import type {FileTab} from '../shared/file-tabs'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AppConfig } from '../shared/config'
 import type {
@@ -19,8 +22,32 @@ import type {
   SkillProposal,
 } from '../shared/types'
 import type { SkillDetail, SkillImportPreview, SkillRecord, SkillWriteInput } from '../shared/skills'
+import type { LiteratureApi, LiteratureSearchEvent, LiteratureSearchInput } from '../shared/literature-search'
 
+const workspaceInvoke=(name:string,...args:unknown[])=>ipcRenderer.invoke('navora:browser.workspace.'+name,...args)
 const api = {
+  literature: {
+    search: (input: LiteratureSearchInput): Promise<{ searchId: string }> => ipcRenderer.invoke('navora:literature.search', input),
+    cancel: (searchId: string): Promise<void> => ipcRenderer.invoke('navora:literature.cancel', searchId),
+    onEvent: (callback: (event: LiteratureSearchEvent) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: LiteratureSearchEvent) => callback(payload)
+      ipcRenderer.on('navora:literature.event', listener)
+      return () => ipcRenderer.removeListener('navora:literature.event', listener)
+    },
+  } satisfies LiteratureApi,
+  fileTabs:{
+    open:(...args)=>ipcRenderer.invoke('navora:file-tabs.open',...args),
+    state:()=>ipcRenderer.invoke('navora:file-tabs.state'),
+    detach:(...args)=>ipcRenderer.invoke('navora:file-tabs.detach',...args),
+    close:(...args)=>ipcRenderer.invoke('navora:file-tabs.close',...args),
+    attach:(...args)=>ipcRenderer.invoke('navora:file-tabs.attach',...args),
+    beginDrag:(...args)=>ipcRenderer.invoke('navora:file-tabs.beginDrag',...args),
+    drop:(...args)=>ipcRenderer.invoke('navora:file-tabs.drop',...args),
+    endDrag:(...args)=>ipcRenderer.invoke('navora:file-tabs.endDrag',...args),
+    onChanged:cb=>{const listener=(_e:Electron.IpcRendererEvent,tabs:FileTab[])=>cb(tabs);ipcRenderer.on('navora:file-tabs.changed',listener);return ()=>ipcRenderer.removeListener('navora:file-tabs.changed',listener)},
+    onTransfer:cb=>{const listener=(_e:Electron.IpcRendererEvent,event:FileTransfer)=>cb(event);ipcRenderer.on('navora:file-tabs.transfer',listener);return ()=>ipcRenderer.removeListener('navora:file-tabs.transfer',listener)},
+    completeTransfer:(requestId,error)=>ipcRenderer.invoke('navora:file-tabs.completeTransfer',requestId,error),
+  } as FileWindowsApi,
   creators: {
     list: (kind) => ipcRenderer.invoke('navora:creators.list', kind),
     create: (kind, template) => ipcRenderer.invoke('navora:creators.create', kind, template),
@@ -207,6 +234,28 @@ const api = {
     },
   },
   browser: {
+    workspace: {
+      startPage:chatId=>workspaceInvoke('start.state',chatId),saveQuickLink:(...args)=>workspaceInvoke('start.saveLink',...args),removeQuickLink:(...args)=>workspaceInvoke('start.removeLink',...args),clearBrowserHistory:(...args)=>workspaceInvoke('start.clearHistory',...args),
+      onStartChanged:cb=>{const listener=(_e:Electron.IpcRendererEvent,chatId?:string)=>cb(chatId);ipcRenderer.on('navora:browser.start-changed',listener);return ()=>ipcRenderer.removeListener('navora:browser.start-changed',listener)},
+      annotationDrafts:(chatId)=>workspaceInvoke('annotation.drafts',chatId),writeAnnotationDraft:(...args)=>workspaceInvoke('annotation.writeDraft',...args),
+      annotationDraftRecovery:chatId=>workspaceInvoke('annotation.draftRecovery',chatId),
+      resolveAnnotationDraft:(...args)=>workspaceInvoke('annotation.resolveDraft',...args),
+      find:(...args)=>workspaceInvoke('find',...args),stopFind:(...args)=>workspaceInvoke('stopFind',...args),
+      onFindResult:(cb)=>{const listener=(_e:Electron.IpcRendererEvent,value:Parameters<typeof cb>[0])=>cb(value);ipcRenderer.on('navora:browser.find-result',listener);return ()=>ipcRenderer.removeListener('navora:browser.find-result',listener)},
+      onFindShortcut:(cb)=>{const listener=(_e:Electron.IpcRendererEvent,value:Parameters<typeof cb>[0])=>cb(value);ipcRenderer.on('navora:browser.find-shortcut',listener);return ()=>ipcRenderer.removeListener('navora:browser.find-shortcut',listener)},
+      ensure:(...args)=>workspaceInvoke('ensure',...args),claimLayout:(pageId)=>workspaceInvoke('claimLayout',pageId),layout:(...args)=>workspaceInvoke('layout',...args),state:()=>workspaceInvoke('state'),preview:(pageId:string)=>workspaceInvoke('preview',pageId),
+      command:(...args)=>workspaceInvoke('command',...args),detach:(id)=>workspaceInvoke('detach',id),attach:(id)=>workspaceInvoke('attach',id),
+      beginDrag:(id)=>workspaceInvoke('beginDrag',id),endDrag:(...args)=>workspaceInvoke('endDrag',...args),drop:(token)=>workspaceInvoke('drop',token),
+      beginAnnotation:(...args)=>workspaceInvoke('annotation.begin',...args),collectAnnotation:(...args)=>workspaceInvoke('annotation.collect',...args),
+      cancelAnnotation:(...args)=>workspaceInvoke('annotation.cancel',...args),annotations:(id)=>workspaceInvoke('annotation.list',id),
+      updateAnnotation:(...args)=>workspaceInvoke('annotation.update',...args),removeAnnotation:(...args)=>workspaceInvoke('annotation.remove',...args),
+      presentAnnotation:(...args)=>workspaceInvoke('annotation.present',...args),
+      locateAnnotation:(...args)=>workspaceInvoke('annotation.locate',...args),
+      compareAnnotation:(...args)=>workspaceInvoke('annotation.compare',...args),
+      onAddressFocus:(cb)=>{const listener=(_e:Electron.IpcRendererEvent,id:string)=>cb(id);ipcRenderer.on('navora:browser.address-focus',listener);return ()=>{ipcRenderer.removeListener('navora:browser.address-focus',listener)}},
+      onTabShortcut:(cb)=>{const listener=(_e:Electron.IpcRendererEvent,payload:Parameters<typeof cb>[0])=>cb(payload);ipcRenderer.on('navora:browser.tab-shortcut',listener);return ()=>ipcRenderer.removeListener('navora:browser.tab-shortcut',listener)},
+      onPresent:(cb)=>{const listener=(_e:Electron.IpcRendererEvent,value:Parameters<typeof cb>[0])=>cb(value);ipcRenderer.on('navora:browser.present',listener);return ()=>{ipcRenderer.removeListener('navora:browser.present',listener)}},
+    } as BrowserWorkspaceApi,
     treeAll: (): Promise<BrowserTreeSession[]> => ipcRenderer.invoke('navora:browser.treeAll'),
     tree: (chatId: string): Promise<BrowserTreeSession[]> =>
       ipcRenderer.invoke('navora:browser.tree', chatId),

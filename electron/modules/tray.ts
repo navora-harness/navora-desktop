@@ -1,4 +1,4 @@
-import { Tray, Menu, nativeImage, app, type BrowserWindow, type NativeImage } from 'electron'
+import { Tray, Menu, MenuItem, nativeImage, app, type BrowserWindow, type NativeImage } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -63,19 +63,26 @@ export function createAppTray(opts: {
     if (win && !win.isDestroyed()) win.hide()
   }
 
+  const toggleMain = () => {
+    const win = opts.getMainWindow()
+    if (win && !win.isDestroyed() && win.isVisible()) hideToTray()
+    else showMain()
+  }
+  const windowAction = new MenuItem({ label: '显示 Navora', click: toggleMain })
   const menu = Menu.buildFromTemplate([
-    { label: '显示主窗口', click: () => showMain() },
-    { label: '隐藏主窗口', click: () => hideToTray() },
+    windowAction,
     { type: 'separator' },
-    { label: '退出', click: () => opts.onQuit() },
+    { label: '退出 Navora', click: () => opts.onQuit() },
   ])
+  menu.on('menu-will-show', () => {
+    const win = opts.getMainWindow()
+    windowAction.label = win && !win.isDestroyed() && win.isVisible() ? '隐藏到托盘' : '显示 Navora'
+  })
   tray.setContextMenu(menu)
   tray.on('double-click', () => showMain())
   tray.on('click', () => {
     if (process.platform === 'darwin') return
-    const win = opts.getMainWindow()
-    if (win && !win.isDestroyed() && win.isVisible()) hideToTray()
-    else showMain()
+    toggleMain()
   })
 
   return {

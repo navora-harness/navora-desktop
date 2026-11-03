@@ -4,7 +4,7 @@
       <h3>模型目录 <span class="catalog-count">{{ provider.models.length }}</span></h3>
       <div class="catalog-actions">
         <button type="button" class="catalog-button" :disabled="loading" @click="fetchModels">{{ loading ? '获取中…' : '获取模型' }}</button>
-        <button type="button" class="catalog-button" @click="addModel"><font-awesome-icon icon="plus" /> 添加</button>
+        <button type="button" class="catalog-button" @click="addModel"><AppIcon icon="plus" /> 添加</button>
       </div>
     </div>
     <p v-if="feedback" class="catalog-note" role="status">{{ feedback }}</p>
@@ -36,10 +36,10 @@
           <div v-for="(level, index) in active.reasoning.levels" :key="index" class="reasoning-row">
             <input :value="level.id" aria-label="档位名称" maxlength="40" @change="renameTier(index, $event.target as HTMLInputElement)" />
             <input v-model="level.value" aria-label="推理 API 参数值" maxlength="100" placeholder="如 xhigh" />
-            <button type="button" class="catalog-button icon-control" :aria-label="`删除档位 ${level.id}`" @click="removeReasoningLevel(active.reasoning, index)"><font-awesome-icon icon="trash" /></button>
+            <button type="button" class="catalog-button icon-control" :aria-label="`删除档位 ${level.id}`" @click="removeReasoningLevel(active.reasoning, index)"><AppIcon icon="trash" /></button>
           </div>
           <div class="catalog-toolbar">
-            <button type="button" class="catalog-button" @click="addTier"><font-awesome-icon icon="plus" /> 添加档位</button>
+            <button type="button" class="catalog-button" @click="addTier"><AppIcon icon="plus" /> 添加档位</button>
 
           </div>
           </div></DisclosureTransition>
@@ -141,7 +141,7 @@ async function fetchModels() {
 .probe-result { font-size:12px; color:#32856b; overflow-wrap:anywhere; }
 .probe-result.failed { color:#b02d35; }
 .reasoning-controls { padding:4px 0; }
-.model-catalog { grid-column:1 / -1; min-width:0; }
+.model-catalog { container-type:inline-size;grid-column:1 / -1; min-width:0; }
 .catalog-toolbar,.catalog-actions { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
 .catalog-toolbar h3 { font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px; }
 .catalog-count { font-size:11px; color:var(--n-muted,#6b7280); font-weight:400; }
@@ -171,4 +171,5 @@ input[type=checkbox]:not(.surface-toggle) { accent-color:var(--n-accent,#2f6df6)
 .default-tier { flex-direction:row; align-items:center; gap:8px; }
 .default-tier select { width:100px; }
 @media(max-width:600px) { .model-grid { grid-template-columns:1fr; } .catalog-actions { gap:5px; } }
+@container(max-width:520px){.model-grid{grid-template-columns:minmax(0,1fr)}.catalog-actions{gap:5px}.catalog-picker{flex-wrap:wrap}.catalog-picker>label{flex:1 1 150px}.modalities{gap:8px}.remove-model{margin-left:0}.default-tier{flex-wrap:wrap}.reasoning-head,.reasoning-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 32px}}
 </style>

@@ -1,6 +1,10 @@
 /* Navora product adapter over the versioned Postpile material and motion library. */
 :root {
   --navora-background: #f7f7f8;
+  --navora-chrome: #f7f7f8;
+  --navora-header: #f8f9fb;
+  --navora-sidebar: #f1f3f6;
+  --navora-content-radius: 0px;
   --navora-surface: #fff;
   --navora-ink: #1a2332;
   --navora-muted: #727b8a;
@@ -10,7 +14,7 @@
 }
 .navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.main .main-top,
 .navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.main>.settings-workspace>.top,
-.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.main .creator-header{padding-right:var(--title-actions-reserve,236px)}
+.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.main .creator-header{padding-right:24px}
 .navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.main.file-workspace-open .main-top{padding-right:12px}
 .navora-app .shell.platform-mac:not(.mobile-layout)>.main .main-top,
 .navora-app .shell.platform-mac:not(.mobile-layout)>.main>.settings-workspace>.top,
@@ -18,11 +22,86 @@
 .navora-app .shell:not(.frameless):not(.mobile-layout)>.main>.settings-workspace>.top{padding-right:calc(var(--title-actions-reserve,236px) - 138px)}
 @media(max-width:650px){.global-title-actions [data-chat-resource=files]{display:none}}
 .navora-app { color: var(--navora-ink); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; }
-.navora-app .shell { background: var(--navora-background); }
-.navora-app .shell .sidebar {
-  background: #f7f7f8; color: var(--navora-ink); border-right: 1px solid var(--navora-stroke);
+.navora-app .shell { isolation: isolate; background: var(--navora-background); }
+.navora-app .shell.frameless:not(.mobile-layout) {
+  grid-template-rows: 44px minmax(0, 1fr);
 }
-.navora-app .shell .main { background: var(--navora-surface); }
+.navora-app .shell.frameless:not(.mobile-layout) > .window-titlebar {
+  position: relative;
+  z-index: 6;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 44px;
+  padding-left: 10px;
+  background: var(--navora-chrome);
+  color: var(--navora-ink);
+  -webkit-app-region: no-drag;
+}
+.navora-app .window-titlebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  min-width: 0;
+  height: 100%;
+  color: var(--navora-ink);
+  font-size: 12px;
+  font-weight: 600;
+  -webkit-app-region: no-drag;
+}
+.navora-app .window-titlebar-brand img { width: 24px; height: 24px; object-fit: contain; }
+.navora-app .window-titlebar-brand span { display: inline; }
+.navora-app .window-titlebar-drag {
+  position: absolute;
+  inset: 0 138px 0 120px;
+  -webkit-app-region: drag;
+}
+.navora-app .shell.frameless:not(.mobile-layout) > aside.sidebar { grid-column: 1; grid-row: 2; }
+.navora-app .shell.frameless:not(.mobile-layout) > .main { grid-column: 2; grid-row: 2; }
+.navora-app .shell.frameless:not(.mobile-layout) > .main .win-drag-main { display: none; }
+.navora-app .shell.frameless:not(.mobile-layout) > .main .main-top { padding-top: 8px; padding-right: 24px; }
+.navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace { margin-top: 0; }
+.navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace > .top,
+.navora-app .shell.frameless:not(.mobile-layout) > .main .creator-header { padding-right: 24px; }
+.navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace > .top { background: var(--navora-header); }
+.navora-app .shell.frameless:not(.mobile-layout) > .main .file-manager-head {
+  box-sizing: border-box;
+  height: 48px;
+  min-height: 48px;
+  padding: 0 20px;
+  background: var(--navora-header);
+  -webkit-app-region: no-drag;
+}
+.navora-app .shell.frameless:not(.mobile-layout) > .main .plugin-workspace-head {
+  box-sizing: border-box;
+  height: 48px;
+  min-height: 48px;
+  padding: 0 18px;
+  background: var(--navora-header);
+  -webkit-app-region: no-drag;
+}
+.navora-app .shell.frameless:not(.mobile-layout) > .main > .file-workspace.full-page > .file-workspace-head {
+  box-sizing: border-box;
+  height: 48px;
+  min-height: 48px;
+  padding-right: 12px;
+  background: var(--navora-header);
+  -webkit-app-region: no-drag;
+}
+.navora-app .shell.platform-mac > .window-titlebar .window-titlebar-brand { display: none; }
+.navora-app .shell.platform-mac > .window-titlebar .window-titlebar-drag { inset: 0 12px 0 84px; }
+.navora-app .shell.platform-mac .activity-rail { top: 0; }
+.navora-app .shell.platform-mac .sidebar-content-stack { padding-top: 0; }
+.navora-app .shell .sidebar {
+  background: var(--navora-sidebar); color: var(--navora-ink); border-right: 1px solid var(--navora-stroke);
+}
+.navora-app .sidebar .activity-rail { background: var(--navora-chrome); }
+.navora-app .shell .main { background: var(--navora-surface); border-radius: 0; }
+.navora-app .shell.frameless:not(.mobile-layout) > .main .main-top { background: var(--navora-header); }
+.navora-app .file-workspace .file-workspace-head { background: var(--navora-header); }
 .navora-app .sidebar :is(.brand-name,.chat-item,.new-chat-btn,.sidebar-icon-btn,.brand-search-btn,.chat-toolbar-icon-btn) {
   color: var(--navora-ink);
 }
@@ -271,12 +350,11 @@
 .navora-app .shell > .main > .settings-workspace.external-navigation .section { max-width: 940px; }
 .navora-app .shell > .main > .settings-workspace.external-navigation .section:has(> .message-display-card) { max-width: 760px; }
 .navora-app .settings-workspace.external-navigation .section-head { display: none; }
-/* One desktop toolbar shares the native caption row. Reserve the system controls
-   explicitly; interactive controls sit above the draggable background. */
-.navora-app .shell.frameless:not(.mobile-layout) > .main .main-top { min-height: 44px; padding: 6px 154px 6px 24px; gap: 18px; position: relative; z-index: 5; -webkit-app-region: drag; }
+/* Context headers live below the native caption row and share one compact height. */
+.navora-app .shell.frameless:not(.mobile-layout) > .main .main-top { min-height: 48px; padding: 8px 24px; gap: 18px; position: relative; z-index: 5; -webkit-app-region: no-drag; }
 .navora-app .shell.frameless:not(.mobile-layout) > .main .main-top button { -webkit-app-region: no-drag; }
 .navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace { margin-top: 0; }
-.navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace > .top { min-height: 44px; padding: 6px 154px 6px 24px; position: relative; z-index: 5; -webkit-app-region: drag; }
+.navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace > .top { box-sizing: border-box; height: 48px; min-height: 48px; padding: 6px 24px; position: relative; z-index: 5; -webkit-app-region: no-drag; }
 .navora-app .settings-workspace > .top button { -webkit-app-region: no-drag; }
 .navora-app .settings-workspace > .top h1 { font-size: 14px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .navora-app .settings-workspace > .top .top-left { gap: 10px; }
@@ -337,8 +415,6 @@
 .navora-app .main .subchat-back { padding: 4px 7px; font-size: 12px; border-color: transparent; background: transparent; }
 .navora-app .main .subchat-back:hover { background: #f0f1f4; border-color: #dce0e7; }
 .navora-app .shell.mobile-layout > aside.sidebar { padding: 0 10px calc(8px + env(safe-area-inset-bottom,0px)) 54px; }
-.navora-app .shell.platform-mac .activity-rail { top: 40px; }
-.navora-app .shell.platform-mac .sidebar-content-stack { padding-top: 40px; }
 .navora-app .shell.sidebar-collapsed:has(> .sidebar) { grid-template-columns: 52px minmax(0,1fr); }
 .navora-app .shell.sidebar-collapsed:not(.mobile-layout) > aside.sidebar { width: 100%; padding-left: 0; padding-right: 0; }
 .navora-app .shell.sidebar-collapsed.mobile-layout > aside.sidebar { width: 52px; padding-left: 0; padding-right: 0; }
@@ -554,11 +630,11 @@
 .navora-app .shell .sidebar :is(.chat-list,.res-body,.res-tree)::-webkit-scrollbar-thumb:hover { background:#929eaf; }
 .navora-app .shell .sidebar :is(.chat-list,.res-body,.res-tree)::-webkit-scrollbar-button { display:none; width:0; height:0; }
 .navora-app .sidebar .dock-panel-actions .docked-head { min-height:0; padding:0; border:0; margin:0; background:transparent; }
-.navora-app .sidebar .dock-panel-actions .docked-head .icon-btn { width:23px; height:24px; border-radius:6px; }
-.navora-app .sidebar .dock-panel-actions .docked-head .icon-btn svg { width:11px; height:11px; }
+.navora-app .sidebar .dock-panel-actions .docked-head .icon-btn { width:30px; min-width:30px; height:30px; min-height:30px; padding:0; border-radius:7px; }
+.navora-app .sidebar .dock-panel-actions .docked-head .icon-btn svg { width:16px; height:16px; }
 .navora-app .sidebar .dock-pane .batch-list-footer { flex-shrink:0; padding:6px; }
-.navora-app .sidebar .dock-panel-actions .chat-batch-trigger { width:26px;min-width:26px;height:26px;padding:5px;border-radius:6px; }
-.navora-app .sidebar .chat-batch-trigger svg { width:13px;height:13px; }
+.navora-app .sidebar .dock-header :is(.chat-batch-trigger,.sidebar-more-trigger,.ui-icon-button,.dock-panel-actions .icon-btn) { width:30px; min-width:30px; height:30px; min-height:30px; padding:0; }
+.navora-app .sidebar .dock-header :is(.chat-batch-trigger,.sidebar-more-trigger,.ui-icon-button,.dock-panel-actions .icon-btn) svg { width:16px; height:16px; }
 .navora-app .sidebar .batch-list-footer { gap:6px;margin:0;border-top:1px solid #d9e1eb;background:#f7f7f8; }
 .navora-app .sidebar .batch-list-footer :is(.batch-pin-btn,.batch-delete-btn) { min-height:32px!important;height:32px!important;padding-inline:8px!important;font-size:11px!important;font-weight:500!important; }
 .navora-app .sidebar .batch-delete-btn { background:#f6edef!important;color:#a34e5b!important;border:1px solid #e3cdd2; }
@@ -603,3 +679,19 @@
 .plugin-development-settings .switch-row { border-top:1px solid #e8edf3; padding-block:10px; }
 .navora-app .settings-page .plugin-import-trigger svg { width:10px; height:10px; }
 @media(prefers-reduced-motion:reduce) { .plugin-development-settings summary svg:last-child { transition:none; } }
+
+/* Prefer the platform's normal arrow cursor for interactive UI controls. */
+.navora-app :is(button,a,[role="button"],[role="menuitem"],[role="tab"],[role="option"],[role="treeitem"],[role="switch"],[role="checkbox"],summary) {
+  cursor: default !important;
+}
+
+/* Keep the conversation heading compact now that the native caption has its own row. */
+.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac) > .main .conversation-title-header:not(.compact) {
+  box-sizing: border-box;
+  min-height: 56px;
+  padding: 8px 24px;
+  align-items: center;
+}
+.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac) > .main .conversation-title-header:not(.compact) .main-title {
+  transform:none;
+}

@@ -74,7 +74,7 @@
               :disabled="busy"
               v-bind="menuProps"
             >
-              <font-awesome-icon icon="ellipsis-vertical" />
+              <AppIcon icon="ellipsis-vertical" />
             </v-btn>
           </template>
           <v-list density="compact" min-width="120">

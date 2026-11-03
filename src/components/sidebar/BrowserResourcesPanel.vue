@@ -3,21 +3,22 @@
     <Teleport :to="headerTarget || 'body'" :disabled="!headerTarget" defer>
     <div v-show="headerVisible !== false" class="res-head" :class="{ 'docked-head': headerTarget }">
       <button type="button" v-if="!headerTarget && !embedded" class="res-label-btn" :aria-expanded="!collapsed" aria-label="折叠或展开浏览器资源" @click="collapsed = !collapsed">
-        <font-awesome-icon icon="chevron-down" class="res-chevron" />
+        <AppIcon icon="chevron-down" class="res-chevron" />
         <span class="res-label">浏览器资源</span>
       </button>
       <span v-if="embedded" class="embedded-browser-title">浏览器会话</span>
       <div class="res-head-actions">
-      <button type="button" class="quick-browser-btn icon-btn" :disabled="!chatId || busyQuickOpen" title="打开或复用浏览器（Ctrl/⌘ Shift B）" aria-label="快速打开浏览器" @click="quickOpen"><font-awesome-icon :icon="busyQuickOpen ? 'circle-notch' : 'arrow-up-right-from-square'" :spin="busyQuickOpen" /></button>
+      <button type="button" class="quick-browser-btn icon-btn" :disabled="!chatId || busyQuickOpen" title="打开或复用浏览器（Ctrl/⌘ Shift B）" aria-label="快速打开浏览器" @click="quickOpen"><AppIcon :icon="busyQuickOpen ? 'circle-notch' : 'arrow-up-right-from-square'" :spin="busyQuickOpen" /></button>
       <button
         type="button"
         class="icon-btn"
         :disabled="!chatId || busySession"
         :class="{ loading: busySession }"
-        title="新建会话并打开窗口"
+        title="新建浏览器会话并打开页面"
+        aria-label="新建浏览器会话"
         @click="createSession"
       >
-        <font-awesome-icon icon="plus" />
+        <AppIcon icon="plus" />
       </button>
       </div>
     </div>
@@ -25,21 +26,30 @@
     <Transition name="resource-body">
     <div v-show="!collapsed" class="res-body" data-ctx-menu="browser">
       <div v-if="!chatId" class="res-empty">选择对话后使用浏览器</div>
-      <div v-else-if="!tree.length" class="res-empty">暂无浏览器窗口</div>
+      <div v-else-if="!tree.length" class="res-empty">暂无浏览器页面</div>
       <div v-else class="res-tree">
-        <div v-for="s in tree" :key="s.sessionId" class="tree-sess">
+        <button v-if="emptySessions.length" type="button" class="empty-session-group" :aria-expanded="emptySessionsExpanded" @click="emptySessionsExpanded = !emptySessionsExpanded">
+          <AppIcon :icon="emptySessionsExpanded ? 'chevron-down' : 'chevron-right'" class="empty-session-chevron" />
+          <AppIcon icon="layer-group" class="tree-kind-icon session-kind-icon" />
+          <span>空会话</span>
+          <span class="empty-session-count">{{ emptySessions.length }}</span>
+        </button>
+        <div v-for="s in visibleSessions" :key="s.sessionId" class="tree-sess">
           <div
             class="tree-row sess"
+            :class="{'is-empty':!s.windows.length}"
             draggable="true"
             @dragstart="onDragStart($event, sessionRef(s))" @dragend="($event.currentTarget as HTMLElement).classList.remove('dragging')"
             @click="emit('add-ref', sessionRef(s))"
-            @contextmenu="onSessionMenu($event, s)"
-            title="拖到输入框或点击以引用"
-          >
+          @contextmenu="onSessionMenu($event, s)"
+          title="拖到输入框或点击以引用"
+        >
+            <button type="button" class="tree-disclosure" :aria-label="`${expandedSessions.has(s.sessionId)?'折叠':'展开'}会话 ${s.sessionIndex}`" :aria-expanded="expandedSessions.has(s.sessionId)" @click.stop="toggleSession(s.sessionId)"><AppIcon :icon="expandedSessions.has(s.sessionId)?'chevron-down':'chevron-right'" /></button>
             <button type="button" class="tree-name" @click.stop="emit('add-ref', sessionRef(s))">
-              <span class="session-title">会话 {{ s.sessionIndex }}</span>
+              <AppIcon icon="layer-group" class="tree-kind-icon session-kind-icon" />
+              <span class="session-copy"><span class="session-title">会话 {{ s.sessionIndex }}</span><span v-if="!s.windows.length" class="session-empty-hint">暂无页面</span></span>
               <span v-if="s.chatId !== chatId" class="tree-meta">{{ ownerLabel(s.chatId) }}</span>
-              <span class="tree-meta">{{ s.windows.length ? `${s.windows.length} 个窗口` : '暂无窗口' }}</span>
+              <span v-if="s.windows.length" class="tree-meta">{{ s.windows.length }} 个页面</span>
               <span class="session-lifetime" :class="{persistent:s.persist}">{{ s.persist ? '已保留' : '临时' }}</span>
             </button>
             <span class="tree-actions" @click.stop>
@@ -47,42 +57,37 @@
                 type="button"
                 class="icon-btn"
                 :disabled="busyWindow === s.sessionId"
-                title="创建窗口"
+                title="新建页面"
+                aria-label="在此会话中新建页面"
                 @click="createWindow(s.sessionId)"
               >
-                <font-awesome-icon icon="window-maximize" />
+                <AppIcon :icon="s.windows.length?'browser':'plus'" />
               </button>
-              <button type="button" class="icon-btn danger" title="释放会话并清除登录状态" aria-label="释放浏览器会话" @click="emit('ask-close-session', s)">
-                <font-awesome-icon icon="xmark" />
-              </button>
+              <button type="button" class="icon-btn" title="会话更多操作" aria-label="会话更多操作" @click="onSessionMenu($event,s)"><AppIcon icon="ellipsis" /></button>
             </span>
           </div>
-          <div
-            v-for="w in s.windows"
-            :key="w.windowId"
-            class="tree-row win"
-            draggable="true"
-            @dragstart="onDragStart($event, windowRef(s, w))" @dragend="($event.currentTarget as HTMLElement).classList.remove('dragging')"
-            @click="emit('add-ref', windowRef(s, w))"
-            @contextmenu="onWindowMenu($event, s, w)"
-            title="拖到输入框或点击以引用"
-          >
-            <button type="button" class="tree-name" :title="w.url" @click.stop="emit('add-ref', windowRef(s,w))">
-              {{ w.title || '无标题' }}
-              <span v-if="w.loading" class="tree-meta">加载中</span>
-              <span v-else-if="!w.visible" class="tree-meta">已隐藏</span>
-            </button>
-            <span class="tree-actions" @click.stop>
-              <button
-                type="button"
-                class="icon-btn"
-                :title="isRemote ? '远程查看/操控此窗口' : w.visible ? '隐藏本机窗口' : '显示本机窗口'"
-                @click="toggleVisible(w)"
-              >
-                <font-awesome-icon :icon="isRemote ? 'window-maximize' : w.visible ? 'eye' : 'eye-slash'" />
+          <div v-show="expandedSessions.has(s.sessionId)" class="tree-children">
+            <div
+              v-for="w in s.windows"
+              :key="w.windowId"
+              class="tree-row win"
+              :class="{'is-selected':w.selected}"
+              draggable="true"
+              @dragstart="onDragStart($event, windowRef(s, w))" @dragend="($event.currentTarget as HTMLElement).classList.remove('dragging')"
+              @click="showPage(w)"
+              @contextmenu="onWindowMenu($event, s, w)"
+              title="点击显示页面，拖到输入框可引用"
+            >
+              <button type="button" class="tree-name" :title="w.url" :aria-current="w.selected?'page':undefined" @click.stop="showPage(w)">
+                <span class="tree-kind-icon browser-kind-icon"><AppIcon icon="browser" /></span>
+                <span class="page-title">{{ windowLabel(s,w) }}</span>
+                <span v-if="w.loading" class="tree-meta">加载中</span>
               </button>
-              <button type="button" class="icon-btn danger" title="关闭窗口" aria-label="关闭浏览器窗口" @click="closeWindow(w)"><font-awesome-icon icon="xmark" /></button>
-            </span>
+              <span class="tree-actions" @click.stop>
+                <button type="button" class="icon-btn" title="引用到输入框" aria-label="引用此页面到输入框" @click="emit('add-ref',windowRef(s,w))"><AppIcon icon="paperclip" /></button>
+                <button type="button" class="icon-btn" title="页面更多操作" aria-label="页面更多操作" @click="onWindowMenu($event,s,w)"><AppIcon icon="ellipsis" /></button>
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -91,12 +96,12 @@
 
     <SidebarContextMenu ref="sessMenu">
       <button type="button" class="sidebar-more-item" role="menuitem" @click="emit('add-ref', sessionRef(menuSession!))">
-        <font-awesome-icon icon="plus" />
+        <AppIcon icon="plus" />
         <span>引用到输入框</span>
       </button>
       <button type="button" class="sidebar-more-item" role="menuitem" @click="createWindow(menuSession!.sessionId)">
-        <font-awesome-icon icon="window-maximize" />
-        <span>新建窗口</span>
+        <AppIcon icon="browser" />
+        <span>新建页面</span>
       </button>
       <button
         type="button"
@@ -104,38 +109,35 @@
         role="menuitem"
         @click="emit('ask-close-session', menuSession!)"
       >
-        <font-awesome-icon icon="xmark" />
+        <AppIcon icon="xmark" />
         <span>释放会话与登录状态</span>
       </button>
     </SidebarContextMenu>
 
     <SidebarContextMenu ref="winMenu">
       <button type="button" class="sidebar-more-item" role="menuitem" @click="emit('add-ref', windowRef(menuSession!, menuWindow!))">
-        <font-awesome-icon icon="plus" />
+        <AppIcon icon="plus" />
         <span>引用到输入框</span>
       </button>
-      <button type="button" class="sidebar-more-item" role="menuitem" @click="toggleVisible(menuWindow!)">
-        <font-awesome-icon :icon="isRemote ? 'window-maximize' : menuWindow?.visible ? 'eye-slash' : 'eye'" />
-        <span>{{ isRemote ? '远程查看' : menuWindow?.visible ? '隐藏' : '显示' }}</span>
-      </button>
-      <button v-if="!isRemote" type="button" class="sidebar-more-item" role="menuitem" @click="focusWindow(menuWindow!)">
-        <font-awesome-icon icon="window-maximize" />
-        <span>前置</span>
+      <button type="button" class="sidebar-more-item" role="menuitem" @click="showPage(menuWindow!)">
+        <AppIcon icon="browser" />
+        <span>{{ isRemote ? '远程查看' : '打开页面' }}</span>
       </button>
       <button type="button" class="sidebar-more-item" role="menuitem" @click="copyUrl(menuWindow!)">
-        <font-awesome-icon icon="clipboard-list" />
+        <AppIcon icon="clipboard-list" />
         <span>复制网址</span>
       </button>
       <button type="button" class="sidebar-more-item danger" role="menuitem" @click="closeWindow(menuWindow!)">
-        <font-awesome-icon icon="xmark" />
-        <span>关闭窗口</span>
+        <AppIcon icon="xmark" />
+        <span>关闭页面</span>
       </button>
     </SidebarContextMenu>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import AppIcon from '../icons/AppIcon.vue'
+import { computed, ref,watch } from 'vue'
 import type { BrowserContextRef, BrowserTreeSession, BrowserTreeWindow } from '@shared/types'
 import SidebarContextMenu from './SidebarContextMenu.vue'
 
@@ -165,6 +167,19 @@ const sessMenu = ref<{ show: (e: MouseEvent) => void } | null>(null)
 const winMenu = ref<{ show: (e: MouseEvent) => void } | null>(null)
 const menuSession = ref<BrowserTreeSession | null>(null)
 const menuWindow = ref<BrowserTreeWindow | null>(null)
+const expandedSessions=ref(new Set<string>())
+const emptySessionsExpanded=ref(false)
+const emptySessions=computed(()=>props.tree.filter(session=>!session.windows.length))
+const visibleSessions=computed(()=>[
+  ...props.tree.filter(session=>session.windows.length),
+  ...(emptySessionsExpanded.value?emptySessions.value:[]),
+])
+watch(()=>props.tree.map(session=>session.sessionId),ids=>{
+  const live=new Set(ids)
+  for(const id of ids)if(!expandedSessions.value.has(id))expandedSessions.value.add(id)
+  for(const id of expandedSessions.value)if(!live.has(id))expandedSessions.value.delete(id)
+},{immediate:true})
+function toggleSession(id:string){if(expandedSessions.value.has(id))expandedSessions.value.delete(id);else expandedSessions.value.add(id)}
 
 function sessionRef(s: BrowserTreeSession): BrowserContextRef {
   return {
@@ -175,13 +190,19 @@ function sessionRef(s: BrowserTreeSession): BrowserContextRef {
   }
 }
 
+function windowLabel(s:BrowserTreeSession,w:BrowserTreeWindow){
+  const label=w.title||(w.url==='about:blank'?'新标签页':'无标题')
+  const duplicates=s.windows.filter(item=>(item.title||(item.url==='about:blank'?'新标签页':'无标题'))===label)
+  return duplicates.length>1?`${label} ${duplicates.findIndex(item=>item.windowId===w.windowId)+1}`:label
+}
+
 function windowRef(s: BrowserTreeSession, w: BrowserTreeWindow): BrowserContextRef {
   return {
     kind: 'window',
     sessionId: s.sessionId,
     windowId: w.windowId,
     sessionIndex: s.sessionIndex,
-    label: w.title || w.windowId,
+    label: windowLabel(s,w),
     url: w.url,
   }
 }
@@ -244,19 +265,6 @@ async function createWindow(sessionId: string) {
   }
 }
 
-async function toggleVisible(w: BrowserTreeWindow) {
-  if (!window.navora) return
-  if (props.isRemote) {
-    emit('remote-view', w.windowId)
-    return
-  }
-  try {
-    await window.navora.browser.setVisible(w.windowId, !w.visible)
-  } catch (e) {
-    emit('notify', e instanceof Error ? e.message : '切换窗口显示失败')
-  }
-}
-
 async function focusWindow(w: BrowserTreeWindow) {
   if (!window.navora) return
   try {
@@ -265,6 +273,7 @@ async function focusWindow(w: BrowserTreeWindow) {
     emit('notify', e instanceof Error ? e.message : '前置窗口失败')
   }
 }
+function showPage(w:BrowserTreeWindow){if(props.isRemote)emit('remote-view',w.windowId);else void focusWindow(w)}
 
 async function closeWindow(w: BrowserTreeWindow) {
   if (!window.navora) return
@@ -358,6 +367,10 @@ async function copyUrl(w: BrowserTreeWindow) {
 .tree-sess + .tree-sess {
   margin-top: 4px;
 }
+.empty-session-group{display:flex;align-items:center;gap:7px;width:100%;min-height:30px;margin:2px 0 4px;padding:4px 8px;border:0;border-radius:6px;background:transparent;color:#77869a;text-align:left;font:inherit;font-size:11px;cursor:default}
+.empty-session-group:hover{background:#edf1f5;color:#465a72}
+.empty-session-chevron{width:9px;height:9px;flex:0 0 9px}
+.empty-session-count{margin-left:auto;color:#8793a2;font-size:10px;font-variant-numeric:tabular-nums}
 .tree-row {
   display: flex;
   align-items: center;
@@ -376,9 +389,18 @@ async function copyUrl(w: BrowserTreeWindow) {
   background: rgba(255, 255, 255, 0.06);
 }
 .tree-row.win {
-  padding-left: 18px;
+  padding-left: 8px;
   opacity: 0.92;
 }
+.tree-children{margin:2px 0 4px 16px;padding:2px 0 2px 9px;border-left:1px solid #d7dfe8}
+.tree-children .tree-row.win{position:relative}
+.tree-children .tree-row.win::after{content:'';position:absolute;left:-10px;top:50%;width:9px;height:1px;background:#d7dfe8}
+.tree-disclosure{display:grid;place-items:center;width:16px;height:24px;flex:0 0 16px;padding:0;border:0;border-radius:4px;background:transparent;color:#7d8998;cursor:default}
+.tree-disclosure:hover{background:#e3eaf2;color:#405a77}
+.tree-disclosure>.app-icon{width:10px;height:10px}
+.tree-kind-icon{display:grid;place-items:center;width:15px;height:15px;flex:0 0 15px;color:#68809a}
+.tree-kind-icon>.app-icon{width:14px;height:14px}
+.session-kind-icon{color:#7385a0}
 .tree-name {
   min-width: 0;
   overflow: hidden;
@@ -386,6 +408,9 @@ async function copyUrl(w: BrowserTreeWindow) {
   white-space: nowrap;
   flex: 1;
 }
+.tree-row.sess .tree-name{gap:6px}.tree-row.sess.is-empty{min-height:48px;background:#f7f9fc;border-color:#e4eaf1}.tree-row.sess.is-empty .tree-name{min-width:0;flex:1}.session-copy{display:flex;flex:1;flex-direction:column;gap:2px;min-width:0;overflow:hidden}.session-empty-hint{overflow:hidden;text-overflow:ellipsis;font-size:9px;color:#8a96a6;line-height:1.35;white-space:nowrap}.tree-row.sess.is-empty .tree-actions .icon-btn:first-child{color:#476c98;background:#e9f0f8}
+.tree-row.win .tree-name{display:flex;align-items:center;gap:7px}
+.tree-row.win .page-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tree-meta {
   margin-left: 4px;
   font-size: 0.65rem;
@@ -439,5 +464,13 @@ async function copyUrl(w: BrowserTreeWindow) {
   opacity: 0.45;
   pointer-events: none;
 }
-.embedded-browser-title{font-size:10px;color:#7d899a;flex:1}.res-head:has(.embedded-browser-title){justify-content:space-between}.tree-row{margin-right:0;min-height:34px;padding:5px 6px;color:#4b5d74;border:1px solid transparent}.tree-row.sess{background:#f0f3f7}.tree-row:hover{background:#e8eef5;border-color:#d5dfeb}.tree-name{text-align:left;display:flex;align-items:center;gap:6px;font-size:12px}.session-title{color:#3e526c;font-weight:500;white-space:nowrap}.tree-meta{font-size:10px;margin:0;color:#7a8798;opacity:1}.session-lifetime{font-size:9px;color:#808b99;white-space:nowrap}.session-lifetime.persistent{color:#60806c}.tree-actions{gap:1px}.tree-actions .icon-btn{width:24px;height:24px;background:transparent;border-radius:6px;color:#6d7e94}.tree-actions .icon-btn.danger:hover{color:#b64747;background:#f8eaea}.tree-row.win .tree-name{display:block}.tree-row.win .tree-meta{margin-left:5px}.res-head-actions .icon-btn{background:transparent}.icon-btn:focus-visible,.tree-name:focus-visible{outline:2px solid #5d80aa;outline-offset:-2px}
+.embedded-browser-title{font-size:10px;color:#7d899a;flex:1}.res-head:has(.embedded-browser-title){justify-content:space-between}.tree-row{margin-right:0;min-height:34px;padding:5px 6px;color:#4b5d74;border:1px solid transparent}.tree-row.sess{background:#f0f3f7}.tree-row:hover{background:#e8eef5;border-color:#d5dfeb}.tree-name{text-align:left;display:flex;align-items:center;gap:6px;font-size:12px}.session-title{overflow:hidden;text-overflow:ellipsis;color:#3e526c;font-weight:500;white-space:nowrap}.tree-meta{font-size:10px;margin:0;color:#7a8798;opacity:1}.session-lifetime{flex:0 0 auto;font-size:9px;color:#808b99;white-space:nowrap}.session-lifetime.persistent{color:#60806c}.tree-actions{gap:1px}.tree-actions .icon-btn{width:24px;height:24px;background:transparent;border-radius:6px;color:#6d7e94}.tree-actions .icon-btn.danger:hover{color:#b64747;background:#f8eaea}.tree-row.win .tree-meta{margin-left:5px}.res-head-actions .icon-btn{background:transparent}.icon-btn:focus-visible,.tree-name:focus-visible,.tree-disclosure:focus-visible{outline:2px solid #5d80aa;outline-offset:-2px}
+.browser-panel button{cursor:pointer;pointer-events:auto}
+.browser-panel .tree-row{pointer-events:auto}
+</style>
+<style scoped>
+.tree-row.win.is-selected{position:relative;border-radius:7px;background:var(--control-selected);color:var(--navora-accent)}
+.tree-row.win.is-selected::before{content:'';position:absolute;left:0;top:8px;bottom:8px;width:2px;border-radius:2px;background:var(--navora-accent)}
+.tree-row.win.is-selected .tree-name{color:var(--navora-accent);font-weight:500}
+.empty-session-group:focus-visible{outline:2px solid #5d80aa;outline-offset:-2px}
 </style>

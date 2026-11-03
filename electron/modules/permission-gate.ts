@@ -190,6 +190,8 @@ export function toolNameToCapability(name: string): PermissionCapability | null 
     case 'browser_flow':
       return null // wait (+ click) gated inside executeAgentTool
     case 'browser_click':
+    case 'browser_mouse':
+    case 'browser_touch':
     case 'browser_hover':
     case 'browser_scroll':
     case 'browser_select':

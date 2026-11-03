@@ -54,13 +54,13 @@ win.webContents.once('did-finish-load',()=>void(async()=>{
   const click=async(selector:string)=>{const point=await js(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});if(!el)throw Error('Missing '+${JSON.stringify(selector)});el.scrollIntoView({block:'nearest'});const r=el.getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);for(const event of [{type:'mouseMove',...point},{type:'mouseDown',button:'left',clickCount:1,...point},{type:'mouseUp',button:'left',clickCount:1,...point}])win.webContents.sendInputEvent(event as Electron.MouseInputEvent);await wait(180)}
   const input=async(selector:string,value:string)=>{await js(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});el.value=${JSON.stringify(value)};el.dispatchEvent(new Event('input',{bubbles:true}))})()`);await wait(70)}
   const nav=async(label:string)=>{await js(`[...document.querySelectorAll('.plugin-sections button')].find(el=>el.textContent.includes(${JSON.stringify(label)})).click()`);await wait(240)}
-  const action=async(label:string)=>{await js(`[...document.querySelectorAll('.plugin-detail-actions button')].find(el=>el.textContent.trim()===${JSON.stringify(label)}).click()`);await wait(250)}
+  const action=async(label:string)=>{if(['导出','卸载','更换变体','复制路径'].includes(label)){await click('[aria-label="插件更多操作"]');await js(`[...document.querySelectorAll('.ui-action-menu button')].find(el=>el.textContent.includes(${JSON.stringify(label)})).click()`)}else await js(`[...document.querySelectorAll('.plugin-detail-actions button')].find(el=>el.textContent.trim()===${JSON.stringify(label)}).click()`);await wait(250)}
   const dialogButton=async(label:string)=>{await js(`[...document.querySelectorAll('.v-dialog.v-overlay--active button')].find(el=>el.textContent.trim()===${JSON.stringify(label)}).click()`);await wait(300)}
   const capture=async(name:string)=>{await wait(80);fs.writeFileSync(path.join(output,name+'.png'),(await win.webContents.capturePage(undefined,{stayHidden:true})).toPNG())}
   try{
     for(let n=0;n<60;n++){if(await js('!!document.querySelector(".composer")'))break;await wait(100)}win.setMinimumSize(0,0);win.setContentSize(1440,900);await wait(150)
     await input('.composer-input textarea','保留的对话草稿')
-    await click('[aria-label="页面更多操作"]')
+    await js(`(()=>{const button=[...document.querySelectorAll('[aria-label="页面更多操作"]')].find(el=>el.checkVisibility());if(!button)throw Error('Visible page actions are missing');button.click()})()`);await wait(180)
     const menuLayout=await js('(()=>{const menu=document.querySelector(".conversation-actions-menu"),parent=menu.parentElement,r=menu.getBoundingClientRect();return {visible:menu.checkVisibility(),rect:{x:r.x,y:r.y,width:r.width,height:r.height},visibility:getComputedStyle(menu).visibility,parentHeight:parent.clientHeight,parentOverflow:getComputedStyle(parent).overflow}})()')
     assert.equal(menuLayout.visible&&menuLayout.rect.x>=0&&menuLayout.rect.x+menuLayout.rect.width<=1440,true,'The page menu stays inside the viewport in either motion mode')
     await capture('global-menu-initial')
@@ -75,7 +75,7 @@ win.webContents.once('did-finish-load',()=>void(async()=>{
         await js('document.querySelector(".v-overlay--active .sidebar-panel-menu").dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown",bubbles:true}))')
         assert.equal(await js('document.activeElement.getAttribute("role")'),'menuitem','Actions support keyboard focus')
         await capture('sidebar-more-menu')
-        await click('.plugin-workspace-head h1')
+        await click('.plugin-workspace-head')
         assert.equal(await js('!!document.querySelector(".v-overlay--active .sidebar-panel-menu")'),false,'Clicking outside dismisses the actions menu')
         assert.equal(await js('document.querySelector(".sidebar").getBoundingClientRect().width>52'),true)
         await click(`[aria-label="${label}侧栏更多操作"]`)
@@ -93,14 +93,8 @@ win.webContents.once('did-finish-load',()=>void(async()=>{
     assert.equal(await js('document.querySelector(".conversation-content").checkVisibility()'),false)
     assert.equal(await js('document.querySelectorAll(".plugin-result").length'),3)
     assert.equal(await js('document.querySelectorAll(".rail-panel-button[aria-pressed=true]").length'),1)
-    await click('[aria-label="页面更多操作"]')
-    assert.equal(await js('document.querySelector(".conversation-actions-menu").textContent.includes("刷新插件")'),true,'The global menu remains available in the plugin workspace')
-    assert.equal(await js('document.querySelector(".conversation-actions-menu").textContent.includes("删除当前对话")'),false,'Plugin actions do not expose unrelated conversation controls')
-    await click('[aria-label="页面更多操作"]')
+    assert.equal(await js('document.querySelector(".plugin-page-identity").checkVisibility()'),true,'Plugin workspace shows its own page identity')
     await click('.sidebar-settings-btn')
-    await click('[aria-label="页面更多操作"]')
-    await js('[...document.querySelectorAll(".conversation-actions-menu button")].find(el=>el.textContent.includes("模型配置")).click()');await wait(200)
-    assert.equal(await js('document.querySelector("#settings-page-title").textContent'),'模型','The global settings menu navigates to the actual model configuration')
     await click('[aria-label="页面更多操作"]')
     await js('[...document.querySelectorAll(".conversation-actions-menu button")].find(el=>el.textContent.includes("打开插件管理")).click()');await wait(250)
     assert.equal(await js('document.querySelector(".plugin-workspace").checkVisibility()'),true)

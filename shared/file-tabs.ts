@@ -1,4 +1,4 @@
-export type FileTab={key:string;chatId:string;path:string;kind?:'browser';url?:string}
+export type FileTab={key:string;chatId:string;path:string;kind?:'browser';url?:string;pageId?:string;faviconUrl?:string;loading?:boolean}
 export type FileTabs={tabs:FileTab[];active:string;open:boolean}
 export const emptyFileTabs=():FileTabs=>({tabs:[],active:'',open:false})
 export function workspaceLinkPath(href:string,baseFile?:string):string|null{
@@ -30,6 +30,10 @@ export function openBrowserTab(state:FileTabs,chatId:string):FileTabs{
   if(state.tabs.length>=32)throw Error('标签页已达上限，请先关闭部分标签页')
   const tab:FileTab={key:`browser:${crypto.randomUUID()}`,chatId,path:'新标签页',kind:'browser',url:'about:blank'}
   return {tabs:[...state.tabs,tab],active:tab.key,open:true}
+}
+export function showFileWorkspace(state:FileTabs,chatId:string):FileTabs{
+  if(!state.tabs.length)return openBrowserTab(state,chatId)
+  return {...state,open:true,active:state.tabs.some(tab=>tab.key===state.active)?state.active:state.tabs[0]!.key}
 }
 export function removeFileOwner(state:FileTabs,owner:string):FileTabs{
   return state.tabs.filter(tab=>tab.chatId===owner).reduce((next,tab)=>closeFileTab(next,tab.key),state)

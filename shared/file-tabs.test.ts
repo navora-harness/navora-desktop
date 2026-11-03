@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {emptyFileTabs,openFileTab,openBrowserTab,closeFileTab,restoreFileTabs,makeFileTab,workspaceLinkPath,removeFileOwner} from './file-tabs'
+import {emptyFileTabs,openFileTab,openBrowserTab,showFileWorkspace,closeFileTab,restoreFileTabs,makeFileTab,workspaceLinkPath,removeFileOwner} from './file-tabs'
 test('file tabs reuse paths, distinguish resource owners and close to a neighbouring tab',()=>{
   let state=openFileTab(emptyFileTabs(),'a','folder/report.md')
   state=openFileTab(state,'a','./folder\\report.md');assert.equal(state.tabs.length,1)
@@ -51,4 +51,21 @@ test('full tab lists reuse canonical paths and owner deletion removes only affec
   const next=removeFileOwner(state,'foreign')
   assert.equal(next.tabs.length,30);assert.equal(next.active,state.active)
   assert.equal(removeFileOwner(next,'owner').open,false)
+})
+
+test('opening an empty workspace creates one owned default tab and reopening reuses it',()=>{
+  const first=showFileWorkspace(emptyFileTabs(),'owner')
+  assert.equal(first.tabs.length,1);assert.equal(first.tabs[0]!.kind,'browser');assert.equal(first.tabs[0]!.chatId,'owner');assert.equal(first.open,true)
+  const reopened=showFileWorkspace({...first,open:false},'owner')
+  assert.deepEqual(reopened,first)
+  const afterClose=showFileWorkspace(closeFileTab(first,first.active),'owner')
+  assert.equal(afterClose.tabs.length,1);assert.notEqual(afterClose.active,first.active)
+  assert.equal(showFileWorkspace(emptyFileTabs(),'other').tabs[0]!.chatId,'other')
+})
+
+test('showing an existing file workspace preserves its selection and never inserts a browser tab',()=>{
+  const files=openFileTab(openFileTab(emptyFileTabs(),'owner','one.txt'),'owner','two.txt')
+  assert.deepEqual(showFileWorkspace({...files,open:false},'owner'),files)
+  const repaired=showFileWorkspace({...files,active:'missing'},'owner')
+  assert.equal(repaired.tabs.length,2);assert.equal(repaired.active,files.tabs[0]!.key)
 })

@@ -1,7 +1,7 @@
 <template>
   <aside ref="card" class="conversation-resource-card" :class="{'is-overview':tab==='overview'}" :data-layout="overlay?'overlay':'docked'" aria-label="当前对话摘要面板" :style="{'--resource-width':`${width}px`}" @keydown.esc="onEscape">
     <div v-if="!overlay" class="resource-card-resizer" role="separator" aria-label="调整资源面板宽度" aria-orientation="vertical" :aria-valuenow="width" aria-valuemin="280" :aria-valuemax="maximum" tabindex="0" @pointerdown="beginResize" @keydown="resizeKey" />
-    <header class="resource-card-head"><button v-if="tab!=='overview'" type="button" class="resource-icon-button" aria-label="返回资源概览" title="返回资源概览" @click="changeTab('overview')"><font-awesome-icon icon="arrow-left" /></button><div><h2>{{ tab==='overview' ? '摘要' : '对话摘要' }}</h2><span :title="title">{{ title }}</span></div><SidebarMoreMenu label="摘要面板" hide-label="隐藏摘要面板" hide-aria-label="关闭资源面板" @hide="emit('close')" /></header>
+    <header class="resource-card-head"><button v-if="tab!=='overview'" type="button" class="resource-icon-button" aria-label="返回资源概览" title="返回资源概览" @click="changeTab('overview')"><AppIcon icon="arrow-left" /></button><div><h2>{{ tab==='overview' ? '摘要' : '对话摘要' }}</h2><span :title="title">{{ title }}</span></div><SidebarMoreMenu label="摘要面板" hide-label="隐藏摘要面板" hide-aria-label="关闭资源面板" @hide="emit('close')" /></header>
     <nav v-if="tab!=='overview'" class="resource-card-tabs" aria-label="资源类型">
       <button v-for="item in tabs" :key="item.id" type="button" :data-resource-tab="item.id" :aria-pressed="tab===item.id" @click="changeTab(item.id)">{{ item.label }}<span v-if="item.id==='browser' && windowCount">{{ windowCount }}</span><span v-if="item.id==='outputs' && outputs.length">{{ outputs.length }}</span></button>
     </nav>
@@ -15,12 +15,12 @@
     </div>
     <div v-else class="resource-card-body resource-outputs">
       <template v-if="selectedOutput">
-        <div class="resource-output-actions"><button type="button" @click="selectedOutputId=''">返回输出列表</button><button type="button" @click="emit('jump',selectedOutput.id)">定位到对话 <font-awesome-icon icon="arrow-up-right-from-square" /></button></div>
+        <div class="resource-output-actions"><button type="button" @click="selectedOutputId=''">返回输出列表</button><button type="button" @click="emit('jump',selectedOutput.id)">定位到对话 <AppIcon icon="arrow-up-right-from-square" /></button></div>
         <ChatMarkdown :chat-id="chatId" :content="selectedOutput.content" @open-media="emit('openMedia',$event)" @open-file="emit('preview',$event)" @notify="notify" />
       </template>
       <template v-else>
         <div v-if="!outputs.length" class="resource-empty">暂无输出</div>
-        <button v-for="(message,index) in outputs" :key="message.id" type="button" class="resource-output-row" @click="selectedOutputId=message.id"><font-awesome-icon icon="file-lines" /><span>{{ outputTitle(message.content) }}</span><small>{{ outputs.length-index }}</small><font-awesome-icon icon="chevron-right" /></button>
+        <button v-for="(message,index) in outputs" :key="message.id" type="button" class="resource-output-row" @click="selectedOutputId=message.id"><AppIcon icon="file-lines" /><span>{{ outputTitle(message.content) }}</span><small>{{ outputs.length-index }}</small><AppIcon icon="chevron-right" /></button>
       </template>
     </div>
   </aside>
@@ -76,6 +76,7 @@ onBeforeUnmount(()=>{stopResize?.();document.removeEventListener('pointerdown',o
 <style>
 .conversation-resource-card{position:absolute;inset:56px 12px 14px auto;width:var(--resource-width);max-width:calc(100% - 24px);display:flex;flex-direction:column;min-height:0;z-index:6;background:#fff;border:1px solid #d4dce6;border-radius:13px;box-shadow:0 6px 30px #243b5814;color:#46546a;font-size:12px;isolation:isolate;contain:layout style}
 .conversation-resource-card.is-overview{bottom:auto;max-height:calc(100% - 70px);border-radius:16px;border-color:#dfe3e8}
+.conversation-resource-card.is-overview[data-layout="overlay"]{width:min(var(--resource-width),350px);max-height:min(60vh,calc(100% - 88px))}
 .is-overview .resource-card-head{min-height:38px;padding:10px 14px 0}.is-overview .resource-card-head h2{font-size:11px;font-weight:500;color:#8b939d}.is-overview .resource-card-head span{display:none}.is-overview .resource-card-resizer{bottom:8px}
 .resource-card-head{display:flex;align-items:center;gap:8px;min-height:65px;padding:12px 14px 10px;flex-shrink:0}.resource-card-head>div{min-width:0;flex:1}.resource-card-head h2{font-size:13px;font-weight:600;margin:0 0 3px;color:#344156}.resource-card-head span{display:block;color:#7a8594;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .resource-icon-button{display:grid;place-items:center;width:28px;height:28px;flex-shrink:0;border:1px solid transparent;border-radius:7px;color:#657184;background:transparent}.resource-icon-button svg{width:14px;height:14px}.resource-icon-button:hover{background:#edf0f4;border-color:#dce2ea;color:#2c4666}

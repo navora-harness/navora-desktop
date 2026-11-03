@@ -80,6 +80,35 @@ test('allows internal links and new nested files, rejects traversal and dot chat
   assert.notEqual(files.chatRoot('..'), path.dirname(root))
 })
 
+test('preview distinguishes source text, Markdown, images and system-open formats',async t=>{
+  const {files,root}=await fixture(t)
+  for(const name of ['source.ts','data.json','table.csv','table.tsv','page.html','settings.yaml','output.log','LICENSE']){
+    await fs.writeFile(path.join(root,name),'<script>window.shouldNeverRun=true</script>\n中文')
+    const result=await files.preview('chat',name)
+    assert.equal(result.kind,'text',name);assert.ok(result.content?.includes('<script>'))
+  }
+  for(const name of ['note.MD','note.markdown','note.mdown']){await fs.writeFile(path.join(root,name),'# heading');assert.equal((await files.preview('chat',name)).kind,'markdown')}
+  for(const ext of ['pdf','docx','xlsx','pptx','zip','mp4']){
+    await fs.writeFile(path.join(root,`file.${ext}`),'%PDF-1.7 readable header')
+    const result=await files.preview('chat',`file.${ext}`)
+    assert.equal(result.kind,'unsupported');assert.equal(result.reason,'file_type');assert.equal(result.content,undefined)
+  }
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3ioAAAAASUVORK5CYII=','base64')
+  await fs.writeFile(path.join(root,'pixel.png'),png)
+  const image=await files.preview('chat','pixel.png');assert.equal(image.mime,'image/png');assert.deepEqual(Buffer.from(image.base64!,'base64'),png)
+  const big=await fs.open(path.join(root,'large.jpg'),'w');await big.truncate(12*1024*1024+1);await big.close()
+  assert.equal((await files.preview('chat','large.jpg')).reason,'image_too_large')
+})
+
+test('preview decodes both UTF-16 BOM orders and rejects malformed text instead of showing replacement characters',async t=>{
+  const {files,root}=await fixture(t)
+  const be=Buffer.from('中文😀','utf16le').swap16()
+  await fs.writeFile(path.join(root,'be.txt'),Buffer.concat([Buffer.from([254,255]),be]))
+  assert.equal((await files.preview('chat','be.txt')).content,'中文😀')
+  await fs.writeFile(path.join(root,'invalid.txt'),Buffer.from([0xd6,0xd0,0xce,0xc4]))
+  const invalid=await files.preview('chat','invalid.txt');assert.equal(invalid.kind,'unsupported');assert.equal(invalid.reason,'encoding');assert.equal(invalid.content,undefined)
+})
+
 test('rejects a built-in chat root redirected outside its parent', async (t) => {
   const { base, files } = await fixture(t)
   const outside = path.join(base, 'outside')
@@ -138,4 +167,16 @@ test('resource snapshot limits and inaccessible subdirectories are explicit inst
   bounded.resolveExisting=async(id,relative)=>{if(relative==='locked')throw Error('EACCES');return resolve(id,relative)}
   for(let i=1;i<4;i++)await fs.rm(path.join(root,`${i}.txt`))
   const partial=await bounded.resources('chat');assert.equal(partial.entries.length,1);assert.equal(partial.unavailable,1)
+})
+
+test('draft recovery files stay out of output resources while explicit workspace access remains available',async t=>{
+  const {files,root}=await fixture(t)
+  await fs.mkdir(path.join(root,'browser-annotations','drafts','conflicts'),{recursive:true})
+  await fs.writeFile(path.join(root,'browser-annotations','drafts','ann_one.json'),'original buffer')
+  await fs.writeFile(path.join(root,'browser-annotations','drafts','conflicts','copy.json'),'conflict buffer')
+  await fs.writeFile(path.join(root,'browser-annotations','snapshot.png'),'annotation evidence')
+  await fs.writeFile(path.join(root,'report.md'),'user deliverable')
+  const result=await files.resources('chat')
+  assert.deepEqual(result.entries.map(entry=>entry.path).sort(),['browser-annotations/snapshot.png','report.md'])
+  assert.equal((await files.readText('chat','browser-annotations/drafts/conflicts/copy.json')).content,'conflict buffer')
 })

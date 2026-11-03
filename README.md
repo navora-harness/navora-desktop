@@ -45,7 +45,7 @@ npm run build:plugins
 
 ## 开发
 
-重构分支已对齐 `45.0.0-cloudbypass.2`。原发布包的原生文件输入存在文件读权限遗漏：选择文件后导航可能导致渲染进程被 Chromium 终止。本仓库保留修复补丁 [`patches/electron/file-input-read-grants.patch`](patches/electron/file-input-read-grants.patch)。当前本机已编译、安装并验证修复后的内核；外部分发包尚未重新发布。
+当前运行时使用 Electron `45.0.0-cloudbypass.3`。此 Windows x64 定制版新增原生 DOM/无障碍快照、跨域 iframe 与封闭 Shadow DOM 查找，以及不激活隐藏窗口的可信点击、键盘和触摸输入；应用内工具接入说明见[浏览器 Agent 自动化](docs/browser-agent-automation.md)。本版本发布包只覆盖 Windows x64。
 
 在匹配的 Electron 源码中应用补丁并增量编译后，可安装本机产物：
 
@@ -58,10 +58,8 @@ npm run test:browser
 
 ```bash
 cd navora-desktop
-cp .npmrc.example .npmrc   # electron_mirror → http://127.0.0.1:8787/electron/
-# 先启动仓库旁 mirror/（serve:local），再：
 npm install
-npm run electron:install   # 如需重下 Electron 二进制
+npm run electron:install   # 下载并校验 cloudbypass.3 Windows x64 运行时
 npm run electron:dev
 ```
 

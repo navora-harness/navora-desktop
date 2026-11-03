@@ -55,6 +55,14 @@ import { runPluginDevCli, type PluginDevCliAction } from './plugin-dev-cli'
 import { packPluginProject } from './plugin-pack'
 import { findPluginReadmePath } from './plugin-store'
 
+function parseAgentTarget(value:unknown):Electron.AgentTarget|null {
+  if(!value||typeof value!=='object')return null
+  const target=value as Partial<Electron.AgentTarget>
+  const integer=(n:unknown)=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0
+  if(!integer(target.webContentsId)||!integer(target.processId)||!integer(target.routingId)||!integer(target.documentId)||!integer(target.backendNodeId))return null
+  return target as Electron.AgentTarget
+}
+
 export type ToolExecContext = {
   chatId: string
   /** Root chat id for session-scoped plugin-dev links (parent of sub-chats). */
@@ -103,11 +111,12 @@ function resolvePluginDistDir(
   workspaceRoot: string,
   cliCwd: string,
   packageId: string,
+  target?: string,
 ): string | null {
   const id = String(packageId || '').trim()
   if (!id) return null
   const root = path.resolve(workspaceRoot)
-  for (const dir of [path.join(cliCwd, 'dist', id), path.join(root, 'dist', id)]) {
+  for (const dir of [path.join(cliCwd, 'dist', id, target || `${process.platform}-${process.arch}`), path.join(cliCwd, 'dist', id), path.join(root, 'dist', id, target || `${process.platform}-${process.arch}`), path.join(root, 'dist', id)]) {
     const abs = path.resolve(dir)
     if (!isPathInsideOrEqual(root, abs)) continue
     try {
@@ -1147,7 +1156,14 @@ async function sessionFetch(
   }
 }
 
-export async function executeAgentTool(
+export async function executeAgentTool(name:string,rawArgs:Record<string,unknown>,ctx:ToolExecContext,opts?:{skipPermission?:boolean}):Promise<unknown>{
+  const page=typeof rawArgs.windowId==='string'?ctx.registry.getWindowRecord(rawArgs.windowId)?.win:undefined
+  if(page?.manualControl&&name.startsWith('browser_'))return {ok:false,error:'browser_manual_control',hint:'用户已接管页面，等待用户恢复 AI 操作。'}
+  if(page)page.activeOperations++
+  try{return await executeAgentToolInternal(name,rawArgs,ctx,opts)}finally{if(page){page.activeOperations--;page.manager.flushLayout(page)}}
+}
+
+async function executeAgentToolInternal(
   name: string,
   rawArgs: Record<string, unknown>,
   ctx: ToolExecContext,
@@ -1155,6 +1171,10 @@ export async function executeAgentTool(
 ): Promise<unknown> {
   assertNotAborted(ctx.signal)
   const cfg = ctx.getConfig()
+  if (typeof rawArgs.windowId === 'string' && name.startsWith('browser_')) {
+    const activePage=ctx.registry.getWindowRecord(rawArgs.windowId)
+    if(activePage?.win.manualControl)return {ok:false,error:'browser_manual_control',hint:'用户正在批注或已接管页面；等待用户点击恢复 AI 操作，不要重试点击。'}
+  }
 
   const remapped = remapAgentToolCall(name, rawArgs)
   if (remapped) {
@@ -1977,6 +1997,9 @@ export async function executeAgentTool(
       const clickCount = Math.max(1, Math.min(3, Number(rawArgs.clickCount) || 1))
       const rec = ctx.registry.assertWindowOwned(ctx.chatId, windowId)
       const wc = rec.win.webContents
+      const hasTarget=rawArgs.target!==undefined&&rawArgs.target!==null
+      const target=hasTarget?parseAgentTarget(rawArgs.target):null
+      if(hasTarget&&!target)return {ok:false,error:'invalid_agent_target'}
       const worldId = cfg.browser.evaluate_world_id
       const actionMs = cfg.browser.action_timeout_ms || 15000
       const beforeUrl = wc.getURL()
@@ -2000,6 +2023,15 @@ export async function executeAgentTool(
       }
       const meta = {
         ...pageWaitMeta(wc, wait),
+      }
+
+      if(target){
+        if(iframeSelector)return {ok:false,error:'target_and_iframe_selector_are_mutually_exclusive',...meta}
+        if(typeof wc.clickSelector!=='function')return {ok:false,error:'target_click_unavailable',capabilities:browserCapabilities(wc),...meta}
+        try{
+          const result=await wc.clickSelector('',{target,button,clickCount,scrollIntoView:true})
+          return finishClick({ok:result.status==='dispatched',method:'target_clickSelector',dispatch:result,...(result.status==='failed'?{error:result.reason||'target_click_failed'}:{})})
+        }catch(error){return {ok:false,error:'target_click_failed',message:error instanceof Error?error.message:String(error),...meta}}
       }
 
       if (iframeSelector) {
@@ -2814,7 +2846,10 @@ export async function executeAgentTool(
     case 'browser_type': {
       const windowId = String(rawArgs.windowId || '')
       const selector = String(rawArgs.selector || '')
-      if (!selector) return {ok:false,error:'selector_or_ref_required'}
+      const hasTarget=rawArgs.target!==undefined&&rawArgs.target!==null
+      const target=hasTarget?parseAgentTarget(rawArgs.target):null
+      if(hasTarget&&!target)return {ok:false,error:'invalid_agent_target'}
+      if (!selector&&!target) return {ok:false,error:'selector_or_ref_required'}
       const text = String(rawArgs.text ?? '')
       const append = Boolean(rawArgs.append)
       const submit = Boolean(rawArgs.submit)
@@ -2828,6 +2863,29 @@ export async function executeAgentTool(
         selector,
       })
       const meta = pageWaitMeta(wc, wait)
+      if(target){
+        if(typeof wc.dispatchKeyEvent!=='function')return {ok:false,error:'target_keyboard_unavailable',capabilities:browserCapabilities(wc),...meta}
+        const beforeUrl=wc.getURL()
+        const dispatch=async(event:Electron.KeyEvent)=>wc.dispatchKeyEvent({...event,target})
+        const steps:Electron.AgentDispatchResult[]=[]
+        if(!append){
+          steps.push(await dispatch({type:'rawKeyDown',key:'Control',code:'ControlLeft'}))
+          steps.push(await dispatch({type:'rawKeyDown',key:'a',code:'KeyA',modifiers:2}))
+          steps.push(await dispatch({type:'keyUp',key:'a',code:'KeyA',modifiers:2}))
+          steps.push(await dispatch({type:'keyUp',key:'Control',code:'ControlLeft'}))
+          steps.push(await dispatch({type:'rawKeyDown',key:'Backspace',code:'Backspace'}))
+          steps.push(await dispatch({type:'keyUp',key:'Backspace',code:'Backspace'}))
+        }
+        if(text)steps.push(await dispatch({type:'char',text}))
+        if(steps.some(step=>step.status==='failed'))return {ok:false,error:'target_type_failed',steps,dispatch:steps.at(-1),...meta}
+        if(submit){
+          steps.push(await dispatch({type:'rawKeyDown',key:'Enter',code:'Enter'}))
+          steps.push(await dispatch({type:'keyUp',key:'Enter',code:'Enter'}))
+          const after=await settleAfterInteraction(wc,cfg,ctx.signal,beforeUrl,8000)
+          return {ok:steps.every(step=>step.status==='dispatched'),length:text.length,submitted:true,method:'target_dispatchKeyEvent',steps,...pageWaitMeta(wc,after),url:wc.getURL(),title:wc.getTitle(),navigated:wc.getURL()!==beforeUrl}
+        }
+        return {ok:true,length:text.length,submitted:false,method:'target_dispatchKeyEvent',steps,...meta,url:wc.getURL()}
+      }
       const selWaitMs = Math.min(actionMs, Number(rawArgs.waitTimeoutMs) || 5000)
       const sel = await waitForSelectorSoft(wc, worldId, selector, selWaitMs, ctx.signal)
       if (!sel.found) {
@@ -2934,6 +2992,28 @@ export async function executeAgentTool(
         label: `get_${what}`,
       }
       try {
+        if (what === 'agent_snapshot' || what === 'agent_find') {
+          if (what === 'agent_snapshot' && typeof wc.getAgentSnapshot !== 'function') {
+            return {ok:false,error:'agent_snapshot_unavailable',capabilities:browserCapabilities(wc),...meta}
+          }
+          if (what === 'agent_find' && typeof wc.findAgentElements !== 'function') {
+            return {ok:false,error:'agent_find_unavailable',capabilities:browserCapabilities(wc),...meta}
+          }
+          const options: Electron.AgentSnapshotOptions = {
+            maxNodes: Math.max(1,Math.min(5000,Number(rawArgs.maxNodes)||300)),
+            maxFrames: Math.max(1,Math.min(1000,Number(rawArgs.maxFrames)||100)),
+            timeoutMs: Math.max(100,Math.min(30000,Number(rawArgs.agentTimeoutMs)||5000)),
+            pierce: rawArgs.pierce !== false,
+            ...(selector ? {selector} : {}),
+          }
+          const agentQuery = rawArgs.agentQuery && typeof rawArgs.agentQuery === 'object'
+            ? rawArgs.agentQuery as Electron.AgentFindQuery
+            : rawArgs.query ? {text:String(rawArgs.query)} : {}
+          const snapshot = what === 'agent_snapshot'
+            ? await wc.getAgentSnapshot(options)
+            : await wc.findAgentElements(agentQuery,options)
+          return {ok:true,value:snapshot,native:true,capabilities:browserCapabilities(wc),...meta}
+        }
         if (what === 'snapshot') {
           const snapshot = await isolatedEval(wc, worldId, pageIndexReadScript({
             refresh: rawArgs.refresh === true,
@@ -3382,6 +3462,18 @@ export async function executeAgentTool(
       if (!key) return { ok: false, error: 'key_required' }
       const rec = ctx.registry.assertWindowOwned(ctx.chatId, windowId)
       const wc = rec.win.webContents
+      const hasTarget=rawArgs.target!==undefined&&rawArgs.target!==null
+      const target=hasTarget?parseAgentTarget(rawArgs.target):null
+      if(hasTarget&&!target)return {ok:false,error:'invalid_agent_target'}
+      if(target){
+        if(typeof wc.dispatchKeyEvent!=='function')return {ok:false,error:'target_keyboard_unavailable',capabilities:browserCapabilities(wc)}
+        const mapped=mapKeyCode(key)
+        const keyName=mapped==='Return'?'Enter':mapped==='Up'?'ArrowUp':mapped==='Down'?'ArrowDown':mapped==='Left'?'ArrowLeft':mapped==='Right'?'ArrowRight':mapped==='Space'?' ':mapped
+        const code=keyName===' '?'Space':keyName.length===1?`Key${keyName.toUpperCase()}`:keyName
+        const down=await wc.dispatchKeyEvent({target,type:'rawKeyDown',key:keyName,code})
+        const up=await wc.dispatchKeyEvent({target,type:'keyUp',key:keyName,code})
+        return {ok:down.status==='dispatched'&&up.status==='dispatched',key:keyName,method:'target_dispatchKeyEvent',steps:[down,up]}
+      }
       const selector = rawArgs.selector ? String(rawArgs.selector) : ''
       if (selector) {
         await waitForSelectorSoft(
@@ -3402,6 +3494,45 @@ export async function executeAgentTool(
       wc.sendInputEvent({ type: 'keyDown', keyCode })
       wc.sendInputEvent({ type: 'keyUp', keyCode })
       return { ok: true, key: keyCode }
+    }
+
+    case 'browser_mouse': {
+      const windowId=String(rawArgs.windowId||'')
+      const target=parseAgentTarget(rawArgs.target)
+      if(!target)return {ok:false,error:'agent_target_required'}
+      const action=String(rawArgs.action||'')
+      const eventType:Record<string,string>={move:'mouseMoved',down:'mousePressed',up:'mouseReleased',wheel:'mouseWheel'}
+      const type=eventType[action]
+      if(!type)return {ok:false,error:'invalid_mouse_action'}
+      const rec=ctx.registry.assertWindowOwned(ctx.chatId,windowId)
+      const wc=rec.win.webContents
+      if(typeof wc.dispatchMouseEvent!=='function')return {ok:false,error:'target_mouse_unavailable',capabilities:browserCapabilities(wc)}
+      const buttonRaw=String(rawArgs.button||'left')
+      const button=['left','middle','right','back','forward'].includes(buttonRaw)?buttonRaw:'left'
+      const x=Number(rawArgs.x)||0,y=Number(rawArgs.y)||0
+      const buttonMask=button==='left'?1:button==='right'?2:button==='middle'?4:0
+      const event:Electron.MouseEvent={type,x,y,button:action==='down'||action==='up'?button:'none',clickCount:action==='down'||action==='up'?Math.max(1,Math.min(3,Number(rawArgs.clickCount)||1)):0,...(Number.isFinite(Number(rawArgs.modifiers))?{modifiers:Number(rawArgs.modifiers)}:{}),buttons:Number.isFinite(Number(rawArgs.buttons))?Number(rawArgs.buttons):action==='down'?buttonMask:0,...(action==='wheel'?{deltaX:Number(rawArgs.deltaX)||0,deltaY:Number(rawArgs.deltaY)||0}:{})}
+      const dispatch=await wc.dispatchMouseEvent({...event,target})
+      return {ok:dispatch.status==='dispatched',method:'target_dispatchMouseEvent',dispatch}
+    }
+
+    case 'browser_touch': {
+      const windowId=String(rawArgs.windowId||'')
+      const target=parseAgentTarget(rawArgs.target)
+      if(!target)return {ok:false,error:'agent_target_required'}
+      const type=String(rawArgs.action||'')
+      if(!['touchStart','touchMove','touchEnd','touchCancel'].includes(type))return {ok:false,error:'invalid_touch_action'}
+      const rec=ctx.registry.assertWindowOwned(ctx.chatId,windowId)
+      const wc=rec.win.webContents
+      if(typeof wc.dispatchTouchEvent!=='function')return {ok:false,error:'target_touch_unavailable',capabilities:browserCapabilities(wc)}
+      const supplied=Array.isArray(rawArgs.touchPoints)?rawArgs.touchPoints:[]
+      const touchPoints:Electron.TouchPoints[]=type==='touchEnd'||type==='touchCancel'?[]:supplied.map((point,index)=>{
+        const item=point&&typeof point==='object'?point as Record<string,unknown>:{ }
+        return {x:Number(item.x)||0,y:Number(item.y)||0,id:Number(item.id)||index+1,radiusX:Number(item.radiusX)||1,radiusY:Number(item.radiusY)||1,force:Number(item.force)||1}
+      })
+      if(type!=='touchEnd'&&type!=='touchCancel'&&!touchPoints.length)return {ok:false,error:'touch_points_required'}
+      const result=await wc.dispatchTouchEvent({target,type,touchPoints})
+      return {ok:result.status==='dispatched',method:'target_dispatchTouchEvent',dispatch:result}
     }
 
     case 'browser_hover': {
@@ -3569,8 +3700,13 @@ export async function executeAgentTool(
       const rec = ctx.registry.assertWindowOwned(ctx.chatId, windowId)
       const wc = rec.win.webContents
       const acrossDocuments = rawArgs.acrossDocuments === true
+      const agentInfo = rawArgs.agentInfo === true
       if (acrossDocuments && !hasQuerySelectorAcrossDocuments(wc)) {
         return {ok:false,error:'querySelectorAcrossDocuments_unavailable'}
+      }
+      if(acrossDocuments&&agentInfo){
+        const snapshot=await wc.querySelectorAcrossDocuments(selector,{pierce,scrollIntoView,agentInfo:true})
+        return {ok:true,pierce,acrossDocuments:true,agentInfo:true,value:snapshot}
       }
       if (!hasQuerySelectorDeep(wc)) {
         return {
@@ -4152,6 +4288,7 @@ export async function executeAgentTool(
         root: rawArgs.root != null ? String(rawArgs.root) : undefined,
         out: rawArgs.out != null ? String(rawArgs.out) : undefined,
         includeNodeModules: Boolean(rawArgs.include_node_modules),
+        target: typeof rawArgs.target === 'string' ? rawArgs.target : undefined,
       })
       if (!packed.ok) return packed
       return {
@@ -4181,6 +4318,7 @@ export async function executeAgentTool(
       const workspaceRoot = ctx.files.chatRoot(ctx.chatId)
       const result = await runPluginDevCli({
         action,
+        target: typeof rawArgs.target === 'string' ? rawArgs.target : undefined,
         workspaceRoot,
         id: rawArgs.id != null ? String(rawArgs.id) : undefined,
         entry: rawArgs.entry != null ? String(rawArgs.entry) : undefined,
@@ -4197,7 +4335,7 @@ export async function executeAgentTool(
           String(rawArgs.entry || rawArgs.id || '').trim() ||
           packageIdFromBuildStdout(result.stdout) ||
           ''
-        const distDir = resolvePluginDistDir(workspaceRoot, result.cwd, pkgId)
+        const distDir = resolvePluginDistDir(workspaceRoot, result.cwd, pkgId, typeof rawArgs.target === 'string' ? rawArgs.target : undefined)
         if (distDir) {
           link = linkPluginForChatSession(ctx, distDir)
         } else {

@@ -2,6 +2,8 @@
  * In-process plugin zip (plugin_pack). Mirrors navora-plugin CLI pack
  * without spawning Node / the SDK — required for packaged desktop.
  */
+import { assertPlatformPackage } from '../../shared/plugin-platform'
+import { assertRuntimeFiles, writeRuntimeInventory } from './plugin-package'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -193,8 +195,8 @@ function listPackageIds(manifest: ProjectManifest, entryFilter?: string): string
   return [entryFilter]
 }
 
-function packageOutDir(projectDir: string, packageId: string): string {
-  return path.join(projectDir, 'dist', packageId)
+function packageOutDir(projectDir: string, packageId: string, target?: string): string {
+  return path.join(projectDir, 'dist', packageId, ...(target ? [target] : []))
 }
 
 function copyPath(src: string, dest: string): void {
@@ -334,6 +336,7 @@ function assertDistPackage(outDir: string, packageId: string): ReturnType<typeof
     throw new Error(`dist_missing:dist/${packageId}`)
   }
   const manifest = readDistManifest(outDir)
+  assertRuntimeFiles(outDir, JSON.parse(fs.readFileSync(path.join(outDir, 'plugin.json'), 'utf8')))
   const mainFile = path.join(outDir, manifest.main)
   if (!fs.existsSync(mainFile) || !fs.statSync(mainFile).isFile()) {
     throw new Error(`main_missing:dist/${packageId}/${manifest.main}`)
@@ -383,6 +386,7 @@ function packSuiteBundle(opts: {
   projectDir: string
   manifest: ProjectManifest
   packageIds: string[]
+  target?: string
   dest: string
   workspaceRoot: string
   includeNodeModules: boolean
@@ -392,7 +396,7 @@ function packSuiteBundle(opts: {
   const suitePackages: PluginSuiteManifest['packages'] = []
 
   for (const packageId of opts.packageIds) {
-    const outDir = packageOutDir(opts.projectDir, packageId)
+    const outDir = packageOutDir(opts.projectDir, packageId, opts.target)
     const outManifest = assertDistPackage(outDir, packageId)
     const prefix = `packages/${packageId}`
     addDirToZip(zip, outDir, prefix, opts.includeNodeModules)
@@ -484,6 +488,7 @@ function resolveOutPath(
 /** Pack built dist/<packageId> into workspace zip(s). Output never leaves the Chat workspace. */
 export function packPluginProject(opts: {
   workspaceRoot: string
+  target?: string
   id?: string
   entry?: string
   root?: string
@@ -495,6 +500,11 @@ export function packPluginProject(opts: {
     const target = resolvePackTarget(workspaceRoot, opts.root)
     const { projectDir, projectId, outputRoot } = resolveProjectDir(target, opts.id)
     const manifest = readProjectManifest(projectDir)
+    const author = JSON.parse(fs.readFileSync(path.join(projectDir, 'plugin.json'), 'utf8'))
+    const targets = author.build?.targets as Array<{ artifactId: string }> | undefined
+    const artifactId = targets ? (opts.target || `${process.platform}-${process.arch}`) : undefined
+    if (artifactId && !targets?.some(t => t.artifactId === artifactId)) throw new Error('target_not_found')
+
     const entryFilter = opts.entry?.trim() || undefined
     const packageIds = listPackageIds(manifest, entryFilter)
     const isMulti = manifest.entries.length > 0
@@ -502,7 +512,7 @@ export function packPluginProject(opts: {
     const includeNodeModules = Boolean(opts.includeNodeModules)
 
     for (const packageId of packageIds) {
-      const outDir = packageOutDir(projectDir, packageId)
+      const outDir = packageOutDir(projectDir, packageId, artifactId)
       if (!fs.existsSync(outDir)) {
         return {
           ok: false,
@@ -511,6 +521,9 @@ export function packPluginProject(opts: {
         }
       }
       copyPackageAssets(projectDir, outDir, manifest.packFiles)
+      const builtManifest = JSON.parse(fs.readFileSync(path.join(outDir, 'plugin.json'), 'utf8'))
+      assertPlatformPackage(builtManifest)
+      writeRuntimeInventory(outDir)
     }
 
     const zips: PluginPackZip[] = []
@@ -522,6 +535,7 @@ export function packPluginProject(opts: {
           projectId,
           projectDir,
           manifest,
+          target: artifactId,
           packageIds,
           dest,
           workspaceRoot,
@@ -546,8 +560,8 @@ export function packPluginProject(opts: {
     }
 
     for (const packageId of packageIds) {
-      const distMan = readDistManifest(packageOutDir(projectDir, packageId))
-      const fileName = `${packageId}-${safeZipNamePart(distMan.version)}-plugin.zip`
+      const distMan = readDistManifest(packageOutDir(projectDir, packageId, artifactId))
+      const fileName = `${packageId}-${safeZipNamePart(distMan.version)}${artifactId ? `-${artifactId}` : ''}-plugin.zip`
       const fallbackRel = isMulti
         ? path.join('dist', projectId, fileName)
         : path.join('dist', fileName)
@@ -559,7 +573,7 @@ export function packPluginProject(opts: {
       )
       zips.push(
         packPackageDir({
-          outDir: packageOutDir(projectDir, packageId),
+          outDir: packageOutDir(projectDir, packageId, artifactId),
           packageId,
           dest,
           workspaceRoot,
@@ -582,6 +596,7 @@ export function packPluginProject(opts: {
           projectId,
           projectDir,
           manifest,
+          target: artifactId,
           packageIds,
           dest,
           workspaceRoot,

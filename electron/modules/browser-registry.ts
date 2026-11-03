@@ -1,7 +1,7 @@
+import {browserTabShortcut} from '../../shared/browser-workspace'
+import {BrowserHostManager,type BrowserPage} from './browser-host'
 import {
-  BrowserWindow,
   session as electronSession,
-  type BrowserWindowConstructorOptions,
   type Session,
   type WebContents,
 } from 'electron'
@@ -23,6 +23,12 @@ const WINDOW_MIN_W = 320
 const WINDOW_MIN_H = 240
 const WINDOW_MAX_W = 7680
 const WINDOW_MAX_H = 4320
+
+function displayBrowserTabTitle(url:string,title:string):string{
+  if(!url||url==='about:blank')return '新标签页'
+  if(title.trim()&&!/^(新标签页|新窗口|Navora Browser)$/i.test(title.trim()))return title.trim()
+  try{return new URL(url).hostname||'网页'}catch{return title.trim()||'网页'}
+}
 
 function clampDim(n: number, min: number, max: number): number {
   if (!Number.isFinite(n)) return min
@@ -46,7 +52,7 @@ function resolveWindowSize(
   return { width, height }
 }
 
-function windowBoundsSnapshot(win: BrowserWindow): {
+function windowBoundsSnapshot(win: BrowserPage): {
   width: number
   height: number
   x: number
@@ -60,9 +66,14 @@ type AgentWindowRecord = {
   windowId: string
   sessionId: string
   chatId: string
-  win: BrowserWindow
+  tabKey?: string
+  crashed?: boolean
+  loadError?: import('../../shared/browser-workspace').BrowserLoadError
+  win: BrowserPage
   title: string
+  faviconUrl?: string
   url: string
+  restoreUrl?:string
   visible: boolean
   loading: boolean
 }
@@ -79,6 +90,7 @@ type AgentSessionRecord = {
 }
 
 export type RegistryEvents = {
+  onVisit?:(info:{chatId:string;url:string;title:string})=>void
   onTreeChanged?: (chatId: string) => void
   /** Fired when user closes an agent window while something may be listening. */
   onWindowClosedByUser?: (info: {
@@ -134,8 +146,12 @@ export type RegistryEvents = {
 }
 
 export class BrowserRegistry {
+  readonly hosts = new BrowserHostManager()
   private sessions = new Map<string, AgentSessionRecord>()
   private windows = new Map<string, AgentWindowRecord>()
+  private persistenceFile:string|null=null
+  private restoring=false
+  private restored=false
   private nextIndex = new Map<string, number>()
   private getConfig: () => AppConfig
   private events: RegistryEvents
@@ -156,6 +172,15 @@ export class BrowserRegistry {
   constructor(getConfig: () => AppConfig, events: RegistryEvents = {}) {
     this.getConfig = getConfig
     this.events = events
+    this.hosts.onChanged = () => { for (const id of this.nextIndex.keys()) this.emitTree(id) }
+    this.hosts.onActivate = page => {
+      if(this.restoring)return
+      const rec=this.windows.get(page.id),url=rec?.restoreUrl
+      if(!rec||!url)return
+      rec.restoreUrl=undefined;rec.url=url
+      this.quietNavigateLog(page.id)
+      void page.loadURL(url).catch(error=>console.warn('[browser] restored page load failed',error))
+    }
   }
 
   bindNetwork(network: BrowserNetworkManager): void {
@@ -256,6 +281,7 @@ export class BrowserRegistry {
       chatId,
       setTimeout(() => {
         this.debounceTimers.delete(chatId)
+        this.savePersistent()
         this.events.onTreeChanged?.(chatId)
       }, ms),
     )
@@ -275,11 +301,25 @@ export class BrowserRegistry {
         const bounds =
           w.win.isDestroyed() ? undefined : windowBoundsSnapshot(w.win)
         windows.push({
+          viewport:w.win.fixedViewport,
+          zoomFactor:w.win.webContents.getZoomFactor(),
+          canGoBack:w.win.webContents.navigationHistory.canGoBack(),
+          canGoForward:w.win.webContents.navigationHistory.canGoForward(),
+          crashed:w.crashed,
+          loadError:w.loadError,
+          annotationSelecting:w.win.annotationSelecting,
+          tabKey: w.tabKey,
+          pageId: w.windowId,
+          hostWindowId: w.win.hostId || undefined,
+          presentation: this.hosts.presentation(w.win),
+          selected:this.hosts.selectedPageId===w.windowId,
+          manualControl: w.win.manualControl,
           windowId: w.windowId,
           sessionId: w.sessionId,
-          title: w.title,
+          title: displayBrowserTabTitle(w.url,w.win.getTitle()||w.title),
+          faviconUrl:w.faviconUrl,
           url: w.url,
-          visible: w.visible,
+          visible: w.win.isVisible(),
           loading: w.loading,
           ...(bounds || {}),
         })
@@ -312,6 +352,15 @@ export class BrowserRegistry {
     return this.windows.get(windowId)
   }
 
+  markNavigationStopped(windowId:string){
+    const rec=this.windows.get(windowId)
+    if(!rec)return
+    rec.win.navigationStopped=true
+    rec.loading=false
+    rec.loadError=undefined
+    this.emitTree(rec.chatId)
+  }
+
   listWindowSummaries(): Array<{
     windowId: string
     sessionId: string
@@ -338,7 +387,7 @@ export class BrowserRegistry {
         chatId: rec.chatId,
         title: rec.title,
         url: rec.url,
-        visible: rec.visible,
+        visible: rec.win.isVisible(),
         loading: rec.loading,
       })
     }
@@ -438,7 +487,7 @@ export class BrowserRegistry {
     }
   }
 
-  createSession(chatId: string, opts: { persist?: boolean; ua?: string } = {}): BrowserTreeSession {
+  createSession(chatId: string, opts: { persist?: boolean; ua?: string; restoreId?:string } = {}): BrowserTreeSession {
     const persist = opts.persist === true
     const index = (this.nextIndex.get(chatId) || 0) + 1
     this.nextIndex.set(chatId, index)
@@ -447,7 +496,7 @@ export class BrowserRegistry {
     const cfg = this.getConfig()
     const ua = opts.ua?.trim() || resolveUserAgent(cfg)
 
-    const sessionId = `sess_${randomUUID().replace(/-/g, '').slice(0, 10)}`
+    const sessionId = opts.restoreId || `sess_${randomUUID().replace(/-/g, '').slice(0, 10)}`
     const rec: AgentSessionRecord = {
       sessionId,
       chatId,
@@ -774,6 +823,7 @@ export class BrowserRegistry {
       width?: number
       height?: number
       openerWindowId?: string
+      restoreId?: string
     } = {},
   ): BrowserTreeWindow {
     const s = this.sessions.get(sessionId)
@@ -787,25 +837,12 @@ export class BrowserRegistry {
     // Omit show → inherit settings (browser.show_agent_windows).
     const show = opts.show ?? cfg.browser.show_agent_windows
     const { width, height } = resolveWindowSize(cfg, opts)
-    const windowId = `win_${randomUUID().replace(/-/g, '').slice(0, 10)}`
+    const windowId = opts.restoreId || `win_${randomUUID().replace(/-/g, '').slice(0, 10)}`
 
-    const bwOpts: BrowserWindowConstructorOptions = {
-      width,
-      height,
-      show,
-      title: 'Navora Browser',
-      webPreferences: {
-        partition: s.partition,
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: false,
-        // Block media autoplay unless the document has user activation.
-        autoplayPolicy: 'document-user-activation-required',
-      },
-    }
-
-    // Session 已 setUserAgent + webRequest；同 partition 的窗口无需再 setUserAgent
-    const win = new BrowserWindow(bwOpts)
+    const win = this.hosts.create(windowId, s.chatId, {
+      partition: s.partition, contextIsolation: true, nodeIntegration: false,
+      sandbox: false, autoplayPolicy: 'document-user-activation-required',
+    }, {width,height}, show)
     // Agent windows default muted so background tabs don't make noise.
     win.webContents.setAudioMuted(true)
 
@@ -830,7 +867,9 @@ export class BrowserRegistry {
     const url = opts.url?.trim() || 'about:blank'
     // Initial load is always programmatic — never a "user navigated" op.
     this.quietNavigateLog(windowId)
-    void win.loadURL(url).catch((e) => console.warn('[browser] loadURL', e))
+    // A new WebContentsView already owns an empty document. Loading about:blank
+    // again races the first real navigation (and may report a spurious failure).
+    if(url!=='about:blank')void win.loadURL(url).catch((e) => console.warn('[browser] loadURL', e))
 
     this.emitTree(s.chatId)
     if (opts.openerWindowId) {
@@ -858,12 +897,41 @@ export class BrowserRegistry {
     const { win } = rec
     const wc = win.webContents
 
+    wc.on('before-input-event',(event,input)=>{
+      if(input.type!=='keyDown'||!input.control&&!input.meta)return
+      const key=input.key.toLowerCase(),host=this.hosts.getHost(win.hostId||'')
+      if(!host)return
+      const action=browserTabShortcut(input)
+      if(action&&host.ready&&!host.suspended&&host.active===rec.windowId){event.preventDefault();if(action==='new')host.window.webContents.focus();host.window.webContents.send('navora:browser.tab-shortcut',{pageId:rec.windowId,action});return}
+      if(input.alt||input.isComposing||input.isAutoRepeat)return
+      if(key==='l'&&!input.shift){event.preventDefault();host.window.webContents.focus();host.window.webContents.send('navora:browser.address-focus',rec.windowId)}
+      else if(key==='f'&&!input.shift&&host.ready&&!host.suspended&&host.active===rec.windowId){event.preventDefault();host.window.webContents.focus();host.window.webContents.send('navora:browser.find-shortcut',{pageId:rec.windowId,action:'open'})}
+      else if(action==='close'){event.preventDefault();win.close()}
+      else if(action==='new'){
+        event.preventDefault();const created=this.createWindow(rec.sessionId,{show:false}),page=this.windows.get(created.windowId)!.win
+        this.hosts.transfer(page,host.id);this.hosts.present(page)
+      }else if(action==='next'||action==='previous'){
+        event.preventDefault();const ids=[...host.pages],at=ids.indexOf(rec.windowId),next=ids[(at+(input.shift?-1:1)+ids.length)%ids.length]
+        if(next)this.hosts.present(this.windows.get(next)!.win)
+      }
+    })
     wc.on('page-title-updated', (_e, title) => {
       rec.title = title || rec.title
+      this.hosts.updateWindowTitle(win)
+      this.emitTree(rec.chatId)
+    })
+    wc.on('page-favicon-updated', (_e, favicons) => {
+      rec.faviconUrl = favicons.find(url => /^https?:/i.test(url))
+      this.emitTree(rec.chatId)
+    })
+    wc.on('did-start-navigation',(_e,_url,inPlace,mainFrame)=>{
+      if(!mainFrame||inPlace)return
+      rec.loadError=undefined;rec.faviconUrl=undefined;rec.crashed=false;win.annotationSelecting=false;win.navigationStopped=false
       this.emitTree(rec.chatId)
     })
     wc.on('did-navigate', (_e, url, httpResponseCode, httpStatusText) => {
       rec.url = url
+      this.hosts.updateWindowTitle(win)
       this.emitTree(rec.chatId)
       if (!this.shouldEmitUserNavigate(rec)) return
       const code = typeof httpResponseCode === 'number' ? httpResponseCode : undefined
@@ -877,17 +945,22 @@ export class BrowserRegistry {
         ...(text ? { statusText: text } : {}),
       })
     })
-    wc.on('did-navigate-in-page', (_e, url) => {
+    wc.on('did-navigate-in-page', (_e, url,mainFrame) => {
+      if(!mainFrame)return
       rec.url = url
+      this.hosts.updateWindowTitle(win)
+      this.events.onVisit?.({chatId:rec.chatId,url,title:rec.title})
       this.emitTree(rec.chatId)
     })
     wc.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (!isMainFrame) return
       // Redirects / superseded navigations commonly emit ERR_ABORTED (-3).
-      if (errorCode === -3) return
+      if (errorCode === -3 || win.navigationStopped) return
       const url = String(validatedURL || rec.url || '').trim()
       if (!url) return
       rec.url = url
+      rec.loadError={code:errorCode,url,description:String(errorDescription||'load_failed')}
+      rec.loading=false
       this.emitTree(rec.chatId)
       if (!this.shouldEmitUserNavigate(rec)) return
       this.events.onUserNavigate?.({
@@ -899,14 +972,22 @@ export class BrowserRegistry {
         statusText: String(errorDescription || 'load_failed').trim() || 'load_failed',
       })
     })
+    wc.on('render-process-gone',()=>{rec.crashed=true;rec.loading=false;win.annotationSelecting=false;this.emitTree(rec.chatId)})
     wc.on('did-start-loading', () => {
+      // A late loading notification from a navigation that was just stopped
+      // must not restore the stale stop-button state. A new main-frame
+      // navigation clears this flag in did-start-navigation above.
+      if(win.navigationStopped){rec.loading=false;this.emitTree(rec.chatId);return}
+      rec.crashed=false
       rec.loading = true
       this.emitTree(rec.chatId)
     })
     wc.on('did-stop-loading', () => {
       rec.loading = false
       rec.title = wc.getTitle() || rec.title
-      rec.url = wc.getURL() || rec.url
+      if(!rec.loadError)rec.url = wc.getURL() || rec.url
+      this.hosts.updateWindowTitle(win)
+      if(!rec.loadError)this.events.onVisit?.({chatId:rec.chatId,url:rec.url,title:rec.title})
       this.emitTree(rec.chatId)
     })
     win.on('show', () => {
@@ -930,15 +1011,25 @@ export class BrowserRegistry {
         return { action: 'deny' }
       }
       const openUrl = details.url || 'about:blank'
+      if(openUrl!=='about:blank'&&!/^https?:\/\//i.test(openUrl))return {action:'deny'}
       if (openUrl !== 'about:blank' && !isUrlAllowed(openUrl, cfg().browser.url_allowlist)) {
         console.warn('[browser] window.open blocked by allowlist', openUrl)
         return { action: 'deny' }
       }
-      // Same-window navigation: avoids spawning extra Agent windows from target=_blank / window.open.
-      if (openUrl && openUrl !== 'about:blank') {
-        void rec.win.loadURL(openUrl).catch((e) => console.warn('[browser] same-window open failed', e))
+      // Electron's createWindow hook requires a WebContents attached to the
+      // BrowserWindow created with its supplied options. BrowserPage uses a
+      // WebContentsView instead, so route popups through our tab registry and
+      // deny Chromium's incompatible native popup creation.
+      try {
+        const child=this.createWindow(rec.sessionId,{url:openUrl,show:false,openerWindowId:rec.windowId})
+        const page=this.windows.get(child.windowId)?.win
+        if(!page)return {action:'deny'}
+        if(rec.win.hostId&&page.hostId!==rec.win.hostId)this.hosts.transfer(page,rec.win.hostId)
+        this.hosts.present(page)
+      } catch(error) {
+        console.warn('[browser] could not open popup in a new tab',error)
       }
-      return { action: 'deny' }
+      return {action:'deny'}
     })
   }
 
@@ -983,6 +1074,8 @@ export class BrowserRegistry {
     this.emitTree(rec.chatId)
     return windowBoundsSnapshot(rec.win)
   }
+
+  requestCloseWindow(windowId:string):void {this.windows.get(windowId)?.win.close()}
 
   closeWindow(windowId: string): void {
     const rec = this.windows.get(windowId)
@@ -1039,6 +1132,40 @@ export class BrowserRegistry {
     this.sessions.delete(sessionId)
     this.emitTree(s.chatId)
   }
+
+  restorePersistent(file:string,chatExists:(id:string)=>boolean){
+    if(this.restored)return
+    this.restored=true;this.persistenceFile=file;this.restoring=true
+    try{
+      if(!fs.existsSync(file))return
+      const records=JSON.parse(fs.readFileSync(file,'utf8'))
+      if(!Array.isArray(records))return
+      const detachedGroups=new Map<string,string>()
+      for(const saved of records.slice(0,100).sort((a,b)=>a.sessionIndex-b.sessionIndex)){
+        if(!chatExists(saved.chatId)||!Number.isSafeInteger(saved.sessionIndex)||saved.sessionIndex<1)continue
+        this.nextIndex.set(saved.chatId,saved.sessionIndex-1)
+        const session=this.createSession(saved.chatId,{persist:true,restoreId:/^sess_[a-f0-9]{10}$/.test(saved.sessionId)?saved.sessionId:undefined})
+        this.nextIndex.set(saved.chatId,Math.max(saved.sessionIndex,this.nextIndex.get(saved.chatId)||0))
+        for(const item of Array.isArray(saved.pages)?saved.pages.slice(0,32):[]){
+          if(!/^win_[a-f0-9]{10}$/.test(item.id)||this.windows.has(item.id))continue
+          if(item.url!=='about:blank'&&!/^https?:\/\//i.test(item.url))continue
+          if(item.url!=='about:blank'&&!isUrlAllowed(item.url,this.getConfig().browser.url_allowlist))continue
+          const created=this.createWindow(session.sessionId,{url:'about:blank',show:false,restoreId:item.id})
+          const rec=this.windows.get(created.windowId)!
+          if(item.url!=='about:blank'){rec.url=item.url;rec.restoreUrl=item.url}
+          rec.tabKey=typeof item.tabKey==='string'?item.tabKey:undefined
+          if(item.viewport&&Number.isFinite(item.viewport.width)&&Number.isFinite(item.viewport.height))rec.win.fixedViewport={width:clampDim(item.viewport.width,1,WINDOW_MAX_W),height:clampDim(item.viewport.height,1,WINDOW_MAX_H)}
+          if(item.detached){const group=detachedGroups.get(item.host);if(group)this.hosts.transfer(rec.win,group);else detachedGroups.set(item.host,this.hosts.detach(rec.win))}
+        }
+      }
+    }catch(error){console.warn('[browser] persistent workspace could not be restored',error)}finally{this.restoring=false}
+  }
+  savePersistent(){
+    if(!this.persistenceFile||this.restoring)return
+    const records=[...this.sessions.values()].filter(s=>s.persist).map(s=>({sessionId:s.sessionId,chatId:s.chatId,sessionIndex:s.sessionIndex,pages:[...s.windows.values()].filter(w=>!w.win.isDestroyed()).map(w=>({id:w.windowId,url:w.restoreUrl||w.win.webContents.getURL()||w.url,tabKey:w.tabKey,viewport:w.win.fixedViewport,detached:this.hosts.presentation(w.win)==='detached',host:w.win.hostId}))}))
+    try{const temp=this.persistenceFile+'.tmp';fs.writeFileSync(temp,JSON.stringify(records));fs.renameSync(temp,this.persistenceFile)}catch(error){console.warn('[browser] workspace save failed',error)}
+  }
+  shutdown(){this.savePersistent();this.persistenceFile=null;this.hosts.dispose()}
 
   async clearChat(chatId: string): Promise<void> {
     const ids = [...this.sessions.values()].filter((s) => s.chatId === chatId).map((s) => s.sessionId)

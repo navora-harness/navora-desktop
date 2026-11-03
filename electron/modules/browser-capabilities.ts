@@ -9,11 +9,16 @@ export function browserCapabilities(contents: object) {
     nodeGeometry: has('getNodeBoxModel'),
     trustedClick: has('clickSelector'),
     trustedPointer: has('dispatchMouseEvent'),
+    agentSnapshot: has('getAgentSnapshot'),
+    agentFind: has('findAgentElements'),
+    targetedTrustedInput: has('dispatchKeyEvent') && has('dispatchMouseEvent') && has('clickSelector'),
+    targetedTouchInput: has('dispatchTouchEvent'),
     fileInput: has('setFileInputFiles'),
     fileInputMethod: 'setFileInputFiles',
     documentResponse: has('loadURLWithResponse'),
     jsDialogHandler: has('setJsDialogHandler'),
     pageIndex: { source: 'isolated-world', openShadow: true, closedShadow: false, frameContents: false },
+    agentDom: { source: 'native-blink', frames: has('getAgentSnapshot'), closedShadow: has('getAgentSnapshot'), coverageAndTruncation: has('getAgentSnapshot') },
     debuggerRequired: false,
   }
 }

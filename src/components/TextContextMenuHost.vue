@@ -10,11 +10,11 @@
           :disabled="state.readonly"
           @click="onCut"
         >
-          <font-awesome-icon icon="scissors" />
+          <AppIcon icon="scissors" />
           <span>剪切</span>
         </button>
         <button type="button" class="sidebar-more-item" role="menuitem" @click="onCopy">
-          <font-awesome-icon icon="clipboard-list" />
+          <AppIcon icon="clipboard-list" />
           <span>复制</span>
         </button>
         <button
@@ -24,7 +24,7 @@
           :disabled="state.readonly"
           @click="onDelete"
         >
-          <font-awesome-icon icon="xmark" />
+          <AppIcon icon="xmark" />
           <span>删除</span>
         </button>
       </template>
@@ -42,18 +42,18 @@
         :disabled="state.readonly"
         @click="onPaste"
       >
-        <font-awesome-icon icon="paste" />
+        <AppIcon icon="paste" />
         <span>粘贴</span>
       </button>
       <button type="button" class="sidebar-more-item" role="menuitem" @click="onSelectAll">
-        <font-awesome-icon icon="check" />
+        <AppIcon icon="check" />
         <span>全选</span>
       </button>
     </template>
     <template v-else-if="state?.kind === 'selection'">
       <div class="sidebar-ctx-label" role="presentation">文本</div>
       <button type="button" class="sidebar-more-item" role="menuitem" @click="onCopy">
-        <font-awesome-icon icon="clipboard-list" />
+        <AppIcon icon="clipboard-list" />
         <span>复制</span>
       </button>
     </template>

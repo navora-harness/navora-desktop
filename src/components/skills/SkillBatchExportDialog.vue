@@ -29,7 +29,7 @@
         :disabled="!items.length"
         @click="emit('confirm')"
       >
-        <font-awesome-icon icon="file-export" class="btn-ic" />
+        <AppIcon icon="file-export" class="btn-ic" />
         导出到文件夹（{{ items.length }}）
       </v-btn>
     </template>

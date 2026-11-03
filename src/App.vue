@@ -21,7 +21,7 @@ import { useOnboarding } from './composables/useOnboarding'
 const { open: wizardOpen, manual: wizardManual, show: showWizard } = useOnboarding()
 
 onMounted(async () => {
-  if (!window.navora) return
+  if (!window.navora || location.hash.startsWith('#/browser-host/')||location.hash.startsWith('#/file-host')) return
   try {
     const cfg = await window.navora.config.get()
     if (cfg.app?.onboarding_completed !== true) {

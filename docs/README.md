@@ -1,6 +1,6 @@
 # 文档导航
 
-整理日期：2026-11-01。当前行为以 [当前功能与验证边界](./current-state.md) 为准；设计草案和历史验收记录保留原日期，不代表最新版本全部功能。
+整理日期：2026-11-03。当前行为以 [当前功能与验证边界](./current-state.md) 为准；设计草案和历史验收记录保留原日期，不代表最新版本全部功能。
 
 ## 使用与开发
 
@@ -22,9 +22,14 @@ SDK 与官方插件链接按关联仓库并列检出组织；仅检出桌面仓�
 
 ## 后续设计
 
-- [功能路线](./feature-roadmap-2026-10.md)：已交付项及接管、编辑、运行恢复等后续验收。
-- [跨平台插件安装与原生运行时](./plugin-platform-installation-plan.md)：待实施，平台产物和协议 v2 不属于当前安装能力。
-- [Fastls 与 fastls-curl 集成](./fastls-plugin-plan.md)：待对接发布物和调用契约，不代表已经接入。
+- [主窗口框架重规划 V2](./main-window-framework-v2-plan.md)：2026-11-03 的整体规划，统一场景、区域职责、工作区状态、菜单归属、视觉规范与分批验收；目前仅规划，尚未实施。
+- [2026-11 产品路线图](./feature-roadmap-2026-11.md)：聊天、文件、插件、浏览器的下一阶段更新；含现状核对、任务编号、共享依赖、实施批次和发布门槛，第 9–15 节为 11 月 3 日增补。
+- [文献检索加速方案](./literature-search-plan.md)：已落地首版多 API 并发查询与增量结果；记录来源级限流、去重、缓存和后续扩展计划。
+- [应用窗口与内容区界面优化建议](./browser-ui-optimization-2026-11.md)：窗口层级、资源侧栏、内容区标题栏和浏览器工具栏的布局与配色建议。
+- [浏览器 Agent 自动化](./browser-agent-automation.md)：Electron cloudbypass.3 的原生快照、iframe/Shadow DOM 和后台可信输入能力。
+- [2026-10 历史功能路线](./feature-roadmap-2026-10.md)：保留当时设计与验收记录；最新计划和状态以 2026-11 路线图及当前功能页为准。
+- [跨平台插件安装与原生运行时](./plugin-platform-installation-plan.md)：通用机制和 Windows 闭环已实现；macOS/Linux 宿主运行与分发仍需逐平台验收。
+- [Fastls 与 fastls-curl 集成](./fastls-plugin-plan.md)：三个基础工具及 Windows x64 闭环已实现；Cookie 上下文、自动逐跳和其他平台认证仍待完成。
 
 ## 历史设计与阶段记录
 

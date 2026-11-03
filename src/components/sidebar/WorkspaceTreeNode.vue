@@ -1,25 +1,28 @@
 <template>
   <div class="ws-nodes" :role="depth === 0 ? 'tree' : 'group'" :aria-label="depth === 0 ? '工作区文件' : undefined">
-    <div v-for="ent in entries" :key="ent.path">
+    <div v-for="ent in entries" :key="ent.path" class="ws-item" :style="{'--tree-level':depth}">
       <button
         type="button"
         class="tree-row"
         role="treeitem"
         :tabindex="selected === ent.path || (!hasVisibleSelection && depth === 0 && entries[0]?.path === ent.path) ? 0 : -1"
-        @focus="emit('select', ent)"
+        @focus="emit('select', ent, false)"
         :aria-level="depth + 1"
         :aria-expanded="ent.type === 'dir' ? expanded.has(ent.path) : undefined"
         :aria-selected="selected === ent.path"
         :data-depth="depth"
+        :data-path="ent.path"
+        :data-download-state="ent.download?.state"
         @keydown="onKeydown($event, ent)"
         :class="{
           dir: ent.type === 'dir',
           open: ent.type === 'dir' && expanded.has(ent.path),
           selected: selected === ent.path,
+          nested: depth > 0,
         }"
-        :style="{ paddingLeft: `${8 + depth * 12}px` }"
-        :title="ent.path"
-        @click="emit('select', ent)"
+        :style="{ '--tree-indent': `${8 + depth * 16}px`, paddingLeft: `${8 + depth * 16}px` }"
+        :title="ent.download ? `${ent.name}\n${downloadDetail(ent.download)}${ent.virtual ? '' : `\n${ent.path}`}` : ent.path"
+        @click="emit('select', ent, true)"
         @dblclick="ent.type === 'dir' ? emit('toggle', ent) : emit('open', ent)"
         @contextmenu.prevent="emit('menu', $event, ent)"
       >
@@ -28,21 +31,21 @@
           class="ws-twist"
           @click.stop="emit('toggle', ent)"
         >
-          <font-awesome-icon
-            :icon="expanded.has(ent.path) ? 'chevron-down' : 'chevron-right'"
-          />
+          <AppIcon icon="chevron-right" />
         </span>
         <span v-else class="ws-twist hidden" />
-        <font-awesome-icon
+        <AppIcon
           :icon="ent.type === 'dir' ? (expanded.has(ent.path) ? 'folder-open' : 'folder') : 'file'"
           class="ws-icon"
         />
         <span class="tree-name">{{ ent.name }}</span>
+        <FileDownloadIndicator v-if="ent.download" :download="ent.download" />
+        <span v-if="ent.activeDownloads" class="file-download-status started" :title="`${ent.activeDownloads} 个文件正在下载`"><AppIcon icon="download" />{{ ent.activeDownloads }}</span>
       </button>
       <div v-if="ent.type === 'dir' && expanded.has(ent.path)" class="ws-kids">
-        <div v-if="loading.has(ent.path)" class="ws-hint">加载中…</div>
+        <div v-if="loading.has(ent.path) && !(children[ent.path] || []).length" class="ws-hint">加载中…</div>
         <WorkspaceTreeNode
-          v-else-if="(children[ent.path] || []).length"
+          v-if="(children[ent.path] || []).length"
           :entries="children[ent.path] || []"
           :depth="depth + 1"
           :expanded="expanded"
@@ -51,10 +54,10 @@
           :selected="selected"
           @toggle="emit('toggle', $event)"
           @open="emit('open', $event)"
-          @select="emit('select', $event)"
+          @select="(entry,activate) => emit('select', entry, activate)"
           @menu="forwardMenu"
         />
-        <div v-else class="ws-hint" :style="{ paddingLeft: `${24 + (depth + 1) * 12}px` }">空</div>
+        <div v-else-if="!loading.has(ent.path)" class="ws-hint" :style="{ paddingLeft: `${28 + (depth + 1) * 16}px` }">空</div>
       </div>
     </div>
   </div>
@@ -62,13 +65,9 @@
 
 <script setup lang="ts">
 import { computed, nextTick } from 'vue'
-export type WsEntry = {
-  path: string
-  name: string
-  type: 'file' | 'dir'
-  size?: number
-  mtimeMs?: number
-}
+import { downloadDetail, type WorkspaceTreeEntry } from '@shared/workspace-downloads'
+import FileDownloadIndicator from '../FileDownloadIndicator.vue'
+export type WsEntry = WorkspaceTreeEntry
 
 defineOptions({ name: 'WorkspaceTreeNode' })
 
@@ -88,7 +87,7 @@ const hasVisibleSelection = computed(() => {
 const emit = defineEmits<{
   toggle: [ent: WsEntry]
   open: [ent: WsEntry]
-  select: [ent: WsEntry]
+  select: [ent: WsEntry, activate?:boolean]
   menu: [e: MouseEvent, ent: WsEntry]
 }>()
 
@@ -125,11 +124,16 @@ function forwardMenu(e: MouseEvent, ent: WsEntry) {
   min-width: 0;
 }
 .tree-row {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   display: flex;
   align-items: center;
   box-sizing: border-box;
-  width: calc(100% - 8px);
-  gap: 5px;
+  width: 100%;
+  height: 28px;
+  min-height: 28px;
+  gap: 6px;
   margin: 0;
   border: 0;
   border-radius: 6px;
@@ -137,35 +141,44 @@ function forwardMenu(e: MouseEvent, ent: WsEntry) {
   background: transparent;
   color: inherit;
   font: inherit;
-  font-size: 0.78rem;
-  line-height: 1.25;
+  font-size: 12px;
+  line-height: 18px;
   text-align: left;
   cursor: pointer;
 }
-.tree-row:hover {
-  background: rgba(255, 255, 255, 0.06);
+.ws-nodes > .ws-item > .tree-row:hover {
+  background: var(--control-hover,rgba(30,43,66,.05));
 }
-.tree-row.selected {
-  background: rgba(93, 173, 226, 0.22);
+.ws-nodes > .ws-item > .tree-row.selected {
+  background: var(--control-selected,rgba(50,105,172,.1));
+  box-shadow: inset 2px 0 rgba(83,127,179,.6);
 }
-.tree-row.selected:hover {
-  background: rgba(93, 173, 226, 0.3);
+.tree-row.selected .tree-name { color:#34577a; }
+.ws-kids { position:relative; }
+.ws-kids::before { content:'';position:absolute;left:calc(15px + var(--tree-level)*16px);top:0;bottom:14px;width:1px;background:#dce3eb;pointer-events:none; }
+.tree-row.nested::before { content:'';position:absolute;left:calc(var(--tree-indent) - 9px);top:50%;width:6px;height:1px;background:#dce3eb;pointer-events:none; }
+.tree-row { transition:background-color 140ms ease; }
+.ws-twist svg { width:10px;height:10px;transition:transform 140ms ease; }
+.tree-row.open > .ws-twist svg { transform:rotate(90deg); }
+@media(prefers-reduced-motion:reduce) {
+  .tree-row,.ws-twist svg { transition:none; }
 }
 .ws-twist {
   display: inline-grid;
   place-items: center;
-  width: 12px;
+  width: 14px;
+  height: 22px;
   flex-shrink: 0;
   font-size: 0.58rem;
-  opacity: 0.55;
+  color:#8290a2;
 }
 .ws-twist.hidden {
   visibility: hidden;
 }
 .ws-icon {
-  opacity: 0.62;
-  font-size: 0.72rem;
-  width: 0.9em;
+  color:#8290a2;
+  width:13px;
+  height:13px;
   flex-shrink: 0;
 }
 .tree-name {
@@ -175,6 +188,11 @@ function forwardMenu(e: MouseEvent, ent: WsEntry) {
   white-space: nowrap;
   flex: 1;
 }
+.file-download-status{display:inline-flex;align-items:center;gap:3px;flex-shrink:0;font-size:10px;color:var(--navora-muted,#7c8999);white-space:nowrap}
+.file-download-status svg{width:11px;height:11px}
+.file-download-status.started{color:var(--navora-accent,#4f78a3)}
+.file-download-status.completed{color:#548477}
+.file-download-status.failed{color:#b46957}
 .ws-hint {
   font-size: 0.7rem;
   opacity: 0.4;

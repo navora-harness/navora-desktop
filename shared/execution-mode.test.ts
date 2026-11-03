@@ -7,7 +7,15 @@ test('only short weather queries receive a smaller toolkit; compound and plugin 
     // “如何” can request a method, and conservatively retains all tools.
     if (!text.includes('如何')) assert.equal(isSimpleWeatherQuery(text), true, text)
   }
-  for (const text of ['天气预报的原理是什么', '使用插件查天气', '看看天气然后下载截图', '打开 https://example.com 查天气', '帮我写个天气插件', '查天气和新闻']) {
+  for (const text of ['天气预报的原理是什么',
+    '使用插件查天气',
+    '看看天气然后下载截图',
+    '打开 https://example.com 查天气',
+    '帮我写个天气插件',
+    '查天气和新闻',
+    '打开百度搜索今天的天气，并打开第一个链接，注意避开广告，全程使用自动化',
+    '搜索今天的天气并打开第一个链接',
+  ]) {
     assert.equal(isSimpleWeatherQuery(text), false, text)
   }
 })

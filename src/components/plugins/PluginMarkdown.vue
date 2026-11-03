@@ -4,7 +4,7 @@
     <div class="document-layout" :class="{'has-outline':sections.length>=3}">
       <nav v-if="sections.length>=3" class="document-outline" :class="{'is-expanded':outlineExpanded}" aria-label="说明目录">
         <span class="outline-label">本页内容</span>
-        <button type="button" class="outline-toggle" :aria-expanded="outlineExpanded" :aria-controls="`${documentId}-outline`" @click="outlineExpanded=!outlineExpanded"><font-awesome-icon icon="list-ul" /><span>本页内容</span><font-awesome-icon icon="chevron-down" /></button>
+        <button type="button" class="outline-toggle" :aria-expanded="outlineExpanded" :aria-controls="`${documentId}-outline`" @click="outlineExpanded=!outlineExpanded"><AppIcon icon="list-ul" /><span>本页内容</span><AppIcon icon="chevron-down" /></button>
         <ol :id="`${documentId}-outline`" class="document-outline-list"><li v-for="section in sections" :key="section.id" :class="{'is-nested':section.level===3}"><button type="button" :class="{active:activeSection===section.id}" :aria-current="activeSection===section.id?'location':undefined" :title="section.title" @click="jump(section.id)">{{ section.title }}</button></li></ol>
       </nav>
       <div ref="body" class="md-body document-prose" v-html="html" @click="onDocumentClick" />

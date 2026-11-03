@@ -76,7 +76,7 @@ app.on('browser-window-created',(_,win) => {
     const text = async (selector:string,value:string) => { await js(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});el.value=${JSON.stringify(value)};el.dispatchEvent(new Event('input',{bubbles:true}))})()`); await wait(30) }
     const button = async (label:string) => { await js(`[...document.querySelectorAll('.creator-workspace button,.creator-library button')].find(button=>button.textContent.trim()===${JSON.stringify(label)}).click()`); await wait(240) }
     const capture = async (name:string) => { await wait(120); fs.writeFileSync(path.join(output,name+'.png'),(await win.webContents.capturePage(undefined,{stayHidden:true})).toPNG()) }
-    const open = async (kind:'plugin'|'skill') => { await click('.creator-menu-trigger'); await js(`[...document.querySelectorAll('.creator-launch-menu button')].find(b=>b.textContent.includes('${kind==='plugin'?'插件':'技能'}创建器')).click()`); await wait(250) }
+    const open = async (kind:'plugin'|'skill') => { await click('.sidebar-settings-btn'); await click('[aria-label="页面更多操作"]'); await js(`[...document.querySelectorAll('.conversation-actions-menu button')].find(b=>b.textContent.trim()==='${kind==='plugin'?'打开插件管理':'技能创建器'}').click()`); await wait(250); if(kind==='plugin')await click('[aria-label="创建插件"]'); await wait(250) }
     try {
       for(let n=0;n<60;n++) { if(await js('!!document.querySelector(".composer")')) break; await wait(100) }
       win.setMinimumSize(0,0); win.setContentSize(1440,900); await wait(200)
@@ -123,7 +123,7 @@ app.on('browser-window-created',(_,win) => {
       await button('README.md'); await text('.creator-code','# 已更新\n\n更新说明。'); await button('更新')
       const saved = await js(`(async()=>{const r=await window.navora.creators.get(${JSON.stringify(projectId)});return r.project})()`)
       assert.equal(saved.installedRevision,saved.revision)
-      await button('导出')
+      await click('[aria-label="创建器更多操作"]'); await js(`[...document.querySelectorAll('.ui-action-menu button')].find(b=>b.textContent.includes('导出 ZIP')).click()`); await wait(240)
       assert.ok(new AdmZip(exportPath).getEntry('main.cjs'))
       await click('[aria-label="退出创建器"]')
       await open('skill'); await button('从模板开始')

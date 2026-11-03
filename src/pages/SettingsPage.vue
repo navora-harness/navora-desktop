@@ -1,5 +1,6 @@
 <template>
-  <div class="settings-page" :class="{ 'is-embedded': embedded, 'is-mobile': mobile, 'external-navigation': !!navigationTarget }">
+  <div class="settings-page" :class="{ 'is-embedded': embedded, 'is-mobile': mobile, 'external-navigation': !!navigationTarget }" :aria-label="navigationTarget ? activeSettingsTitle : '设置'">
+    <div v-if="embedded && !mobile" class="settings-titlebar-spacer" aria-hidden="true" />
     <header class="top">
       <div class="top-left">
         <button
@@ -10,42 +11,27 @@
           title="返回对话"
           :disabled="saving"
           @click="emit('close')"
-        ><font-awesome-icon icon="arrow-left" /></button>
+        ><AppIcon icon="arrow-left" /></button>
         <v-btn v-if="!embedded" variant="text" class="back-btn" @click="$router.push('/')">
-          <font-awesome-icon icon="arrow-left" class="mr-2" />
+          <AppIcon icon="arrow-left" class="mr-2" />
           返回
         </v-btn>
-        <div class="top-titles">
-          <h1 id="settings-page-title">{{ navigationTarget ? activeSettingsTitle : '设置' }}</h1>
-          <p v-if="!mobile" class="top-sub">Navora 应用与 Agent 偏好</p>
-        </div>
       </div>
       <div class="top-actions">
         <button v-if="hasPendingSettings" type="button" class="settings-discard" title="放弃未应用的修改" :disabled="saving || savingInstant" @click="discardSettings">还原</button>
         <span class="settings-save-status" role="status">{{ saving || savingInstant ? '保存中…' : hasPendingSettings ? '有未应用更改' : '已保存' }}</span>
         <v-btn
           color="primary"
-          variant="tonal"
+          variant="flat"
           class="save-btn"
           size="small"
           :loading="saving && !savingAndExit"
-          :disabled="!cfg || saving"
+          :disabled="!cfg || saving || !hasPendingSettings"
           @click="save(false)"
         >
           应用
         </v-btn>
-        <v-btn
-          v-if="!mobile && !navigationTarget"
-          color="primary"
-          variant="tonal"
-          class="save-btn"
-          size="small"
-          :loading="saving && savingAndExit"
-          :disabled="!cfg || saving"
-          @click="save(true)"
-        >
-          应用并退出
-        </v-btn>
+        <ActionMenu v-if="!mobile && !navigationTarget" label="应用选项" icon="chevron-down" :disabled="!cfg || saving" :items="[{id:'exit',label:'应用并退出',icon:'check'}]" @select="save(true)" />
       </div>
     </header>
 
@@ -63,14 +49,14 @@
             aria-controls="settings-content"
             @click="selectTab(item.value)"
           >
-            <font-awesome-icon :icon="item.icon" class="settings-nav-icon" />
+            <AppIcon :icon="item.icon" class="settings-nav-icon" />
             <span class="nav-label">{{ item.title }}</span>
             <span v-if="!mobile" class="nav-desc">{{ item.desc }}</span>
           </button>
         </div>
         <div class="nav-foot">
           <button type="button" class="nav-item nav-guide" @click="openOnboarding">
-            <font-awesome-icon icon="circle-question" class="settings-nav-icon" />
+            <AppIcon icon="circle-question" class="settings-nav-icon" />
             <span class="nav-label">开始引导</span>
             <span v-if="!mobile" class="nav-desc">模型 · 工作区 · 权限 · 远程</span>
           </button>
@@ -79,7 +65,7 @@
       </Teleport>
 
       <div class="panel">
-        <div id="settings-content" ref="contentEl" class="content" role="region" aria-labelledby="settings-page-title">
+        <div id="settings-content" ref="contentEl" class="content" role="region" :aria-label="navigationTarget ? activeSettingsTitle : '设置'">
           <!-- 基本 -->
           <section v-if="tab === 'basic'" class="section">
             <header class="section-head">
@@ -245,7 +231,7 @@
                     <button type="button" class="provider-tool-btn" @click="addCustomProvider">
                       自定义
                     </button>
-                    <v-menu location="bottom end"><template #activator="{ props: menuProps }"><button v-bind="menuProps" type="button" class="provider-tool-btn provider-more" aria-label="服务商更多操作" title="更多操作"><font-awesome-icon icon="ellipsis" /></button></template><div class="skill-more-panel" role="menu"><button type="button" role="menuitem" class="skill-more-item" @click="resetProviders">重置预设</button></div></v-menu>
+                    <v-menu location="bottom end"><template #activator="{ props: menuProps }"><button v-bind="menuProps" type="button" class="provider-tool-btn provider-more" aria-label="服务商更多操作" title="更多操作"><AppIcon icon="ellipsis" /></button></template><div class="skill-more-panel" role="menu"><button type="button" role="menuitem" class="skill-more-item" @click="resetProviders">重置预设</button></div></v-menu>
                   </div>
                   <v-select v-if="mobile" :model-value="selectedProviderId" :items="cfg.ai.providers.map(p => ({title:p.label || p.id,value:p.id}))" label="当前服务商" class="mobile-provider-select" :menu-props="selectMenuProps" hide-details @update:model-value="selectProvider" />
                   <ul v-else class="provider-list" role="listbox" aria-label="模型服务商">
@@ -315,7 +301,7 @@
                     <ProviderConnectionFields :provider="provider" v-model:key-draft="apiKeyDraft" :key-label="apiKeyLabel" :key-placeholder="apiKeyPreview ? '留空保留现有密钥' : '输入 API Key'">
                       <template #key-actions><button v-if="apiKeyPreview" type="button" class="provider-tool-btn danger" :disabled="clearingApiKey" @click.stop="clearApiKey">清除</button></template>
                     </ProviderConnectionFields>
-                    <button type="button" class="advanced-toggle span-2" :aria-expanded="advancedModel" @click="advancedModel = !advancedModel"><font-awesome-icon :icon="advancedModel ? 'chevron-down' : 'chevron-right'" />高级连接配置</button>
+                    <button type="button" class="advanced-toggle span-2" :aria-expanded="advancedModel" @click="advancedModel = !advancedModel"><AppIcon :icon="advancedModel ? 'chevron-down' : 'chevron-right'" />高级连接配置</button>
                     <DisclosureTransition><div v-if="advancedModel" class="advanced-connection span-2 form-grid">
                       <v-select v-model="provider.protocol" :items="[{title:'OpenAI Chat Completions', value:'chat_completions'}]" label="API 协议" :menu-props="selectMenuProps" />
                       <v-select v-model="provider.output_token_param" :items="['max_tokens','max_completion_tokens']" label="输出上限参数" :menu-props="selectMenuProps" />
@@ -378,10 +364,10 @@
           <section v-if="tab === 'browser'" class="section">
             <header class="section-head">
               <h2>浏览器</h2>
-              <p>Agent 窗口与访问限制</p>
+              <p>Agent 窗口、页面加载与访问范围</p>
             </header>
             <div class="card">
-              <button type="button" class="advanced-toggle" :aria-expanded="advancedBrowser" @click="advancedBrowser = !advancedBrowser"><font-awesome-icon :icon="advancedBrowser ? 'chevron-down' : 'chevron-right'" />访问与语言配置</button>
+              <button type="button" class="advanced-toggle" :aria-expanded="advancedBrowser" @click="advancedBrowser = !advancedBrowser"><AppIcon :icon="advancedBrowser ? 'chevron-down' : 'chevron-right'" />高级：网站标识与语言</button>
               <DisclosureTransition><div v-if="advancedBrowser" class="ua-form">
                 <v-select
                   :model-value="cfg.browser.default_ua_preset"
@@ -426,37 +412,36 @@
             </div>
 
             <div class="card">
-              <h3 class="card-title">窗口</h3>
+              <h3 class="card-title">窗口行为</h3>
               <div class="switch-row">
                 <div>
                   <div class="switch-title">新建 Agent 窗口默认显示</div>
-                  <div class="switch-hint">关闭后窗口在后台运行，可在侧栏切换显示</div>
+                  <div class="switch-hint">关闭后在后台打开，可从浏览器资源中切换到页面</div>
                 </div>
                 <v-switch aria-label="新建 Agent 窗口默认显示" v-model="cfg.browser.show_agent_windows" color="primary" hide-details density="compact" />
               </div>
               <div class="switch-row">
                 <div>
-                  <div class="switch-title">阻止 window.open</div>
-                  <div class="switch-hint">拦截页面弹出的新窗口</div>
+                  <div class="switch-title">拦截网站弹出窗口</div>
+                  <div class="switch-hint">关闭时，网站通过 window.open 打开的页面会作为新标签打开</div>
                 </div>
                 <v-switch aria-label="阻止 window.open" v-model="cfg.browser.block_window_open" color="primary" hide-details density="compact" />
-              </div>
-              <div class="switch-row">
-                <div>
-                  <div class="switch-title">记录 DataDome 上报</div>
-                  <div class="switch-hint">将 captcha-delivery / datadome 请求与 body 写入 logs/datadome-telemetry.jsonl（调试用）</div>
-                </div>
-                <v-switch aria-label="记录 DataDome 上报" v-model="cfg.browser.log_datadome_telemetry" color="primary" hide-details density="compact" />
               </div>
             </div>
 
             <div class="card">
-              <h3 class="card-title">超时与等待</h3>
+              <h3 class="card-title">导航与加载</h3>
+              <p class="switch-hint">超时只结束等待，不会自动关闭页面；可在浏览器工具栏停止或重新加载。</p>
               <div class="form-grid">
                 <v-text-field
                   v-model.number="cfg.browser.navigation_timeout_ms"
                   type="number"
-                  label="导航超时 (ms)"
+                  min="1000"
+                  max="300000"
+                  step="1000"
+                  label="导航等待上限（毫秒）"
+                  hint="1,000–300,000 毫秒；默认 30,000"
+                  persistent-hint
                   variant="outlined"
                   density="comfortable"
                   color="primary"
@@ -465,7 +450,12 @@
                 <v-text-field
                   v-model.number="cfg.browser.action_timeout_ms"
                   type="number"
-                  label="动作超时 (ms)"
+                  min="1000"
+                  max="120000"
+                  step="1000"
+                  label="页面操作等待上限（毫秒）"
+                  hint="1,000–120,000 毫秒；默认 15,000"
+                  persistent-hint
                   variant="outlined"
                   density="comfortable"
                   color="primary"
@@ -475,34 +465,60 @@
               <div class="switch-block">
                 <div class="switch-row">
                   <div>
-                    <div class="switch-title">等待页面 load</div>
-                    <div class="switch-hint">导航后等待页面加载完成</div>
+                    <div class="switch-title">等待主页面加载完成</div>
+                    <div class="switch-hint">Agent 导航后等待页面 load 事件；关闭后更快返回，但内容可能尚未就绪</div>
                   </div>
-                  <v-switch aria-label="等待页面 load" v-model="cfg.browser.wait.load" color="primary" hide-details density="compact" />
+                  <v-switch aria-label="等待主页面加载完成" v-model="cfg.browser.wait.load" color="primary" hide-details density="compact" />
                 </div>
                 <div class="switch-row">
                   <div>
-                    <div class="switch-title">等待 network idle</div>
-                    <div class="switch-hint">网络短暂空闲后再继续</div>
+                    <div class="switch-title">继续等待网络短暂空闲</div>
+                    <div class="switch-hint">适合加载较慢的页面；持续联网的网站可能要等到超时才继续</div>
                   </div>
-                  <v-switch aria-label="等待 network idle" v-model="cfg.browser.wait.network_idle" color="primary" hide-details density="compact" />
+                  <v-switch aria-label="继续等待网络短暂空闲" v-model="cfg.browser.wait.network_idle" color="primary" hide-details density="compact" />
                 </div>
+                <v-text-field
+                  v-if="cfg.browser.wait.network_idle"
+                  v-model.number="cfg.browser.wait.network_idle_ms"
+                  type="number"
+                  min="100"
+                  max="5000"
+                  step="100"
+                  label="网络空闲判定时间（毫秒）"
+                  hint="连续空闲达到此时间后继续；100–5,000 毫秒，默认 500"
+                  persistent-hint
+                  variant="outlined"
+                  density="comfortable"
+                  color="primary"
+                  base-color="#c5d0db"
+                />
               </div>
             </div>
 
             <div class="card">
-              <h3 class="card-title">URL 白名单</h3>
+              <h3 class="card-title">访问范围</h3>
               <v-textarea
                 v-model="allowlistText"
-                label="每行一条；空 = 不限制"
-                rows="6"
+                label="网址白名单（每行一条）"
+                rows="5"
                 variant="outlined"
                 density="comfortable"
                 color="primary"
                 base-color="#c5d0db"
-                hint="支持域名、通配符或完整 URL"
+                hint="留空表示不限制；支持域名、通配符或完整 URL"
                 persistent-hint
               />
+            </div>
+
+            <div class="card">
+              <h3 class="card-title">诊断</h3>
+              <div class="switch-row">
+                <div>
+                  <div class="switch-title">记录 DataDome 上报</div>
+                  <div class="switch-hint">仅用于排查验证码问题；请求内容会写入本机日志文件</div>
+                </div>
+                <v-switch aria-label="记录 DataDome 上报" v-model="cfg.browser.log_datadome_telemetry" color="primary" hide-details density="compact" />
+              </div>
             </div>
           </section>
 
@@ -662,7 +678,7 @@
                     :disabled="!skillBatchSelectedCount || !!skillsBusy"
                     @click="askBatchRemoveSkills"
                   >
-                    <font-awesome-icon icon="trash" class="btn-ic-left" />
+                    <AppIcon icon="trash" class="btn-ic-left" />
                     删除{{ skillBatchSelectedCount ? ` ${skillBatchSelectedCount}` : '' }}
                   </v-btn>
                   <span class="skill-batch-count" :class="{ ready: skillBatchSelectedCount > 0 }">
@@ -682,7 +698,7 @@
             </div>
 
             <div v-if="!skillsList.length" class="card mt-3">
-              <div class="settings-empty"><font-awesome-icon icon="book" /><strong>暂无技能</strong><span>新建、导入或从商店添加</span></div>
+              <div class="settings-empty"><AppIcon icon="book" /><strong>暂无技能</strong><span>新建、导入或从商店添加</span></div>
             </div>
 
             <div v-if="proposals.length && !skillBatchMode" class="card mt-3">
@@ -742,7 +758,7 @@
                   :disabled="!!skillsBusy"
                   @click="enterSkillBatchMode"
                 >
-                  <font-awesome-icon icon="list-check" />
+                  <AppIcon icon="list-check" />
                 </v-btn>
               </div>
             </div>
@@ -765,7 +781,7 @@
                     :class="{ on: skillBatchSelectedIds.has(s.id) }"
                     aria-hidden="true"
                   >
-                    <font-awesome-icon
+                    <AppIcon
                       :icon="skillBatchSelectedIds.has(s.id) ? 'circle-check' : 'circle'"
                     />
                   </span>
@@ -803,7 +819,7 @@
                       :disabled="!!skillsBusy"
                       v-bind="menuProps"
                     >
-                      <font-awesome-icon icon="ellipsis-vertical" />
+                      <AppIcon icon="ellipsis-vertical" />
                     </v-btn>
                   </template>
                   <div class="skill-more-panel" role="menu">
@@ -813,7 +829,7 @@
                       role="menuitem"
                       @click="openEditSkill(s.id)"
                     >
-                      <font-awesome-icon icon="pen-to-square" />
+                      <AppIcon icon="pen-to-square" />
                       <span>编辑</span>
                     </button>
                     <button
@@ -822,7 +838,7 @@
                       role="menuitem"
                       @click="exportSkill(s.id)"
                     >
-                      <font-awesome-icon icon="file-export" />
+                      <AppIcon icon="file-export" />
                       <span>导出</span>
                     </button>
                     <button
@@ -831,7 +847,7 @@
                       role="menuitem"
                       @click="askRemoveSkill(s)"
                     >
-                      <font-awesome-icon icon="trash" />
+                      <AppIcon icon="trash" />
                       <span>删除</span>
                     </button>
                   </div>
@@ -1209,9 +1225,10 @@
       v-model="toast.show"
       :color="toast.color"
       :timeout="2200"
-      location="top"
+      location="top end"
+      variant="tonal"
+      class="app-toast"
       :z-index="10000"
-      multi-line
     >
       {{ toast.text }}
     </v-snackbar>
@@ -1221,6 +1238,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import ActionMenu from '@/components/ActionMenu.vue'
 import { defaultModelCapabilities } from '@shared/model-capabilities'
 import { rebaseSettingsDraft } from '@shared/settings-draft'
 import { settingsDraftSession, settingsCredentialDrafts } from '@/composables/settingsDraftSession'
@@ -2236,6 +2254,7 @@ const PERM_LABELS: Record<string, string> = {
   evaluate: '执行页面脚本',
   screenshot: '页面截图',
   'desktop.screenshot': '桌面截图',
+  'network.request': '独立网络请求',
   'network.observe': '观察网络请求',
   'network.modify': '修改网络请求',
   'network.block': '拦截网络请求',
@@ -2571,6 +2590,9 @@ async function save(exitAfter = false) {
     cfg.value.ai.max_tool_rounds = clamp(cfg.value.ai.max_tool_rounds, 4, 80, 24)
     cfg.value.ai.continue_tool_rounds = clamp(cfg.value.ai.continue_tool_rounds, 4, 40, 12)
     cfg.value.app.max_composer_chars = clamp(cfg.value.app.max_composer_chars, 1000, 200000, 16000)
+    cfg.value.browser.navigation_timeout_ms = clamp(cfg.value.browser.navigation_timeout_ms, 1000, 300000, 30000)
+    cfg.value.browser.action_timeout_ms = clamp(cfg.value.browser.action_timeout_ms, 1000, 120000, 15000)
+    cfg.value.browser.wait.network_idle_ms = clamp(cfg.value.browser.wait.network_idle_ms, 100, 5000, 500)
     if (!cfg.value.fork_decision) {
       cfg.value.fork_decision = createDefaultForkDecision()
     }
@@ -2682,6 +2704,8 @@ defineExpose({apply:()=>save(false)})
 
 <style scoped>
 .settings-page {
+  container-type:inline-size;
+  min-width:0;
   height: 100vh;
   width: 100%;
   box-sizing: border-box;
@@ -2726,6 +2750,8 @@ defineExpose({apply:()=>save(false)})
   gap: 4px;
   min-width: 0;
 }
+.top-titles{min-width:0}
+.top-titles h1{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .top-actions {
   display: flex;
   align-items: center;
@@ -2902,7 +2928,7 @@ defineExpose({apply:()=>save(false)})
 
 .form-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0,1fr) minmax(0,1fr);
   gap: 14px 16px;
   align-items: start;
 }
@@ -3544,6 +3570,18 @@ defineExpose({apply:()=>save(false)})
   color: #9aa8b5;
   font-size: 1.05rem;
 }
+/* Adapt to the available pane, including a wide navigation rail. */
+.section-head h2{font-size:16px;font-weight:600;line-height:1.5}.section-head p{font-size:12px;line-height:1.6}.card{border-color:#e0e6ee;border-radius:9px}.card-title{font-size:12px;font-weight:600;letter-spacing:0;text-transform:none}
+@container(max-width:640px){
+  .settings-page .content{padding:16px!important}
+  .content{padding:16px}.form-grid,.about-dl,.provider-layout{grid-template-columns:minmax(0,1fr)}.card{padding:14px}.connection-form{grid-template-columns:minmax(0,1fr)}.perm-toolbar{flex-wrap:wrap}.perm-table-head{display:none}.perm-row{grid-template-columns:minmax(0,1fr);gap:6px}.perm-id{overflow-wrap:anywhere}.provider-edit-head{flex-wrap:wrap}.switch-row{gap:12px}.settings-save-status{font-size:10px}
+}
+@container(max-width:560px){
+  .settings-page.external-navigation:not(.is-mobile)>.top{display:grid;grid-template-columns:minmax(0,1fr);height:auto!important;min-height:44px;padding:0!important;gap:0}
+  .settings-page.external-navigation:not(.is-mobile)>.top>.top-left{min-height:44px;padding:4px var(--workspace-caption-reserve,12px) 4px 12px}
+  .settings-page.external-navigation:not(.is-mobile)>.top>.top-actions{min-width:0;min-height:40px;justify-content:flex-end;padding:4px 12px;border-top:1px solid #edf0f5;background:#fbfcfd}
+  .top-sub{display:none}.top-titles{flex:1}.top-titles h1{font-size:13px;line-height:20px}.settings-page.is-mobile .nav-item{border-radius:6px;padding:6px 10px;min-height:32px}.settings-page.is-mobile .nav-item.active{background:var(--control-selected);border-color:#cbd9e8}.settings-page.is-mobile .nav-item.active .nav-label{color:#42658e}
+}
 </style>
 
 <style>
@@ -3590,4 +3628,5 @@ defineExpose({apply:()=>save(false)})
 .skill-more-item.danger:hover {
   background: #fdecea;
 }
-</style>
+.settings-titlebar-spacer{height:44px;min-height:44px;flex:0 0 44px}
+:global(.navora-app .shell.frameless:not(.mobile-layout) .settings-titlebar-spacer){height:56px;min-height:56px;flex-basis:56px}</style>

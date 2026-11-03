@@ -50,6 +50,7 @@ function allowCapability(
 export function createPluginHostApi(
   ctx: ToolExecContext,
   approvedCapabilities: readonly PermissionCapability[],
+  runtime?: PluginHostApi['runtime'],
 ): PluginHostApi {
   if (!ctx || typeof ctx.getConfig !== 'function') {
     throw new Error('plugin_host_context_invalid')
@@ -100,6 +101,7 @@ export function createPluginHostApi(
   }
 
   const api: PluginHostApi & { ctx?: PluginHostApi } = {
+    runtime,
     chatId: ctx.chatId,
     signal: ctx.signal,
     approvedCapabilities: [...approvedCapabilities],

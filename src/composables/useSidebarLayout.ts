@@ -2,10 +2,12 @@ import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 
 type Panel = 'chats' | 'workspace' | 'browser'
 type Divider = 'width' | 'chats' | 'resources'
-const defaults = { width: 310, workspace: 155, browser: 155, chats: true, showWorkspace: true, showBrowser: true }
+const defaults = { width: 280, workspace: 155, browser: 155, chats: true, showWorkspace: true, showBrowser: true }
 
 export function useSidebarLayout() {
   const layout = ref({ ...defaults })
+  const viewportWidth=ref(innerWidth)
+  const maxWidth=computed(()=>Math.min(460,Math.max(250,viewportWidth.value*.35)))
   const resizing = ref(false)
   try {
     const saved = JSON.parse(localStorage.getItem('navora.sidebar') || '{}')
@@ -15,7 +17,7 @@ export function useSidebarLayout() {
   } catch { /* Use defaults when storage is unavailable. */ }
   const clamp = (v: number, min: number, max: number) => Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : min
   function normalize() {
-    layout.value.width = clamp(layout.value.width, 250, innerWidth > 1024 ? Math.min(560, innerWidth * .5) : 560)
+    layout.value.width = clamp(layout.value.width, 250, maxWidth.value)
     const max = Math.max(64, (innerHeight - 220) / 2)
     layout.value.workspace = clamp(layout.value.workspace, 64, max)
     layout.value.browser = clamp(layout.value.browser, 64, max)
@@ -105,13 +107,14 @@ export function useSidebarLayout() {
     else adjust(divider, ['ArrowLeft', 'ArrowUp'].includes(event.key) ? -12 : 12)
   }
   watch(layout, () => { clearTimeout(saveTimer); saveTimer = setTimeout(persist, 150) }, { deep: true })
-  window.addEventListener('resize', normalize)
+  function onResize(){viewportWidth.value=innerWidth;normalize()}
+  window.addEventListener('resize', onResize)
   onUnmounted(() => {
     disposed = true
     endDrag?.()
     if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame)
     persist()
-    window.removeEventListener('resize', normalize)
+    window.removeEventListener('resize', onResize)
   })
-  return { layout, visible, style, resizing, toggle, beginResize, resizeKey }
+  return { layout, visible, style, resizing, maxWidth, toggle, beginResize, resizeKey }
 }

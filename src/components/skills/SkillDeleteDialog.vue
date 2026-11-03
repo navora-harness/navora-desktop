@@ -10,7 +10,7 @@
   >
     <div class="danger-panel">
       <div class="danger-icon" aria-hidden="true">
-        <font-awesome-icon icon="trash" />
+        <AppIcon icon="trash" />
       </div>
       <div class="danger-body">
         <template v-if="isBatch">

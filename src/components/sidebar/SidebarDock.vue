@@ -5,6 +5,7 @@
         <h2 :id="`dock-label-${panel.id}`" class="dock-label">{{ panel.label }}</h2>
         <div :id="`dock-actions-${panel.id}`" class="dock-panel-actions" />
         <SidebarMoreMenu :label="`${panel.label}侧栏`" @hide="emit('close')" />
+        <button type="button" class="ui-icon-button" :aria-label="`隐藏${panel.label}侧栏`" :title="`隐藏${panel.label}侧栏`" @click="emit('close')"><AppIcon icon="angles-left" /></button>
       </header>
       <div :id="`dock-content-${panel.id}`" class="dock-content" :inert="active !== panel.id" />
     </section>

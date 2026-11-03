@@ -1,47 +1,37 @@
 <template>
   <div class="chat-resource-buttons">
-    <button v-if="context==='chat'" type="button" class="chat-resource-button" data-chat-resource="files" title="打开对话文件夹" aria-label="打开对话文件夹" :disabled="!chatId || isRemote || openingFolder" @click="openFolder">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5.5A1.5 1.5 0 0 1 4.5 4H9l2 2h8.5A1.5 1.5 0 0 1 21 7.5V19a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7Z"/><path d="M3 10h18M7 14h4m-4 3h7"/></svg>
-    </button>
     <button v-if="context==='chat'" type="button" class="chat-resource-button" :class="{selected:open}" data-chat-resource="resources" title="当前对话摘要" aria-label="当前对话摘要" :aria-expanded="open" :disabled="!chatId" @click="emit('toggleResources')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
+      <AppIcon icon="file-lines" />
     </button>
-    <span class="chat-resource-divider" aria-hidden="true" />
+    <button v-if="context==='chat'" type="button" class="chat-resource-button" :class="{selected:fileWorkspaceOpen}" data-chat-resource="workspace" title="工作区" aria-label="工作区" :aria-expanded="fileWorkspaceOpen" :disabled="!chatId" @click="emit('toggleWorkspace')"><AppIcon icon="workspace" /></button>
     <v-menu v-model="moreOpen" location="bottom end" origin="auto" :offset="6" :close-on-content-click="true">
-      <template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" class="chat-resource-button chat-more-trigger" :class="{selected:moreOpen}" :title="`${contextLabel}更多操作`" aria-label="页面更多操作" :disabled="context==='chat' && !chatId"><font-awesome-icon icon="ellipsis" /></button></template>
+      <template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" class="chat-resource-button chat-more-trigger" :class="{selected:moreOpen}" :title="`${contextLabel}更多操作`" aria-label="页面更多操作" :disabled="context==='chat' && !chatId"><AppIcon icon="ellipsis" /></button></template>
       <div class="conversation-actions-menu" role="menu" :aria-label="`${contextLabel}操作菜单`" @keydown="onMenuKey" @keydown.esc.stop="moreOpen=false">
         <template v-if="context==='chat'">
         <div class="conversation-actions-heading">浏览器</div>
-        <button type="button" role="menuitem" aria-label="快速打开浏览器" :disabled="!chatId || openingBrowser" @click="quickOpen"><font-awesome-icon :icon="openingBrowser?'circle-notch':'arrow-up-right-from-square'" :spin="openingBrowser" /><span>打开浏览器窗口<small>已有窗口会直接显示</small></span><kbd>Ctrl/⌘ ⇧ B</kbd></button>
-        <button type="button" role="menuitem" :disabled="!chatId" @click="emit('showBrowser')"><font-awesome-icon icon="window-maximize" /><span>查看浏览器资源</span><small class="conversation-actions-count">{{ windowCount }} 个窗口</small></button>
-        <button type="button" role="menuitem" @click="emit('newBrowserTab')"><font-awesome-icon icon="plus" /><span>新建侧栏浏览器标签页</span></button>
-        <div class="conversation-actions-heading conversation-actions-section">查看</div>
-        <button type="button" role="menuitem" @click="emit('toggleResources')"><font-awesome-icon icon="list-ul" /><span>{{ open?'隐藏摘要':'查看对话摘要' }}</span></button>
-        <button type="button" role="menuitem" :disabled="isRemote" @click="openFolder"><font-awesome-icon icon="folder-open" /><span>打开对话文件夹</span></button>
-        <button type="button" role="menuitem" @click="emit('toggleWorkspace')"><font-awesome-icon icon="window-restore" /><span>{{ fileWorkspaceOpen?'隐藏右侧栏':'打开右侧栏' }}</span></button>
-        <div class="conversation-actions-heading conversation-actions-section">当前对话</div>
-        <button type="button" role="menuitem" @click="emit('newChat')"><font-awesome-icon icon="pen-to-square" /><span>新对话</span></button>
-        <button type="button" role="menuitem" @click="emit('search')"><font-awesome-icon icon="magnifying-glass" /><span>搜索对话</span></button>
-        <button type="button" role="menuitem" @click="emit('rename')"><font-awesome-icon icon="pen-to-square" /><span>修改标题</span></button>
-        <button type="button" role="menuitem" :aria-label="pinned?'取消置顶当前对话':'置顶当前对话'" @click="emit('pin')"><font-awesome-icon icon="thumbtack" /><span>{{ pinned?'取消置顶':'置顶对话' }}</span><font-awesome-icon v-if="pinned" class="conversation-actions-check" icon="check" /></button>
-        <button type="button" role="menuitem" :disabled="!canExport || exporting" @click="emit('export')"><font-awesome-icon icon="file-export" /><span>{{ exporting?'正在导出…':'导出对话' }}</span></button>
-        <button v-if="running" type="button" role="menuitem" @click="emit('stop')"><font-awesome-icon icon="stop" /><span>停止当前任务</span></button>
-        <button type="button" role="menuitem" class="conversation-action-danger" @click="emit('delete')"><font-awesome-icon icon="trash" /><span>删除当前对话…</span></button>
+        <button type="button" role="menuitem" aria-label="快速打开浏览器" :disabled="!chatId || openingBrowser" @click="quickOpen"><AppIcon :icon="openingBrowser?'circle-notch':'arrow-up-right-from-square'" :spin="openingBrowser" /><span>打开浏览器标签页<small>已有页面会直接显示</small></span><kbd>Ctrl/⌘ ⇧ B</kbd></button>
+        <button type="button" role="menuitem" :disabled="isRemote" @click="openFolder"><AppIcon icon="folder-open" /><span>打开对话文件夹</span></button>
+        <div class="conversation-actions-heading conversation-actions-section">当前对话 · {{ windowCount }} 个页面</div>
+        <button type="button" role="menuitem" @click="emit('rename')"><AppIcon icon="pen-to-square" /><span>修改标题</span></button>
+        <button type="button" role="menuitem" :aria-label="pinned?'取消置顶当前对话':'置顶当前对话'" @click="emit('pin')"><AppIcon icon="thumbtack" /><span>{{ pinned?'取消置顶':'置顶对话' }}</span><AppIcon v-if="pinned" class="conversation-actions-check" icon="check" /></button>
+        <button type="button" role="menuitem" :disabled="!canExport || exporting" @click="emit('export')"><AppIcon icon="file-export" /><span>{{ exporting?'正在导出…':'导出对话' }}</span></button>
+        <button v-if="running" type="button" role="menuitem" @click="emit('stop')"><AppIcon icon="stop" /><span>停止当前任务</span></button>
+        <button type="button" role="menuitem" class="conversation-action-danger" @click="emit('delete')"><AppIcon icon="trash" /><span>删除当前对话…</span></button>
         </template>
-        <template v-else><div class="conversation-actions-heading">{{ contextLabel }}</div><button v-for="action in pageActions" :key="action.id" type="button" role="menuitem" @click="emit('contextAction',action.id)"><font-awesome-icon :icon="action.icon" /><span>{{ action.label }}</span></button><div class="conversation-actions-heading conversation-actions-section">导航</div><button type="button" role="menuitem" @click="emit('contextAction','back')"><font-awesome-icon icon="comments" /><span>返回对话</span></button></template>
+        <template v-else><div class="conversation-actions-heading">{{ contextLabel }}</div><button v-for="action in pageActions" :key="action.id" type="button" role="menuitem" @click="emit('contextAction',action.id)"><AppIcon :icon="action.icon" /><span>{{ action.label }}</span></button><div class="conversation-actions-heading conversation-actions-section">导航</div><button type="button" role="menuitem" @click="emit('contextAction','back')"><AppIcon icon="comments" /><span>返回对话</span></button></template>
       </div>
     </v-menu>
-    <button type="button" class="chat-resource-button" :class="{selected:fileWorkspaceOpen}" data-chat-resource="workspace" title="右侧栏" aria-label="右侧栏" :aria-expanded="fileWorkspaceOpen" :disabled="!chatId" @click="emit('toggleWorkspace')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
   </div>
 </template>
 <script setup lang="ts">
+import AppIcon from './icons/AppIcon.vue'
 import {computed,ref,watch} from 'vue'
 import type {BrowserTreeSession} from '@shared/types'
-const props=defineProps<{chatId:string;tree:BrowserTreeSession[];isRemote:boolean;open?:boolean;fileWorkspaceOpen?:boolean;hasFileTabs?:boolean;pinned?:boolean;canExport?:boolean;exporting?:boolean;context:'chat'|'files'|'plugins'|'settings'|'creator';running?:boolean}>()
+const props=defineProps<{chatId:string;tree:BrowserTreeSession[];isRemote:boolean;open?:boolean;fileWorkspaceOpen?:boolean;hasFileTabs?:boolean;pinned?:boolean;canExport?:boolean;exporting?:boolean;context:'chat'|'files'|'plugins'|'settings'|'creator'|'browser';running?:boolean}>()
 const emit=defineEmits<{notify:[text:string,color?:string];toggleResources:[];toggleWorkspace:[];showBrowser:[];rename:[];pin:[];export:[];newChat:[];search:[];delete:[];stop:[];newBrowserTab:[];contextAction:[action:string]}>()
 const openingFolder=ref(false),openingBrowser=ref(false),moreOpen=ref(false)
-const contextLabel=computed(()=>({chat:'当前对话',files:'文件管理',plugins:'插件',settings:'设置',creator:'创建器'})[props.context])
-const pageActions=computed(()=>({files:[{id:'refresh',icon:'arrow-rotate-right',label:'刷新文件列表'},{id:'folder',icon:'folder-open',label:'打开当前文件夹'}],plugins:[{id:'refresh',icon:'arrow-rotate-right',label:'刷新插件'},{id:'manage',icon:'list-check',label:'管理已安装插件'},{id:'create',icon:'plus',label:'创建插件'}],settings:[{id:'apply',icon:'check',label:'应用设置'},{id:'models',icon:'microchip',label:'模型配置'},{id:'plugins',icon:'puzzle-piece',label:'打开插件管理'}],creator:[{id:'save',icon:'check',label:'保存草稿'},{id:'export',icon:'file-export',label:'导出作品'}],chat:[]})[props.context])
+const contextLabel=computed(()=>({chat:'当前对话',files:'文件管理',plugins:'插件',settings:'设置',creator:'创建器',browser:'浏览器'})[props.context])
+const pageActions=computed(()=>({files:[],plugins:[{id:'create',icon:'plus',label:'创建插件'}],settings:[{id:'models',icon:'microchip',label:'模型配置'},{id:'plugins',icon:'puzzle-piece',label:'打开插件管理'},{id:'create-skill',icon:'book',label:'技能创建器'}],creator:[],browser:[{id:'new-browser',icon:'plus',label:'新建浏览器标签页'}],chat:[]})[props.context])
 watch(()=>props.context,()=>{moreOpen.value=false})
 const currentSessions=computed(()=>props.tree.filter(session=>session.chatId===props.chatId))
 const windowCount=computed(()=>currentSessions.value.reduce((sum,session)=>sum+session.windows.length,0))

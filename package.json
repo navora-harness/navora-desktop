@@ -1,6 +1,6 @@
 {
   "name": "navora",
-  "version": "0.3.32",
+  "version": "0.3.33",
   "private": true,
   "license": "MIT",
   "author": "Navora",
@@ -9,19 +9,25 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run typecheck && npm test && vite build && node scripts/build-electron.mjs",
+    "build": "npm run electron:install && npm run typecheck && npm test && vite build && node scripts/build-electron.mjs",
     "build:electron": "node scripts/build-electron.mjs",
     "typecheck": "vue-tsc -b --noEmit",
     "test": "node scripts/test.mjs",
-    "test:browser": "node scripts/browser-smoke.mjs",
+    "test:store": "node scripts/test-marketplace.mjs",
+    "test:plugins:platform": "node scripts/plugin-platform-smoke.mjs",
+    "test:browser": "npm run electron:install && node scripts/browser-smoke.mjs",
+    "test:ui:browser": "npm run build && node scripts/ui-browser-workspace.mjs",
+    "test:ui:browser:recovery": "npm run build && node scripts/ui-browser-recovery.mjs",
+    "test:ui:browser:start": "npm run build && node scripts/ui-browser-start.mjs",
     "test:ui": "npm run build && node scripts/ui-smoke.mjs",
     "test:ui:renovation": "npm run build && node scripts/ui-renovation.mjs",
+    "test:ui:interface": "npm run build && node scripts/ui-interface.mjs",
     "test:ui:creators": "npm run build && node scripts/ui-creators.mjs",
     "test:ui:plugins": "npm run build && node scripts/ui-plugins.mjs",
-    "electron:dev": "node scripts/dev.mjs",
+    "electron:dev": "npm run electron:install && node scripts/dev.mjs",
     "electron:use-build": "node scripts/use-electron-build.mjs",
-    "electron:install": "node -e \"process.env.ELECTRON_MIRROR=process.env.ELECTRON_MIRROR||'http://127.0.0.1:8787/electron/';process.env.electron_use_remote_checksums='1';require('child_process').execFileSync(process.execPath,['node_modules/electron/install.js'],{stdio:'inherit',env:process.env})\"",
-    "start": "electron .",
+    "electron:install": "node scripts/install-cloudbypass-electron.mjs",
+    "start": "npm run electron:install && electron .",
     "dist": "npm run build && npm run test:browser && electron-builder --win portable",
     "dist:nsis": "npm run build && npm run test:browser && electron-builder --win nsis",
     "dist:mac": "npm run build && npm run test:browser && electron-builder --mac",
@@ -66,13 +72,19 @@
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "electron/assets/app-icon.png",
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
     },
     "linux": {
       "category": "Utility",
       "icon": "electron/assets/app-icon.png",
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "artifactName": "${productName}-${version}-linux-${arch}.${ext}"
     },
     "portable": {
@@ -109,7 +121,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.13.10",
     "@vitejs/plugin-vue": "^5.2.1",
-    "electron": "https://github.com/ChengHoward/edist/releases/download/v45.0.0-cloudbypass.2/electron-45.0.0-cloudbypass.2.tgz",
+    "electron": "https://github.com/ChengHoward/edist/releases/download/v45.0.0-cloudbypass.3/electron-45.0.0-cloudbypass.3.tgz",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.25.0",
     "typescript": "~5.7.2",
@@ -118,7 +130,6 @@
     "vue-tsc": "^2.2.8"
   },
   "allowScripts": {
-    "electron@45.0.0-cloudbypass.2": true,
     "esbuild@0.25.12": true,
     "electron-winstaller@5.4.0": true
   }

@@ -1,0 +1,86 @@
+{
+  "baseline": "FastTLS/fastls-curl v0.2.0",
+  "archive": "fcurl-0.2.0-windows-amd64.zip",
+  "archiveSha256": "4d7572d8412685f0f05735232be308288c7c1973c429c866337c940083071e9f",
+  "binarySha256": "06963c174cb1f3966696bb0623ed31a2ef2a18c1d434974351b88ddb00e74033",
+  "environment": "Windows amd64; Python-controlled localhost HTTP fixture",
+  "scope": "release CLI smoke only; no Navora plugin implementation or cross-platform certification",
+  "cases": [
+    {
+      "case": "version",
+      "exitCode": 0,
+      "stdout": "fcurl 0.2.0 (fastls 0.2.1; imitate 0.1.2)\n",
+      "stderr": ""
+    },
+    {
+      "case": "profiles",
+      "exitCode": 0,
+      "stdout": "chrome/120/windows\nchrome/1204/windows/legacy-ja4r\nchrome/142/windows\nchrome/1424/windows/legacy-ja4r\nchrome/150/linux\nchrome/150/macos\nchrome/150/windows\nchrome/1504/windows/legacy-ja4r\nchrome/151/linux\nchrome/151/macos\nchrome/151/windows\nchrome/152/linux\nchrome/152/macos\nchrome/152/windows\nchrome/153/linux\nchrome/153/macos\nchrome/153/windows\nchrome/154/linux\nchrome/154/macos\nchrome/154/windows\nchrome/155/linux\nchrome/155/macos\nchrome/155/windows\nchrome/156/linux\nchrome/156/macos\nchrome/156/win",
+      "stderr": "",
+      "lineCount": 152
+    },
+    {
+      "case": "get_repeated_headers",
+      "exitCode": 0,
+      "stdout": "{\"path\": \"/ok\", \"cookie\": null}",
+      "stderr": "",
+      "headers": "HTTP/1.0 200 OK\r\nDate: Sun, 01 Nov 2026 14:30:55 GMT\r\nServer: BaseHTTP/0.6 Python/3.11.9\r\nX-Repeat: one\r\nX-Repeat: two\r\n\r\n"
+    },
+    {
+      "case": "http404_without_fail",
+      "exitCode": 0,
+      "stdout": "{\"path\": \"/404\", \"cookie\": null}",
+      "stderr": ""
+    },
+    {
+      "case": "manual_redirect",
+      "exitCode": 0,
+      "stdout": "{\"path\": \"/redirect\", \"cookie\": null}",
+      "stderr": ""
+    },
+    {
+      "case": "json_stdin",
+      "exitCode": 0,
+      "stdout": "{\"check\":\"body-stdin\"}",
+      "stderr": ""
+    },
+    {
+      "case": "cookie_save",
+      "exitCode": 0,
+      "stdout": "{\"path\": \"/cookie\", \"cookie\": null}",
+      "stderr": ""
+    },
+    {
+      "case": "cookie_reload",
+      "exitCode": 0,
+      "stdout": "{\"path\": \"/ok\", \"cookie\": \"sid=fixture\"}",
+      "stderr": ""
+    },
+    {
+      "case": "timeout",
+      "exitCode": 28,
+      "stdout": "",
+      "stderr": "fcurl: (28) Get \"http://127.0.0.1:57328/slow\": ftransport: http/1.1 round trip: context deadline exceeded\n"
+    }
+  ],
+  "linuxBinaryInspection": [
+    {
+      "archive": "fcurl-0.2.0-linux-amd64.tar.gz",
+      "archiveSha256": "594fd42028340d5a66efda6d674c94c7c48994a552ea1591a5f33050b35a5de1",
+      "binarySha256": "1735853084ea10627eb843f3b4221b6e445f37c26286c0857d42a7928bf83a0d",
+      "elfMachine": 62,
+      "hasInterpreter": false,
+      "hasDynamicSegment": false,
+      "cgoDisabled": true
+    },
+    {
+      "archive": "fcurl-0.2.0-linux-arm64.tar.gz",
+      "archiveSha256": "03f02bc87ec198efae41d875d30d0129f89ae3b6ee4cac0f688cee690b68c501",
+      "binarySha256": "825979652743c87e01a744b8d372d0c9037e88afd8a92f1db4f6f68338d51cdb",
+      "elfMachine": 183,
+      "hasInterpreter": false,
+      "hasDynamicSegment": false,
+      "cgoDisabled": true
+    }
+  ]
+}

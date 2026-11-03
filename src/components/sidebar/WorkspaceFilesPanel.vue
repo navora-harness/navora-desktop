@@ -3,7 +3,7 @@
     <Teleport :to="headerTarget || 'body'" :disabled="!headerTarget" defer>
     <div v-show="headerVisible !== false && !navigationOnly" class="res-head" :class="{ 'docked-head': headerTarget }">
       <button type="button" v-if="!headerTarget && !embedded" class="res-label-btn" :aria-expanded="!collapsed" aria-label="折叠或展开工作区" @click="collapsed = !collapsed">
-        <font-awesome-icon icon="chevron-down" class="res-chevron" />
+        <AppIcon icon="chevron-down" class="res-chevron" />
         <span class="res-label">工作区</span>
       </button>
       <span class="res-head-actions">
@@ -14,7 +14,7 @@
           :disabled="!chatId || busy"
           @click="revealRoot"
         >
-          <font-awesome-icon icon="folder-open" />
+          <AppIcon icon="folder-open" />
         </button>
         <button
           type="button"
@@ -23,7 +23,7 @@
           :disabled="!chatId || busy"
           @click="reload()"
         >
-          <font-awesome-icon icon="arrow-rotate-right" />
+          <AppIcon icon="arrow-rotate-right" />
         </button>
       </span>
     </div>
@@ -33,13 +33,13 @@
       <div v-if="rootLabel && !navigationOnly" class="ws-root" :title="absoluteRoot">{{ rootLabel }}</div>
       <div v-if="!chatId" class="res-empty">选择对话后查看文件</div>
       <div v-else-if="loadError" class="res-empty res-error">{{ loadError }}</div>
-      <div v-else-if="!rootEntries.length" class="res-empty">暂无文件</div>
+      <div v-else-if="!visibleRootEntries.length" class="res-empty">暂无文件</div>
       <div v-else class="res-tree">
         <WorkspaceTreeNode
-          :entries="rootEntries"
+          :entries="visibleRootEntries"
           :depth="0"
           :expanded="expanded"
-          :children="childrenByPath"
+          :children="visibleChildren"
           :loading="loadingDirs"
           :selected="selectedPath"
           @toggle="toggleDir"
@@ -54,30 +54,35 @@
 
     <SidebarContextMenu ref="menu">
       <template v-if="menuEntry">
-        <button type="button" class="sidebar-more-item" role="menuitem" @click="openEntry">
-          <font-awesome-icon :icon="menuEntry.type === 'dir' ? 'folder-open' : 'arrow-up-right-from-square'" />
+        <button v-if="canOpen(menuEntry)" type="button" class="sidebar-more-item" role="menuitem" @click="openEntry">
+          <AppIcon :icon="menuEntry.type === 'dir' ? 'folder-open' : 'arrow-up-right-from-square'" />
           <span>{{ menuEntry.type === 'dir' ? '展开 / 折叠' : '打开' }}</span>
         </button>
-        <button type="button" class="sidebar-more-item" role="menuitem" @click="revealEntry">
-          <font-awesome-icon icon="folder-open" />
+        <button v-if="menuDownload?.canPause" type="button" class="sidebar-more-item" role="menuitem" @click="downloadAction('pause')"><AppIcon icon="pause-circle" /><span>暂停下载</span></button>
+        <button v-if="menuDownload?.canResume" type="button" class="sidebar-more-item" role="menuitem" @click="downloadAction('resume')"><AppIcon icon="arrow-right" /><span>继续下载</span></button>
+        <button v-if="menuDownload?.canCancel" type="button" class="sidebar-more-item" role="menuitem" @click="downloadAction('cancel')"><AppIcon icon="xmark" /><span>取消下载</span></button>
+        <button v-if="menuDownload?.source==='tool' && activeDownload(menuDownload)" type="button" class="sidebar-more-item" role="menuitem" title="停止所属对话的当前任务，包括正在运行的其他工具" @click="stopDownloadTask"><AppIcon icon="stop" /><span>停止当前任务</span></button>
+        <button v-if="menuDownload && !activeDownload(menuDownload)" type="button" class="sidebar-more-item" role="menuitem" title="仅移除下载状态，保留已保存文件" @click="downloadAction('remove')"><AppIcon icon="xmark" /><span>移除下载状态</span></button>
+        <button v-if="!menuEntry.virtual" type="button" class="sidebar-more-item" role="menuitem" @click="revealEntry">
+          <AppIcon icon="folder-open" />
           <span>在资源管理器中显示</span>
         </button>
-        <button type="button" class="sidebar-more-item" role="menuitem" @click="copyPath">
-          <font-awesome-icon icon="clipboard-list" />
+        <button v-if="!menuEntry.path.startsWith(':download/')" type="button" class="sidebar-more-item" role="menuitem" @click="copyPath">
+          <AppIcon icon="clipboard-list" />
           <span>复制相对路径</span>
         </button>
-        <button type="button" class="sidebar-more-item danger" role="menuitem" @click="askDelete">
-          <font-awesome-icon icon="trash" />
+        <button v-if="!menuEntry.virtual && (!menuDownload || !activeDownload(menuDownload))" type="button" class="sidebar-more-item danger" role="menuitem" @click="askDelete">
+          <AppIcon icon="trash" />
           <span>删除</span>
         </button>
       </template>
       <template v-else>
         <button type="button" class="sidebar-more-item" role="menuitem" @click="revealRoot">
-          <font-awesome-icon icon="folder-open" />
+          <AppIcon icon="folder-open" />
           <span>在资源管理器中打开</span>
         </button>
         <button type="button" class="sidebar-more-item" role="menuitem" @click="reload()">
-          <font-awesome-icon icon="arrow-rotate-right" />
+          <AppIcon icon="arrow-rotate-right" />
           <span>刷新</span>
         </button>
       </template>
@@ -103,8 +108,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import SidebarContextMenu from './SidebarContextMenu.vue'
 import WorkspaceTreeNode, { type WsEntry } from './WorkspaceTreeNode.vue'
+import type { BrowserDownloadEntry } from '@shared/types'
+import { activeDownload, downloadRelativePath, mergeWorkspaceDownloads } from '@shared/workspace-downloads'
 
-const props = withDefaults(defineProps<{ chatId: string; headerTarget?: string; headerVisible?: boolean; embedded?: boolean; navigationOnly?:boolean }>(), {headerVisible:true})
+const props = withDefaults(defineProps<{ chatId: string; headerTarget?: string; headerVisible?: boolean; embedded?: boolean; navigationOnly?:boolean; downloads?:BrowserDownloadEntry[] }>(), {headerVisible:true})
 const emit = defineEmits<{
   notify: [text: string, color?: string]
   preview: [entry: WsEntry]
@@ -126,6 +133,46 @@ const deleteOpen = ref(false)
 const deleteTarget = ref<WsEntry | null>(null)
 const deleting = ref(false)
 const selectedPath = ref('')
+const downloads = ref<BrowserDownloadEntry[]>([])
+const awaitingDisk = ref(new Set<string>())
+const seenDownloads = new Set<string>()
+const visibleRootEntries = computed(() => mergeWorkspaceDownloads(rootEntries.value, '', props.chatId, downloads.value, awaitingDisk.value))
+const visibleChildren = computed(() => {
+  const paths = new Set(Object.keys(childrenByPath.value))
+  for (const item of downloads.value) {
+    const parts = downloadRelativePath(item)?.split('/') || []
+    for (let i = 1; i < parts.length; i++) paths.add(parts.slice(0, i).join('/'))
+  }
+  return Object.fromEntries([...paths].map(path => [path, mergeWorkspaceDownloads(childrenByPath.value[path] || [], path, props.chatId, downloads.value, awaitingDisk.value)]))
+})
+const menuDownload = computed(() => downloads.value.find(item => item.id === menuEntry.value?.download?.id))
+
+function virtualDirectory(path:string):boolean {
+  const parent=path.includes('/')?path.slice(0,path.lastIndexOf('/')):''
+  return Boolean((parent ? visibleChildren.value[parent] : visibleRootEntries.value)?.find(entry=>entry.path===path)?.virtual)
+}
+
+function updateDownloads(items:BrowserDownloadEntry[]) {
+  const next = items.filter(item => item.chatId === props.chatId)
+  const before = downloads.value
+  const changed = next.map(item=>`${item.id}:${item.state}:${item.relPath || ''}`).sort().join('|') !== before.map(item=>`${item.id}:${item.state}:${item.relPath || ''}`).sort().join('|')
+  const pending = new Set([...awaitingDisk.value].filter(id=>next.some(item=>item.id===id)))
+  const folders = new Set(expanded.value)
+  for (const item of next) {
+    const previous=before.find(old=>old.id===item.id)
+    if (item.state==='completed' && (!previous || previous.state!=='completed' || previous.relPath!==item.relPath)) pending.add(item.id)
+    const key=`${item.id}:${item.relPath || ''}`
+    if (!seenDownloads.has(key) && activeDownload(item)) {
+      const parts=downloadRelativePath(item)?.split('/') || []
+      for (let i=1;i<parts.length;i++) folders.add(parts.slice(0,i).join('/'))
+    }
+    seenDownloads.add(key)
+  }
+  awaitingDisk.value=pending
+  expanded.value=folders
+  downloads.value=next
+  if(changed)scheduleReload()
+}
 
 const rootLabel = computed(() => {
   const abs = absoluteRoot.value
@@ -161,9 +208,11 @@ async function listDir(rel: string): Promise<{ entries: WsEntry[]; truncated: bo
 }
 
 async function loadDir(rel: string) {
+  const chatId=props.chatId
   withLoading(rel, true)
   try {
     const got = await listDir(rel)
+    if(disposed || props.chatId!==chatId)return
     if (rel) {
       childrenByPath.value = { ...childrenByPath.value, [rel]: got.entries }
     } else {
@@ -172,11 +221,12 @@ async function loadDir(rel: string) {
       absoluteRoot.value = got.absoluteRoot
     }
   } finally {
-    withLoading(rel, false)
+    if(props.chatId===chatId)withLoading(rel, false)
   }
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+let disposed=false, reloadAgain=false, downloadRevision=0
 function scheduleReload() {
   if (debounceTimer) clearTimeout(debounceTimer)
   debounceTimer = setTimeout(() => {
@@ -186,6 +236,8 @@ function scheduleReload() {
 }
 
 async function reload() {
+  if(disposed)return
+  if(busy.value){reloadAgain=true;return}
   if (!props.chatId || !window.navora?.workspace.list) {
     rootEntries.value = []
     childrenByPath.value = {}
@@ -193,25 +245,29 @@ async function reload() {
     return
   }
   busy.value = true
+  const chatId=props.chatId, verified=new Set(awaitingDisk.value)
   loadError.value = ''
   try {
     await loadDir('')
-    const still = new Set<string>()
-    for (const p of expanded.value) {
+    if(disposed || props.chatId!==chatId)return
+    const still = new Set<string>(), checked=new Set(expanded.value)
+    for (const p of checked) {
       if (!p) continue
       try {
         await loadDir(p)
-        still.add(p)
+        if(expanded.value.has(p))still.add(p)
       } catch {
-        /* dropped */
+        if(virtualDirectory(p)&&expanded.value.has(p))still.add(p)
       }
     }
-    expanded.value = still
+    if(props.chatId!==chatId || disposed)return
+    expanded.value = new Set([...still,...[...expanded.value].filter(path=>!checked.has(path))])
+    awaitingDisk.value=new Set([...awaitingDisk.value].filter(id=>!verified.has(id)))
   } catch (e) {
-    loadError.value = e instanceof Error ? e.message : String(e)
-    rootEntries.value = []
+    if(props.chatId===chatId&&!disposed){loadError.value = e instanceof Error ? e.message : String(e);rootEntries.value = []}
   } finally {
     busy.value = false
+    if(reloadAgain&&!disposed){reloadAgain=false;void reload()}
   }
 }
 
@@ -225,18 +281,24 @@ function toggleDir(ent: WsEntry) {
   }
   next.add(ent.path)
   expanded.value = next
-  if (!childrenByPath.value[ent.path]) void loadDir(ent.path)
+  if (!ent.virtual && !childrenByPath.value[ent.path]) void loadDir(ent.path).catch(()=>emit('notify','无法读取此文件夹'))
 }
 
-function selectEntry(ent: WsEntry) {
+function canOpen(ent:WsEntry):boolean {
+  const download=downloads.value.find(item=>item.id===ent.download?.id)||ent.download
+  return ent.type==='dir'||(!ent.virtual&&(!download||download.state==='completed'))
+}
+
+function selectEntry(ent: WsEntry, activate=true) {
   selectedPath.value = ent.path
-  if (ent.type === 'file') emit('preview', ent)
-  else if(props.navigationOnly) emit('browse',ent.path)
+  if(!activate)return
+  if (ent.type === 'file' && canOpen(ent)) emit('preview', ent)
+  else if(ent.type==='dir'&&props.navigationOnly) emit('browse',ent.path)
 }
 
 function openFile(ent: WsEntry) {
   selectedPath.value = ent.path
-  emit('preview', ent)
+  if(canOpen(ent))emit('preview', ent)
 }
 
 function onEntryMenu(e: MouseEvent, ent: WsEntry) {
@@ -271,7 +333,23 @@ function openEntry() {
   if (!ent) return
   selectedPath.value = ent.path
   if (ent.type === 'dir') toggleDir(ent)
-  else emit('preview', ent)
+  else if(canOpen(ent))emit('preview', ent)
+}
+
+async function downloadAction(action:'pause'|'resume'|'cancel'|'remove') {
+  const item=menuDownload.value
+  if(!item||!window.navora?.downloads)return
+  try {
+    const result=await window.navora.downloads[action](item.id)
+    if(result && !result.ok)emit('notify',('error' in result && String(result.error)) || '下载操作失败')
+    updateDownloads(await window.navora.downloads.list(props.chatId))
+  } catch(error){emit('notify',error instanceof Error?error.message:'下载操作失败')}
+}
+
+async function stopDownloadTask(){
+  const item=menuDownload.value
+  if(item?.source!=='tool'||!activeDownload(item))return
+  try{await window.navora?.agent.stop(item.chatId)}catch{emit('notify','停止任务失败')}
 }
 
 function revealEntry() {
@@ -334,12 +412,25 @@ let unsubDownloads: (() => void) | undefined
 watch(
   () => props.chatId,
   () => {
+    downloadRevision++
     expanded.value = new Set()
+    loadingDirs.value = new Set()
+    rootEntries.value=[]
     childrenByPath.value = {}
     selectedPath.value = ''
+    seenDownloads.clear()
+    awaitingDisk.value=new Set()
+    updateDownloads(props.downloads||[])
+    if(props.downloads===undefined)void fetchDownloads()
     void reload()
   },
 )
+watch(()=>props.downloads,items=>{if(items)updateDownloads(items)},{immediate:true})
+
+async function fetchDownloads(){
+  const revision=downloadRevision,chatId=props.chatId
+  try{const items=await window.navora?.downloads.list(chatId);if(items&&!disposed&&revision===downloadRevision&&chatId===props.chatId)updateDownloads(items)}catch{ /* File listing remains available if downloads cannot be read. */ }
+}
 
 onMounted(() => {
   void reload()
@@ -348,13 +439,17 @@ onMounted(() => {
   unsubChanged = window.navora?.workspace.onChanged?.((payload) => {
     if (payload.chatId === props.chatId) scheduleReload()
   })
-  unsubDownloads = window.navora?.downloads.onChanged?.((payload) => {
-    if (!props.chatId) return
-    if (payload.downloads.some((d) => d.chatId === props.chatId)) scheduleReload()
-  })
+  if(props.downloads===undefined){
+    void fetchDownloads()
+    unsubDownloads = window.navora?.downloads.onChanged?.((payload) => {
+      downloadRevision++
+      updateDownloads(payload.downloads)
+    })
+  }
 })
 
 onBeforeUnmount(() => {
+  disposed=true
   if (debounceTimer) clearTimeout(debounceTimer)
   window.removeEventListener('focus', onFocus)
   document.removeEventListener('visibilitychange', onVisibility)

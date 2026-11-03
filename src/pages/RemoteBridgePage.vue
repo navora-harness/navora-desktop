@@ -2,20 +2,20 @@
   <div class="bridge-page">
     <header class="toolbar">
       <div class="toolbar-left">
-        <button type="button" class="tool-btn" @click="$router.push('/')">
-          <font-awesome-icon icon="arrow-left" />
-          <span class="tool-btn-label">Chat</span>
+        <button type="button" class="tool-btn" aria-label="返回对话" title="返回对话" @click="$router.push('/')">
+          <AppIcon icon="arrow-left" />
+          <span class="tool-btn-label">对话</span>
         </button>
-        <button type="button" class="tool-btn" @click="$router.push('/remote')">
-          <font-awesome-icon icon="list-ul" />
-          <span class="tool-btn-label">窗口</span>
+        <button type="button" class="tool-btn" aria-label="返回远程页面列表" title="远程页面列表" @click="$router.push('/remote')">
+          <AppIcon icon="list-ul" />
+          <span class="tool-btn-label">页面</span>
         </button>
       </div>
       <div class="titles">
-        <h1>远程窗口</h1>
+        <h1>远程页面</h1>
         <p class="meta" :title="pageUrl">{{ pageTitle || windowId }}</p>
       </div>
-      <span class="status">{{ statusText }}</span>
+      <span class="status" role="status" :title="statusText">{{ statusText }}</span>
     </header>
 
     <div
@@ -36,7 +36,7 @@
         alt="远程窗口画面"
         draggable="false"
       />
-      <div v-else class="empty">{{ emptyText }}</div>
+      <div v-else class="empty" role="status">{{ emptyText }}</div>
     </div>
 
     <p class="hint">点击、拖动画面可远程操作；双指滚动页面请直接在画面上滑动。</p>
@@ -171,11 +171,13 @@ onUnmounted(() => {
 
 <style scoped>
 .bridge-page {
+  min-width:0;
+  min-height:0;
   height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: #101820;
-  color: #ecf0f1;
+  background: #f7f9fc;
+  color: #46566c;
 }
 .toolbar {
   flex-shrink: 0;
@@ -184,8 +186,8 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 10px;
   padding: calc(10px + env(safe-area-inset-top, 0px)) 12px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: #15202b;
+  border-bottom: 1px solid #e1e7ef;
+  background: #fff;
 }
 .toolbar-left {
   display: flex;
@@ -197,9 +199,9 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid #dce4ee;
   background: transparent;
-  color: #ecf0f1;
+  color: #617b9b;
   border-radius: 8px;
   padding: 8px 10px;
   cursor: pointer;
@@ -207,13 +209,14 @@ onUnmounted(() => {
   min-height: 38px;
 }
 .tool-btn:active {
-  background: rgba(255, 255, 255, 0.08);
+  background: #eef3f8;
 }
 .titles {
   min-width: 0;
   flex: 1;
 }
 .titles h1 {
+  white-space:nowrap;
   margin: 0;
   font-size: 0.95rem;
   font-weight: 650;
@@ -266,6 +269,7 @@ onUnmounted(() => {
   color: #7f8c8d;
   line-height: 1.45;
 }
+.tool-btn>svg{width:14px;height:14px;flex-shrink:0}.status{color:#728aa5}.toolbar .meta{color:#8c98a8}.stage{overflow:hidden}.hint{border-top:1px solid #e1e7ef;background:#fff;color:#8995a5}
 
 @media (max-width: 768px) {
   .tool-btn-label {

@@ -1,3 +1,4 @@
+import { assertPlatformPackage, selectPlatformArtifact, type PlatformPackage, type PlatformHost } from './plugin-platform'
 /** Local store catalog + install preview types (navora-store protocol). See navora-store/PROTOCOL.md. */
 
 export type StoreKind = 'plugin' | 'skill'
@@ -11,7 +12,7 @@ export const STORE_ZIP_MAX_BYTES = 200 * 1024 * 1024
 export const STORE_DOWNLOAD_TIMEOUT_MS = 600_000
 export const STORE_ID_RE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
 const CATALOG_FILE_RE =
-  /^(plugins|skills)\/[a-z][a-z0-9._-]{0,63}\/[A-Za-z0-9._+-]+\/(package\.zip|README\.md|SKILL\.md)$/
+  /^(plugins|skills)\/[a-z][a-z0-9._-]{0,63}\/[A-Za-z0-9._+-]+\/(?:artifacts\/[a-z][a-z0-9-]{0,63}\/)?(package\.zip|README\.md|SKILL\.md)$/
 
 export type StoreInstallProgress = {
   phase: StoreProgressPhase
@@ -20,7 +21,13 @@ export type StoreInstallProgress = {
   bytesTotal?: number
 }
 
+export type StoreArtifact = PlatformPackage & { sha256: string; size: number; downloadPath: string; publishedAt?: string; readmePath?: string; hasReadme?: boolean }
+
 export type StoreCatalogVersion = {
+  artifacts?: StoreArtifact[]
+  artifactId?: string
+  compatibilityError?: string
+  targetLabel?: string
   version: string
   sha256: string
   size: number
@@ -79,6 +86,9 @@ export type StorePreviewInstallInput = {
 }
 
 export type StorePreviewInstallResult = {
+  artifactId?: string
+  targetLabel?: string
+  installPlanKey?: string
   ok: boolean
   error?: string
   blockers?: string[]
@@ -118,6 +128,7 @@ export type StorePreviewInstallResult = {
 }
 
 export type StoreInstallInput = {
+  installPlanKey?: string
   kind: StoreKind
   packageId: string
   version?: string
@@ -215,16 +226,53 @@ export function assertCatalogIndex(raw: unknown): StoreCatalogIndex {
   return o as StoreCatalogIndex
 }
 
+/** Resolve server artifacts once, in the main process, for UI, update checks and downloads alike. */
+export function catalogForPlatform(raw: StoreCatalogIndex, host: PlatformHost): StoreCatalogIndex {
+  if (raw.schemaVersion !== 1 && raw.schemaVersion !== 2) throw new Error('invalid_catalog_schema')
+  const catalog = structuredClone(raw)
+  for (const product of catalog.products) {
+    if (!Array.isArray(product.packages)) throw new Error('invalid_catalog_schema')
+    for (const pkg of product.packages) {
+      if (!Array.isArray(pkg.versions)) throw new Error('invalid_catalog_schema')
+      for (const version of pkg.versions) {
+        if (!version.artifacts) continue
+        if (raw.schemaVersion !== 2 || product.kind !== 'plugin' || !Array.isArray(version.artifacts) || !version.artifacts.length) throw new Error('invalid_catalog_schema')
+        for (const a of version.artifacts) {
+          assertPlatformPackage(a)
+          if (a.packageFormatVersion !== 2 || !/^[a-f0-9]{64}$/.test(a.sha256) || !Number.isSafeInteger(a.size) || a.size <= 0 || a.size > STORE_ZIP_MAX_BYTES) throw new Error('invalid_catalog_artifact')
+          assertCatalogRelPath(a.downloadPath)
+          const expected = `plugins/${pkg.id}/${version.version}/artifacts/${a.artifactId}/package.zip`
+          if (a.downloadPath !== expected) throw new Error('invalid_catalog_path')
+          if (a.readmePath) assertCatalogRelPath(a.readmePath)
+        }
+        const selected = selectPlatformArtifact(version.artifacts.filter(a => (a as StoreArtifact & { status?: string }).status !== 'yanked'), host)
+        if (selected) Object.assign(version, selected, { targetLabel: selected.artifactId })
+        else Object.assign(version, { compatibilityError: 'unsupported_platform', targetLabel: '不支持当前系统', downloadPath: '', size: 0, sha256: '' })
+      }
+    }
+  }
+  return catalog
+}
+
 export function latestPackageVersion(
   pkg: StoreCatalogPackage | undefined | null,
-  opts?: { includeYanked?: boolean },
+  opts?: { includeYanked?: boolean; includePrerelease?: boolean; hostVersion?: string },
 ): StoreCatalogVersion | null {
   if (!pkg?.versions?.length) return null
-  const list = opts?.includeYanked
-    ? pkg.versions
-    : pkg.versions.filter((v) => v.status !== 'yanked')
-  const pool = list.length ? list : pkg.versions
-  return [...pool].sort((a, b) => compareStoreVersions(b.version, a.version))[0] || null
+  const list = pkg.versions.filter((v) => {
+    if (!opts?.includeYanked && v.status === 'yanked') return false
+    if (!opts?.includePrerelease && v.version.split('+')[0].includes('-')) return false
+    if (v.compatibilityError) return false
+    const minHost = minimumHostVersion(pkg, v)
+    return !opts?.hostVersion || !minHost || compareStoreVersions(opts.hostVersion, minHost) >= 0
+  })
+  return [...list].sort((a, b) => compareStoreVersions(b.version, a.version))[0] || null
+}
+
+/** Legacy catalogs duplicated the newest version's requirement on the package. */
+export function minimumHostVersion(pkg: StoreCatalogPackage, version: StoreCatalogVersion): string | undefined {
+  if (version.minHostVersion) return version.minHostVersion
+  return pkg.versions.some(v => v.minHostVersion) ? undefined : pkg.minHostVersion
 }
 
 export function findCatalogPackage(
@@ -263,6 +311,13 @@ export function isSafeZipEntryName(raw: string): boolean {
 }
 
 const STORE_ERROR_HINTS: Record<string, string> = {
+  unsupported_platform: '该版本不支持当前系统或架构',
+  unsupported_arch: '该插件包不支持当前处理器架构',
+  unsupported_libc: '该插件包与当前 Linux 运行库不兼容',
+  platform_detection_failed: '无法确认该插件要求的系统条件',
+  install_plan_changed: '安装包已变化，请刷新预览后重试',
+  plugin_busy: '插件正在执行请求，请停止请求后重试',
+  runtime_hash_mismatch: '插件运行文件校验失败，请重新安装',
   host_too_old: '当前桌面版本过低，无法安装该版本',
   invalid_catalog_path: '商店目录路径无效，已拒绝下载',
   invalid_catalog_json: '商店目录不是合法 JSON',
@@ -271,6 +326,8 @@ const STORE_ERROR_HINTS: Record<string, string> = {
   product_kind_required: '插件与技能同名，请指定类型',
   package_not_found: '商店中找不到该包',
   version_not_found: '商店中找不到该版本',
+  version_yanked: '该版本已下架，无法安装，请选择其它版本',
+  store_source_changed: '商店来源已更改，请重新选择插件',
   package_id_required: '缺少包标识',
   kind_required: '缺少产品类型',
   product_id_required: '缺少产品标识',
