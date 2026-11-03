@@ -5,6 +5,7 @@ const MOBILE_WIDTH = 1024
 
 function detectMobileLayout(): boolean {
   if (typeof window === 'undefined') return false
+  if (!isWebRemote() && window.navora?.app.platform && window.navora.app.platform !== 'web') return false
   if (window.innerWidth <= MOBILE_WIDTH) return true
   if (isWebRemote() && window.matchMedia('(pointer: coarse)').matches) return true
   return false

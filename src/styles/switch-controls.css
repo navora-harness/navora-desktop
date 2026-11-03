@@ -15,12 +15,12 @@
 :is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-switch__thumb {
   width:16px;height:16px;background:#fff;color:#fff;transform:none;box-shadow:0 1px 2px #25354b26;
 }
-:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-selection-control__input {
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch.v-input .v-selection-control__input {
   width:32px;height:32px;transform:translateX(-7px);transition:transform 180ms var(--navora-ease);
 }
-:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-selection-control--dirty .v-selection-control__input { transform:translateX(7px); }
-:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch:dir(rtl) .v-selection-control__input { transform:translateX(7px); }
-:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch:dir(rtl) .v-selection-control--dirty .v-selection-control__input { transform:translateX(-7px); }
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch.v-input .v-selection-control--dirty .v-selection-control__input { transform:translateX(7px); }
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch.v-input:dir(rtl) .v-selection-control__input { transform:translateX(7px); }
+:is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch.v-input:dir(rtl) .v-selection-control--dirty .v-selection-control__input { transform:translateX(-7px); }
 :is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch .v-selection-control--dirty .v-switch__track { background:var(--navora-switch-on) !important;border-color:var(--navora-switch-on); }
 :is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch:not(.v-input--disabled):hover .v-switch__track { background:var(--navora-switch-off-hover) !important; }
 :is(.navora-app,.skill-dlg-card,.ob-card,.v-overlay) .v-switch:not(.v-input--disabled):hover .v-selection-control--dirty .v-switch__track { background:var(--navora-switch-on-hover) !important;border-color:var(--navora-switch-on-hover); }

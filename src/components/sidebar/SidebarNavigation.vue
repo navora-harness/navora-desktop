@@ -1,6 +1,6 @@
 <template>
   <div class="rail-panel-groups">
-    <button v-for="panel in panels" :key="panel.id" type="button" class="sidebar-icon-btn rail-panel-button" :class="{selected:!inactive && active===panel.id,'has-activity':panel.id==='workspace'&&downloads>0}" :data-panel="panel.id" :aria-label="label(panel)" :title="label(panel)" :aria-pressed="!inactive && active===panel.id" @click="emit('activate',panel.id)"><AppIcon :icon="panel.id==='browser'?'browser':panel.icon" /><span v-if="count(panel.id)" class="rail-count" :aria-label="`${count(panel.id)} ${panel.id==='workspace'?'个下载进行中':'个页面'}`">{{ count(panel.id)>99?'99+':count(panel.id) }}</span><span v-else-if="panel.id==='workspace' && unread" class="rail-notification" aria-label="有新下载完成" /></button>
+    <button v-for="panel in panels" :key="panel.id" type="button" class="sidebar-icon-btn rail-panel-button" :class="{selected:!inactive && active===panel.id,'has-activity':panel.id==='workspace'&&downloads>0}" :data-panel="panel.id" :aria-label="label(panel)" :title="label(panel)" :aria-pressed="!inactive && active===panel.id" @click="emit('activate',panel.id)"><AppIcon :icon="panel.icon" /><span v-if="count(panel.id)" class="rail-count" :aria-label="`${count(panel.id)} ${panel.id==='workspace'?'个下载进行中':'个页面'}`">{{ count(panel.id)>99?'99+':count(panel.id) }}</span><span v-else-if="panel.id==='workspace' && unread" class="rail-notification" aria-label="有新下载完成" /></button>
   </div>
 </template>
 <script setup lang="ts">

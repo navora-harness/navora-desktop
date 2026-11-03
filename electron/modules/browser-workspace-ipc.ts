@@ -4,7 +4,8 @@ import fs from 'node:fs'
 import type {BrowserRegistry} from './browser-registry'
 import {BrowserAnnotationService} from './browser-annotations'
 import {BrowserAnnotationDraftStore} from './browser-annotation-drafts'
-import {browserAddress,browserRect,type BrowserAnnotation} from '../../shared/browser-workspace'
+import {BrowserTabsService} from './browser-tabs-service'
+import {browserAddress,browserRect,browserLayoutRect,type BrowserAnnotation,type BrowserTabCommandInput,type BrowserEditCommand,type BrowserEditState} from '../../shared/browser-workspace'
 import type {BrowserPage} from './browser-host'
 import {isUrlAllowed} from '../../shared/url-allowlist'
 import type {AppConfig} from '../../shared/config'
@@ -13,7 +14,7 @@ import type {BrowserStartStore} from './browser-start-store'
 
 export function registerBrowserWorkspace(options:{registry:BrowserRegistry;files:WorkspaceFiles;start:BrowserStartStore;getConfig:()=>AppConfig;chatExists:(id:string)=>boolean;getMain:()=>BrowserWindow|null;preload:string;loadHost:(win:BrowserWindow,id:string)=>void}){
   const {registry,files}=options,hosts=registry.hosts,annotations=new BrowserAnnotationService(registry,files)
-  const keys=new Map<string,string>(),drags=new Map<string,{pageId:string;source:string;expires:number}>()
+  const drags=new Map<string,{pageId:string;pageIds:string[];source:string;expires:number}>(),tabs=new BrowserTabsService(registry,options.getConfig,options.chatExists)
   hosts.detachedPreferences={preload:options.preload}
   hosts.configureDetached=options.loadHost
   hosts.onPresent=page=>{
@@ -23,30 +24,62 @@ export function registerBrowserWorkspace(options:{registry:BrowserRegistry;files
   const host=(e:IpcMainInvokeEvent)=>{const h=hosts.hostForSender(e.sender);if(!h||e.senderFrame!==e.sender.mainFrame)throw Error('browser_ui_only');return h}
   const page=(e:IpcMainInvokeEvent,id:string)=>{const h=host(e),p=hosts.pages.get(id);if(!p||p.isDestroyed())throw Error('browser_page_not_found');if(!h.embedded&&p.hostId!==h.id)throw Error('browser_page_wrong_host');return p}
   function handle(name:string,fn:(e:IpcMainInvokeEvent,...args:any[])=>unknown){ipcMain.handle(`navora:browser.workspace.${name}`,fn)}
-  handle('ensure',(e,chatId:string,key:string,url?:string)=>{
-    const h=host(e);if(!options.chatExists(chatId)||typeof key!=='string'||key.length>180)throw Error('invalid_browser_tab')
-    if(!h.embedded&&[...h.pages].some(id=>hosts.pages.get(id)?.chatId!==chatId))throw Error('browser_chat_mismatch')
-    const existing=keys.get(`${chatId}:${key}`)||registry.getTree(chatId).flatMap(s=>s.windows).find(w=>w.tabKey===key)?.windowId||key.replace(/^browser:/,'')
-    const live=registry.getWindowRecord(existing)
-    if(live){if(live.chatId!==chatId)throw Error('browser_wrong_chat');return live.windowId}
-    const tree=registry.getTree(chatId),session=tree[0]||registry.createSession(chatId,{persist:true})
-    const target=browserAddress(url||'about:blank')
-    if(target!=='about:blank'&&!isUrlAllowed(target,options.getConfig().browser.url_allowlist))throw Error('url_not_allowed')
-    const record=registry.createWindow(session.sessionId,{url:target,show:false})
-    const p=hosts.pages.get(record.windowId)!;if(p.hostId!==h.id)hosts.transfer(p,h.id)
-    keys.set(`${chatId}:${key}`,record.windowId);registry.getWindowRecord(record.windowId)!.tabKey=key
-    return record.windowId
+  handle('ensure',async(e,chatId:string,key:string,url?:string)=>{
+    const h=host(e)
+    // Old persisted keys can name a page directly before tabKey was introduced.
+    const live=registry.getWindowRecord(typeof key==='string'?key.replace(/^browser:/,''):'')
+    if(live){if(live.chatId!==chatId)throw Error('browser_wrong_chat');if(live.win.hostId!==h.id)throw Error('browser_page_wrong_host');return live.windowId}
+    return (await tabs.action(h.id,{chatId,action:'new',key,url,background:true})).pageId!
+  })
+  handle('tabState',(e,chatId:string)=>tabs.state(host(e).id,chatId))
+  handle('tabAction',(e,input:BrowserTabCommandInput)=>tabs.action(host(e).id,input))
+  const editingPage=(e:IpcMainInvokeEvent,id:string)=>{const h=host(e),p=page(e,id);if(p.hostId!==h.id||h.active!==id)throw Error('browser_page_not_visible');return p}
+  async function editState(e:IpcMainInvokeEvent,id:string):Promise<BrowserEditState>{
+    const p=editingPage(e,id),epoch=p.automation.captureDocumentEpoch()
+    const state=await p.webContents.executeJavaScriptInIsolatedWorld(1006,[{code:`(()=>{const el=document.activeElement,isInput=el instanceof HTMLInputElement,isTextArea=el instanceof HTMLTextAreaElement,password=isInput&&el.type==='password',editable=!!el&&(el.isContentEditable||isTextArea||isInput&&['text','search','url','tel','email','password','number',''].includes(el.type)),writable=editable&&!el.readOnly&&!el.disabled;let selection=false;if((isInput||isTextArea)&&typeof el.selectionStart==='number')selection=el.selectionEnd>el.selectionStart;else selection=!!getSelection()?.toString();const can=name=>{try{return !!document.queryCommandEnabled(name)}catch{return false}};return {undo:writable&&can('undo'),redo:writable&&can('redo'),cut:writable&&selection&&!password,copy:selection&&!password,paste:writable,pastePlain:writable,delete:writable&&selection,selectAll:!!document.body};})()`}]) as BrowserEditState
+    editingPage(e,id);if(epoch!==p.automation.captureDocumentEpoch())throw Error('composer_source_changed')
+    return state
+  }
+  handle('editState',editState)
+  handle('openSettings',(e,id:string)=>{
+    const source=host(e),current=page(e,id),main=options.getMain()
+    if(current.hostId!==source.id||source.active!==id)throw Error('browser_page_not_visible')
+    if(!main||main.isDestroyed())throw Error('main_window_unavailable')
+    if(main.isMinimized())main.restore()
+    main.show();main.focus();main.webContents.focus()
+    main.webContents.send('navora:browser.open-settings',{section:'browser',pageId:id,sourceHostId:source.id})
+  })
+  handle('edit',async(e,id:string,command:BrowserEditCommand)=>{
+    if(!['undo','redo','cut','copy','paste','pastePlain','delete','selectAll'].includes(command))throw Error('invalid_browser_edit_command')
+    const p=editingPage(e,id),state=await editState(e,id)
+    if(!state[command])throw Error('browser_edit_unavailable')
+    if(!['copy','selectAll'].includes(command)){
+      if(p.annotationSelecting)throw Error('browser_busy_finish_action_first')
+      const control=await p.automation.takeControl();if(control.error)throw Error(control.error)
+    }
+    editingPage(e,id)
+    const wc=p.webContents;wc.focus()
+    if(command==='pastePlain')wc.pasteAndMatchStyle()
+    else wc[command]()
   })
   handle('state',e=>{const h=host(e),owners=new Set([...hosts.pages.values()].map(p=>p.chatId));return {hostId:h.id,embedded:h.embedded,pages:[...owners].flatMap(id=>registry.getTree(id)).map(s=>({...s,windows:s.windows.filter(p=>p.hostWindowId===h.id)}))}})
-  handle('claimLayout',(e,id:string)=>{const h=host(e),p=page(e,id);if(p.hostId!==h.id)throw Error('browser_page_wrong_host');return p.layoutOwner=randomUUID()})
-  handle('layout',(e,id:string|null,bounds:unknown,owner?:string)=>{const h=host(e),p=id?hosts.pages.get(id):undefined;if(id&&p?.hostId!==h.id)return;if(owner&&p?.layoutOwner!==owner)return;hosts.setLayout(h.id,id,bounds?browserRect(bounds):null)})
+  handle('claimLayout',(e,id:string)=>hosts.claimLayout(host(e).id,page(e,id).id))
+  handle('layout',(e,id:string|null,bounds:unknown,owner?:string,generation?:number)=>{
+    const h=host(e)
+    if(typeof id!=='string'||!id||typeof owner!=='string'||!owner)throw Error('invalid_browser_layout_owner')
+    // Renderer geometry is CSS pixels; native View bounds are content-area DIP.
+    // BrowserWindow zoom is the conversion, not the monitor's devicePixelRatio.
+    const rect=bounds?browserLayoutRect(bounds,e.sender.getZoomFactor()):null
+    return hosts.setLayout(h.id,id,rect,owner,generation)
+  })
   handle('preview',async(e,id:string)=>{
-    const h=host(e),p=page(e,id)
+    const h=host(e),p=hosts.pages.get(id)
+    if(!p||p.isDestroyed())return null
     if(p.hostId!==h.id||h.active!==id||h.suspended)return null
     // Offscreen UI hosts do not have a native compositor surface to capture.
     if(h.window.webContents.isOffscreen())return null
-    const image=await p.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})
-    if(image.isEmpty())return null
+    const image=await p.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true}).catch(()=>null)
+    if(!image||image.isEmpty())return null
     if(p.isDestroyed()||p.hostId!==h.id||h.active!==id||h.suspended)return null
     const size=image.getSize(),scale=Math.min(1,1920/size.width,1920/size.height)
     const preview=scale<1?image.resize({width:Math.max(1,Math.round(size.width*scale)),height:Math.max(1,Math.round(size.height*scale))}):image
@@ -90,20 +123,36 @@ export function registerBrowserWorkspace(options:{registry:BrowserRegistry;files
     // an Agent operation or annotation state is holding the page command lock.
     if(command==='stop'){
       cancelPending()
+      const stopped=p.automation.pause()
       registry.markNavigationStopped(id)
       if(!wc.isCrashed())wc.stop()
+      await stopped
       return
     }
     if(command==='focus'){if(hosts.isVisible(p))wc.focus();return}
-    if(command==='resume'){await annotations.cancel(p.chatId,id,true);return}
-    if(p.activeOperations)throw Error('browser_busy_wait_for_current_action')
-    if(command==='takeControl'){p.manualControl=true;return}
+    if(command==='resume'){await annotations.cancel(p.chatId,id);await p.automation.resume();return}
+    if(command==='takeControl'||command==='pause'||command==='retryAutomation'){
+      if(p.annotationSelecting)await annotations.cancel(p.chatId,id)
+      const state=await (command==='takeControl'?p.automation.takeControl():command==='pause'?p.automation.pause():p.automation.retryRelease())
+      if(state.error)throw Error(state.error)
+      return
+    }
     // Manual control pauses agent tools, while the user's own navigation stays available.
     if(p.annotationSelecting)throw Error('browser_busy_finish_action_first')
+    // User navigation/geometry changes interrupt this page only, including tools
+    // still waiting for a permission decision. Never wait for the old action lock.
+    if(['navigate','back','forward','reload','reloadIgnoringCache','zoom','viewport'].includes(command)){
+      const state=await p.automation.takeControl()
+      // A confirmed unlock permits explicit user navigation to replace a document
+      // whose old held-input cleanup failed; no old release is sent into the new one.
+      const recoveryNavigation=['navigate','back','forward','reload','reloadIgnoringCache'].includes(command)&&state.error==='cleanup_unconfirmed'&&state.nativeConfirmed&&!state.inputProtected
+      if(state.error&&!recoveryNavigation)throw Error(state.error)
+    }
     switch(command){
       case 'navigate':{
         const url=browserAddress(String(value))
         if(url!=='about:blank'&&!isUrlAllowed(url,options.getConfig().browser.url_allowlist))throw Error('url_not_allowed')
+        registry.markDesiredUrl(id,url)
         cancelPending();const attempt={cancelled:false};navigations.set(p,attempt)
         try{await wc.loadURL(url)}catch(error){
           const aborted=error as {code?:string;errno?:number}
@@ -116,7 +165,8 @@ export function registerBrowserWorkspace(options:{registry:BrowserRegistry;files
       case 'back':if(wc.navigationHistory.canGoBack()){cancelPending();wc.navigationHistory.goBack()}break
       case 'forward':if(wc.navigationHistory.canGoForward()){cancelPending();wc.navigationHistory.goForward()}break
       case 'reload':cancelPending();wc.reload();break
-      case 'zoom':{const zoom=Number(value);if(!Number.isFinite(zoom)||zoom<0.25||zoom>3)throw Error('invalid_zoom');wc.setZoomFactor(zoom);hosts.flushLayout(p);break}
+      case 'reloadIgnoringCache':cancelPending();wc.reloadIgnoringCache();break
+      case 'zoom':{const zoom=Number(value);if(!Number.isFinite(zoom)||zoom<0.25||zoom>3)throw Error('invalid_zoom');if(wc.getZoomFactor()!==zoom){wc.setZoomFactor(zoom);p.automation.geometryChanged()}hosts.flushLayout(p);break}
       case 'viewport':{
         if(value===null)p.fixedViewport=null
         else{const size=browserRect({x:0,y:0,...value as object});p.fixedViewport={width:size.width,height:size.height}}
@@ -125,26 +175,46 @@ export function registerBrowserWorkspace(options:{registry:BrowserRegistry;files
       default:throw Error('unknown_browser_command')
     }
   })
-  handle('detach',(e,id:string)=>{const p=page(e,id);if(p.manualControl||p.activeOperations)throw Error('browser_busy_finish_action_first');hosts.detach(p)})
-  handle('attach',(e,id:string)=>{const p=page(e,id);if(p.manualControl||p.activeOperations)throw Error('browser_busy_finish_action_first');hosts.attachMain(p)})
-  handle('beginDrag',(e,id:string)=>{
-    const p=page(e,id);if(p.manualControl||p.activeOperations)throw Error('browser_busy_finish_action_first')
+  handle('detach',async(e,id:string)=>{const p=page(e,id);if(p.annotationSelecting)throw Error('browser_busy_finish_action_first');await p.automation.withTransfer(()=>hosts.detach(p))})
+  handle('attach',async(e,id:string)=>{const p=page(e,id);if(p.annotationSelecting)throw Error('browser_busy_finish_action_first');await p.automation.withTransfer(()=>hosts.attachMain(p))})
+  handle('beginDrag',(e,id:string,pageIds?:string[])=>{
+    const h=host(e),p=page(e,id),requested=pageIds?.length?pageIds:[id]
+    if(!Array.isArray(requested)||requested.length>256||requested.some(value=>typeof value!=='string'))throw Error('invalid_browser_tab')
+    const selected=new Set([...requested,id]),ordered=hosts.hostPages(h.id).filter(value=>selected.has(value))
+    for(const value of selected){const candidate=page(e,value);if(candidate.hostId!==h.id)throw Error('browser_page_wrong_host');if(candidate.chatId!==p.chatId)throw Error('browser_chat_mismatch');if(candidate.annotationSelecting)throw Error('browser_busy_finish_action_first')}
     for(const [token,d] of drags)if(d.expires<Date.now())drags.delete(token)
-    const token=randomUUID();drags.set(token,{pageId:id,source:host(e).id,expires:Date.now()+30000});return token
+    const token=randomUUID();drags.set(token,{pageId:id,pageIds:ordered,source:h.id,expires:Date.now()+30000});return token
   })
-  handle('drop',(e,token:string)=>{
+  const dropTabs=async(e:IpcMainInvokeEvent,token:string)=>{
     const h=host(e),d=drags.get(token);if(!d||d.expires<Date.now())throw Error('browser_drag_expired')
     drags.delete(token)
     const p=hosts.pages.get(d.pageId);if(!p||p.hostId!==d.source)throw Error('browser_drag_stale')
-    if(p.manualControl||p.activeOperations)throw Error('browser_busy_finish_action_first')
-    if(!h.embedded&&[...h.pages].some(id=>hosts.pages.get(id)?.chatId!==p.chatId))throw Error('browser_chat_mismatch')
-    hosts.transfer(p,h.id);hosts.onPresent?.(p);return p.id
+    await tabs.transferPages(d.pageIds,h.id,d.source);hosts.present(p);return {pageId:p.id,pageIds:[...d.pageIds]}
+  }
+  handle('dropTabs',dropTabs)
+  handle('drop',async(e,token:string)=>(await dropTabs(e,token)).pageId)
+  handle('endDrag',async(e,token:string,outside:boolean,point?:{x:number;y:number})=>{
+    const d=drags.get(token);if(!d)return
+    if(d.source!==host(e).id)throw Error('browser_drag_wrong_source')
+    drags.delete(token)
+    if(outside&&d.expires>Date.now()){
+      const p=hosts.pages.get(d.pageId)
+      if(p&&p.hostId===d.source){
+        const newHost=hosts.createDetachedHost(point)
+        try{await tabs.transferPages(d.pageIds,newHost,d.source);hosts.present(p)}
+        finally{hosts.closeEmptyDetachedHosts([newHost])}
+      }
+    }
   })
-  handle('endDrag',(e,token:string,outside:boolean,point?:{x:number;y:number})=>{const d=drags.get(token);if(!d)return;if(d.source!==host(e).id)throw Error('browser_drag_wrong_source');drags.delete(token);if(outside&&d.expires>Date.now()){const p=hosts.pages.get(d.pageId);if(p&&p.hostId===d.source){if(p.manualControl||p.activeOperations)throw Error('browser_busy_finish_action_first');hosts.detach(p,point)}}})
   const owned=(e:IpcMainInvokeEvent,chatId:string,id:string)=>{const p=page(e,id);if(p.chatId!==chatId)throw Error('browser_wrong_chat');return p}
-  handle('annotation.begin',async(e,chatId:string,id:string,kind:'element'|'region')=>{owned(e,chatId,id);if(!['element','region'].includes(kind))throw Error('invalid_annotation_kind');await annotations.begin(chatId,id,kind)})
+  handle('annotation.begin',async(e,chatId:string,id:string,kind:'auto'|'element'|'region')=>{const p=owned(e,chatId,id);if(!['auto','element','region'].includes(kind))throw Error('invalid_annotation_kind');if(hosts.getHost(p.hostId||'')?.active!==p.id)throw Error('browser_page_not_visible');await annotations.begin(chatId,id,kind)})
   handle('annotation.collect',async(e,chatId:string,id:string)=>{owned(e,chatId,id);return annotations.collect(chatId,id)})
   handle('annotation.cancel',async(e,chatId:string,id:string)=>{owned(e,chatId,id);return annotations.cancel(chatId,id)})
+  handle('annotation.mode',async(e,chatId:string,id:string,mode:'armed'|'passthrough')=>{owned(e,chatId,id);if(!['armed','passthrough'].includes(mode))throw Error('invalid_annotation_mode');await annotations.mode(chatId,id,mode)})
+  handle('annotation.targets',(e,chatId:string,id:string)=>{owned(e,chatId,id);return annotations.listTargets(chatId,id)})
+  handle('annotation.writeTarget',(e,chatId:string,id:string,version:number,input)=>{host(e);const target=annotations.getTarget(chatId,id);owned(e,chatId,target.pageId);return annotations.writeTarget(chatId,id,version,input)})
+  handle('annotation.commitTarget',(e,chatId:string,pageId:string,id:string,version:number)=>{owned(e,chatId,pageId);return annotations.commitTarget(chatId,pageId,id,version)})
+  handle('annotation.discardTarget',(e,chatId:string,pageId:string,id:string,version:number)=>{owned(e,chatId,pageId);return annotations.discardTarget(chatId,pageId,id,version)})
   const checkChat=(e:IpcMainInvokeEvent,id:string)=>{const h=host(e);if(!options.chatExists(id)||!h.embedded&&![...h.pages].some(p=>hosts.pages.get(p)?.chatId===id))throw Error('browser_wrong_chat')}
   options.start.onChanged=chatId=>{for(const h of new Set([...hosts.pages.values()].map(page=>page.hostId))){const target=hosts.getHost(h||'');if(target&&!target.window.isDestroyed())target.window.webContents.send('navora:browser.start-changed',chatId)}}
   handle('start.state',(e,chatId:string)=>{checkChat(e,chatId);return options.start.state(chatId)})

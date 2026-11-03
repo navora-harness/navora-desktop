@@ -1,4 +1,5 @@
 /** Navora shared types — P1 skeleton */
+import type {ComposerDocument,ComposerDraftRecovery} from './composer-document'
 
 export const DEFAULT_EDGE_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36 Edg/152.0.0.0'
@@ -75,11 +76,15 @@ export type ChatMessage = {
     runId?: string
     /** Append order within a run; updates keep their original sequence. */
     runSequence?: number
+    /** Monotonic transcript revision for a direct child conversation. */
+    subchatVersion?: number
     /** Initial user message; inserted corrections remain part of the same run. */
     turnId?: string
     /** Distinguishes execution narration from a completed answer after streaming ends. */
     phase?: 'progress' | 'final'
     refs?: BrowserContextRef[]
+    document?: ComposerDocument
+    clientMessageId?: string
     [key: string]: unknown
   }
 }
@@ -94,6 +99,11 @@ export type ChatPermissions = {
 export type ChatKind = 'main' | 'sub'
 
 export type SubChatSpawnStatus = 'running' | 'done' | 'failed' | 'cancelled'
+export type SubChatRunStatus = SubChatSpawnStatus | 'interrupted'
+export type SubChatRun = {id:string;attempt:number;status:SubChatRunStatus;startedAt?:number;finishedAt?:number;reason?:string;summary?:string}
+/** Lightweight direct-child index. Transcripts are fetched separately through chats.get. */
+export type SubchatIndexItem = {id:string;parentChatId:string;title:string;purpose:string;status:SubChatRunStatus;run?:SubChatRun;createdAt:number;updatedAt:number;revision:number;messageVersion:number;summary:string;messageCount:number;unread?:boolean;pendingCount:number;resourceCount?:number;resourcesTruncated?:boolean}
+export type SubchatsPending = {asks:AgentAskRequest[];permissions:PermissionRequest[]}
 
 export type ChatSession = {
   queuedMessages?: QueuedMessage[]
@@ -130,8 +140,18 @@ export type ChatSession = {
   executionMode?: 'auto' | 'chat' | 'agent'
   /** Unsent composer draft (Telegram-style; synced across local + remote clients). */
   draft?: string
-  /** Last draft write time (ms); used for remote last-write-wins. */
+  /** Last draft write time (ms); legacy clients use it alongside revisioned document saves. */
   draftUpdatedAt?: number
+  draftDocument?: ComposerDocument
+  /** Preserve an unreadable/newer structured draft verbatim until a compatible app restores it. */
+  draftUnsupportedDocument?: unknown
+  draftUnsupportedRecoveries?: unknown[]
+  /** Monotonic, including clears, so an older remote draft cannot reappear. */
+  draftRevision?: number
+  draftClearedFromRevision?: number
+  draftRecoveries?: ComposerDraftRecovery[]
+  draftConflict?: {recoveryId:string;expectedRevision:number;actualRevision:number}
+  acceptedClientMessageIds?: Array<{id:string;acceptedAt:number;fingerprint?:string}>
   /** Default `main`. Sub-chats are spawned by Agent and hidden from the primary sidebar. */
   kind?: ChatKind
   /** Parent chat id when `kind === 'sub'`. */
@@ -142,6 +162,12 @@ export type ChatSession = {
   spawnPurpose?: string
   /** Lifecycle of an Agent-spawned sub-chat. */
   spawnStatus?: SubChatSpawnStatus
+  /** Current attempt, including follow-up messages; independent of the original delegation result. */
+  subchatRun?: SubChatRun
+  /** Immutable first delegation receipt; follow-up runs must not rewrite the parent's original result. */
+  spawnResult?: {runId:string;status:Exclude<SubChatSpawnStatus,'running'>;finishedAt?:number;summary:string}
+  subchatRevision?: number
+  subchatMessageVersion?: number
   /**
    * Unlimited (timeoutMs === 0) 询问/决策 parked across restarts.
    * Timed asks are not stored. Cleared on answer, deny, stop, or delete.
@@ -149,9 +175,19 @@ export type ChatSession = {
   pendingAsk?: AgentAskRequest
 }
 
-export type QueuedMessage = {id:string;content:string;refs?:BrowserContextRef[];createdAt:number;error?:string}
+export type QueuedMessage = {modelIdentity?:import('./model-selection').ModelSelectionIdentity;id:string;content:string;refs?:BrowserContextRef[];document?:ComposerDocument;clientMessageId?:string;revision?:number;createdAt:number;error?:string}
 
 export type BrowserTreeWindow = {
+  manualMuted?:boolean
+  muteReason?:'manual'|'agent'
+  desiredUrl?:string
+  pinned?:boolean
+  muted?:boolean
+  audible?:boolean
+  order?:number
+  hostActive?:boolean
+  tabRevision?:number
+  persistent?:boolean
   viewport?: {width:number;height:number}|null
   zoomFactor?:number
   canGoBack?:boolean
@@ -165,6 +201,7 @@ export type BrowserTreeWindow = {
   presentation?: 'embedded' | 'detached'
   selected?:boolean
   manualControl?: boolean
+  automation?: import('./browser-automation').BrowserAutomationState
   windowId: string
   sessionId: string
   title: string
@@ -185,8 +222,13 @@ export type BrowserTreeSession = {
   sessionIndex: number
   partition: string
   persist: boolean
+  name?: string
+  isDefault?: boolean
   windows: BrowserTreeWindow[]
 }
+export type BrowserSessionUpdate = { name?: string; isDefault?: boolean }
+export type BrowserSessionManageAction = 'close-pages' | 'clear-data' | 'delete'
+export type BrowserSessionManageResult = { action: BrowserSessionManageAction; closedPages: number; remainingPages: number; deleted: boolean }
 
 export type AppInfo = {
   name: string
@@ -430,5 +472,25 @@ export type BrowserDownloadEntry = {
   canResume?: boolean
   /** UI: cancel is available (not finished + live item, or still awaiting confirm). */
   canCancel?: boolean
+}
+
+export type BrowserDownloadsChanged = {
+  downloads: BrowserDownloadEntry[]
+  /** Monotonic for this application run; optional for older clients. */
+  revision?: number
+  /** Separates revisions after a server restart without remounting a remote UI. */
+  instanceId?: string
+}
+
+export type BrowserDownloadsApi = {
+  list: (chatId?: string) => Promise<BrowserDownloadEntry[]>
+  clear: (chatId?: string) => Promise<{ ok: true; removed: number }>
+  remove: (id: string, chatId?: string) => Promise<{ ok: boolean; error?: string }>
+  pause: (id: string, chatId?: string) => Promise<{ ok: boolean; error?: string }>
+  resume: (id: string, chatId?: string) => Promise<{ ok: boolean; error?: string }>
+  cancel: (id: string, chatId?: string) => Promise<{ ok: boolean; error?: string }>
+  reveal: (id: string, chatId?: string) => Promise<{ ok: boolean; path?: string; error?: string }>
+  open: (id: string, chatId?: string) => Promise<{ ok: boolean; path?: string; error?: string }>
+  onChanged: (cb: (payload: BrowserDownloadsChanged) => void) => () => void
 }
 

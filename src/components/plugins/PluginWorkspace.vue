@@ -95,7 +95,7 @@ const protectedPlugin=(record:PluginRecord)=>record.bundled || record.kind==='bu
 const pluginActions=computed(()=>[
   ...(product.value?.installed&&product.value.displayMode==='suite'&&product.value.packages.length>1?[{id:'variant',label:'更换变体',icon:'layer-group'}]:[]),
   {id:'export',label:'导出插件',icon:'file-export'},
-  {id:'path',label:'复制路径',icon:'clipboard-list'},
+  {id:'path',label:'复制路径',icon:'copy'},
   ...(local.value&&!protectedPlugin(local.value)?[{id:'remove',label:local.value.kind==='linked'?'取消外链…':'卸载插件…',icon:'trash',danger:true,divider:true}]:[])
 ])
 function pluginAction(action:string){if(busy.value||!local.value)return;if(action==='export')void exportPlugin(local.value);else if(action==='path')void copyPath(local.value.path);else if(action==='variant')void install('change');else if(action==='remove')deleteTarget.value=local.value}

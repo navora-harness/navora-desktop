@@ -1,5 +1,9 @@
 <template>
-  <v-menu v-model="open" location="bottom end" origin="auto" :offset="6" :close-on-content-click="true">
+  <template v-if="native.menusSupported.value">
+    <button type="button" class="sidebar-more-trigger" :aria-label="`${label}更多操作`" :title="`${label}更多操作`" aria-haspopup="menu" :aria-expanded="nativeShell?.open||false" @click="nativeShell?.show($event)"><AppIcon icon="ellipsis" /></button>
+    <SidebarContextMenu ref="nativeShell"><slot /><button type="button" role="menuitem" :aria-label="hideAriaLabel||hideLabel" @click="emit('hide')"><AppIcon icon="window-minimize" /><span>{{hideLabel}}</span></button></SidebarContextMenu>
+  </template>
+  <v-menu v-else v-model="open" location="bottom end" origin="auto" :offset="6" :close-on-content-click="true">
     <template #activator="{props:menuProps}">
       <button v-bind="menuProps" type="button" class="sidebar-more-trigger" :aria-label="`${label}更多操作`" :title="`${label}更多操作`">
         <AppIcon icon="ellipsis" />
@@ -12,10 +16,17 @@
   </v-menu>
 </template>
 <script setup lang="ts">
-import {ref} from 'vue'
+import {onBeforeUnmount,onMounted,ref} from 'vue'
+import SidebarContextMenu from './SidebarContextMenu.vue'
+import {useNativeUi} from '@/composables/useNativeUi'
+import {NATIVE_UI_OPEN} from '@shared/native-ui'
 withDefaults(defineProps<{label:string;hideLabel?:string;hideAriaLabel?:string}>(),{hideLabel:'隐藏侧栏'})
 const emit=defineEmits<{hide:[]}>()
 const open=ref(false)
+const native=useNativeUi(),nativeShell=ref<InstanceType<typeof SidebarContextMenu>>()
+function otherNative(){open.value=false}
+onMounted(()=>{void native.ready();window.addEventListener(NATIVE_UI_OPEN,otherNative)})
+onBeforeUnmount(()=>window.removeEventListener(NATIVE_UI_OPEN,otherNative))
 function onKey(event:KeyboardEvent){
   if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return
   event.preventDefault()

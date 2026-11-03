@@ -80,7 +80,7 @@ const adapters: Record<LiteratureProvider, ProviderAdapter> = {
     url.searchParams.set('select', 'id,doi,title,publication_year,authorships,primary_location,abstract_inverted_index,cited_by_count,open_access')
     const json = await getJson(url, signal)
     return (json.results || []).map((item: any) => work('openalex', {
-      sourceId: String(item.id || '').split('/').pop(), title: item.title, doi: item.doi,
+      sourceId: String(item.id || '').split('/').pop() || '', title: item.title, doi: item.doi,
       year: Number(item.publication_year) || undefined,
       authors: (item.authorships || []).map((entry: any) => entry.author?.display_name),
       venue: item.primary_location?.source?.display_name,

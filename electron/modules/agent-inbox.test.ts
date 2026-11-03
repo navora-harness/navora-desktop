@@ -11,6 +11,14 @@ function fixture(){
   return {chat,inbox,starts,inserts,setRunning:(value:boolean)=>{running=value},setFail:(value:boolean)=>{fail=value}}
 }
 const tick=()=>new Promise(resolve=>setImmediate(resolve))
+
+test('legacy edits and queue resume cannot discard an unsupported structured message',async()=>{
+  const f=fixture(),raw={schemaVersion:3,id:'future',chatId:'chat',revision:1,updatedAt:1,content:[{type:'future-node',payload:'must remain'}]}
+  f.chat.queuedMessages=[{id:'queued',content:'readable copy',createdAt:1,document:raw as unknown as NonNullable<ChatSession['draftDocument']>}]
+  await assert.rejects(()=>f.inbox.edit('chat','queued','replacement'),/composer_document_version/)
+  assert.deepEqual(f.chat.queuedMessages[0].document,raw)
+  f.setRunning(false);await f.inbox.resume('chat');assert.equal(f.chat.queuePaused,true);assert.deepEqual(f.chat.queuedMessages[0].document,raw);assert.deepEqual(f.starts,[])
+})
 test('message queue preserves order through edits, deletion, stop and resume',async()=>{
   const f=fixture()
   await f.inbox.submit('chat',{content:'first'},'queue');await f.inbox.submit('chat',{content:'second'},'queue');await f.inbox.submit('chat',{content:'remove'},'queue')

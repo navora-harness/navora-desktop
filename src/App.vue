@@ -12,15 +12,37 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onBeforeUnmount, onMounted } from 'vue'
+import {useRouter} from 'vue-router'
 import OnboardingWizard from './components/OnboardingWizard.vue'
 import StoreUiHost from './components/store/StoreUiHost.vue'
 import TextContextMenuHost from './components/TextContextMenuHost.vue'
 import { useOnboarding } from './composables/useOnboarding'
+import { useAppearance } from './composables/useAppearance'
+
+useAppearance()
+const router=useRouter()
+let offBrowserSettings:(()=>void)|undefined
+let offSettings:(()=>void)|undefined
+let offSettingsReady:(()=>void)|undefined
 
 const { open: wizardOpen, manual: wizardManual, show: showWizard } = useOnboarding()
 
 onMounted(async () => {
+  if(window.navora?.app.platform!=='web'){
+    offSettings=window.navora?.app.onOpenSettings(async request=>{
+      try{const current=router.currentRoute.value;const failure=await router.push({path:'/',query:{...(current.path==='/'?current.query:{}),settings:request.section,settingsRequest:request.requestId,settingsReturn:request.returnId}});if(failure)await window.navora?.app.settingsHandled(request.requestId,false)}
+      catch{await window.navora?.app.settingsHandled(request.requestId,false)}
+    })
+    const announceSettingsReady=()=>{if(!location.hash.startsWith('#/browser-host/')&&!location.hash.startsWith('#/file-host'))void window.navora?.app.settingsReady().catch(()=>{})}
+    offSettingsReady=window.navora?.app.onSettingsReadyRequest(announceSettingsReady)
+    announceSettingsReady()
+  }
+  if(window.navora?.app.platform!=='web')offBrowserSettings=window.navora?.browser.workspace.onOpenSettings(payload=>{
+    if(payload.section!=='browser')return
+    const current=router.currentRoute.value
+    void router.push({path:'/',query:{...(current.path==='/'?current.query:{}),settings:'browser'}}).catch(error=>console.warn('[browser-settings] Could not open settings',error))
+  })
   if (!window.navora || location.hash.startsWith('#/browser-host/')||location.hash.startsWith('#/file-host')) return
   try {
     const cfg = await window.navora.config.get()
@@ -31,6 +53,7 @@ onMounted(async () => {
     console.warn('[onboarding] check failed', e)
   }
 })
+onBeforeUnmount(()=>{offBrowserSettings?.();offSettings?.();offSettingsReady?.()})
 </script>
 
 <style>

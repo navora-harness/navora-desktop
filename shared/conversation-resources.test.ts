@@ -39,3 +39,30 @@ test('resource citations exclude narration while preserving evidence on the fina
   ] as ChatMessage[]
   assert.deepEqual(conversationSources(messages).map(source=>source.url),['https://example.com/final'])
 })
+import {ResourceUnreadTracker,browserSummaryResources} from './conversation-resources'
+
+test('summary unread baseline is silent and revisions deduplicate per resource',()=>{
+  const tracker=new ResourceUnreadTracker(),file={id:'file:one',version:'1'}
+  assert.equal(tracker.update('chat',[file]),0)
+  assert.equal(tracker.update('chat',[{...file,version:'2'}]),1)
+  assert.equal(tracker.update('chat',[{...file,version:'2'}]),1)
+  assert.equal(tracker.update('chat',[{...file,version:'3'},{id:'file:two',version:'1'}]),2)
+  tracker.markRead('chat');assert.equal(tracker.count('chat'),0)
+  assert.equal(tracker.update('chat',[{...file,version:'4'}],true),0)
+})
+test('summary unread state stays with its chat and removes deleted resources',()=>{
+  const tracker=new ResourceUnreadTracker();tracker.update('a',[]);tracker.update('b',[])
+  tracker.update('a',[{id:'file:a',version:'1'}]);tracker.update('b',[{id:'file:b',version:'1'}])
+  tracker.markRead('b');assert.equal(tracker.count('a'),1);assert.equal(tracker.count('b'),0)
+  assert.equal(tracker.update('a',[]),0)
+  assert.equal(tracker.update('a',[{id:'file:a',version:'2'}]),1)
+})
+test('summary ignores start pages and failed loads, and navigation metadata never repeats a badge',()=>{
+  const page={windowId:'page',url:'about:blank',title:'',loading:false} as BrowserTreeSession['windows'][number]
+  const tree=[{windows:[page]}] as BrowserTreeSession[]
+  assert.deepEqual(browserSummaryResources(tree),[])
+  page.url='https://example.test/';const initial=browserSummaryResources(tree)
+  page.title='A new title';page.loading=true;page.visible=true;page.url='https://example.test/next'
+  assert.deepEqual(browserSummaryResources(tree),initial)
+  page.loadError={code:-105,url:page.url,description:'fixture'};assert.deepEqual(browserSummaryResources(tree),[])
+})

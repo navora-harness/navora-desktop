@@ -9,10 +9,10 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..')
 const electronDir=path.join(root,'node_modules','electron')
 const distDir=path.join(electronDir,'dist')
 const packageInfo=JSON.parse(fs.readFileSync(path.join(electronDir,'package.json'),'utf8'))
-const version='45.0.0-cloudbypass.3'
+const version='45.0.0-cloudbypass.5'
 const archiveName=`electron-v${version}-win32-x64.zip`
 const downloadUrl=`https://github.com/ChengHoward/edist/releases/download/v${version}/${archiveName}`
-const expectedSha256='d5168ab311800e0feb739c1bd7bea50cea2ddb601975152de9f95ff1dd9ec82f'
+const expectedSha256='bf86a89be1a2578ea30fbf48d2f34082dd31938acda0cbc98b67f688c90c9ece'
 const marker=path.join(distDir,'navora-cloudbypass-runtime.json')
 
 if(packageInfo.version!==version)throw new Error(`Expected electron ${version}; found ${packageInfo.version}`)
@@ -23,11 +23,12 @@ if(fs.existsSync(marker)&&JSON.parse(fs.readFileSync(marker,'utf8')).version===v
   process.exit(0)
 }
 
-const archivePath=path.join(os.tmpdir(),archiveName)
+const archivePath=process.env.NAVORA_ELECTRON_ARCHIVE||path.join(os.tmpdir(),archiveName)
 const hashFile=filePath=>crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex')
 if(!fs.existsSync(archivePath)||hashFile(archivePath)!==expectedSha256){
+  if(process.env.NAVORA_ELECTRON_ARCHIVE)throw new Error('Supplied Electron archive failed the published checksum')
   fs.rmSync(archivePath,{force:true})
-  const size=168764808,parts=8,partPaths=Array.from({length:parts},(_,i)=>`${archivePath}.part-${i}`)
+  const size=168988385,parts=8,partPaths=Array.from({length:parts},(_,i)=>`${archivePath}.part-${i}`)
   try{
     await Promise.all(partPaths.map(async(partPath,i)=>{
       const start=Math.floor(size*i/parts),end=Math.floor(size*(i+1)/parts)-1
@@ -59,5 +60,5 @@ archive.extractAllTo(distDir,true)
 if(!fs.existsSync(path.join(distDir,'electron.exe')))throw new Error('Electron runtime archive did not contain electron.exe')
 fs.writeFileSync(path.join(distDir,'path.txt'),'electron.exe\n')
 fs.writeFileSync(marker,JSON.stringify({version,platform:'win32',arch:'x64',sha256:actualSha256,source:downloadUrl},null,2)+'\n')
-fs.rmSync(archivePath,{force:true})
+if(!process.env.NAVORA_ELECTRON_ARCHIVE)fs.rmSync(archivePath,{force:true})
 console.log(JSON.stringify({version,platform:'win32',arch:'x64',sha256:actualSha256,installed:true}))

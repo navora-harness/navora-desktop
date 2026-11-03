@@ -1,14 +1,17 @@
-import {dispatchTrustedPointer} from '../electron/modules/trusted-input'
+import type {TrustedPointerOpts} from '../electron/modules/trusted-input'
 import {app,BrowserWindow,WebContentsView,webContents,screen} from 'electron'
 import {execFile} from 'node:child_process'
 import {promisify} from 'node:util'
 import fs from 'node:fs'
 import path from 'node:path'
+import os from 'node:os'
 import assert from 'node:assert/strict'
 import {createServer} from 'node:http'
 import {createDefaultConfig} from '../shared/config'
 
 const root=process.env.NAVORA_DATA_ROOT!,output=process.env.NAVORA_UI_OUTPUT!
+const canonicalRoot=root&&fs.realpathSync(root),fixtureParent=canonicalRoot&&path.dirname(canonicalRoot),canonicalTemp=fs.realpathSync(os.tmpdir())
+assert.ok(canonicalRoot&&fixtureParent&&path.dirname(fixtureParent).toLowerCase()===canonicalTemp.toLowerCase()&&path.basename(fixtureParent).startsWith('navora-ui-renovation-')&&['normal','reduced-motion'].includes(path.basename(canonicalRoot))&&!fs.lstatSync(root).isSymbolicLink()&&!fs.lstatSync(fixtureParent).isSymbolicLink(),'Refuse to import main or write fixture config outside its canonical dedicated temporary data directory')
 if(process.env.NAVORA_UI_REDUCED_MOTION==='1')app.commandLine.appendSwitch('force-prefers-reduced-motion')
 // Native views are exercised in windows kept outside the desktop. Use the
 // software compositor and disable occlusion backgrounding for deterministic
@@ -20,9 +23,14 @@ const config=createDefaultConfig();config.app.onboarding_completed=true;config.a
 config.permissions.preset='custom';config.permissions.modes['file.download.passive']='allow'
 fs.writeFileSync(path.join(root,'config.yml'),JSON.stringify(config));app.setPath('userData',root)
 const firstShownBounds=new Map<number,{x:number;y:number;width:number;height:number}>()
-BrowserWindow.prototype.show=function(){if(!firstShownBounds.has(this.id))firstShownBounds.set(this.id,this.getBounds());this.setPosition(-30000,-30000);this.showInactive()}
+// Keep test windows outside every display but inside the signed 16-bit physical
+// coordinate range used by Windows caption messages at this machine's DPI.
+BrowserWindow.prototype.show=function(){if(!firstShownBounds.has(this.id)){firstShownBounds.set(this.id,this.getBounds());this.setPosition(-8000,-8000)}this.showInactive()}
 BrowserWindow.prototype.focus=function(){}
 const wait=(ms:number)=>new Promise(r=>setTimeout(r,ms))
+// Fixture pointer events represent the human user, including the annotation
+// period. Agent helpers intentionally reject input while that user owns it.
+async function dispatchTrustedPointer(wc:Electron.WebContents,input:TrustedPointerOpts){await wc.dispatchMouseEvent({type:input.action==='down'?'mousePressed':input.action==='up'?'mouseReleased':input.action==='wheel'?'mouseWheel':'mouseMoved',x:input.x,y:input.y,button:input.action==='down'||input.action==='up'?'left':'none',buttons:input.buttons??(input.action==='down'?1:0),clickCount:input.action==='down'||input.action==='up'?1:0,...(input.action==='wheel'?{deltaX:0,deltaY:input.deltaY||0}:{})})}
 async function until(check:()=>Promise<unknown>,label:string){for(let i=0;i<120;i++){if(await check())return;await wait(50)}throw Error('Timed out: '+label)}
 async function closeFromRenderer(host:BrowserWindow,code:string){try{await host.webContents.executeJavaScript(code)}catch(error){if(!/disposed|destroyed/i.test(String(error)))throw error;await until(()=>Promise.resolve(host.isDestroyed()),'window closes after final renderer command')}}
 async function beginUiDrag(js:(code:string)=>Promise<any>,row:string,mime:string){
@@ -35,7 +43,7 @@ function checkDisplayFit(host:BrowserWindow){
   assert.ok(bounds.x>=work.x&&bounds.y>=work.y&&bounds.x+bounds.width<=work.x+work.width&&bounds.y+bounds.height<=work.y+work.height,'Torn-out window, including its controls, fits the target work area: '+JSON.stringify({bounds,work}))
 }
 async function checkDetachedChrome(host:BrowserWindow){
-  const layout=await host.webContents.executeJavaScript(`(()=>{const rect=selector=>{const r=document.querySelector(selector).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,left:r.left,right:r.right,top:r.top,bottom:r.bottom}};return {tab:rect('[role=tab]'),caption:rect('.detached-caption-space'),controls:{left:innerWidth-138},buttons:[115,69,23].map(offset=>({x:innerWidth-offset,y:20})),custom:!!document.querySelector('.win-chrome')}})()`)
+  const layout=await host.webContents.executeJavaScript(`(()=>{const rect=selector=>{const r=document.querySelector(selector).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,left:r.left,right:r.right,top:r.top,bottom:r.bottom}};const header=document.querySelector('.detached-window-bar');let caption;const gap=document.querySelector('.browser-host-drag-space');if(gap?.checkVisibility()){const r=gap.getBoundingClientRect();if(r.width>8&&r.height>8)caption={x:r.x+r.width/2,y:r.y+r.height/2}}for(let x=innerWidth-200;!caption&&x>12;x-=8){const el=document.elementFromPoint(x,20);if(el&&header.contains(el)&&!el.closest('button,.workspace-tab-item')){caption={x,y:20};break}}if(!caption)throw Error('No actual draggable caption gap');return {tab:rect('[role=tab]'),caption,controls:{left:innerWidth-138},buttons:[115,69,23].map(offset=>({x:innerWidth-offset,y:20})),custom:!!document.querySelector('.win-chrome')}})()`)
   assert.ok(layout.tab.top>=0&&layout.tab.bottom<=44,'Tabs belong to the custom title bar')
   assert.ok(layout.tab.right<=layout.controls.left,'Window controls never cover the tabs')
   if(process.platform!=='win32')return
@@ -63,11 +71,13 @@ app.on('browser-window-created',(_event,win)=>{
     const js=async(code:string)=>{try{return await win.webContents.executeJavaScript(code)}catch(e){console.error('[browser-workspace] Failed script:',code.slice(0,140));throw e}}
     try{
       await until(()=>js('!!window.navora && !!document.querySelector(".composer")'),'main UI')
+      await js('(()=>{const original=console.error;console.error=(...items)=>original(...items.map(item=>item instanceof Error?item.stack:item))})()')
       if(process.env.NAVORA_UI_REDUCED_MOTION==='1')assert.equal(await js('matchMedia("(prefers-reduced-motion: reduce)").matches'),true,'Reduced-motion acceptance must use the real renderer preference')
       if(process.platform==='win32'){
         // Renderer input injection bypasses Windows caption hit testing. Check
         // the real native route so a drag region cannot silently swallow clicks.
-        const controls=await js(`([...document.querySelectorAll('.global-title-actions button')].filter(b=>b.checkVisibility()).map(b=>{const r=b.getBoundingClientRect();return {label:b.getAttribute('aria-label'),x:r.x+r.width/2,y:r.y+r.height/2}}))`)
+        const controls=await js(`([...document.querySelectorAll('.window-titlebar .application-menu-trigger')].filter(b=>b.checkVisibility()).map((b,index)=>{const r=b.getBoundingClientRect();return {label:b.textContent,index,x:r.x+r.width/2,y:r.y+r.height/2}}))`)
+        assert.ok(controls.length>=4,'The actual desktop application menu must be present for native caption checks')
         const bounds=win.getContentBounds(),hwnd=win.getNativeWindowHandle().readBigUInt64LE().toString()
         const points=controls.map((p:{x:number;y:number})=>{const q=screen.dipToScreenPoint({x:Math.round(bounds.x+p.x),y:Math.round(bounds.y+p.y)});return ((q.y&65535)*65536+(q.x&65535)).toString()})
         const script=`Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class CaptionHit { [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context); [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l); }'; [void][CaptionHit]::SetThreadDpiAwarenessContext([IntPtr]::new(-4)); foreach($point in @(${points.join(',')})){ [CaptionHit]::SendMessage([IntPtr]::new(${hwnd}),132,[IntPtr]::Zero,[IntPtr]::new([long]$point)).ToInt64() }`
@@ -77,31 +87,36 @@ app.on('browser-window-created',(_event,win)=>{
         for(const control of controls){
           const click=()=>{win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,x:Math.round(control.x),y:Math.round(control.y)});win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,x:Math.round(control.x),y:Math.round(control.y)})}
           click();await wait(150)
-          assert.equal(await js(`document.querySelector('.global-title-actions button[aria-label="${control.label}"]').getAttribute('aria-expanded')`),'true','Title action opens: '+control.label)
+          assert.equal(await js(`document.querySelectorAll('.window-titlebar .application-menu-trigger')[${control.index}].getAttribute('aria-expanded')`),'true','Title action opens: '+control.label)
           click();await wait(250)
         }
       }
+      assert.equal(await js('(async()=>(await window.navora.browser.workspace.state()).pages.flatMap(s=>s.windows).length)()'),0,'Idle startup does not create a browser or a blank tab strip')
+      await js('document.querySelector("[data-chat-resource=workspace]").click()')
+      await until(()=>js('document.querySelectorAll(".file-workspace [role=tab]").length===1'),'explicit workspace launch creates one default browser')
       const initialDefault=await js('(async()=>(await window.navora.browser.workspace.state()).pages.flatMap(s=>s.windows)[0]?.windowId)()')
       assert.ok(initialDefault,'Opening the empty workspace creates a default browser page')
+      await js('document.querySelector("[aria-label=隐藏工作区]").click()')
+      await until(()=>js('!document.querySelector(".file-workspace")'),'hide default workspace before restore')
       await js('document.querySelector("[data-chat-resource=workspace]").click()')
       await until(()=>js('document.querySelectorAll(".file-workspace [role=tab]").length===1'),'restore default tab')
       assert.equal(await js('(async()=>(await window.navora.browser.workspace.state()).pages.flatMap(s=>s.windows).length)()'),1,'Reopening cannot duplicate the default page')
-      await js('document.querySelector(".file-tab-close").click()')
+      await js('document.querySelector("[aria-label=关闭标签页]").click()')
       await until(()=>js('!document.querySelector(".file-workspace")'),'closing final default tab hides workspace')
       await js('document.querySelector("[data-chat-resource=workspace]").click()')
       await until(()=>js('document.querySelectorAll(".file-workspace [role=tab]").length===1'),'new default after closing all tabs')
       await until(()=>js(`(async()=>{const pages=(await window.navora.browser.workspace.state()).pages.flatMap(s=>s.windows);return pages.length===1&&pages[0].windowId!==${JSON.stringify(initialDefault)}})()`),'replacement default page ready')
-      await js('document.querySelector(".file-tab-close").click()')
+      await js('document.querySelector("[aria-label=关闭标签页]").click()')
       await until(()=>js('!document.querySelector(".file-workspace")'),'remove replacement default')
       await js('document.querySelector("[data-panel=browser]").click()')
       await until(()=>js('!!document.querySelector(".file-workspace.full-page .workspace-empty")'),'browser primary empty state')
-      assert.equal(await js('document.querySelector(".workspace-empty").textContent.includes("选择侧栏中的页面")'),true,'Browser section gives an explicit empty state without creating a page')
-      await js('[...document.querySelectorAll("[aria-label=返回对话],[aria-label=返回对话并保留网页]")].find(b=>b.checkVisibility()).click()')
+      assert.equal(await js('document.querySelector(".workspace-empty").textContent.includes("从左侧选择已有页面")'),true,'Browser section gives an explicit empty state without creating a page')
+      await js('document.querySelector("[data-panel=chats]").click()')
       await until(()=>js('!document.querySelector(".file-workspace.full-page")'),'return from empty browser')
-      await js('document.querySelector(".composer-input textarea").focus()')
+      await js('document.querySelector(".composer-input [contenteditable=true]").focus()')
       const composer=await js('(()=>{const r=document.querySelector(".composer-box").getBoundingClientRect();return {x:Math.floor(r.x),y:Math.floor(r.y),width:Math.ceil(r.width),height:Math.ceil(r.height)}})()')
       fs.writeFileSync(path.join(output,'composer-refined.png'),(await win.webContents.capturePage(composer)).toPNG())
-      assert.equal(await js('getComputedStyle(document.querySelector(".composer-input textarea")).outlineStyle'),'none','Composer focus uses its outer surface without an inner field frame')
+      assert.equal(await js('getComputedStyle(document.querySelector(".composer-input [contenteditable=true]")).outlineStyle'),'none','Composer focus uses its outer surface without an inner field frame')
       await js(`(async()=>{const c=await window.navora.chats.create('浏览器完整验收');window.testChatId=c.id;window.testPageId=await window.navora.browser.workspace.ensure(c.id,'browser:acceptance',${JSON.stringify(url)});await window.navora.browser.setVisible(window.testPageId,true)})()`)
       await until(()=>js('!!document.querySelector(".browser-native-slot")'),'embedded native slot')
       await until(()=>Promise.resolve(webContents.getAllWebContents().some(w=>w.getURL()===url)),'fixture navigation')
@@ -119,7 +134,7 @@ app.on('browser-window-created',(_event,win)=>{
       assert.equal(await js('document.querySelector("[aria-label=浏览器后退]").disabled'),true,'Back reflects actual page history')
       await guest.executeJavaScript('document.querySelector("input").value="菜单前的输入"')
       await guest.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
-      await js('document.querySelector("[aria-label=工作区更多操作]").click()')
+      await js('document.querySelector("[aria-label=浏览器更多操作]").click()')
       await until(()=>js('!!document.querySelector(".ui-action-menu")&&!!document.querySelector(".browser-frozen-frame")?.naturalWidth'),'workspace menu preserves the page image')
       await until(()=>Promise.resolve(!nativeVisible()),'covered native view yields input to the menu')
       const menu=await js('(()=>{const menu=document.querySelector(".ui-action-menu");return {display:getComputedStyle(menu).display,rows:[...menu.querySelectorAll("button")].map(b=>b.getBoundingClientRect().toJSON())}})()')
@@ -146,8 +161,8 @@ app.on('browser-window-created',(_event,win)=>{
       await js('document.querySelector("[aria-label=浏览器后退]").click()')
       await until(()=>Promise.resolve(guest.getURL()===url),'toolbar back navigation')
       await until(()=>guest.executeJavaScript('!!document.querySelector("input")'),'fixture after history navigation')
-      await js('document.querySelector("[aria-label=接管页面]").click()')
-      await until(()=>js('!!document.querySelector(".browser-manual-status")'),'manual control status')
+      await js('document.querySelector("[data-browser-agent-control]").click()')
+      await until(()=>js('document.querySelector(".browser-tab-panel")?.dataset.controlOwner==="user"'),'manual control status')
       assert.equal(await js('document.querySelector("[aria-label=浏览器地址]").readOnly'),false,'Manual control keeps the address editable')
       assert.equal(await js('document.querySelector(\'[aria-label="刷新浏览器标签页"],[aria-label="停止加载网页"]\').disabled'),false,'Manual control keeps the refresh/stop button available')
       await js(`window.navora.browser.workspace.command(window.testPageId,'navigate',${JSON.stringify(url+'?manual=1')})`)
@@ -160,7 +175,7 @@ app.on('browser-window-created',(_event,win)=>{
       await js('document.querySelector("[aria-label=停止加载网页]").click()')
       await until(()=>js('!!document.querySelector("[aria-label=刷新浏览器标签页]")'),'stopping clears loading state')
       assert.equal(await js('window.slowNavigation'),true,'An intentional stop is not a navigation failure')
-      assert.equal(await js('!!document.querySelector(".browser-page-failure,.browser-tab-notice")'),false,'Stopped navigation shows no spurious failure')
+      assert.equal(await js('!!document.querySelector(".browser-page-failure,.browser-tab-notice,.browser-operation-notice")'),false,'Stopped navigation shows no spurious failure')
       await js(`window.navora.browser.workspace.command(window.testPageId,'navigate',${JSON.stringify(url)})`)
       // Wait for navigation and painting before selecting screenshot evidence.
       await until(()=>Promise.resolve(guest.getURL()===url&&!guest.isLoading()),'manual navigation finishes before annotation')
@@ -169,19 +184,31 @@ app.on('browser-window-created',(_event,win)=>{
       await until(()=>js('!!document.querySelector(".annotation-tools button")'),'annotation tools during manual control')
       assert.equal(await js('document.querySelector(".annotation-tools button").disabled'),false,'Manual control permits starting an annotation')
       await js('document.querySelector(".annotation-tools button").click()')
-      await until(()=>js('!!document.querySelector(".browser-selecting-text")&&!document.querySelector(".browser-selecting-text").nextElementSibling.disabled'),'manual element selection ready')
+      await until(()=>js('!!document.querySelector(".browser-annotation-mode")&&!document.querySelector(".browser-annotation-mode").textContent.includes("等待")'),'manual unified selection ready')
       const manualTarget=await guest.executeJavaScript('(()=>{const r=document.querySelector("#target").getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()')
       await dispatchTrustedPointer(guest,{action:'down',...manualTarget});await dispatchTrustedPointer(guest,{action:'up',...manualTarget})
-      try{await until(()=>js('!!document.querySelector(".browser-manual-status")&&!!document.querySelector(".browser-annotations article")'),'completing annotation keeps manual control')}
+      try{await until(()=>js('document.activeElement?.getAttribute("aria-label")==="悬浮批注意见"'),'selected target opens a focused trusted floating editor')}
       catch(error){console.error('[manual-annotation-navigation]',JSON.stringify(annotationNavigation));throw error}
-      await js('document.querySelectorAll(".annotation-tools button")[1].click()')
-      await until(()=>js('!!document.querySelector(".browser-selecting-text")&&!document.querySelector(".browser-selecting-text").nextElementSibling.disabled'),'second annotation during manual control')
+      assert.equal(await js('(async()=>(await window.navora.browser.workspace.annotations(window.testChatId)).length)()'),0,'Selecting alone never creates an empty annotation')
+      await js('(()=>{const input=document.querySelector("[aria-label=悬浮批注意见]");input.value="人工操作时填写的批注意见";input.dispatchEvent(new Event("input",{bubbles:true}))})()')
+      await until(()=>js('!!document.querySelector(".annotation-floating-editor footer>div button:last-child")&&!document.querySelector(".annotation-floating-editor footer>div button:last-child").disabled'),'floating target opinion persisted')
+      const floatingBounds=await js('(()=>{const r=document.querySelector(".annotation-floating-editor").getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:innerWidth,height:innerHeight}})()')
+      assert.ok(floatingBounds.x>=0&&floatingBounds.y>=0&&floatingBounds.right<=floatingBounds.width&&floatingBounds.bottom<=floatingBounds.height,'Target editor stays inside the actual host viewport')
+      fs.writeFileSync(path.join(output,'annotation-floating-editor.png'),(await win.webContents.capturePage()).toPNG())
+      win.webContents.sendInputEvent({type:'keyDown',keyCode:'Enter',modifiers:['control']});win.webContents.sendInputEvent({type:'keyUp',keyCode:'Enter',modifiers:['control']})
+      await until(()=>js('!document.querySelector(".annotation-floating-editor")&&!!document.querySelector(".browser-annotations article")'),'Ctrl Enter explicitly saves the target')
+      assert.equal(await js('document.querySelector(".browser-tab-panel").dataset.controlOwner'),'user','Saving remains inside the manual annotation session')
+      await js('[...document.querySelectorAll(".browser-page-tools button")].find(b=>b.textContent==="结束批注").click()')
+      await until(()=>js('!document.querySelector(".browser-annotation-mode")'),'explicitly end first annotation session')
+      assert.equal(await js('document.querySelector(".browser-tab-panel").dataset.controlOwner'),'user','Exiting annotation preserves prior manual control')
+      await js('document.querySelector(".annotation-tools button").click()')
+      await until(()=>js('!!document.querySelector(".browser-annotation-mode")&&!document.querySelector(".browser-annotation-mode").textContent.includes("等待")'),'second annotation during manual control')
       guest.sendInputEvent({type:'keyDown',keyCode:'Escape'});guest.sendInputEvent({type:'keyUp',keyCode:'Escape'})
-      await until(()=>js('!document.querySelector(".browser-selecting-text")&&!!document.querySelector(".browser-manual-status")'),'native Escape preserves manual control')
+      await until(()=>js('!document.querySelector(".browser-annotation-mode")&&document.querySelector(".browser-tab-panel").dataset.controlOwner==="user"'),'native Escape preserves manual control')
       await js('(async()=>{const note=(await window.navora.browser.workspace.annotations(window.testChatId))[0];await window.navora.browser.workspace.removeAnnotation(window.testChatId,note.id)})()')
       await js('document.querySelector("[aria-label=收起批注]").click()')
-      await js('document.querySelector(\'[aria-label="恢复 AI 操作"]\').click()')
-      await until(()=>js('!document.querySelector(".browser-manual-status")'),'manual control resumes')
+      await js('document.querySelector("[data-browser-agent-control]").click()')
+      await until(()=>js('document.querySelector(".browser-tab-panel")?.dataset.controlOwner==="ai"'),'manual control resumes')
       guest.sendInputEvent({type:'keyDown',keyCode:'f',modifiers:['control']});guest.sendInputEvent({type:'keyUp',keyCode:'f',modifiers:['control']})
       await until(()=>js('document.activeElement?.getAttribute("aria-label")==="在网页中查找"'),'native Ctrl F opens focused page search')
       const findText=async(text:string)=>{await js(`(()=>{const input=document.querySelector('[aria-label="在网页中查找"]');input.value=${JSON.stringify(text)};input.dispatchEvent(new Event('input',{bubbles:true}))})()`)}
@@ -222,10 +249,12 @@ app.on('browser-window-created',(_event,win)=>{
       await until(()=>guest.executeJavaScript('!!document.querySelector("#draft")').catch(()=>false),'crashed renderer can be reloaded')
       await until(()=>Promise.resolve(nativeVisible()),'crash recovery restores native view')
       await js('window.navora.browser.workspace.command(window.testPageId,"resume")')
-      await js('document.querySelector(".browser-tab-toolbar [aria-label=下载列表]").click()')
+      await js('document.querySelector("[aria-label=浏览器更多操作]").click()')
+      await until(()=>js('!!document.querySelector(".ui-action-menu")'),'empty download list remains reachable from browser menu')
+      await js('[...document.querySelectorAll(".ui-action-menu button")].find(b=>b.textContent.includes("下载列表")).click()')
       await until(()=>js('!!document.querySelector(".dl-panel")'),'toolbar downloads menu opens')
       await until(()=>Promise.resolve(!nativeVisible()),'download popup receives native input')
-      await js('document.querySelector(".browser-tab-toolbar [aria-label=下载列表]").click()')
+      win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'})
       await until(()=>Promise.resolve(nativeVisible()),'closing downloads restores live page')
       await js('document.querySelector("[aria-label=浏览器更多操作]").click()')
       await until(()=>js('!!document.querySelector(".ui-action-menu")'),'display menu')
@@ -246,7 +275,7 @@ app.on('browser-window-created',(_event,win)=>{
       assert.equal(await guest.executeJavaScript('innerWidth'),390,'Unapplied viewport draft cannot resize the page')
       assert.equal(Math.round(await js('document.querySelector(".browser-native-slot").getBoundingClientRect().width')),390,'Unapplied draft cannot resize the native slot')
       await js(`(()=>{const input=document.querySelector('[aria-label="视口宽度"]');input.value='0';input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('.browser-view-options button:not(.ui-icon-button)').click()})()`);await wait(80)
-      assert.equal(await js('document.querySelector(".browser-tab-notice").textContent.includes("有效尺寸")'),true,'Invalid viewport gives a local validation message')
+      assert.equal(await js('document.querySelector(".browser-operation-notice,.browser-tab-notice").textContent.includes("有效尺寸")'),true,'Invalid viewport gives a local validation message')
       assert.equal(await guest.executeJavaScript('innerWidth'),390,'Invalid draft leaves the applied viewport intact')
       await js(`(()=>{const input=document.querySelector('[aria-label="视口宽度"]');input.value='600';input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('.browser-view-options button:not(.ui-icon-button)').click()})()`)
       try{await until(()=>guest.executeJavaScript('innerWidth===600'),'custom viewport applies explicitly')}catch(e){console.error('[viewport-state]',await guest.executeJavaScript('({width:innerWidth,height:innerHeight})'),await js(`(async()=>({pages:(await window.navora.browser.workspace.state()).pages.flatMap(s=>s.windows).map(w=>({id:w.windowId,viewport:w.viewport,visible:w.visible,zoom:w.zoomFactor})),slot:document.querySelector('.browser-native-slot')?.getBoundingClientRect().toJSON(),frozen:!!document.querySelector('.browser-frozen-frame'),notice:document.querySelector('.browser-tab-notice')?.textContent,overlays:[...document.querySelectorAll('.v-overlay--active')].map(e=>e.outerHTML.slice(0,500))}))()`));throw e}
@@ -272,18 +301,19 @@ app.on('browser-window-created',(_event,win)=>{
       await until(()=>hostJs('(async()=>window.downloadEvents>0&&(await window.navora.downloads.list()).some(d=>d.filename==="browser-acceptance.txt"&&d.state==="completed"))()'),'real download updates reach detached window')
       await until(()=>js('window.downloadEvents>0'),'real download updates reach main window')
       assert.equal(await js('window.downloadEvents>0'),true,'Download updates also reach main window')
-      await hostJs('document.querySelector(".browser-tab-toolbar [aria-label=下载列表]").click()')
+      await hostJs('document.querySelector(".browser-tab-toolbar .browser-downloads-trigger").click()')
       await until(()=>hostJs('document.querySelector(".dl-panel")?.textContent.includes("browser-acceptance.txt")'),'detached downloads show actual completed file')
       await until(()=>hostJs('document.querySelector(".dl-panel")?.textContent.includes("已完成")&&Number(getComputedStyle(document.querySelector(".dl-panel").closest(".v-overlay__content")).opacity)>.99'),'download popup painted with final status')
-      assert.equal(await hostJs('(()=>{const button=document.querySelector(".browser-tab-toolbar [aria-label=下载列表]").getBoundingClientRect(),panel=document.querySelector(".dl-panel").getBoundingClientRect();return panel.top>=button.bottom&&panel.left>=0&&panel.right<=innerWidth})()'),true,'Download popup stays below its toolbar trigger and within window bounds')
+      assert.equal(await hostJs('(()=>{const button=document.querySelector(".browser-tab-toolbar .browser-downloads-trigger").getBoundingClientRect(),panel=document.querySelector(".dl-panel").getBoundingClientRect();return panel.top>=button.bottom&&panel.left>=0&&panel.right<=innerWidth})()'),true,'Download popup stays below its toolbar trigger and within window bounds')
       assert.equal(await hostJs('getComputedStyle(document.querySelector(".dl-panel")).borderRadius'),'12px','Download surface matches the shared menu radius')
       fs.writeFileSync(path.join(output,'detached-browser-downloads.png'),(await detached.webContents.capturePage()).toPNG())
-      await hostJs('document.querySelector(".browser-tab-toolbar [aria-label=下载列表]").click()')
+      await hostJs('document.querySelector(".browser-tab-toolbar .browser-downloads-trigger").click()')
       await until(()=>hostJs('!document.querySelector(".v-overlay--active")'),'detached downloads closes')
       fs.writeFileSync(path.join(output,'detached-browser-titlebar.png'),(await detached.webContents.capturePage()).toPNG())
       const original=await js('window.testPageId')
       const ids=()=>hostJs('[...document.querySelectorAll("[role=tab]")].map(b=>b.dataset.pageId)')
       const selected=()=>hostJs('document.querySelector("[role=tab][aria-selected=true]")?.dataset.pageId')
+      const presented=(pageId:string)=>hostJs(`(async()=>{const state=await window.navora.browser.workspace.state(),page=state.pages.flatMap(session=>session.windows).find(page=>page.windowId===${JSON.stringify(pageId)});return !!page?.hostActive&&page.visible&&document.querySelector('[role=tab][aria-selected=true]')?.dataset.pageId===${JSON.stringify(pageId)}})()`)
       const newTab=async()=>{
         const count=(await ids()).length
         await hostJs('document.querySelector("[aria-label=新建浏览器标签页]").click()')
@@ -297,7 +327,7 @@ app.on('browser-window-created',(_event,win)=>{
       await hostJs(`(async()=>{const token=await window.navora.browser.workspace.beginDrag(${JSON.stringify(second)}),data=new DataTransfer();data.setData('application/x-navora-browser-tab',token);document.querySelector('[data-page-id="'+${JSON.stringify(original)}+'"]').closest('.browser-host-tab').dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:data}))})()`)
       await until(async()=>JSON.stringify(await ids())===JSON.stringify([second,original]),'reordered detached tabs')
       const third=await newTab()
-      assert.deepEqual(await ids(),[second,original,third],'New tab appends after reordered tabs')
+      assert.deepEqual(await ids(),[second,third,original],'New tab opens immediately after the active reordered tab')
       // Record a reproducible renderer-side tab-switch baseline with real
       // native pages. The value includes the UI event and the next paint where
       // the requested tab is selected; it is diagnostic, not a machine gate.
@@ -318,7 +348,9 @@ app.on('browser-window-created',(_event,win)=>{
         let onResize!:()=>void
         const resized=new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>{detached.removeListener('resize',onResize);reject(Error('Timed out waiting for detached window resize'))},2000);onResize=()=>{clearTimeout(timer);resolve()};detached.once('resize',onResize)})
         const startedAt=process.hrtime.bigint();detached.setSize(width,height);await resized
-        const viewport=await hostJs('new Promise(resolve=>requestAnimationFrame(()=>resolve({width:innerWidth,height:innerHeight})))') as {width:number;height:number}
+        let viewport:{width:number;height:number}|undefined
+        try{await until(async()=>{viewport=await hostJs('new Promise(resolve=>requestAnimationFrame(()=>resolve({width:innerWidth,height:innerHeight})))');const content=detached.getContentBounds();return viewport?.width===content.width&&viewport.height===content.height},'native resize reaches the renderer viewport and paints')}
+        catch(error){const diagnostic={requested:{width,height},window:detached.getBounds(),content:detached.getContentBounds(),zoom:detached.webContents.getZoomFactor(),rootView:detached.contentView.getBounds(),views:detached.contentView.children.map(view=>({type:view.constructor.name,bounds:view.getBounds(),wc:view instanceof WebContentsView?view.webContents.id:undefined,children:view.children.map(child=>({type:child.constructor.name,bounds:child.getBounds(),wc:child instanceof WebContentsView?child.webContents.id:undefined}))})),renderer:await hostJs('({innerWidth,innerHeight,outerWidth,outerHeight,dpr:devicePixelRatio,visibility:document.visibilityState,screen:{width:screen.width,height:screen.height},body:document.body.getBoundingClientRect().toJSON()})')};fs.writeFileSync(path.join(output,'resize-diagnostic.json'),JSON.stringify(diagnostic,null,2));console.error('[native-resize-diagnostic]',JSON.stringify(diagnostic));throw error}
         resizeSamples.push(Number(process.hrtime.bigint()-startedAt)/1e6)
         const content=detached.getContentBounds()
         assert.deepEqual(viewport,{width:content.width,height:content.height},'Detached renderer follows native window resize')
@@ -334,13 +366,28 @@ app.on('browser-window-created',(_event,win)=>{
       await until(async()=>await selected()===original,'original page selected')
       await hostJs(`window.navora.browser.setVisible(${JSON.stringify(original)},true)`)
       guest.sendInputEvent({type:'keyDown',keyCode:'Tab',modifiers:['control']});guest.sendInputEvent({type:'keyUp',keyCode:'Tab',modifiers:['control']})
-      await until(async()=>await selected()===third,'native Ctrl Tab follows visible tab order')
-      await hostJs('document.querySelector(".browser-host-page").dispatchEvent(new KeyboardEvent("keydown",{key:"Tab",ctrlKey:true,shiftKey:true,bubbles:true}))')
+      await until(async()=>await selected()===second,'native Ctrl Tab wraps using visible tab order')
+      try{await until(()=>presented(second),'native switch has a valid presented page before chrome keyboard focus')}
+      catch(error){const diagnostic={expected:second,state:await hostJs('window.navora.browser.workspace.state()'),ui:await hostJs('({selected:document.querySelector("[role=tab][aria-selected=true]")?.dataset.pageId,focus:document.activeElement?.outerHTML?.slice(0,600),overlays:[...document.querySelectorAll(".v-overlay--active,.sidebar-ctx-panel,[data-browser-chrome-overlay]")].filter(node=>node.checkVisibility()).map(node=>({class:node.className,html:node.outerHTML.slice(0,1000),rect:node.getBoundingClientRect().toJSON()})),panels:[...document.querySelectorAll(".browser-tab-panel")].map(node=>({id:node.id,visible:node.checkVisibility(),start:!!node.querySelector(".browser-start-page"),failure:!!node.querySelector(".browser-page-failure"),notice:node.querySelector("[role=alert]")?.textContent,slot:node.querySelector(".browser-native-slot")?.getBoundingClientRect().toJSON()}))})'),native:detached.contentView.children.flatMap(view=>view.children).filter(view=>view instanceof WebContentsView).map(view=>({wc:view.webContents.id,url:view.webContents.getURL(),visible:view.getVisible(),bounds:view.getBounds()}))};fs.writeFileSync(path.join(output,'native-switch-diagnostic.json'),JSON.stringify(diagnostic,null,2));console.error('[native-switch-diagnostic]',JSON.stringify(diagnostic));throw error}
+      // Reproduce an old present notification arriving after a newer tab has
+      // become active. It must invalidate state, not replay the old selection.
+      const beforeDelayedPresent=await hostJs('window.navora.browser.workspace.state()')
+      detached.webContents.send('navora:browser.present',{chatId:await js('window.testChatId'),pageId:original})
+      await wait(200)
+      assert.equal(await presented(second),true,'Delayed presentation cannot replace the current UI/native tab or hide its live View')
+      const afterDelayedPresent=await hostJs('window.navora.browser.workspace.state()')
+      const maxRevision=(state:any)=>Math.max(0,...state.pages.flatMap((session:any)=>session.windows).map((page:any)=>page.tabRevision||0))
+      assert.ok(maxRevision(afterDelayedPresent)-maxRevision(beforeDelayedPresent)<20,'Delayed presentation cannot start an activation notification loop')
+      fs.writeFileSync(path.join(output,'delayed-presentation-regression.json'),JSON.stringify({ok:true,selected:second,ignoredOldPage:original,beforeRevision:maxRevision(beforeDelayedPresent),afterRevision:maxRevision(afterDelayedPresent),nativePresented:true},null,2))
+      await hostJs('document.querySelector("[role=tab][aria-selected=true]").focus()');detached.webContents.focus();await wait(100)
+      detached.webContents.sendInputEvent({type:'keyDown',keyCode:'Tab',modifiers:['control','shift']});detached.webContents.sendInputEvent({type:'keyUp',keyCode:'Tab',modifiers:['control','shift']})
       await until(async()=>await selected()===original,'chrome Ctrl Shift Tab follows visible tab order')
+      await until(()=>presented(original),'chrome switch is acknowledged by native host')
       await hostJs(`document.querySelector('[data-page-id="'+${JSON.stringify(second)}+'"]').click()`)
-      await hostJs('document.querySelector(".browser-host-page").dispatchEvent(new KeyboardEvent("keydown",{key:"w",ctrlKey:true,bubbles:true}))')
-      await until(async()=>JSON.stringify(await ids())===JSON.stringify([original,third]),'close selected reordered tab')
-      assert.equal(await selected(),original,'Closing selects the following visible neighbor')
+      await until(async()=>await selected()===second,'selected tab ready for its visible close control')
+      await hostJs('document.querySelector("[role=tab][aria-selected=true]").closest(".workspace-tab-item").querySelector(".workspace-tab-close").click()')
+      await until(async()=>JSON.stringify(await ids())===JSON.stringify([third,original]),'close selected reordered tab')
+      await until(async()=>await selected()===third,'closing selects the following visible neighbor after native close commits')
       await hostJs(`document.querySelector('[data-page-id="'+${JSON.stringify(third)}+'"]').dispatchEvent(new MouseEvent('auxclick',{button:1,bubbles:true,cancelable:true}))`)
       await until(async()=>JSON.stringify(await ids())===JSON.stringify([original]),'middle click closes detached tab')
       const disposable=await newTab()
@@ -354,15 +401,15 @@ app.on('browser-window-created',(_event,win)=>{
       disposableGuest.sendInputEvent({type:'keyDown',keyCode:'w',modifiers:['control']});disposableGuest.sendInputEvent({type:'keyUp',keyCode:'w',modifiers:['control']})
       await until(async()=>JSON.stringify(await ids())===JSON.stringify([original]),'close final disposable tab')
       const protectedDropToken=await hostJs(`window.navora.browser.workspace.beginDrag(${JSON.stringify(original)})`),protectedEndToken=await hostJs(`window.navora.browser.workspace.beginDrag(${JSON.stringify(original)})`)
-      await hostJs(`window.navora.browser.workspace.command(${JSON.stringify(original)},'takeControl')`)
-      assert.equal(await js(`window.navora.browser.workspace.drop(${JSON.stringify(protectedDropToken)}).then(()=>false,e=>String(e).includes('browser_busy_finish_action_first'))`),true,'Drag token cannot bypass manual control enabled after drag began')
+      await hostJs(`window.navora.browser.workspace.beginAnnotation(${JSON.stringify(await js('window.testChatId'))},${JSON.stringify(original)},'auto')`)
+      assert.equal(await js(`window.navora.browser.workspace.drop(${JSON.stringify(protectedDropToken)}).then(()=>false,e=>String(e).includes('browser_busy_finish_action_first'))`),true,'Drag token cannot bypass annotation started after drag began')
+      const beforeBlockedTearoff=new Set(BrowserWindow.getAllWindows().map(host=>host.id))
       assert.equal(await hostJs(`window.navora.browser.workspace.endDrag(${JSON.stringify(protectedEndToken)},true).then(()=>false,e=>String(e).includes('browser_busy_finish_action_first'))`),true,'Tear-off revalidates page state at drag end')
-      await hostJs('document.querySelector("[aria-label=浏览器窗口更多操作]").click()')
-      await until(()=>hostJs('!!document.querySelector(".ui-action-menu")'),'detached window menu')
-      await hostJs('[...document.querySelectorAll(".ui-action-menu button")].find(b=>b.textContent.includes("全部移回")).click()')
-      await until(()=>hostJs('document.querySelector(".browser-host-error")?.textContent.includes("恢复 AI")'),'friendly transfer error')
+      assert.equal(BrowserWindow.getAllWindows().some(host=>!beforeBlockedTearoff.has(host.id)),false,'Rejected tear-off releases its new empty native host')
+      await hostJs('document.querySelector(".browser-host-restore").click()')
+      await until(()=>hostJs('document.querySelector(".browser-host-error")?.textContent.includes("批注")'),'friendly transfer error')
       assert.equal(await hostJs('document.querySelector("[aria-label=新建浏览器标签页]").disabled'),false,'Failed transfer releases busy controls')
-      await hostJs(`window.navora.browser.workspace.command(${JSON.stringify(original)},'resume')`)
+      await hostJs(`window.navora.browser.workspace.cancelAnnotation(${JSON.stringify(await js('window.testChatId'))},${JSON.stringify(original)})`)
       await hostJs('document.querySelector("[aria-label=关闭窗口操作提示]").click()')
       assert.equal(await guest.executeJavaScript('document.querySelector("input").value'),'保留这个输入','Tab operations preserve the original page')
       const otherChat=await js(`(async()=>{const c=await window.navora.chats.create('另一个页面归属');return c.id})()`)
@@ -382,8 +429,11 @@ app.on('browser-window-created',(_event,win)=>{
       const point=await guest.executeJavaScript('(()=>{const r=document.querySelector("#target").getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()')
       await dispatchTrustedPointer(guest,{action:'move',...point});await dispatchTrustedPointer(guest,{action:'down',...point});await dispatchTrustedPointer(guest,{action:'up',...point});await wait(100)
       assert.equal(await guest.executeJavaScript('window.clicked||false'),false,'Selecting a button must not activate its click handler')
-      const captured=await js('(async()=>(await window.navora.browser.workspace.collectAnnotation(window.testChatId,window.testPageId)).annotation)()')
-      assert.ok(captured);assert.equal(captured.selection.text,'批注这个按钮')
+      const capturedTarget=await js('(async()=>(await window.navora.browser.workspace.collectAnnotation(window.testChatId,window.testPageId)).target)()')
+      assert.ok(capturedTarget);assert.equal(capturedTarget.selection.text,'批注这个按钮');assert.equal(capturedTarget.comment,'')
+      assert.equal(await js('(async()=>(await window.navora.browser.workspace.annotations(window.testChatId)).length)()'),0,'Temporary targets are not an empty saved annotation')
+      const captured=await js(`(async()=>{const api=window.navora.browser.workspace,target=${JSON.stringify(capturedTarget)},draft=await api.writeAnnotationTarget(window.testChatId,target.id,target.version,{text:'创建时填写的意见',editorId:'integration-target',sequence:1});const saved=await api.commitAnnotationTarget(window.testChatId,window.testPageId,draft.id,draft.version);const again=await api.commitAnnotationTarget(window.testChatId,window.testPageId,draft.id,draft.version);if(saved.id!==again.id)throw Error('duplicate target commit');await api.cancelAnnotation(window.testChatId,window.testPageId);return saved})()`)
+      assert.equal(captured.selection.text,'批注这个按钮');assert.equal(captured.sourceTargetId,capturedTarget.id)
       const exactComparison=await js(`window.navora.browser.workspace.compareAnnotation(window.testChatId,${JSON.stringify(captured.id)})`)
       assert.equal(exactComparison.anchor,'matched','Snapshot comparison confirms the original element and text')
       await guest.executeJavaScript('document.querySelector("#target").textContent="按钮内容已更新"')
@@ -395,7 +445,7 @@ app.on('browser-window-created',(_event,win)=>{
       await until(()=>js('!!document.querySelector(".browser-annotations article")'),'draft annotation displayed')
       assert.equal(await js('document.querySelector(".annotation-actions .primary").textContent.trim()'),'加入对话','Draft has one clear next action')
       const ref=await js('window.navora.browser.workspace.presentAnnotation(window.testChatId,window.testAnnotation.id)')
-      await until(()=>js('document.querySelector(".composer").textContent.includes("@批注")'),'annotation context chip')
+      await until(()=>js(`[...document.querySelectorAll('.composer-context-inline button')].some(button=>button.getAttribute('aria-label')===${JSON.stringify('引用 '+ref.label)})`),'annotation context reference is inserted with its real comment label')
       assert.equal(ref.annotationRevision,2)
       const media=await js('window.navora.workspace.readMedia(window.testChatId,window.testAnnotation.screenshotPath)')
       assert.ok(media.ok&&media.base64.length>100)
@@ -414,10 +464,12 @@ app.on('browser-window-created',(_event,win)=>{
       await js('document.querySelector("[data-chat-resource=workspace]").click()');await until(()=>js('!!document.querySelector(".browser-notes-toggle")'),'restore opinion panel')
       await js('document.querySelector(".browser-notes-toggle").click()');await until(()=>js('!!document.querySelector("[aria-label=批注意见]")'),'restore opinion draft')
       assert.equal(await js('document.querySelector("[aria-label=批注意见]").value'),'本地未保存的批注意见','Unsubmitted opinion survives workspace unmount')
+      const beforeDraftTransfer=new Set(BrowserWindow.getAllWindows().map(host=>host.id))
       await js('window.navora.browser.workspace.detach(window.testPageId)')
-      await until(()=>Promise.resolve(BrowserWindow.getAllWindows().some(w=>w!==win&&w.webContents.getURL().includes('/browser-host/'))),'draft transfer host')
-      const draftHost=BrowserWindow.getAllWindows().find(w=>w!==win&&w.webContents.getURL().includes('/browser-host/'))!,draftJs=(code:string)=>draftHost.webContents.executeJavaScript(code)
-      await until(()=>draftJs('!!document.querySelector(".browser-notes-toggle")'),'draft transfer toolbar')
+      await until(()=>Promise.resolve(BrowserWindow.getAllWindows().some(w=>!beforeDraftTransfer.has(w.id)&&w.webContents.getURL().includes('/browser-host/'))),'draft transfer host')
+      const draftHost=BrowserWindow.getAllWindows().find(w=>!beforeDraftTransfer.has(w.id)&&w.webContents.getURL().includes('/browser-host/'))!,draftJs=(code:string)=>draftHost.webContents.executeJavaScript(code)
+      try{await until(()=>draftJs('!!document.querySelector(".browser-notes-toggle")'),'draft transfer toolbar')}
+      catch(error){const diagnostic={windows:BrowserWindow.getAllWindows().map(host=>({id:host.id,url:host.webContents.getURL()})),host:{id:draftHost.id,url:draftHost.webContents.getURL()},renderer:await draftJs('({url:location.href,text:document.body.innerText.slice(0,4000),html:document.body.innerHTML.slice(0,5000),state:!!window.navora})'),state:await draftJs('window.navora?.browser.workspace.state()')};fs.writeFileSync(path.join(output,'draft-transfer-diagnostic.json'),JSON.stringify(diagnostic,null,2));fs.writeFileSync(path.join(output,'draft-transfer-failure.png'),(await draftHost.webContents.capturePage()).toPNG());throw error}
       await draftJs('document.querySelector(".browser-notes-toggle").click()')
       await until(()=>draftJs('document.querySelector("[aria-label=批注意见]")?.value==="本地未保存的批注意见"'),'draft survives main to detached transfer')
       await draftJs('(()=>{const input=document.querySelector("[aria-label=批注意见]");input.value="独立窗口保留的意见";input.dispatchEvent(new Event("input",{bubbles:true}))})()')
@@ -458,7 +510,7 @@ app.on('browser-window-created',(_event,win)=>{
       await until(()=>js('!!document.querySelector(".annotation-conflict")'),'concurrent opinion conflict')
       assert.equal(await js('document.querySelector("[aria-label=批注意见]").value'),'本地未保存的批注意见','Remote opinion update cannot erase local draft')
       await js('[...document.querySelectorAll(".annotation-actions button")].find(b=>b.textContent.includes("保存意见")).click()')
-      await until(()=>js('document.querySelector(".browser-tab-notice")?.textContent.includes("其他位置更新")'),'optimistic opinion conflict')
+      await until(()=>js('document.querySelector(".browser-operation-notice,.browser-tab-notice")?.textContent.includes("其他位置更新")'),'optimistic opinion conflict')
       assert.equal(await js('(async()=>(await window.navora.browser.workspace.annotations(window.testChatId))[0].comment)()'),'另一处更新的意见','Stale draft cannot overwrite newer server opinion')
       await js('document.querySelector(".annotation-conflict button").click()')
       await until(()=>js('document.querySelector("[aria-label=批注意见]").value==="另一处更新的意见"'),'user explicitly accepts latest opinion')
@@ -512,12 +564,14 @@ app.on('browser-window-created',(_event,win)=>{
       await js('document.querySelector(".browser-notes-toggle").click()')
       await until(()=>js('document.querySelectorAll(".browser-annotations article").length===1'),'annotation fixtures removed and original history restored')
       win.setMinimumSize(0,0);win.setContentSize(1600,1000);await wait(150)
-      for(const width of [320,420,640]){
+      // The new split layout has an intentional 400px content minimum. Full
+      // narrow-window expansion is covered by the responsive integration suite.
+      for(const width of [400,420,640]){
         await js(`(async()=>{for(let n=0;n<40;n++){const handle=document.querySelector('.file-workspace [role=separator]'),current=Number(handle.getAttribute('aria-valuenow'));if(Math.abs(current-${width})<2)return;handle.dispatchEvent(new KeyboardEvent('keydown',{key:current>${width}?'ArrowRight':'ArrowLeft',bubbles:true}));await new Promise(r=>setTimeout(r,0))}})()`)
         await until(()=>js(`Math.abs(document.querySelector('.file-workspace').getBoundingClientRect().width-${width})<2`),'workspace resize settles')
         assert.ok(Math.abs(await js('document.querySelector(".file-workspace").getBoundingClientRect().width')-width)<2,`Actual workspace is ${width}px`)
         assert.equal(await js('(()=>{const bar=document.querySelector(".browser-tab-toolbar");return bar.scrollWidth<=bar.clientWidth+1})()'),true,`Browser toolbar fits ${width}px`)
-        if(width===320)assert.equal(await js('(()=>{const filters=document.querySelector(".annotation-filters");return !filters||filters.scrollWidth<=filters.clientWidth+1})()'),true,'Annotation search and filters fit a narrow workspace')
+        if(width===400)assert.equal(await js('(()=>{const filters=document.querySelector(".annotation-filters");return !filters||filters.scrollWidth<=filters.clientWidth+1})()'),true,'Annotation search and filters fit the minimum split workspace')
         fs.writeFileSync(path.join(output,`controls-browser-${width}.png`),(await win.webContents.capturePage()).toPNG())
       }
       await js('document.querySelector("[data-panel=browser]").click()')
@@ -556,10 +610,15 @@ app.on('browser-window-created',(_event,win)=>{
       const drawer=await js('(()=>{const handle=document.querySelector("[aria-label=调整批注面板高度]"),panel=document.querySelector(".browser-annotations");return {value:Number(handle.getAttribute("aria-valuenow")),max:Number(handle.getAttribute("aria-valuemax")),height:panel.getBoundingClientRect().height}})()')
       assert.ok(drawer.max<480&&drawer.value===drawer.max&&Math.abs(drawer.height-drawer.value)<2,'Small-window drawer reports its real attainable height: '+JSON.stringify(drawer))
       win.setContentSize(1600,1000);await wait(100)
-      await js('document.querySelector("[aria-label=收起批注]").click();[...document.querySelectorAll("[aria-label=返回对话],[aria-label=返回对话并保留网页]")].find(b=>b.checkVisibility()).click()')
+      await js('document.querySelector("[aria-label=收起批注]").click();document.querySelector("[data-panel=chats]").click()')
       await until(()=>js('!document.querySelector(".file-workspace.full-page")'),'return from browser to conversation')
       assert.equal(await js('document.querySelector(".composer").checkVisibility()'),true,'Returning restores the conversation')
       const staleOwner=await js('window.navora.browser.workspace.claimLayout(window.testPageId)'),currentOwner=await js('window.navora.browser.workspace.claimLayout(window.testPageId)')
+      // A fresh owner invalidates the previous presentation until it supplies
+      // its own geometry. Commit before checking that the stale owner cannot hide it.
+      const ownedRect=await js('(()=>{const r=document.querySelector(".browser-native-slot").getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height}})()')
+      await js(`window.navora.browser.workspace.layout(window.testPageId,${JSON.stringify(ownedRect)},${JSON.stringify(currentOwner)})`)
+      await until(()=>Promise.resolve(nativeVisible()),'current owner commits its own browser geometry')
       await js(`window.navora.browser.workspace.layout(window.testPageId,null,${JSON.stringify(staleOwner)})`)
       assert.equal(nativeVisible(),true,'An old panel cannot hide the current page')
       await js(`window.navora.browser.workspace.layout(window.testPageId,null,${JSON.stringify(currentOwner)})`)
@@ -582,7 +641,9 @@ app.on('browser-window-created',(_event,win)=>{
       const forged=await js(`window.navora.browser.workspace.drop('forged-token').then(()=>false,()=>true)`)
       assert.equal(forged,true,'Forged transfer tokens are rejected')
       const state=await js('window.navora.browser.workspace.state()')
-      assert.equal(state.pages.flatMap((s:any)=>s.windows).length,1,'One stable page after detach and reattach')
+      const ownerAfterTransfers=await js('window.testChatId'),browserPageIdsBeforeFiles=state.pages.flatMap((session:any)=>session.windows).map((page:any)=>page.windowId).sort()
+      assert.deepEqual(state.pages.filter((session:any)=>session.chatId===ownerAfterTransfers).flatMap((session:any)=>session.windows).map((page:any)=>page.windowId),[await js('window.testPageId')],'Detach and reattach retain exactly the original page for its owner; other conversations may have their own default page')
+      fs.writeFileSync(path.join(output,'browser-page-ownership-after-transfers.json'),JSON.stringify({ok:true,owner:ownerAfterTransfers,ownPage:await js('window.testPageId'),pages:state.pages.flatMap((session:any)=>session.windows.map((page:any)=>({owner:session.chatId,id:page.windowId,url:page.url})))},null,2))
       fs.writeFileSync(path.join(output,'embedded-page.png'),(await guest.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG())
       fs.writeFileSync(path.join(output,'embedded-workspace.png'),(await win.webContents.capturePage()).toPNG())
       assert.equal(guest.debugger.isAttached(),false)
@@ -596,9 +657,9 @@ app.on('browser-window-created',(_event,win)=>{
       const info=await js('window.navora.workspace.info(window.testChatId)')
       fs.writeFileSync(path.join(info.absolutePath,'detached.md'),'# 独立文件测试\n\n[另一个文件](two.txt)')
       fs.writeFileSync(path.join(info.absolutePath,'two.txt'),'第二个文件内容')
-      await js('document.querySelector("[aria-label=工作区更多操作]").click()')
-      await until(()=>js('!!document.querySelector(".ui-action-menu")'),'file picker menu')
-      await js('[...document.querySelectorAll(".ui-action-menu button")].find(b=>b.textContent.includes("打开文件标签页")).click()')
+      await js('document.querySelector(".window-titlebar .application-menu-trigger").click()')
+      await until(()=>js(`!!document.querySelector('[data-command="conversation.openFile"]')`),'current application file menu')
+      await js(`document.querySelector('[data-command="conversation.openFile"]').click()`)
       await until(()=>js('!!document.querySelector("[aria-label=刷新文件索引]")'),'file picker opened')
       await js('document.querySelector("[aria-label=刷新文件索引]").click()')
       await until(()=>js(`!!document.querySelector('[data-resource-path="detached.md"]')`),'fixture file indexed')
@@ -653,7 +714,7 @@ app.on('browser-window-created',(_event,win)=>{
       await until(()=>Promise.resolve(fileHost.isDestroyed()),'final attached file releases its window')
       await until(()=>js('document.querySelectorAll(".file-workspace [role=tab]").length===3'),'main workspace has browser and two unique file tabs')
       assert.equal(fs.readFileSync(path.join(info.absolutePath,'two.txt'),'utf8'),'第二个文件内容','Dragging never rewrites files')
-      assert.equal((await js('window.navora.browser.workspace.state()')).pages.flatMap((s:any)=>s.windows).length,1,'File windows never duplicate or destroy browser pages')
+      assert.deepEqual((await js('window.navora.browser.workspace.state()')).pages.flatMap((session:any)=>session.windows).map((page:any)=>page.windowId).sort(),browserPageIdsBeforeFiles,'File windows preserve every pre-existing browser page identity across owners')
       await js(`window.navora.fileTabs.detach({key:${JSON.stringify(fileKey)},chatId:${JSON.stringify(owner)},path:'detached.md'},${JSON.stringify(owner)})`)
       await until(()=>Promise.resolve(BrowserWindow.getAllWindows().some(w=>w.webContents.getURL().includes('/file-host'))),'file transfer race fixture')
       const racing=BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/file-host'))!
@@ -665,7 +726,7 @@ app.on('browser-window-created',(_event,win)=>{
       fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,workspacePerformance,checks:['annotation-history-sort','annotation-sort-resets-page','annotation-filters-narrow-workspace','annotation-keyboard-results','annotation-history-search','annotation-unsaved-draft-search','annotation-state-filter','annotation-history-paging','annotation-batch-image-loading','annotation-copy-chat-read-isolation','annotation-copy-chat-resolve-isolation','annotation-copy-discovery-and-adoption','annotation-copy-resolved-cleanup','focused-conflict-retains-buffer','focused-conflict-copy-on-disk','focused-conflict-explicit-latest-and-adopt','manual-annotation-start-and-finish','manual-annotation-native-escape','annotation-draft-detach-restore','annotation-draft-renderer-reload','annotation-draft-immediate-return','annotation-draft-stale-write-rejection','annotation-draft-chat-isolation','downloads-popup-position-and-rounded-surface','intentional-stop-without-spurious-error','manual-navigation-keeps-agent-paused','native-ctrl-f-and-escape','find-next-and-previous-matches','find-empty-and-stale-results','network-failure-retry','crashed-renderer-recovery','toolbar-download-overlay-restores-native-view','detached-native-find','real-download-events-both-hosts','detached-download-menu-completion','annotation-navigation-lock','blank-tab-first-navigation','rapid-workspace-toggle-preserves-live-page','native-overlay-input-yield','primary-browser-hide-return','layout-owner-stale-request-isolation','background-pages-preserve-hidden-workspace','file-preview-hides-native-browser','main-cross-owner-browser-return','browser-transfer-state-revalidation','browser-drag-escape-isolation','file-drag-escape-isolation','drop-marker-leave-cleanup','duplicate-file-transfer-guard','detached-display-fit','detached-native-titlebar-hit-testing','file-drag-tearoff','file-relative-link-new-tab','file-window-merge-order','file-drag-return-acknowledged','single-use-file-transfer-tokens','file-window-attach-and-release','workspace-default-tab','default-tab-reopen-and-replacement','teleported-menu-vertical-layout','menu-preserves-page-and-restores-input','native-caption-hit-test-and-pointer-actions','browser-sidebar-primary-content','browser-primary-owner-switch','browser-return-preserves-page','browser-primary-empty-state','detached-visible-tab-order','detached-new-tab-address-focus','native-and-chrome-tab-shortcuts','detached-close-neighbor-and-middle-click','native-close-tab','transfer-failure-feedback','native-embedded-page','toolbar-history','display-menu','viewport-draft-validation-and-apply','annotation-draft-hide-restore','annotation-live-review','concurrent-opinion-preserves-draft-and-server','pointer-menu-position','menu-escape-isolation-and-focus','narrow-toolbars','annotation-stage-actions','keyboard-drawer-resize','small-window-drawer-bounds','hide-restore-form-state','fixed-viewport','detach-reattach-state','authorized-cross-host-drag-transfer','cross-chat-host-isolation','annotation-no-click','snapshot-comment-context','forged-drag-token','no-debugger']}))
       console.log('[browser-workspace] UI and IPC acceptance passed')
       server.close();app.exit(0)
-    }catch(error){console.error(error);server.close();app.exit(1)}
+    }catch(error){console.error(error);fs.writeFileSync(path.join(output,'failure.json'),JSON.stringify({ok:false,failedAt:new Date().toISOString(),error:String(error),stack:error instanceof Error?error.stack:undefined,scope:'built isolated browser-workspace integration; completed.json is written only after all checks'},null,2));server.close();app.exit(1)}
   })()})
 })
 await import('../electron/main')

@@ -4,50 +4,26 @@ import type {WorkspaceFiles} from './workspace-files'
 import type {BrowserRegistry} from './browser-registry'
 import type {BrowserAnnotation,BrowserSelection,BrowserAnnotationResult,BrowserAnnotationComparison} from '../../shared/browser-workspace'
 import type {BrowserPage} from './browser-host'
+import type {BrowserManualSessionToken} from './browser-automation-controller'
+import {annotationSelectionSource} from './browser-annotation-selection'
+import {BrowserAnnotationTargetStore} from './browser-annotation-drafts'
+import type {BrowserAnnotationTarget,BrowserAnnotationPhase} from '../../shared/browser-workspace'
 
 const WORLD=1008
-// Runs in a private isolated world. No preload or general IPC is exposed to the website.
-const selectionSource=String.raw`(() => {
-  const key='__navoraAnnotations';
-  if(globalThis[key])globalThis[key].stop();
-  const state={id:(globalThis.__navoraDocumentId ||= crypto.randomUUID()),selection:null,stop:null};globalThis[key]=state;
-  const host=document.createElement('div');host.style.cssText='position:fixed;inset:0;z-index:2147483647;pointer-events:auto;cursor:crosshair';
-  const root=host.attachShadow({mode:'closed'}),box=document.createElement('div');
-  box.style.cssText='position:fixed;border:2px solid #477bb2;background:#477bb214;pointer-events:none';root.append(box);document.documentElement.append(host);
-  let start=null,mode=MODE;
-  const draw=r=>{Object.assign(box.style,{left:r.x+'px',top:r.y+'px',width:r.width+'px',height:r.height+'px'})};
-  const rect=(x,y,w,h)=>({x,y,width:w,height:h});
-  const target=e=>{host.style.display='none';let el=document.elementFromPoint(e.clientX,e.clientY);host.style.display='';while(el?.shadowRoot){const inner=el.shadowRoot.elementFromPoint(e.clientX,e.clientY);if(!inner||inner===el)break;el=inner}return el};
-  function move(e){if(mode==='region'&&start)draw(rect(Math.min(start.x,e.clientX),Math.min(start.y,e.clientY),Math.abs(start.x-e.clientX),Math.abs(start.y-e.clientY)));else if(mode==='element'){const el=target(e);if(el instanceof Element)draw(el.getBoundingClientRect())}}
-  const block=e=>{e.preventDefault();e.stopImmediatePropagation()};
-  function down(e){block(e);try{host.setPointerCapture(e.pointerId)}catch{}start={x:e.clientX,y:e.clientY}}
-  function up(e){block(e);const el=target(e);if(!(el instanceof Element))return;
-    const r=mode==='region'&&start?rect(Math.min(start.x,e.clientX),Math.min(start.y,e.clientY),Math.abs(start.x-e.clientX),Math.abs(start.y-e.clientY)):el.getBoundingClientRect();
-    if(r.width<2||r.height<2)return;
-    const path=[];let node=el;while(node&&node!==document.documentElement&&path.length<10){if(node.id){path.unshift('#'+CSS.escape(node.id));break}const parent=node.parentElement;if(!parent)break;path.unshift(node.localName+':nth-child('+(Array.from(parent.children).indexOf(node)+1)+')');node=parent}
-    state.element=mode==='element'?el:null;
-    state.selection={documentId:state.id,url:location.href,title:document.title,kind:mode,rect:rect(r.x,r.y,r.width,r.height),selector:mode==='element'?path.join(' > '):undefined,text:mode==='element'&&!el.matches('input,textarea')?(el.textContent||'').trim().slice(0,500):'',viewport:{width:innerWidth,height:innerHeight,scrollX,scrollY,dpr:devicePixelRatio}};
-    stop();document.addEventListener('click',block,{capture:true,once:true});setTimeout(()=>document.removeEventListener('click',block,true),150);
-  }
-  function keydown(e){if(e.key==='Escape'){block(e);state.cancelled=true;stop()}}
-  function stop(){host.remove();for(const [name,fn] of handlers)document.removeEventListener(name,fn,true)}
-  const handlers=[['pointermove',move],['pointerdown',down],['pointerup',up],['click',block],['keydown',keydown]];
-  state.stop=stop;for(const [name,fn] of handlers)document.addEventListener(name,fn,true);
-  return true;
-})()`
-
 export class BrowserAnnotationService {
   private captures=new Set<string>()
-  private previousControl=new WeakMap<BrowserPage,boolean>()
+  private sessions=new Map<string,{id:string;token:BrowserManualSessionToken}>()
+  private targets:BrowserAnnotationTargetStore
   private watched=new WeakSet<BrowserPage>()
   private starting=new WeakSet<BrowserPage>()
-  private finish(page:BrowserPage){
-    const previous=this.previousControl.get(page)
-    if(previous!==undefined)page.manualControl=previous
-    this.previousControl.delete(page);page.annotationSelecting=false
+  private cancelRequested=new Set<string>()
+  private async finish(page:BrowserPage){
+    const session=this.sessions.get(page.id);this.sessions.delete(page.id);this.cancelRequested.delete(page.id);page.annotationSelecting=false
+    if(session&&!page.webContents.isDestroyed())await page.webContents.executeJavaScriptInIsolatedWorld(WORLD,[{code:'globalThis.__navoraAnnotations?.stop()'}]).catch(()=>{})
+    if(session)await page.automation.releaseManualSession(session.token)
     return page.manualControl
   }
-  constructor(private registry:BrowserRegistry,private files:WorkspaceFiles){}
+  constructor(private registry:BrowserRegistry,private files:WorkspaceFiles){this.targets=new BrowserAnnotationTargetStore(files)}
   private path(chatId:string){return this.files.resolve(chatId,'browser-annotations/index.json')}
   list(chatId:string):BrowserAnnotation[]{
     const file=this.path(chatId);if(!fs.existsSync(file))return []
@@ -60,62 +36,93 @@ export class BrowserAnnotationService {
     this.files.emitChanged(chatId)
   }
   get(chatId:string,id:string){const row=this.list(chatId).find(a=>a.id===id);if(!row)throw Error('annotation_not_found');return row}
-  async begin(chatId:string,pageId:string,kind:'element'|'region'){
+  async begin(chatId:string,pageId:string,kind:'auto'|'element'|'region'){
     const page=this.registry.assertWindowOwned(chatId,pageId).win
-    if(page.annotationSelecting||this.captures.has(pageId))throw Error('browser_busy_finish_action_first')
-    if(page.activeOperations)throw Error('browser_busy_wait_for_current_action')
+    if(page.annotationSelecting||this.captures.has(pageId)||this.starting.has(page))throw Error('browser_busy_finish_action_first')
     if(!this.watched.has(page)){
       this.watched.add(page)
-      page.webContents.on('did-start-navigation',(_event,_url,inPlace,mainFrame)=>{if(mainFrame&&!inPlace)this.finish(page)})
-      page.webContents.on('render-process-gone',()=>this.finish(page))
+      page.webContents.on('did-start-navigation',(_event,_url,_inPlace,mainFrame)=>{if(mainFrame)void this.finish(page).catch(()=>{})})
+      page.webContents.on('render-process-gone',()=>{void this.finish(page).catch(()=>{})})
+      page.webContents.on('destroyed',()=>{this.sessions.delete(page.id);page.annotationSelecting=false})
     }
-    this.previousControl.set(page,page.manualControl)
-    this.starting.add(page)
-    page.manualControl=true;page.annotationSelecting=true
-    try{await page.webContents.executeJavaScriptInIsolatedWorld(WORLD,[{code:'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))).then(()=>'+selectionSource.replace('MODE',JSON.stringify(kind))+')'}])}
-    catch(error){this.finish(page);throw error}finally{this.starting.delete(page)}
+    this.cancelRequested.delete(pageId);this.starting.add(page);page.annotationSelecting=true
+    try{
+      const token=await page.automation.acquireManualSession(),id=token.id
+      this.sessions.set(page.id,{id,token})
+      if(this.cancelRequested.has(pageId)||!page.annotationSelecting)throw Error('annotation_session_closed')
+      if(token.documentEpoch!==page.automation.captureDocumentEpoch())throw Error('annotation_page_changed_select_again')
+      await page.webContents.executeJavaScriptInIsolatedWorld(WORLD,[{code:annotationSelectionSource(kind,id)}])
+      if(!page.annotationSelecting||token.documentEpoch!==page.automation.captureDocumentEpoch())throw Error('annotation_page_changed_select_again')
+    }catch(error){await this.finish(page).catch(()=>{});throw error}finally{this.starting.delete(page)}
   }
-  async cancel(chatId:string,pageId:string,resume=false){
+  async mode(chatId:string,pageId:string,mode:'armed'|'passthrough'){
+    const page=this.registry.assertWindowOwned(chatId,pageId).win,session=this.sessions.get(pageId)
+    if(!session||!page.annotationSelecting)throw Error('annotation_session_not_found')
+    await page.webContents.executeJavaScriptInIsolatedWorld(WORLD,[{code:'globalThis.__navoraAnnotations?.mode('+JSON.stringify(mode)+')'}])
+  }
+  async cancel(chatId:string,pageId:string,_resume=false){
     const page=this.registry.assertWindowOwned(chatId,pageId).win
-    if(this.captures.has(pageId)||this.starting.has(page))throw Error('browser_busy_wait_for_current_action')
+    if(this.captures.has(pageId)||this.starting.has(page)){this.cancelRequested.add(pageId);page.annotationSelecting=false;return page.manualControl}
     await page.webContents.executeJavaScriptInIsolatedWorld(WORLD,[{code:'(() => {const s=globalThis.__navoraAnnotations;if(s){s.stop();s.selection=null;s.cancelled=true}})()'}]).catch(()=>{})
-    this.finish(page);if(resume)page.manualControl=false
-    return page.manualControl
+    return this.finish(page)
+  }
+  listTargets(chatId:string,pageId:string){return this.targets.list(chatId,pageId)}
+  getTarget(chatId:string,id:string){return this.targets.get(chatId,id)}
+  writeTarget(chatId:string,id:string,version:number,input:{text:string;editorId:string;sequence:number}){return this.targets.update(chatId,id,version,input)}
+  async discardTarget(chatId:string,pageId:string,id:string,version:number){
+    const row=this.targets.get(chatId,id);if(row.pageId!==pageId)throw Error('browser_wrong_chat')
+    this.targets.remove(chatId,id,version);fs.rmSync(this.files.resolve(chatId,row.screenshotPath),{force:true})
+    if(this.sessions.has(pageId))await this.mode(chatId,pageId,'armed')
+  }
+  async commitTarget(chatId:string,pageId:string,id:string,version:number){
+    const existing=this.list(chatId).find(row=>row.sourceTargetId===id);if(existing)return existing
+    const page=this.registry.assertWindowOwned(chatId,pageId).win
+    const current=await page.webContents.executeJavaScriptInIsolatedWorld(WORLD,[{code:'({id:globalThis.__navoraDocumentId,url:location.href})'}]).catch(()=>null)
+    const target=this.targets.get(chatId,id)
+    if(target.pageId!==pageId)throw Error('browser_wrong_chat')
+    if(target.version!==version)throw Error('annotation_target_draft_conflict')
+    if(!target.comment.trim())throw Error('annotation_comment_required')
+    const list=this.list(chatId);if(list.length>=200)throw Error('annotation_limit_200')
+    const annotationId='ann_'+id.slice(7),screenshotPath='browser-annotations/'+annotationId+'.png',file=this.files.resolve(chatId,screenshotPath)
+    const now=Date.now(),annotation:BrowserAnnotation={id:annotationId,chatId,pageId,sessionId:this.registry.assertWindowOwned(chatId,pageId).sessionId,selection:target.selection,screenshotPath,comment:target.comment,createdAt:now,updatedAt:now,revision:1,taskState:'draft',anchorState:current?.id===target.selection.documentId&&current?.url===target.selection.url?'valid':'stale',sourceTargetId:id}
+    fs.copyFileSync(this.files.resolve(chatId,target.screenshotPath),file)
+    try{this.write(chatId,[...list,annotation])}catch(error){fs.rmSync(file,{force:true});throw error}
+    this.targets.remove(chatId,id,version);fs.rmSync(this.files.resolve(chatId,target.screenshotPath),{force:true})
+    if(this.sessions.has(pageId))await this.mode(chatId,pageId,'armed').catch(()=>{})
+    return annotation
   }
   async collect(chatId:string,pageId:string):Promise<BrowserAnnotationResult>{
-    if(this.captures.has(pageId))return {}
-    const page=this.registry.assertWindowOwned(chatId,pageId).win,wc=page.webContents
-    if(!page.annotationSelecting)return {cancelled:true,manualControl:page.manualControl}
-    const value=await wc.executeJavaScriptInIsolatedWorld(WORLD,[{code:'(() => {const s=globalThis.__navoraAnnotations;return s?{selection:s.selection,cancelled:s.cancelled,id:s.id}:null})()'}]).catch(error=>{this.finish(page);throw error}) as {selection?:BrowserSelection;cancelled?:boolean;id:string}|null
-    if(!page.annotationSelecting)return {cancelled:true,manualControl:page.manualControl}
-    if(!value){this.finish(page);throw Error('annotation_page_changed_select_again')}
-    if(value?.cancelled){return {cancelled:true,manualControl:await this.cancel(chatId,pageId)}}
-    if(!value?.selection)return {}
+    const page=this.registry.assertWindowOwned(chatId,pageId).win,wc=page.webContents,session=this.sessions.get(pageId)
+    if(!page.annotationSelecting||!session)return {cancelled:true,manualControl:page.manualControl}
+    const value=await wc.executeJavaScriptInIsolatedWorld(WORLD,[{code:'(() => {const s=globalThis.__navoraAnnotations;return s?{selection:s.selection,cancelled:s.cancelled,id:s.id,phase:s.phase,sessionId:s.sessionId}:null})()'}]) as {selection?:BrowserSelection;cancelled?:boolean;id:string;phase:BrowserAnnotationPhase;sessionId:string}|null
+    if(!value||value.sessionId!==session.id||!page.annotationSelecting)return {cancelled:true,manualControl:await this.cancel(chatId,pageId)}
+    if(value.cancelled)return {cancelled:true,manualControl:await this.cancel(chatId,pageId)}
+    const status={phase:value.phase,annotationSessionId:session.id,manualControl:page.manualControl}
+    if(!value.selection||value.phase!=='target-ready'||this.captures.has(pageId))return status
+    const targetId=value.selection.targetId
+    if(!targetId)throw Error('invalid_annotation_target')
+    const existing=this.targets.list(chatId,pageId).find(row=>row.id===targetId)
+    if(existing)return {...status,target:existing}
     this.captures.add(pageId)
     let file:string|undefined
     try{
-      const list=this.list(chatId);if(list.length>=200)throw Error('annotation_limit_200')
       const selection=value.selection
-      await wc.executeJavaScriptInIsolatedWorld(WORLD,[{code:'new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))'}])
+      await wc.executeJavaScriptInIsolatedWorld(WORLD,[{code:'globalThis.__navoraAnnotations.hideForCapture(true);new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))'}])
       const image=await wc.capturePage(undefined,{stayHidden:true,stayAwake:true})
       if(image.isEmpty())throw Error('annotation_screenshot_empty')
       const png=image.toPNG();if(png.length>8*1024*1024)throw Error('annotation_image_too_large')
-      const directory=this.files.resolve(chatId,'browser-annotations')
-      const used=fs.existsSync(directory)?fs.readdirSync(directory).filter(name=>name.endsWith('.png')).reduce((sum,name)=>sum+fs.statSync(this.files.resolve(chatId,`browser-annotations/${name}`)).size,0):0
+      const directory=this.files.resolve(chatId,'browser-annotations'),targetsDirectory=this.files.resolve(chatId,'browser-annotations/targets')
+      const used=[directory,targetsDirectory].reduce((total,dir)=>total+(fs.existsSync(dir)?fs.readdirSync(dir).filter(name=>name.endsWith('.png')).reduce((sum,name)=>sum+fs.statSync(dir+'/'+name).size,0):0),0)
       if(used+png.length>100*1024*1024)throw Error('annotation_storage_limit_100MB')
       const current=await wc.executeJavaScriptInIsolatedWorld(WORLD,[{code:'(() => {const s=globalThis.__navoraAnnotations,el=s?.element,r=el?.isConnected?el.getBoundingClientRect():null;return {id:s?.id,url:location.href,x:scrollX,y:scrollY,w:innerWidth,h:innerHeight,rect:r?{x:r.x,y:r.y,width:r.width,height:r.height}:null,text:el&&!el.matches("input,textarea")?(el.textContent||"").trim().slice(0,500):""}})()'}])
       if(selection.kind==='element'&&(!current.rect||(['x','y','width','height'] as const).some(key=>Math.abs(current.rect[key]-selection.rect[key])>1)||current.text!==selection.text))throw Error('annotation_page_changed_select_again')
-      if(current.id!==selection.documentId||current.url!==selection.url||current.x!==selection.viewport.scrollX||current.y!==selection.viewport.scrollY||current.w!==selection.viewport.width||current.h!==selection.viewport.height)throw Error('annotation_page_changed_select_again')
-      const id=`ann_${randomUUID()}`,screenshotPath=`browser-annotations/${id}.png`
-      file=this.files.resolve(chatId,screenshotPath)
-      fs.mkdirSync(this.files.resolve(chatId,'browser-annotations'),{recursive:true});fs.writeFileSync(file,png)
-      const now=Date.now(),annotation:BrowserAnnotation={id,chatId,pageId,sessionId:this.registry.assertWindowOwned(chatId,pageId).sessionId,selection,screenshotPath,comment:'',createdAt:now,updatedAt:now,revision:1,taskState:'draft',anchorState:'valid'}
-      const latest=this.list(chatId);if(latest.length>=200)throw Error('annotation_limit_200')
-      this.write(chatId,[...latest,annotation])
-      await wc.executeJavaScriptInIsolatedWorld(WORLD,[{code:'globalThis.__navoraAnnotations.selection=null'}]).catch(()=>{})
-      return {annotation,manualControl:this.finish(page)}
-    }catch(error){this.finish(page);if(file&&fs.existsSync(file))fs.unlinkSync(file);throw error}
-    finally{this.captures.delete(pageId);page.annotationSelecting=false}
+      if(!page.annotationSelecting||this.sessions.get(pageId)!==session||session.token.documentEpoch!==page.automation.captureDocumentEpoch()||current.id!==selection.documentId||current.url!==selection.url||current.x!==selection.viewport.scrollX||current.y!==selection.viewport.scrollY||current.w!==selection.viewport.width||current.h!==selection.viewport.height)throw Error('annotation_page_changed_select_again')
+      const screenshotPath='browser-annotations/targets/'+targetId+'.png';file=this.files.resolve(chatId,screenshotPath)
+      fs.mkdirSync(this.files.resolve(chatId,'browser-annotations/targets'),{recursive:true});fs.writeFileSync(file,png)
+      const now=Date.now(),target=this.targets.create(chatId,{id:targetId,chatId,pageId,sessionId:session.id,selection,screenshotPath,comment:'',version:1,editorId:'',sequence:0,createdAt:now,updatedAt:now})
+      return {...status,target}
+    }catch(error){if(file)fs.rmSync(file,{force:true});await wc.executeJavaScriptInIsolatedWorld(WORLD,[{code:'if(globalThis.__navoraAnnotations)globalThis.__navoraAnnotations.phase="stale"'}]).catch(()=>{});throw error}
+    finally{this.captures.delete(pageId);await wc.executeJavaScriptInIsolatedWorld(WORLD,[{code:'globalThis.__navoraAnnotations?.hideForCapture(false)'}]).catch(()=>{});if(this.cancelRequested.has(pageId)){await wc.executeJavaScriptInIsolatedWorld(WORLD,[{code:'globalThis.__navoraAnnotations?.stop()'}]).catch(()=>{});await this.finish(page)}}
   }
   update(chatId:string,id:string,revision:number,patch:{comment?:string;taskState?:BrowserAnnotation['taskState']}){
     const list=this.list(chatId),row=list.find(a=>a.id===id);if(!row)throw Error('annotation_not_found')
@@ -164,7 +171,7 @@ export class BrowserAnnotationService {
     const selection=JSON.stringify(note.selection)
     return await page.webContents.executeJavaScriptInIsolatedWorld(WORLD,[{code:`(() => {
       const note=${selection},currentUrl=location.href,currentTitle=document.title;
-      let anchor='region';
+      let anchor=note.kind==='point'?'point':'region';
       if(note.kind==='element'){
         if(!note.selector)anchor='invalid-selector';
         else try{

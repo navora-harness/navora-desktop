@@ -8,6 +8,8 @@ import { spawn } from 'node:child_process'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(import.meta.url)
+const executable = process.env.NAVORA_ELECTRON_EXECUTABLE || require('electron')
+if (!path.isAbsolute(executable) || !fs.statSync(executable).isFile()) throw new Error('Electron smoke requires an existing absolute executable path')
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'navora-browser-smoke-'))
 const entry = path.join(temporary, 'smoke.mjs')
 try {
@@ -18,7 +20,7 @@ try {
   const env = {...process.env, NAVORA_SMOKE_ROOT:temporary}
   delete env.ELECTRON_RUN_AS_NODE
   const code = await new Promise((resolve, reject) => {
-    const child = spawn(require('electron'), [entry], {cwd:root,env,stdio:'inherit',windowsHide:true})
+    const child = spawn(executable, [entry], {cwd:root,env,stdio:'inherit',windowsHide:true})
     let expired=false
     const timer = setTimeout(() => { expired=true;child.kill() }, 60000)
     child.on('error', (error) => {clearTimeout(timer); reject(error)})

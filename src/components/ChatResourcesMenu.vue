@@ -1,18 +1,15 @@
 <template>
   <div class="chat-resource-buttons">
-    <button v-if="context==='chat'" type="button" class="chat-resource-button" :class="{selected:open}" data-chat-resource="resources" title="当前对话摘要" aria-label="当前对话摘要" :aria-expanded="open" :disabled="!chatId" @click="emit('toggleResources')">
-      <AppIcon icon="file-lines" />
-    </button>
-    <button v-if="context==='chat'" type="button" class="chat-resource-button" :class="{selected:fileWorkspaceOpen}" data-chat-resource="workspace" title="工作区" aria-label="工作区" :aria-expanded="fileWorkspaceOpen" :disabled="!chatId" @click="emit('toggleWorkspace')"><AppIcon icon="workspace" /></button>
     <v-menu v-model="moreOpen" location="bottom end" origin="auto" :offset="6" :close-on-content-click="true">
-      <template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" class="chat-resource-button chat-more-trigger" :class="{selected:moreOpen}" :title="`${contextLabel}更多操作`" aria-label="页面更多操作" :disabled="context==='chat' && !chatId"><AppIcon icon="ellipsis" /></button></template>
+      <template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" class="chat-resource-button chat-more-trigger" :class="{selected:moreOpen}" :title="`${contextLabel}更多操作`" :aria-label="`${contextLabel}更多操作`" :disabled="context==='chat' && !chatId"><AppIcon icon="ellipsis" /></button></template>
       <div class="conversation-actions-menu" role="menu" :aria-label="`${contextLabel}操作菜单`" @keydown="onMenuKey" @keydown.esc.stop="moreOpen=false">
         <template v-if="context==='chat'">
         <div class="conversation-actions-heading">浏览器</div>
-        <button type="button" role="menuitem" aria-label="快速打开浏览器" :disabled="!chatId || openingBrowser" @click="quickOpen"><AppIcon :icon="openingBrowser?'circle-notch':'arrow-up-right-from-square'" :spin="openingBrowser" /><span>打开浏览器标签页<small>已有页面会直接显示</small></span><kbd>Ctrl/⌘ ⇧ B</kbd></button>
+        <button type="button" role="menuitem" aria-label="快速打开浏览器" :disabled="!chatId || openingBrowser" @click="quickOpen"><AppIcon :icon="openingBrowser?'circle-notch':'browser'" :spin="openingBrowser" /><span>打开浏览器标签页<small>已有页面会直接显示</small></span><kbd>Ctrl/⌘ ⇧ B</kbd></button>
         <button type="button" role="menuitem" :disabled="isRemote" @click="openFolder"><AppIcon icon="folder-open" /><span>打开对话文件夹</span></button>
         <div class="conversation-actions-heading conversation-actions-section">当前对话 · {{ windowCount }} 个页面</div>
         <button type="button" role="menuitem" @click="emit('rename')"><AppIcon icon="pen-to-square" /><span>修改标题</span></button>
+        <button type="button" role="menuitem" @click="emit('search')"><AppIcon icon="magnifying-glass" /><span>在当前聊天中查找</span><kbd>Ctrl/⌘ F</kbd></button>
         <button type="button" role="menuitem" :aria-label="pinned?'取消置顶当前对话':'置顶当前对话'" @click="emit('pin')"><AppIcon icon="thumbtack" /><span>{{ pinned?'取消置顶':'置顶对话' }}</span><AppIcon v-if="pinned" class="conversation-actions-check" icon="check" /></button>
         <button type="button" role="menuitem" :disabled="!canExport || exporting" @click="emit('export')"><AppIcon icon="file-export" /><span>{{ exporting?'正在导出…':'导出对话' }}</span></button>
         <button v-if="running" type="button" role="menuitem" @click="emit('stop')"><AppIcon icon="stop" /><span>停止当前任务</span></button>
@@ -21,15 +18,17 @@
         <template v-else><div class="conversation-actions-heading">{{ contextLabel }}</div><button v-for="action in pageActions" :key="action.id" type="button" role="menuitem" @click="emit('contextAction',action.id)"><AppIcon :icon="action.icon" /><span>{{ action.label }}</span></button><div class="conversation-actions-heading conversation-actions-section">导航</div><button type="button" role="menuitem" @click="emit('contextAction','back')"><AppIcon icon="comments" /><span>返回对话</span></button></template>
       </div>
     </v-menu>
+    <button v-if="context==='chat'" type="button" class="chat-resource-button" :class="{selected:open,'has-updates':updated&&!open}" data-chat-resource="resources" :title="summaryLabel" aria-label="当前对话摘要" :aria-description="updated&&!open?`${updateCount||1} 项新资源或更新，打开查看后清除提示`:undefined" aria-controls="conversation-summary" :aria-expanded="open" :disabled="!chatId" @click="emit('toggleResources')"><AppIcon icon="file-lines" /></button>
   </div>
 </template>
 <script setup lang="ts">
 import AppIcon from './icons/AppIcon.vue'
 import {computed,ref,watch} from 'vue'
 import type {BrowserTreeSession} from '@shared/types'
-const props=defineProps<{chatId:string;tree:BrowserTreeSession[];isRemote:boolean;open?:boolean;fileWorkspaceOpen?:boolean;hasFileTabs?:boolean;pinned?:boolean;canExport?:boolean;exporting?:boolean;context:'chat'|'files'|'plugins'|'settings'|'creator'|'browser';running?:boolean}>()
-const emit=defineEmits<{notify:[text:string,color?:string];toggleResources:[];toggleWorkspace:[];showBrowser:[];rename:[];pin:[];export:[];newChat:[];search:[];delete:[];stop:[];newBrowserTab:[];contextAction:[action:string]}>()
+const props=defineProps<{chatId:string;tree:BrowserTreeSession[];isRemote:boolean;open?:boolean;updated?:boolean;updateCount?:number;pinned?:boolean;canExport?:boolean;exporting?:boolean;context:'chat'|'files'|'plugins'|'settings'|'creator'|'browser';running?:boolean}>()
+const emit=defineEmits<{notify:[text:string,color?:string];toggleResources:[];showBrowser:[];rename:[];pin:[];export:[];newChat:[];search:[];delete:[];stop:[];newBrowserTab:[];contextAction:[action:string]}>()
 const openingFolder=ref(false),openingBrowser=ref(false),moreOpen=ref(false)
+const summaryLabel=computed(()=>`当前对话摘要${props.updated&&!props.open?` · ${props.updateCount||1} 项新资源或更新`:''}`)
 const contextLabel=computed(()=>({chat:'当前对话',files:'文件管理',plugins:'插件',settings:'设置',creator:'创建器',browser:'浏览器'})[props.context])
 const pageActions=computed(()=>({files:[],plugins:[{id:'create',icon:'plus',label:'创建插件'}],settings:[{id:'models',icon:'microchip',label:'模型配置'},{id:'plugins',icon:'puzzle-piece',label:'打开插件管理'},{id:'create-skill',icon:'book',label:'技能创建器'}],creator:[],browser:[{id:'new-browser',icon:'plus',label:'新建浏览器标签页'}],chat:[]})[props.context])
 watch(()=>props.context,()=>{moreOpen.value=false})
@@ -59,7 +58,7 @@ async function quickOpen(){
   try{
     const existing=currentSessions.value.flatMap(session=>session.windows)[0]
     if(existing){await window.navora.browser.setVisible(existing.windowId,true);return}
-    const session=props.tree.find(session=>session.chatId===props.chatId)||await window.navora.browser.createSession(props.chatId,{persist:false})
+    const session=currentSessions.value.find(session=>session.isDefault)||currentSessions.value[0]||await window.navora.browser.createSession(props.chatId,{persist:false})
     await window.navora.browser.createWindow(session.sessionId,{show:true})
   }catch{emit('notify','打开浏览器失败')}
   finally{openingBrowser.value=false}
@@ -69,6 +68,7 @@ defineExpose({quickOpen})
 <style>
 .chat-resource-buttons{display:flex;align-items:center;gap:3px;flex-shrink:0;-webkit-app-region:no-drag}
 .chat-resource-button{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;flex-shrink:0;border:1px solid transparent;border-radius:7px;color:#657184;background:transparent;cursor:default;transition:background-color 140ms ease,color 140ms ease,border-color 140ms ease;-webkit-app-region:no-drag}
+.chat-resource-button.has-updates{position:relative}.chat-resource-button.has-updates::after{content:"";position:absolute;top:3px;right:3px;width:5px;height:5px;box-shadow:0 0 0 2px var(--navora-surface);border-radius:50%;background:var(--navora-accent)}
 .chat-resource-button>svg{width:16px;height:16px}.chat-resource-button:hover:not(:disabled){background:#edf0f4;border-color:#dce2ea;color:#2c4666}.chat-resource-button.selected{background:#eaf0f7;color:#345e8a}.chat-resource-button:focus-visible{outline:2px solid #537ab9;outline-offset:-2px}.chat-resource-button:disabled{opacity:.4}
 .conversation-actions-menu .conversation-action-danger{color:#b65d63}
 .chat-resource-divider{height:16px;width:1px;margin:0 4px;background:#dfe5ed;flex-shrink:0}.chat-more-trigger>svg{width:14px;height:14px}

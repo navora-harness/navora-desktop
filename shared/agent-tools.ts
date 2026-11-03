@@ -1,5 +1,31 @@
 import type { ChatCompletionTool } from './openai-types'
 
+const pointerPositionSchema = {
+  type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'],
+}
+const pointerMotionSchema = {
+  description: 'Optional motion override. Omit to inherit browser settings; false disables interpolation while coordinate actions retain one closed native batch. intervalMs and sampleRateHz are mutually exclusive. No retries after partial dispatch.',
+  anyOf: [
+    { type: 'boolean' },
+    {
+      type: 'object',
+      properties: {
+        durationMs: { type: 'number', description: 'Base movement duration in milliseconds; omit for automatic distance/target-width timing.' },
+        speedMultiplier: { type: 'number', description: 'Positive speed multiplier. 1.05 is 5% faster; 0.95 is 5% slower.' },
+        intervalMs: { type: 'number', description: 'Positive milliseconds between planned samples; fractions allowed, final interval may be shorter.' },
+        sampleRateHz: { type: 'number', description: 'Alternative to intervalMs, 1..240 Hz (default 120).' },
+        timing: { type: 'string', enum: ['lognormal', 'minimum-jerk'] },
+        curvature: { type: 'number', description: 'Relative curve bend, 0..1.' },
+        jitterPx: { type: 'number', description: 'Smooth spatial variation, 0..10 CSS pixels.' },
+        targetWidthPx: { type: 'number', description: 'Positive effective target width for automatic duration.' },
+        holdMs: { type: 'number', description: 'Explicit-coordinate click dwell, 0..1000 ms (default 50). Requires browser_mouse(action=click) or browser_click with target+x/y; selector center-click cannot set dwell.' },
+        seed: { anyOf: [{ type: 'string' }, { type: 'number' }], description: 'Reproducible geometry and timing.' },
+      },
+      additionalProperties: false,
+    },
+  ],
+}
+
 /** OpenAI-compatible tool schemas for Navora browser agent. */
 export const AGENT_TOOLS: ChatCompletionTool[] = [
   {
@@ -675,7 +701,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_click',
       description:
-        'Trusted click. Prefer browser_get(agent_snapshot/agent_find) targets for iframe, closed-shadow or hidden-window actions; legacy page refs and CSS selectors remain supported. A stale target/ref requires a fresh snapshot. Existing iframeSelector plus innerSelector/offsets remains available.',
+        'Trusted click. Selectors/refs use a smooth timed approach with dispatchInputSequence when available. Native targets retain center-click routing for iframe/hidden windows; supply explicit target-relative x/y plus motion for a timed targeted click. A stale target/ref requires a fresh snapshot. Existing iframeSelector plus innerSelector/offsets remains available.',
       parameters: {
         type: 'object',
         properties: {
@@ -714,6 +740,10 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
             enum: ['left', 'middle', 'right', 'back', 'forward'],
           },
           clickCount: { type: 'number' },
+          x: { type: 'number', description: 'With native target: explicit CSS-pixel offset from element left; provide y too for timed click.' },
+          y: { type: 'number', description: 'With native target: explicit CSS-pixel offset from element top; provide x too for timed click.' },
+          from: pointerPositionSchema,
+          motion: pointerMotionSchema,
           waitUntil: { type: 'string', enum: ['none', 'load', 'text_stable'] },
           waitTimeoutMs: { type: 'number' },
         },
@@ -811,17 +841,21 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_hover',
       description:
-        'Hover (mousemove) over an element by CSS selector. Pierces closed shadow when pierce=true (default).',
+        'Hover using windowId + ref from the latest snapshot. Native targets and CSS selectors remain supported. Motion inherits browser settings; only pass motion for a one-call adjustment. Never retry paused or invalidated actions.',
       parameters: {
         type: 'object',
         properties: {
           windowId: { type: 'string' },
           selector: { type: 'string' },
+          ref: { type: 'string', description: 'Short ref from the latest browser_get snapshot, agent_snapshot or agent_find.' },
+          target: { type: 'object', description: 'Advanced: native target from the latest agent snapshot.' },
           pierce: { type: 'boolean', description: 'Pierce shadow roots (default true)' },
+          from: pointerPositionSchema,
+          motion: pointerMotionSchema,
           waitUntil: { type: 'string', enum: ['none', 'load', 'text_stable'] },
           waitTimeoutMs: { type: 'number' },
         },
-        required: ['windowId', 'selector'],
+        required: ['windowId'],
       },
     },
   },
@@ -919,8 +953,8 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     type:'function',
     function:{
       name:'browser_mouse',
-      description:'Dispatch trusted mouse movement, press/release or wheel to a native agent target without activating a hidden window. x/y are CSS-pixel offsets from the target element; keep the same target for down/up sequences.',
-      parameters:{type:'object',properties:{windowId:{type:'string'},target:{type:'object',properties:{webContentsId:{type:'number'},processId:{type:'number'},routingId:{type:'number'},documentId:{type:'number'},backendNodeId:{type:'number'}}},action:{type:'string',enum:['move','down','up','wheel']},x:{type:'number'},y:{type:'number'},button:{type:'string',enum:['left','middle','right','back','forward']},clickCount:{type:'number'},buttons:{type:'number'},modifiers:{type:'number'},deltaX:{type:'number'},deltaY:{type:'number'}},required:['windowId','target','action']},
+      description:'Trusted pointer actions. move/click/drag generate a smooth timed trajectory in ONE native sequence; drag includes paired press/release. Without target, x/y/from are top-level viewport CSS pixels and x/y are required. With target, coordinates are element-relative CSS offsets, retaining hidden-window routing. Supply from for an explicit start; otherwise reuse the last completed position in the same coordinate scope (first viewport starts at 0,0; first target starts at its destination). Use motion.speedMultiplier/intervalMs to tune speed. Legacy down/up/wheel require a target; never split a native drag across separate sequence calls. Inspect status/dispatchedCount before retrying any failure.',
+      parameters:{type:'object',properties:{windowId:{type:'string'},target:{type:'object',properties:{webContentsId:{type:'number'},processId:{type:'number'},routingId:{type:'number'},documentId:{type:'number'},backendNodeId:{type:'number'}}},action:{type:'string',enum:['move','click','drag','down','up','wheel']},x:{type:'number'},y:{type:'number'},from:pointerPositionSchema,motion:pointerMotionSchema,button:{type:'string',enum:['left','middle','right','back','forward']},clickCount:{type:'number'},buttons:{type:'number'},modifiers:{type:'number'},deltaX:{type:'number'},deltaY:{type:'number'}},required:['windowId','action']},
     },
   },
   {

@@ -7,6 +7,8 @@ import type { PermissionCapability } from '../../shared/types'
 import type { PluginHostApi, PluginHostRegistry } from '../../shared/plugins'
 import { toolNameToCapability } from './permission-gate'
 import { executeAgentTool, type ToolExecContext } from './browser-tools'
+import { normalizeBrowserToolCall } from '../../shared/browser-tool-policy'
+import { getBrowserAutomationController } from './browser-automation-controller'
 
 function capabilitiesForCoreTool(
   name: string,
@@ -63,6 +65,20 @@ export function createPluginHostApi(
     }
   }
 
+  const checkPage = (windowId: string): void => {
+    if (ctx.signal.aborted) throw new Error('aborted')
+    const rec = ctx.registry.assertWindowOwned(ctx.chatId, windowId)
+    const controller = getBrowserAutomationController(rec.win.webContents)
+    const token = ctx.browserIntentEpochs?.get(windowId)
+    if (token && token.webContentsId !== rec.win.webContents.id) throw new Error('browser_operation_invalidated')
+    controller.assertEpoch(token?.epoch ?? controller.captureEpoch())
+    if (controller.isBusy() || rec.win.activeOperations) throw new Error('browser_busy_use_runTool')
+  }
+  const checkSession = (sessionId: string): void => {
+    const session = ctx.registry.assertSessionOwned(ctx.chatId, sessionId)
+    for (const rec of session.windows.values()) checkPage(rec.windowId)
+  }
+
   const registry: PluginHostRegistry = {
     createSession: (chatId, opts) => {
       requireCap('session.create')
@@ -70,14 +86,17 @@ export function createPluginHostApi(
     },
     createWindow: (sessionId, opts) => {
       requireCap('window.create')
+      checkSession(sessionId)
       return ctx.registry.createWindow(sessionId, opts)
     },
     closeWindow: (windowId) => {
       requireCap('window.close')
+      checkPage(windowId)
       ctx.registry.closeWindow(windowId)
     },
     closeSession: (sessionId, clear) => {
       requireCap('session.close')
+      checkSession(sessionId)
       return ctx.registry.closeSession(sessionId, clear)
     },
     assertSessionOwned: (chatId, sessionId) =>
@@ -92,10 +111,12 @@ export function createPluginHostApi(
     getTree: (chatId) => ctx.registry.getTree(chatId),
     setUserAgent: (sessionId, ua) => {
       requireCap('session.set_ua')
+      checkSession(sessionId)
       ctx.registry.setUserAgent(sessionId, ua)
     },
     setProxy: (sessionId, proxy) => {
       requireCap('session.set_proxy')
+      checkSession(sessionId)
       return ctx.registry.setProxy(sessionId, proxy)
     },
   }
@@ -115,6 +136,8 @@ export function createPluginHostApi(
     },
     registry,
     runTool: async (name, args) => {
+      const normalized = normalizeBrowserToolCall(name, args)
+      name = normalized.name; args = normalized.args
       const needed = capabilitiesForCoreTool(name, args)
       for (const cap of needed) {
         if (!allowCapability(approved, cap)) {

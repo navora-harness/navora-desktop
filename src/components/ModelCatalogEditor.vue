@@ -13,6 +13,8 @@
       <button type="button" class="catalog-button" :disabled="selected === provider.model" @click="provider.model = selected">{{ selected === provider.model ? '默认模型' : '设为默认' }}</button>
     </div>
     <article v-if="active" class="model-entry">
+      <details class="model-advanced">
+      <summary>高级 · 容量与推理 <small>{{ customCount ? customCount + ' 项自定义' : '使用内置默认值' }} · 能力声明未经探测验证</small></summary>
       <div class="model-grid">
         <label>模型 ID<input :key="selected" :value="selected" @change="renameModel(selected, $event.target as HTMLInputElement)" /></label>
         <label>显示名称<input v-model="active.label" /></label>
@@ -45,6 +47,7 @@
           </div></DisclosureTransition>
         </div>
       </DisclosureTransition>
+      </details>
     </article>
     <div class="probe-actions"><button type="button" class="catalog-button" :disabled="!!testing || pendingCredentials" @click="probe('connection')">{{ testing === 'connection' ? '连接中…' : '测试连接' }}</button><button type="button" class="catalog-button" :disabled="!!testing || pendingCredentials" @click="probe('reply')">{{ testing === 'reply' ? '等待回答…' : '测试问答' }}</button><span v-if="probeResult" class="probe-result" :class="{ failed: !probeResult.ok }" role="status">{{ probeResult.text }}{{ probeResult.ms != null ? ' · ' + (probeResult.ms / 1000).toFixed(1) + 's' : '' }}</span></div>
   </section>
@@ -52,7 +55,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { AiProviderConfig } from '@shared/config'
-import { defaultModelCapabilities, renameReasoningLevel, removeReasoningLevel } from '@shared/model-capabilities'
+import { defaultModelCapabilities, normalizeModelCapabilities, renameReasoningLevel, removeReasoningLevel, type ModelCapabilities } from '@shared/model-capabilities'
+import { findModelPreset } from '@shared/model-presets'
+import { settingsEqual } from '@shared/settings-commit'
 import DisclosureTransition from './motion/DisclosureTransition'
 const props = defineProps<{ provider: AiProviderConfig; pendingCredentials?: boolean }>()
 const loading = ref(false)
@@ -61,13 +66,29 @@ const testing = ref('')
 const probeResult = ref<{ok:boolean;text:string;ms?:number}|null>(null)
 const feedback = ref('')
 const selected = ref('')
+const fallback = ref<Record<string, ModelCapabilities>>({})
+watch(() => props.provider, () => { fallback.value = {} }, { flush: 'sync' })
 watch(() => [props.provider.id, ...props.provider.models], () => {
-  props.provider.model_settings ||= {}
-  for (const id of props.provider.models) props.provider.model_settings[id] ||= defaultModelCapabilities(id)
   if (!props.provider.models.includes(selected.value)) selected.value = props.provider.model || props.provider.models[0] || ''
 }, { immediate: true, flush: 'sync' })
-const settings = (id: string) => props.provider.model_settings![id]!
-const active = computed(() => props.provider.model_settings?.[selected.value])
+const defaults = (id: string) => {
+  const preset = findModelPreset(props.provider.source_preset || '')
+  return preset?.model_settings?.[id] ? normalizeModelCapabilities(preset.model_settings[id], id) : defaultModelCapabilities(id)
+}
+const settings = (id: string) => props.provider.model_settings?.[id] || (fallback.value[id] ||= defaults(id))
+const active = computed(() => selected.value ? settings(selected.value) : undefined)
+const customCount = computed(() => {
+  if (!active.value) return 0
+  const baseline = defaults(selected.value)
+  return (Object.keys(baseline) as Array<keyof ModelCapabilities>).filter(key => !settingsEqual(active.value![key], baseline[key])).length
+})
+watch(fallback, values => {
+  for (const [id, value] of Object.entries(values)) {
+    if (props.provider.models.includes(id) && !props.provider.model_settings?.[id] && !settingsEqual(value, defaults(id))) {
+      ;(props.provider.model_settings ||= {})[id] = JSON.parse(JSON.stringify(value)) as ModelCapabilities
+    }
+  }
+}, { deep: true })
 function setImages(id: string, enabled: boolean) { settings(id).input_types = enabled ? ['text', 'image'] : ['text'] }
 function addModel() {
   let id = 'new-model', i = 2
@@ -79,7 +100,8 @@ function removeModel(id: string) {
   if (props.provider.models.length <= 1) return
   if (props.provider.model === id) props.provider.model = props.provider.models.find(m => m !== id)!
   props.provider.models = props.provider.models.filter(m => m !== id)
-  delete props.provider.model_settings![id]
+  if (props.provider.model_settings) delete props.provider.model_settings[id]
+  delete fallback.value[id]
 }
 function renameModel(id: string, input: HTMLInputElement) {
   const next = input.value.trim()
@@ -87,7 +109,7 @@ function renameModel(id: string, input: HTMLInputElement) {
     feedback.value = next ? '模型 ID 已存在' : '请填写模型 ID'; input.value = id; return
   }
   feedback.value = ''
-  props.provider.model_settings![next] = settings(id)
+  ;(props.provider.model_settings ||= {})[next] = settings(id)
   if (id !== next) delete props.provider.model_settings![id]
   if (props.provider.model === id) props.provider.model = next
   props.provider.models = props.provider.models.map(m => m === id ? next : m)
@@ -112,22 +134,23 @@ async function probe(kind: 'connection' | 'reply') {
   const provider = props.provider, model = selected.value
   try {
     const disk = await window.navora.config.get()
-    if (JSON.stringify(disk.ai.providers.find(p => p.id === provider.id)) !== JSON.stringify(provider)) { probeResult.value = { ok: false, text: '请先应用配置' }; return }
+    if (!settingsEqual(disk.ai.providers.find(p => p.id === provider.id), provider)) { probeResult.value = { ok: false, text: '请先保存连接与模型' }; return }
     const result = await window.navora.models.probe(provider.id, model, kind)
     if (provider === props.provider && model === selected.value) probeResult.value = result
   } catch { probeResult.value = { ok:false, text:'测试失败，请重试' } }
   finally { testing.value = '' }
 }
 watch(selected, () => { probeResult.value = null; feedback.value = ''; mappingOpen.value = false })
+watch(() => JSON.stringify(props.provider), () => { probeResult.value = null })
 async function fetchModels() {
   if (!window.navora || loading.value) return
-  if (props.pendingCredentials) { feedback.value = '请先应用密钥'; return }
+  if (props.pendingCredentials) { feedback.value = '请先保存连接与模型'; return }
   loading.value = true
   feedback.value = ''
   const provider = props.provider
   try {
     const config = await window.navora.config.get()
-    if (config.ai.providers.find(p => p.id === provider.id)?.base_url !== provider.base_url) { feedback.value = '请先应用连接配置，再获取模型。'; return }
+    if (config.ai.providers.find(p => p.id === provider.id)?.base_url !== provider.base_url) { feedback.value = '请先保存连接配置，再获取模型。'; return }
     const result = await window.navora.models.list(provider.id)
     if (!result.ok) { feedback.value = result.error || '获取失败'; return }
     provider.models = [...new Set([...provider.models, ...(result.models || [])])]
@@ -137,6 +160,7 @@ async function fetchModels() {
 }
 </script>
 <style scoped>
+.model-advanced>summary{cursor:pointer;font-size:13px;font-weight:600;line-height:1.8;padding:4px 0}.model-advanced>summary small{font-size:11px;font-weight:400;color:var(--navora-muted);margin-left:8px}.model-advanced[open]>.model-grid{margin-top:14px}
 .probe-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding-top:14px; margin-top:14px; border-top:1px solid var(--n-border); }
 .probe-result { font-size:12px; color:#32856b; overflow-wrap:anywhere; }
 .probe-result.failed { color:#b02d35; }
@@ -151,7 +175,8 @@ async function fetchModels() {
 .model-entry { border-top:1px solid var(--n-border,#e5e7eb); margin-top:14px; padding-top:14px; }
 .model-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 label { color:var(--n-muted,#6b7280); font-size:12px; display:flex; flex-direction:column; gap:5px; }
-input:not([type=checkbox]),select { width:100%; min-width:0; background:var(--n-surface,#fff); color:var(--n-text,#20252c); border:1px solid var(--n-border,#dfe3e8); padding:7px 10px; height:34px; border-radius:8px; font:inherit; font-size:13px; }
+input:not([type=checkbox]),select { box-sizing:border-box; width:100%; min-width:0; background:var(--n-surface,#fff); color:var(--n-text,#20252c); border:1px solid var(--n-border,#dfe3e8); padding:7px 10px; height:34px; border-radius:8px; font:inherit; font-size:13px; }
+.model-grid>label{min-width:0}
 input:focus-visible,select:focus-visible { outline:2px solid var(--n-accent,#2f6df6); outline-offset:2px; }
 input[type=checkbox]:not(.surface-toggle) { accent-color:var(--n-accent,#2f6df6); width:15px; height:15px; }
 .modalities { justify-content:flex-start; margin:14px 0; font-size:12px; color:var(--n-muted,#6b7280); }

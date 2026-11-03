@@ -4,7 +4,7 @@ export type SidebarPanelDefinition = {id:string; label:string; icon:string; comp
 const registry = shallowReactive(new Map<string,SidebarPanelDefinition>([
   ['chats',{id:'chats',label:'对话',icon:'comments'}],
   ['workspace',{id:'workspace',label:'文件',icon:'folder-open'}],
-  ['browser',{id:'browser',label:'浏览器',icon:'window-maximize'}],
+  ['browser',{id:'browser',label:'浏览器',icon:'browser'}],
   ['plugins',{id:'plugins',label:'插件',icon:'puzzle-piece'}],
 ]))
 export function registerSidebarPanel(definition:SidebarPanelDefinition):()=>void {

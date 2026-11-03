@@ -45,7 +45,7 @@ npm run build:plugins
 
 ## 开发
 
-当前运行时使用 Electron `45.0.0-cloudbypass.3`。此 Windows x64 定制版新增原生 DOM/无障碍快照、跨域 iframe 与封闭 Shadow DOM 查找，以及不激活隐藏窗口的可信点击、键盘和触摸输入；应用内工具接入说明见[浏览器 Agent 自动化](docs/browser-agent-automation.md)。本版本发布包只覆盖 Windows x64。
+当前运行时使用 Electron `45.0.0-cloudbypass.5`。此 Windows x64 定制版提供原生 DOM/无障碍快照、跨域 iframe 与封闭 Shadow DOM 查找，以及不激活隐藏窗口的可信点击、键盘和触摸输入；本轮新增原生菜单、NativePanel 与网站信息接口接入，常用面板覆盖网页时保持实时画面。接入范围与兼容边界见[原生界面实施记录](docs/native-ui-integration-2026-11-04.md)，自动化说明见[浏览器 Agent 自动化](docs/browser-agent-automation.md)。本版本发布包只覆盖 Windows x64。
 
 在匹配的 Electron 源码中应用补丁并增量编译后，可安装本机产物：
 

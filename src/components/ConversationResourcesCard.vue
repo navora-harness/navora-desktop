@@ -1,7 +1,7 @@
 <template>
-  <aside ref="card" class="conversation-resource-card" :class="{'is-overview':tab==='overview'}" :data-layout="overlay?'overlay':'docked'" aria-label="当前对话摘要面板" :style="{'--resource-width':`${width}px`}" @keydown.esc="onEscape">
+  <aside id="conversation-summary" ref="card" class="conversation-resource-card" :class="{'is-overview':tab==='overview'}" :data-layout="overlay?'overlay':'docked'" aria-label="当前对话摘要面板" :style="{'--resource-width':`${width}px`}" @keydown.esc="onEscape">
     <div v-if="!overlay" class="resource-card-resizer" role="separator" aria-label="调整资源面板宽度" aria-orientation="vertical" :aria-valuenow="width" aria-valuemin="280" :aria-valuemax="maximum" tabindex="0" @pointerdown="beginResize" @keydown="resizeKey" />
-    <header class="resource-card-head"><button v-if="tab!=='overview'" type="button" class="resource-icon-button" aria-label="返回资源概览" title="返回资源概览" @click="changeTab('overview')"><AppIcon icon="arrow-left" /></button><div><h2>{{ tab==='overview' ? '摘要' : '对话摘要' }}</h2><span :title="title">{{ title }}</span></div><SidebarMoreMenu label="摘要面板" hide-label="隐藏摘要面板" hide-aria-label="关闭资源面板" @hide="emit('close')" /></header>
+    <header class="resource-card-head"><button v-if="tab!=='overview'" type="button" class="resource-icon-button" aria-label="返回资源概览" title="返回资源概览" @click="changeTab('overview')"><AppIcon icon="arrow-left" /></button><div><h2>{{ tab==='overview' ? '摘要' : '对话摘要' }}</h2><span :title="title">{{ title }}</span></div><button type="button" class="resource-icon-button" aria-label="关闭资源面板" title="隐藏对话摘要" @click="closePanel"><AppIcon icon="xmark" /></button></header>
     <nav v-if="tab!=='overview'" class="resource-card-tabs" aria-label="资源类型">
       <button v-for="item in tabs" :key="item.id" type="button" :data-resource-tab="item.id" :aria-pressed="tab===item.id" @click="changeTab(item.id)">{{ item.label }}<span v-if="item.id==='browser' && windowCount">{{ windowCount }}</span><span v-if="item.id==='outputs' && outputs.length">{{ outputs.length }}</span></button>
     </nav>
@@ -35,7 +35,6 @@ import WorkspaceFilesPanel from './sidebar/WorkspaceFilesPanel.vue'
 import BrowserResourcesPanel from './sidebar/BrowserResourcesPanel.vue'
 import ChatMarkdown from './ChatMarkdown.vue'
 import ConversationResourceOverview from './ConversationResourceOverview.vue'
-import SidebarMoreMenu from './sidebar/SidebarMoreMenu.vue'
 const props=defineProps<{chatId:string;title:string;messages:ChatMessage[];tree:BrowserTreeSession[];tab:ResourceTab;width:number;availableWidth:number;overlay:boolean;isRemote:boolean;ownerLabel:(id:string)=>string;dndMime:string}>()
 const emit=defineEmits<{close:[];tab:[tab:ResourceTab];resize:[width:number];preview:[path:string];jump:[id:string];notify:[text:string,color?:string];addRef:[ref:BrowserContextRef];askCloseSession:[session:BrowserTreeSession];remoteView:[id:string];openMedia:[payload:{src:string;alt?:string}]}>()
 const tabs:Array<{id:ResourceTab;label:string}>=[{id:'files',label:'文件'},{id:'browser',label:'浏览器'},{id:'outputs',label:'输出'}]
@@ -50,7 +49,8 @@ const notify=(text:string,color?:string)=>emit('notify',text,color)
 function outputTitle(content:string){return content.replace(/[#*_`>|]/g,'').trim().split('\n').find(Boolean)?.slice(0,100)||'对话输出'}
 function changeTab(tab:ResourceTab){emit('tab',tab)}
 watch(()=>props.chatId,()=>{selectedOutputId.value=''})
-function onEscape(event:KeyboardEvent){if((event.target as Element).closest('input,textarea,[contenteditable=true]'))return;event.preventDefault();event.stopPropagation();emit('close')}
+function onEscape(event:KeyboardEvent){if((event.target as Element).closest('input,textarea,[contenteditable=true]'))return;event.preventDefault();event.stopPropagation();closePanel()}
+function closePanel(){emit('close');document.querySelector<HTMLButtonElement>('[data-chat-resource=resources]')?.focus({preventScroll:true})}
 function resize(value:number){emit('resize',Math.max(280,Math.min(maximum.value,value)))}
 function onOutsidePointer(event:PointerEvent){
   if(!props.overlay||event.button!==0)return

@@ -1,7 +1,11 @@
-import {browserTabShortcut} from '../../shared/browser-workspace'
+import {browserTabShortcut,type BrowserClosedTab} from '../../shared/browser-workspace'
+import {appShortcutCommand,isAppShortcutEnabled} from '../../shared/app-shortcuts'
+import {BrowserAgentAudio} from './browser-agent-audio'
 import {BrowserHostManager,type BrowserPage} from './browser-host'
 import {
   session as electronSession,
+  dialog,
+  type NavigationEntry,
   type Session,
   type WebContents,
 } from 'electron'
@@ -9,7 +13,8 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { BrowserTreeSession, BrowserTreeWindow } from '../../shared/types'
+import type { BrowserSessionManageAction, BrowserSessionManageResult, BrowserSessionUpdate, BrowserTreeSession, BrowserTreeWindow } from '../../shared/types'
+import { normalizeBrowserSessionUpdate } from '../../shared/browser-session'
 import { applyUserAgentOverride } from '../../shared/user-agent'
 import type { AppConfig } from '../../shared/config'
 import { resolveAcceptLanguageList, resolveUserAgent } from '../../shared/config'
@@ -74,6 +79,7 @@ type AgentWindowRecord = {
   faviconUrl?: string
   url: string
   restoreUrl?:string
+  desiredUrl?:string
   visible: boolean
   loading: boolean
 }
@@ -84,10 +90,17 @@ type AgentSessionRecord = {
   sessionIndex: number
   partition: string
   persist: boolean
+  name?: string
+  isDefault?: boolean
   ses: Session
   userAgent: string
   windows: Map<string, AgentWindowRecord>
 }
+export type BrowserTabSnapshot={
+  chatId:string;sessionId:string;title:string;url:string;entries:NavigationEntry[];historyIndex:number
+  index:number;hostId:string;pinned:boolean;muted:boolean;viewport:{width:number;height:number}|null
+}
+type ClosedTabRecord=BrowserTabSnapshot&{id:string;closedAt:number}
 
 export type RegistryEvents = {
   onVisit?:(info:{chatId:string;url:string;title:string})=>void
@@ -147,8 +160,17 @@ export type RegistryEvents = {
 
 export class BrowserRegistry {
   readonly hosts = new BrowserHostManager()
+  tabRevision=0
   private sessions = new Map<string, AgentSessionRecord>()
+  private sessionManagement = new Set<string>()
   private windows = new Map<string, AgentWindowRecord>()
+  private audioPolicies=new WeakMap<BrowserPage,BrowserAgentAudio>()
+  private audioPreference(page:BrowserPage){return this.audioPolicies.get(page)?.preference??page.webContents.isAudioMuted()}
+  setPageMuted(page:BrowserPage,muted:boolean){
+    const policy=this.audioPolicies.get(page)
+    if(policy)policy.setManual(muted)
+    else page.webContents.setAudioMuted(muted)
+  }
   private persistenceFile:string|null=null
   private restoring=false
   private restored=false
@@ -168,11 +190,26 @@ export class BrowserRegistry {
    * Their `closed` event must NOT be reported as a user op ("你关闭了一个浏览器窗口").
    */
   private programmaticClose = new Set<string>()
+  private pendingUserClose=new Map<string,BrowserTabSnapshot>()
+  private closedTabs=new Map<string,ClosedTabRecord[]>()
+  private closingTabs=new Map<string,Promise<boolean>>()
+  private closingHosts=new Set<string>()
 
   constructor(getConfig: () => AppConfig, events: RegistryEvents = {}) {
     this.getConfig = getConfig
     this.events = events
-    this.hosts.onChanged = () => { for (const id of this.nextIndex.keys()) this.emitTree(id) }
+    this.hosts.onChanged = () => {
+      for(const {win} of this.windows.values())if(!win.isDestroyed())this.audioPolicies.get(win)?.sync(win.automation.snapshot(),this.getConfig().browser.automation.auto_mute!==false)
+      for (const id of this.nextIndex.keys()) this.emitTree(id)
+    }
+    this.hosts.onWillClose=page=>{const snapshot=this.snapshotTab(page.id);if(snapshot)this.pendingUserClose.set(page.id,snapshot)}
+    this.hosts.onCloseHost=hostId=>{
+      if(this.closingHosts.has(hostId))return
+      this.closingHosts.add(hostId)
+      void (async()=>{for(const id of this.hosts.hostPages(hostId))if(!await this.closeUserTab(id,hostId))break})()
+        .catch(error=>console.warn('[browser] window close interrupted',error))
+        .finally(()=>this.closingHosts.delete(hostId))
+    }
     this.hosts.onActivate = page => {
       if(this.restoring)return
       const rec=this.windows.get(page.id),url=rec?.restoreUrl
@@ -274,6 +311,7 @@ export class BrowserRegistry {
   }
 
   private emitTree(chatId: string): void {
+    this.tabRevision++
     const ms = this.getConfig().browser.tree_update_debounce_ms || 100
     const prev = this.debounceTimers.get(chatId)
     if (prev) clearTimeout(prev)
@@ -298,9 +336,20 @@ export class BrowserRegistry {
       if (s.chatId !== chatId) continue
       const windows: BrowserTreeWindow[] = []
       for (const w of s.windows.values()) {
+        if(w.win.isDestroyed())continue
         const bounds =
           w.win.isDestroyed() ? undefined : windowBoundsSnapshot(w.win)
         windows.push({
+          desiredUrl:w.desiredUrl||w.restoreUrl,
+          pinned:w.win.pinned,
+          muted:w.win.webContents.isAudioMuted(),
+          manualMuted:this.audioPolicies.get(w.win)?.snapshot().manualMuted,
+          muteReason:this.audioPolicies.get(w.win)?.snapshot().muteReason,
+          audible:w.win.webContents.isCurrentlyAudible(),
+          order:this.hosts.hostPages(w.win.hostId||'').indexOf(w.windowId),
+          hostActive:this.hosts.getHost(w.win.hostId||'')?.active===w.windowId,
+          tabRevision:this.tabRevision,
+          persistent:s.persist,
           viewport:w.win.fixedViewport,
           zoomFactor:w.win.webContents.getZoomFactor(),
           canGoBack:w.win.webContents.navigationHistory.canGoBack(),
@@ -314,6 +363,7 @@ export class BrowserRegistry {
           presentation: this.hosts.presentation(w.win),
           selected:this.hosts.selectedPageId===w.windowId,
           manualControl: w.win.manualControl,
+          automation: w.win.automation.snapshot(),
           windowId: w.windowId,
           sessionId: w.sessionId,
           title: displayBrowserTabTitle(w.url,w.win.getTitle()||w.title),
@@ -330,6 +380,8 @@ export class BrowserRegistry {
         sessionIndex: s.sessionIndex,
         partition: s.partition,
         persist: s.persist,
+        name: s.name,
+        isDefault: s.isDefault,
         windows,
       })
     }
@@ -350,6 +402,55 @@ export class BrowserRegistry {
 
   getWindowRecord(windowId: string): AgentWindowRecord | undefined {
     return this.windows.get(windowId)
+  }
+
+  updateSession(sessionId: string, patch: BrowserSessionUpdate): BrowserTreeSession {
+    const session = this.sessions.get(sessionId)
+    if (!session) throw Error('session_not_found')
+    if (this.sessionManagement.has(sessionId)) throw Error('browser_session_busy')
+    const normalized = normalizeBrowserSessionUpdate(patch)
+    const previous = [...this.sessions.values()].filter(candidate=>candidate.chatId===session.chatId).map(candidate=>({candidate,name:candidate.name,isDefault:candidate.isDefault}))
+    if (normalized.name !== undefined) session.name = normalized.name || undefined
+    if (normalized.isDefault !== undefined) {
+      if (normalized.isDefault) for (const candidate of this.sessions.values()) if (candidate.chatId === session.chatId) candidate.isDefault = false
+      session.isDefault = normalized.isDefault
+    }
+    try { this.savePersistent(true) }
+    catch (error) { for(const saved of previous){saved.candidate.name=saved.name;saved.candidate.isDefault=saved.isDefault};throw error }
+    this.emitTree(session.chatId)
+    return this.getTree(session.chatId).find(item => item.sessionId === sessionId)!
+  }
+
+  /** Destructive UI operations coordinate every page before touching site data. */
+  async manageSession(sessionId: string, action: BrowserSessionManageAction): Promise<BrowserSessionManageResult> {
+    if (!['close-pages', 'clear-data', 'delete'].includes(action)) throw Error('invalid_browser_session_action')
+    const session = this.sessions.get(sessionId)
+    if (!session) throw Error('session_not_found')
+    if (this.sessionManagement.has(sessionId)) throw Error('browser_session_busy')
+    this.sessionManagement.add(sessionId)
+    let closedPages = 0
+    try {
+      for (const record of [...session.windows.values()]) {
+        if (record.win.annotationSelecting) throw Error('browser_busy_finish_action_first')
+        if (await this.closeUserTab(record.windowId)) closedPages++
+        else break
+      }
+      const remainingPages = [...session.windows.values()].filter(record => !record.win.isDestroyed()).length
+      if (action !== 'close-pages' && remainingPages) throw Error('browser_session_close_cancelled')
+      if (action !== 'close-pages') {
+        // Keep the session record if any cleanup fails; callers must never report
+        // deletion while cookies or storage could still remain on disk.
+        await session.ses.clearData()
+        await session.ses.clearStorageData()
+        await session.ses.clearCache()
+        this.closedTabs.set(session.chatId, (this.closedTabs.get(session.chatId) || []).filter(entry => entry.sessionId !== sessionId))
+      }
+      if (action === 'delete') this.sessions.delete(sessionId)
+      try { this.savePersistent(true) }
+      catch (error) { if(action==='delete')this.sessions.set(sessionId,session);this.emitTree(session.chatId);throw error }
+      this.emitTree(session.chatId)
+      return { action, closedPages, remainingPages, deleted: action === 'delete' }
+    } finally { this.sessionManagement.delete(sessionId) }
   }
 
   markNavigationStopped(windowId:string){
@@ -824,10 +925,12 @@ export class BrowserRegistry {
       height?: number
       openerWindowId?: string
       restoreId?: string
+      deferLoad?:boolean
     } = {},
   ): BrowserTreeWindow {
     const s = this.sessions.get(sessionId)
     if (!s) throw new Error(`session_not_found:${sessionId}`)
+    if (this.sessionManagement.has(sessionId)) throw Error('browser_session_busy')
 
     const cfg = this.getConfig()
     if (this.totalWindows() >= cfg.browser.max_windows_total) {
@@ -843,8 +946,8 @@ export class BrowserRegistry {
       partition: s.partition, contextIsolation: true, nodeIntegration: false,
       sandbox: false, autoplayPolicy: 'document-user-activation-required',
     }, {width,height}, show)
-    // Agent windows default muted so background tabs don't make noise.
-    win.webContents.setAudioMuted(true)
+    // Manual pages retain sound; only an actual Agent lease/operation mutes.
+    this.audioPolicies.set(win,new BrowserAgentAudio(win.webContents))
 
     const rec: AgentWindowRecord = {
       windowId,
@@ -853,6 +956,7 @@ export class BrowserRegistry {
       win,
       title: '新窗口',
       url: opts.url || 'about:blank',
+      desiredUrl:opts.url&&/^https?:\/\//i.test(opts.url)?opts.url:undefined,
       visible: show,
       loading: false,
     }
@@ -869,7 +973,7 @@ export class BrowserRegistry {
     this.quietNavigateLog(windowId)
     // A new WebContentsView already owns an empty document. Loading about:blank
     // again races the first real navigation (and may report a spurious failure).
-    if(url!=='about:blank')void win.loadURL(url).catch((e) => console.warn('[browser] loadURL', e))
+    if(url!=='about:blank'&&!opts.deferLoad)void win.loadURL(url).catch((e) => console.warn('[browser] loadURL', e))
 
     this.emitTree(s.chatId)
     if (opts.openerWindowId) {
@@ -896,13 +1000,42 @@ export class BrowserRegistry {
   private attachWindowListeners(rec: AgentWindowRecord): void {
     const { win } = rec
     const wc = win.webContents
+    let menuAltOnly=false
 
     wc.on('before-input-event',(event,input)=>{
-      if(input.type!=='keyDown'||!input.control&&!input.meta)return
+      const menuHost=this.hosts.getHost(win.hostId||''),menuKey=input.key.toLowerCase(),ownsMenu=!!menuHost&&menuHost.ready&&!menuHost.suspended&&menuHost.active===rec.windowId
+      const focusMenu=(menu?:'file'|'edit'|'view'|'help')=>{event.preventDefault();menuHost!.window.webContents.focus();menuHost!.window.webContents.send('navora:app.menu-focus',{menu,pageId:rec.windowId})}
+      // Guest key events never bubble into the host renderer. Route application
+      // shortcuts through the same host menu boundary; do not intercept them on
+      // a hidden page or route main-only commands from a detached browser.
+      if(ownsMenu&&input.type==='keyDown'){
+        const command=appShortcutCommand({...input,repeat:input.isAutoRepeat})
+        if(command&&(menuHost!.embedded||command==='help.shortcuts')){
+          event.preventDefault()
+          if(isAppShortcutEnabled(this.getConfig(),command)){
+            menuHost!.window.webContents.focus()
+            menuHost!.window.webContents.send('navora:app.menu-focus',{command,pageId:rec.windowId})
+          }
+          return
+        }
+      }
+      if(ownsMenu&&!input.isComposing&&!input.isAutoRepeat){
+        if(menuKey==='alt'&&!input.control&&!input.meta){
+          if(input.type==='keyDown')menuAltOnly=true
+          else if(input.type==='keyUp'&&menuAltOnly){menuAltOnly=false;focusMenu()}
+          return
+        }
+        if(input.type==='keyDown'){
+          menuAltOnly=false
+          if(menuKey==='f10'&&!input.shift&&!input.control&&!input.meta&&!input.alt){focusMenu();return}
+          if(input.alt&&!input.control&&!input.meta){const menu=({f:'file',e:'edit',v:'view',h:'help'} as const)[menuKey as 'f'|'e'|'v'|'h'];if(menu){focusMenu(menu);return}}
+        }
+      }
+      if(input.type!=='keyDown'||!input.control&&!input.meta&&input.key.toLowerCase()!=='f5')return
       const key=input.key.toLowerCase(),host=this.hosts.getHost(win.hostId||'')
       if(!host)return
       const action=browserTabShortcut(input)
-      if(action&&host.ready&&!host.suspended&&host.active===rec.windowId){event.preventDefault();if(action==='new')host.window.webContents.focus();host.window.webContents.send('navora:browser.tab-shortcut',{pageId:rec.windowId,action});return}
+      if(action&&host.ready&&!host.suspended&&host.active===rec.windowId){event.preventDefault();if(action==='new'||action==='address')host.window.webContents.focus();host.window.webContents.send('navora:browser.tab-shortcut',{pageId:rec.windowId,action});return}
       if(input.alt||input.isComposing||input.isAutoRepeat)return
       if(key==='l'&&!input.shift){event.preventDefault();host.window.webContents.focus();host.window.webContents.send('navora:browser.address-focus',rec.windowId)}
       else if(key==='f'&&!input.shift&&host.ready&&!host.suspended&&host.active===rec.windowId){event.preventDefault();host.window.webContents.focus();host.window.webContents.send('navora:browser.find-shortcut',{pageId:rec.windowId,action:'open'})}
@@ -913,6 +1046,8 @@ export class BrowserRegistry {
       }else if(action==='next'||action==='previous'){
         event.preventDefault();const ids=[...host.pages],at=ids.indexOf(rec.windowId),next=ids[(at+(input.shift?-1:1)+ids.length)%ids.length]
         if(next)this.hosts.present(this.windows.get(next)!.win)
+      }else if(action){
+        event.preventDefault();host.window.webContents.send('navora:browser.tab-shortcut',{pageId:rec.windowId,action})
       }
     })
     wc.on('page-title-updated', (_e, title) => {
@@ -924,13 +1059,15 @@ export class BrowserRegistry {
       rec.faviconUrl = favicons.find(url => /^https?:/i.test(url))
       this.emitTree(rec.chatId)
     })
-    wc.on('did-start-navigation',(_e,_url,inPlace,mainFrame)=>{
+    wc.on('did-start-navigation',(_e,url,inPlace,mainFrame)=>{
       if(!mainFrame||inPlace)return
+      if(url==='about:blank'||/^https?:\/\//i.test(url))rec.desiredUrl=url
       rec.loadError=undefined;rec.faviconUrl=undefined;rec.crashed=false;win.annotationSelecting=false;win.navigationStopped=false
       this.emitTree(rec.chatId)
     })
     wc.on('did-navigate', (_e, url, httpResponseCode, httpStatusText) => {
       rec.url = url
+      if(/^https?:\/\//i.test(url))rec.desiredUrl=url
       this.hosts.updateWindowTitle(win)
       this.emitTree(rec.chatId)
       if (!this.shouldEmitUserNavigate(rec)) return
@@ -948,6 +1085,7 @@ export class BrowserRegistry {
     wc.on('did-navigate-in-page', (_e, url,mainFrame) => {
       if(!mainFrame)return
       rec.url = url
+      if(/^https?:\/\//i.test(url))rec.desiredUrl=url
       this.hosts.updateWindowTitle(win)
       this.events.onVisit?.({chatId:rec.chatId,url,title:rec.title})
       this.emitTree(rec.chatId)
@@ -959,6 +1097,7 @@ export class BrowserRegistry {
       const url = String(validatedURL || rec.url || '').trim()
       if (!url) return
       rec.url = url
+      if(/^https?:\/\//i.test(url))rec.desiredUrl=url
       rec.loadError={code:errorCode,url,description:String(errorDescription||'load_failed')}
       rec.loading=false
       this.emitTree(rec.chatId)
@@ -973,6 +1112,16 @@ export class BrowserRegistry {
       })
     })
     wc.on('render-process-gone',()=>{rec.crashed=true;rec.loading=false;win.annotationSelecting=false;this.emitTree(rec.chatId)})
+    wc.on('media-started-playing',()=>this.emitTree(rec.chatId))
+    wc.on('media-paused',()=>this.emitTree(rec.chatId))
+    wc.on('audio-state-changed',()=>this.emitTree(rec.chatId))
+    wc.on('will-prevent-unload',event=>{
+      const parent=this.hosts.getHost(win.hostId||'')?.window
+      const options:Electron.MessageBoxSyncOptions={type:'question',buttons:['留在页面','离开页面'],defaultId:0,cancelId:0,title:'离开此页面',message:'离开此页面？',detail:'页面可能有尚未保存的内容。',noLink:true}
+      const response=parent&&!parent.isDestroyed()?dialog.showMessageBoxSync(parent,options):dialog.showMessageBoxSync(options)
+      if(response===1)event.preventDefault()
+      else{this.pendingUserClose.delete(rec.windowId);win.emit('close-cancelled')}
+    })
     wc.on('did-start-loading', () => {
       // A late loading notification from a navigation that was just stopped
       // must not restore the stale stop-button state. A new main-frame
@@ -986,6 +1135,7 @@ export class BrowserRegistry {
       rec.loading = false
       rec.title = wc.getTitle() || rec.title
       if(!rec.loadError)rec.url = wc.getURL() || rec.url
+      if(!rec.loadError&&/^https?:\/\//i.test(rec.url))rec.desiredUrl=rec.url
       this.hosts.updateWindowTitle(win)
       if(!rec.loadError)this.events.onVisit?.({chatId:rec.chatId,url:rec.url,title:rec.title})
       this.emitTree(rec.chatId)
@@ -1021,11 +1171,14 @@ export class BrowserRegistry {
       // WebContentsView instead, so route popups through our tab registry and
       // deny Chromium's incompatible native popup creation.
       try {
-        const child=this.createWindow(rec.sessionId,{url:openUrl,show:false,openerWindowId:rec.windowId})
-        const page=this.windows.get(child.windowId)?.win
+        const child=this.createWindow(rec.sessionId,{url:openUrl,show:false,deferLoad:true,openerWindowId:rec.windowId})
+        const childRecord=this.windows.get(child.windowId),page=childRecord?.win
         if(!page)return {action:'deny'}
-        if(rec.win.hostId&&page.hostId!==rec.win.hostId)this.hosts.transfer(page,rec.win.hostId)
-        this.hosts.present(page)
+        childRecord.tabKey=`browser:${randomUUID()}`
+        if(rec.win.hostId&&page.hostId!==rec.win.hostId)this.hosts.transfer(page,rec.win.hostId,false)
+        this.hosts.insertAfter(page,rec.windowId)
+        if(openUrl!=='about:blank')void page.loadURL(openUrl).catch(error=>{if(!page.isDestroyed())console.warn('[browser] popup navigation failed',error)})
+        if(details.disposition!=='background-tab')this.hosts.present(page)
       } catch(error) {
         console.warn('[browser] could not open popup in a new tab',error)
       }
@@ -1075,7 +1228,72 @@ export class BrowserRegistry {
     return windowBoundsSnapshot(rec.win)
   }
 
-  requestCloseWindow(windowId:string):void {this.windows.get(windowId)?.win.close()}
+  markDesiredUrl(windowId:string,url:string){const rec=this.windows.get(windowId);if(!rec)return;rec.desiredUrl=url;this.emitTree(rec.chatId)}
+
+  snapshotTab(windowId:string):BrowserTabSnapshot|null{
+    const rec=this.windows.get(windowId);if(!rec||rec.win.isDestroyed())return null
+    const wc=rec.win.webContents,original=wc.navigationHistory.getAllEntries(),activeIndex=wc.navigationHistory.getActiveIndex()
+    const allowed=(url:string)=>url==='about:blank'||/^https?:\/\//i.test(url)&&isUrlAllowed(url,this.getConfig().browser.url_allowlist)
+    const entries=original.filter(entry=>allowed(entry.url)).map(entry=>({...entry})),active=original[activeIndex]
+    let historyIndex=active?original.slice(0,activeIndex+1).filter(entry=>allowed(entry.url)).length-1:-1
+    const url=rec.desiredUrl||rec.restoreUrl||wc.getURL()||rec.url
+    if(allowed(url)&&entries[historyIndex]?.url!==url){entries.splice(Math.max(0,historyIndex+1));entries.push({url,title:rec.title});historyIndex=entries.length-1}
+    return {chatId:rec.chatId,sessionId:rec.sessionId,title:displayBrowserTabTitle(url,rec.title),url,
+      entries,historyIndex:Math.max(0,historyIndex),index:this.hosts.hostPages(rec.win.hostId||'').indexOf(windowId),hostId:rec.win.hostId||'',pinned:rec.win.pinned,muted:this.audioPreference(rec.win),viewport:rec.win.fixedViewport?{...rec.win.fixedViewport}:null}
+  }
+  recentlyClosed(chatId:string):BrowserClosedTab[]{return (this.closedTabs.get(chatId)||[]).map(entry=>({id:entry.id,title:entry.title,url:entry.url,closedAt:entry.closedAt,hostId:entry.hostId}))}
+  closedTab(chatId:string,id?:string){const list=this.closedTabs.get(chatId)||[];return id?list.find(entry=>entry.id===id):list[0]}
+  forgetClosedTab(chatId:string,id:string){const list=this.closedTabs.get(chatId)||[];this.closedTabs.set(chatId,list.filter(entry=>entry.id!==id));this.emitTree(chatId)}
+
+  createFromSnapshot(snapshot:BrowserTabSnapshot,hostId:string,pinned=snapshot.pinned):BrowserPage{
+    const target=this.hosts.getHost(hostId);if(!target||target.window.isDestroyed())throw Error('browser_host_unavailable')
+    const url=snapshot.url
+    if(url!=='about:blank'&&(!/^https?:\/\//i.test(url)||!isUrlAllowed(url,this.getConfig().browser.url_allowlist)))throw Error('url_not_allowed')
+    const session=this.sessions.get(snapshot.sessionId)||this.sessions.get(this.createSession(snapshot.chatId,{persist:true}).sessionId)!
+    if(session.chatId!==snapshot.chatId)throw Error('browser_wrong_chat')
+    const created=this.createWindow(session.sessionId,{url:'about:blank',show:false}),rec=this.windows.get(created.windowId)!,page=rec.win
+    rec.tabKey=`browser:${randomUUID()}`;rec.title=snapshot.title;rec.desiredUrl=url;rec.url=url
+    page.pinned=pinned;page.fixedViewport=snapshot.viewport?{...snapshot.viewport}:null;this.setPageMuted(page,snapshot.muted)
+    try{
+      if(page.hostId!==hostId)this.hosts.transfer(page,hostId,false)
+      this.hosts.setOrder(hostId,this.hosts.hostPages(hostId))
+      this.quietNavigateLog(page.id)
+      // Restore submits immediately. Its network lifecycle must not hold the UI
+      // command open; did-fail-load already exposes a normal retryable page.
+      const entries=snapshot.entries.length?snapshot.entries:[{url,title:snapshot.title}]
+      const index=Math.min(Math.max(0,snapshot.historyIndex),entries.length-1)
+      void page.webContents.navigationHistory.restore({entries,index}).catch(error=>{
+        if(!page.isDestroyed())console.warn('[browser] tab history restore failed',error)
+      })
+      this.emitTree(snapshot.chatId);return page
+    }catch(error){this.closeWindow(page.id);throw error}
+  }
+
+  closeUserTab(windowId:string,expectedHostId?:string):Promise<boolean>{
+    const rec=this.windows.get(windowId);if(!rec||rec.win.isDestroyed())return Promise.resolve(true)
+    const pending=this.closingTabs.get(windowId);if(pending)return pending
+    const page=rec.win
+    if(page.annotationSelecting)return Promise.reject(new Error('browser_busy_finish_action_first'))
+    let settled=false
+    const closing=new Promise<boolean>((resolve,reject)=>{
+      const finish=(closed:boolean,error?:unknown)=>{if(settled)return;settled=true;clearTimeout(timer);page.removeListener('closed',onClosed);page.removeListener('close-cancelled',onCancelled);this.closingTabs.delete(windowId);if(error)reject(error);else resolve(closed)}
+      const onClosed=()=>finish(true),onCancelled=()=>finish(false)
+      // This deadline only bounds waiting for automation ownership. Once native
+      // close begins, an unload confirmation may legitimately outlive it.
+      const timer=setTimeout(()=>{this.pendingUserClose.delete(windowId);finish(false)},30000)
+      page.once('closed',onClosed);page.once('close-cancelled',onCancelled)
+      void page.automation.withTransfer(()=>{
+        if(settled)return
+        clearTimeout(timer)
+        if(page.isDestroyed()){finish(true);return}
+        if(expectedHostId&&page.hostId!==expectedHostId)throw Error('browser_page_wrong_host')
+        page.close()
+      }).catch(error=>{if(settled)return;this.pendingUserClose.delete(windowId);finish(false,error)})
+    })
+    if(!settled)this.closingTabs.set(windowId,closing)
+    return closing
+  }
+  requestCloseWindow(windowId:string):void {void this.closeUserTab(windowId).catch(error=>console.warn('[browser] tab close interrupted',error))}
 
   closeWindow(windowId: string): void {
     const rec = this.windows.get(windowId)
@@ -1092,6 +1310,8 @@ export class BrowserRegistry {
   private detachWindow(windowId: string, byUserClose: boolean): void {
     const rec = this.windows.get(windowId)
     if (!rec) return
+    const snapshot=this.pendingUserClose.get(windowId);this.pendingUserClose.delete(windowId)
+    if(byUserClose&&snapshot){const entry={...snapshot,id:randomUUID(),closedAt:Date.now()},history=this.closedTabs.get(rec.chatId)||[];this.closedTabs.set(rec.chatId,[entry,...history].slice(0,30))}
     jsDialogHost.uninstall(windowId)
     this.windows.delete(windowId)
     this.programmaticClose.delete(windowId)
@@ -1110,6 +1330,8 @@ export class BrowserRegistry {
   async closeSession(sessionId: string, purge = false): Promise<void> {
     const s = this.sessions.get(sessionId)
     if (!s) return
+    if (this.sessionManagement.has(sessionId)) throw Error('browser_session_busy')
+    this.closedTabs.set(s.chatId,(this.closedTabs.get(s.chatId)||[]).filter(entry=>entry.sessionId!==sessionId))
     for (const w of [...s.windows.values()]) {
       this.programmaticClose.add(w.windowId)
       if (!w.win.isDestroyed()) w.win.destroy()
@@ -1141,29 +1363,36 @@ export class BrowserRegistry {
       const records=JSON.parse(fs.readFileSync(file,'utf8'))
       if(!Array.isArray(records))return
       const detachedGroups=new Map<string,string>()
+      const restoredOrders=new Map<string,{id:string;order:number}[]>()
       for(const saved of records.slice(0,100).sort((a,b)=>a.sessionIndex-b.sessionIndex)){
         if(!chatExists(saved.chatId)||!Number.isSafeInteger(saved.sessionIndex)||saved.sessionIndex<1)continue
         this.nextIndex.set(saved.chatId,saved.sessionIndex-1)
         const session=this.createSession(saved.chatId,{persist:true,restoreId:/^sess_[a-f0-9]{10}$/.test(saved.sessionId)?saved.sessionId:undefined})
+        const restored=this.sessions.get(session.sessionId)!
+        if(typeof saved.name==='string'&&saved.name.trim().length<=80&&!/[\u0000-\u001f\u007f]/.test(saved.name))restored.name=saved.name.trim()||undefined
+        if(saved.isDefault===true&&!this.getTree(saved.chatId).some(item=>item.isDefault))restored.isDefault=true
         this.nextIndex.set(saved.chatId,Math.max(saved.sessionIndex,this.nextIndex.get(saved.chatId)||0))
-        for(const item of Array.isArray(saved.pages)?saved.pages.slice(0,32):[]){
+        for(const item of Array.isArray(saved.pages)?saved.pages.filter((item:any)=>typeof item?.url==='string'&&/^https?:\/\//i.test(item.url)).slice(0,32):[]){
           if(!/^win_[a-f0-9]{10}$/.test(item.id)||this.windows.has(item.id))continue
-          if(item.url!=='about:blank'&&!/^https?:\/\//i.test(item.url))continue
-          if(item.url!=='about:blank'&&!isUrlAllowed(item.url,this.getConfig().browser.url_allowlist))continue
+          if(!isUrlAllowed(item.url,this.getConfig().browser.url_allowlist))continue
           const created=this.createWindow(session.sessionId,{url:'about:blank',show:false,restoreId:item.id})
           const rec=this.windows.get(created.windowId)!
-          if(item.url!=='about:blank'){rec.url=item.url;rec.restoreUrl=item.url}
+          rec.url=item.url;rec.restoreUrl=item.url;rec.desiredUrl=item.url
           rec.tabKey=typeof item.tabKey==='string'?item.tabKey:undefined
+          rec.win.pinned=item.pinned===true
+          this.setPageMuted(rec.win,item.muted===true)
           if(item.viewport&&Number.isFinite(item.viewport.width)&&Number.isFinite(item.viewport.height))rec.win.fixedViewport={width:clampDim(item.viewport.width,1,WINDOW_MAX_W),height:clampDim(item.viewport.height,1,WINDOW_MAX_H)}
           if(item.detached){const group=detachedGroups.get(item.host);if(group)this.hosts.transfer(rec.win,group);else detachedGroups.set(item.host,this.hosts.detach(rec.win))}
+          const hostId=rec.win.hostId!,order=restoredOrders.get(hostId)||[];order.push({id:rec.windowId,order:Number.isFinite(item.order)?item.order:order.length});restoredOrders.set(hostId,order)
         }
       }
+      for(const [hostId,order] of restoredOrders)this.hosts.setOrder(hostId,order.sort((a,b)=>a.order-b.order).map(item=>item.id))
     }catch(error){console.warn('[browser] persistent workspace could not be restored',error)}finally{this.restoring=false}
   }
-  savePersistent(){
+  savePersistent(strict=false){
     if(!this.persistenceFile||this.restoring)return
-    const records=[...this.sessions.values()].filter(s=>s.persist).map(s=>({sessionId:s.sessionId,chatId:s.chatId,sessionIndex:s.sessionIndex,pages:[...s.windows.values()].filter(w=>!w.win.isDestroyed()).map(w=>({id:w.windowId,url:w.restoreUrl||w.win.webContents.getURL()||w.url,tabKey:w.tabKey,viewport:w.win.fixedViewport,detached:this.hosts.presentation(w.win)==='detached',host:w.win.hostId}))}))
-    try{const temp=this.persistenceFile+'.tmp';fs.writeFileSync(temp,JSON.stringify(records));fs.renameSync(temp,this.persistenceFile)}catch(error){console.warn('[browser] workspace save failed',error)}
+    const records=[...this.sessions.values()].filter(s=>s.persist).map(s=>({sessionId:s.sessionId,chatId:s.chatId,sessionIndex:s.sessionIndex,name:s.name,isDefault:s.isDefault,pages:[...s.windows.values()].filter(w=>!w.win.isDestroyed()).map(w=>({id:w.windowId,url:w.desiredUrl||w.restoreUrl||w.win.webContents.getURL()||w.url,tabKey:w.tabKey,viewport:w.win.fixedViewport,detached:this.hosts.presentation(w.win)==='detached',host:w.win.hostId,pinned:w.win.pinned,muted:this.audioPreference(w.win),order:this.hosts.hostPages(w.win.hostId||'').indexOf(w.windowId)})).filter(w=>/^https?:\/\//i.test(w.url))}))
+    try{const temp=this.persistenceFile+'.tmp';fs.writeFileSync(temp,JSON.stringify(records));fs.renameSync(temp,this.persistenceFile)}catch(error){console.warn('[browser] workspace save failed',error);if(strict)throw Error('browser_session_save_failed')}
   }
   shutdown(){this.savePersistent();this.persistenceFile=null;this.hosts.dispose()}
 
@@ -1173,6 +1402,7 @@ export class BrowserRegistry {
       await this.closeSession(id, true)
     }
     this.nextIndex.delete(chatId)
+    this.closedTabs.delete(chatId)
   }
 }
 

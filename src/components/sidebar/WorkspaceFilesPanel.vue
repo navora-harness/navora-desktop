@@ -68,7 +68,7 @@
           <span>在资源管理器中显示</span>
         </button>
         <button v-if="!menuEntry.path.startsWith(':download/')" type="button" class="sidebar-more-item" role="menuitem" @click="copyPath">
-          <AppIcon icon="clipboard-list" />
+          <AppIcon icon="copy" />
           <span>复制相对路径</span>
         </button>
         <button v-if="!menuEntry.virtual && (!menuDownload || !activeDownload(menuDownload))" type="button" class="sidebar-more-item danger" role="menuitem" @click="askDelete">

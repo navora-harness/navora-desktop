@@ -1,12 +1,13 @@
 <template>
   <div
-    class="shell"
-    :style="[sidebarStyle,{'--title-actions-reserve':pageContext==='chat'?'258px':'202px','--workspace-caption-reserve':isMobileLayout?'12px':showDesktopChrome && windowPlatform!=='darwin'?'202px':'64px'}]"
+    class="shell main-shell"
+    :style="[sidebarStyle,{'--workspace-caption-reserve':'12px'}]"
     :class="{
       'mobile-layout': isMobileLayout,
       'remote-web': isWebRemote(),
       'sidebar-open': isMobileLayout && mobileSidebarOpen,
-      'sidebar-collapsed': (allSidebarHidden || sidebarAutoCollapsed) && !settingsOpen && !creatorKind,
+      'sidebar-collapsed': allSidebarHidden && !settingsOpen && !creatorKind,
+      'sidebar-floating': sidebarFloating && !settingsOpen && !creatorKind,
       'sidebar-resizing': sidebarResizing,
       frameless: showDesktopChrome,
       'platform-mac': windowPlatform === 'darwin',
@@ -17,6 +18,8 @@
         <img src="/app-icon.png" alt="" draggable="false" />
         <span>Navora</span>
       </div>
+      <ApplicationMenuBar ref="appMenu" :command-state="applicationCommandState" :context-key="activeId || ''" :app-version="applicationVersion" :shortcuts-active="!settingsOpen&&!docsOpen&&!creatorKind" :capture-target="captureApplicationTarget" :restore-target="restoreApplicationTarget" @beforeopen="refreshApplicationTarget" @command="executeApplicationCommand" @error="onPanelNotify" />
+      <button type="button" class="ui-icon-button window-sidebar-toggle" :disabled="!!settingsOpen||!!creatorKind" :aria-label="allSidebarHidden?'显示侧栏':'隐藏侧栏'" :title="allSidebarHidden?'显示侧栏':'隐藏侧栏'" :aria-expanded="!allSidebarHidden" @click="toggleSidebarVisibility"><AppIcon icon="workspace" /></button>
       <div class="window-titlebar-drag" aria-hidden="true" />
     </header>
     <Transition name="sidebar-backdrop">
@@ -27,11 +30,40 @@
       @click="closeMobileSidebar"
     />
     </Transition>
-    <aside class="sidebar">
+      <nav class="activity-rail" aria-label="侧栏导航" @contextmenu.prevent.stop="railContextMenu?.show($event)" @keydown="onRailContextKey">
+        <div class="activity-rail-sections">
+          <div v-if="!showDesktopChrome || isMobileLayout" class="rail-brand" :class="{ 'app-drag': showDesktopChrome }" title="Navora">
+            <img src="/app-icon.png" alt="Navora" draggable="false" />
+          </div>
+          <SidebarNavigation :panels="sidebarPanels" :active="sidebarRail.active" :inactive="settingsOpen || !!creatorKind" @activate="toggleSidebarGroup" />
+        </div>
+        <div class="sidebar-foot">
+        <div class="sidebar-foot-actions">
+          <button v-if="!showDesktopChrome || isMobileLayout" type="button" class="sidebar-icon-btn" title="应用菜单" aria-label="应用菜单" @mousedown.prevent @click="appMenu?.openMenu('file')"><AppIcon icon="bars" /></button>
+          <button v-if="!isWebRemote()" type="button" class="sidebar-icon-btn" title="文献检索" aria-label="文献检索" @click="router.push('/literature')"><AppIcon icon="book" /></button>
+          <button v-else type="button" class="sidebar-icon-btn" title="远程窗口" aria-label="远程窗口" @click="openRemoteWindows"><AppIcon icon="browser" /></button>
+          <div class="sidebar-foot-end">
+            <button
+              type="button"
+              class="sidebar-icon-btn sidebar-settings-btn"
+              :class="{ selected: settingsOpen }"
+              :title="settingsOpen ? '返回上一页（Alt ←）' : '设置'"
+              :aria-label="settingsOpen ? '返回上一页' : '设置'"
+              :aria-pressed="settingsOpen"
+              @click="toggleSettings"
+            >
+              <AppIcon icon="gear" />
+            </button>
+          </div>
+        </div>
+      </div>
+      </nav>
+    <div class="content-surface">
+    <aside ref="sidebarElement" class="sidebar" :data-browser-chrome-overlay="sidebarFloating&&!settingsOpen&&!creatorKind&&!allSidebarHidden?'sidebar':undefined" :aria-label="sidebarFloating&&!settingsOpen&&!creatorKind?'悬浮侧栏':'侧栏'">
       <div class="sidebar-content-stack">
       <Transition name="sidebar-flip">
       <div v-show="(!settingsOpen && !creatorKind) || isMobileLayout" class="sidebar-chat-face">
-      <SidebarDock :active="sidebarRail.active" :panels="sidebarPanels" @close="closeSidebar">
+      <SidebarDock :active="sidebarRail.active" :panels="sidebarPanels" :floating="sidebarFloating" :pinned="sidebarPresentationMode==='fixed'" @pin="toggleSidebarPin" @close="closeSidebar">
         <template #chats="slot">
       <Teleport :to="slot.headerTarget" defer><button v-show="slot.active" type="button" class="chat-toolbar-icon-btn chat-batch-trigger" :title="chatBatchMode ? '取消批量操作' : '批量管理对话'" :aria-label="chatBatchMode ? '取消批量操作' : '批量操作'" :aria-pressed="chatBatchMode" @click="chatBatchMode ? exitChatBatchMode() : enterChatBatchMode()"><AppIcon :icon="chatBatchMode ? 'xmark' : 'list-check'" /></button></Teleport>
       <div class="chat-list-actions" role="group" aria-label="对话操作">
@@ -57,12 +89,11 @@
       <div v-show="true" class="chat-list" :class="{ 'batch-mode': chatBatchMode }">
         <template v-for="sec in visibleChatListSections" :key="sec.key">
           <div class="chat-date-label">{{ sec.label }}</div>
-          <template v-for="c in sec.items" :key="c.id" v-memo="[c, chats, activeId, chatBatchMode, batchSelectedIds, isMobileLayout, chatSwipeOpenId, chatSwipeDragId, chatSwipeOffset, chatSwipeLockedH, chatMoreOpenId, renamingChatId, renameDraft, chatStatusById, pendingAsks, windowCounts, subchatsByParent, subScrollMetrics, runningChats, exportingChat, Math.floor(nowTick / 60000)]">
+          <template v-for="c in sec.items" :key="c.id" v-memo="[c, chats, activeId, chatBatchMode, batchSelectedIds, isMobileLayout, chatSwipeOpenId, chatSwipeDragId, chatSwipeOffset, chatSwipeLockedH, chatMoreOpenId, renamingChatId, renameDraft, chatStatusById, pendingAsks, windowCounts, subchatsByParent, runningChats, exportingChat, Math.floor(nowTick / 60000)]">
             <div
               class="chat-item"
               :class="{
                 active: !chatBatchMode && c.id === activeId,
-                'branch-open': !chatBatchMode && isChatBranchExpanded(c.id),
                 pinned: Boolean(c.pinned),
                 'swipe-open': !chatBatchMode && chatSwipeOpenId === c.id,
                 swiping: !chatBatchMode && chatSwipeLockedH && chatSwipeDragId === c.id,
@@ -168,7 +199,7 @@
                           :title="`${windowCounts[c.id]} 个窗口`"
                           :aria-label="`${windowCounts[c.id]} 个窗口`"
                         >
-                          <AppIcon icon="window-maximize" />
+                          <AppIcon icon="browser" />
                           <span class="chat-stat-num">{{ windowCounts[c.id] }}</span>
                         </span>
                         <span
@@ -265,123 +296,7 @@
             </div>
             </div>
 
-            <div
-              v-if="!chatBatchMode && isChatBranchExpanded(c.id) && subchatCountOf(c.id)"
-              class="chat-sub-wrap"
-            >
-              <div class="chat-sub-rail" aria-hidden="true">
-                <div
-                  class="chat-sub-rail-thumb"
-                  :class="{ show: subScrollNeedsBar(c.id) }"
-                  :style="subScrollThumbStyle(c.id)"
-                />
-              </div>
-              <div
-                class="chat-sub-scroll"
-                :ref="(el) => setSubScrollEl(c.id, el)"
-                @scroll.passive="onSubListScroll(c.id)"
-              >
-                <div class="chat-sub-list">
-                  <div
-                    v-for="sub in subchatsOf(c.id)"
-                    :key="sub.id"
-                    class="chat-sub-chip"
-                    :class="{
-                      active: sub.id === activeId,
-                      renaming: renamingChatId === sub.id,
-                      'menu-open': chatMoreOpenId === sub.id,
-                      running: Boolean(runningChats[sub.id] || sub.spawnStatus === 'running'),
-                    }"
-                    @contextmenu="onChatItemContext($event, sub)"
-                  >
-                    <button
-                      type="button"
-                      class="chat-sub-chip-main"
-                      :title="subchatTitleTooltip(sub)"
-                      @click="onChatItemActivate(sub.id)"
-                    >
-                      <span
-                        v-if="chatStatusById[sub.id]"
-                        class="chat-sub-chip-status"
-                        :class="chatStatusById[sub.id].tone"
-                        :title="chatStatusById[sub.id].title"
-                      >
-                        <StatusIcon :kind="chatStatusById[sub.id].tone" />
-                      </span>
-                      <input
-                        v-if="renamingChatId === sub.id"
-                        :ref="(el) => setRenameInputRef(sub.id, el)"
-                        v-model="renameDraft"
-                        class="chat-sub-chip-input"
-                        maxlength="80"
-                        aria-label="修改子对话标题"
-                        @click.stop
-                        @focus="onRenameInputFocus"
-                        @keydown.enter.prevent="commitRenameChat"
-                        @keydown.escape.prevent="cancelRenameChat"
-                        @blur="onRenameInputBlur"
-                      />
-                      <span v-else class="chat-sub-chip-title">{{ displaySubchatTitle(sub) }}</span>
-                      <span
-                        v-if="pendingAskForSidebar(sub.id)"
-                        class="chat-sub-chip-ask"
-                        :title="pendingAskBadge(sub.id) || '询问/决策'"
-                      />
-                    </button>
-                    <v-menu
-                      :model-value="chatMoreOpenId === sub.id"
-                      location="bottom end"
-                      :close-on-content-click="true"
-                      content-class="chat-more-menu"
-                      @update:model-value="(v) => onChatMoreOpen(sub.id, v)"
-                    >
-                      <template #activator="{ props: menuProps }">
-                        <button
-                          type="button"
-                          class="chat-sub-chip-more"
-                          title="更多"
-                          aria-label="更多"
-                          v-bind="menuProps"
-                          @click.stop
-                        >
-                          <AppIcon icon="ellipsis" />
-                        </button>
-                      </template>
-                      <div class="chat-more-panel" role="menu">
-                        <button
-                          type="button"
-                          class="chat-more-item"
-                          role="menuitem"
-                          @click="startRenameChat(sub)"
-                        >
-                          <AppIcon icon="pen-to-square" />
-                          <span>修改标题</span>
-                        </button>
-                        <button
-                          type="button"
-                          class="chat-more-item"
-                          role="menuitem"
-                          :disabled="exportingChat || !sub.messages?.length"
-                          @click="exportChatById(sub.id)"
-                        >
-                          <AppIcon icon="file-export" />
-                          <span>导出对话</span>
-                        </button>
-                        <button
-                          type="button"
-                          class="chat-more-item danger"
-                          role="menuitem"
-                          @click="askDeleteChat(sub)"
-                        >
-                          <AppIcon icon="trash" />
-                          <span>删除</span>
-                        </button>
-                      </div>
-                    </v-menu>
-                  </div>
-                </div>
-              </div>
-            </div>
+
           </template>
         </template>
         <button
@@ -439,102 +354,11 @@
         </div>
       </Transition>
       </div>
-      <nav class="activity-rail" aria-label="侧栏导航">
-        <div class="activity-rail-sections">
-          <div v-if="!showDesktopChrome || isMobileLayout" class="rail-brand" :class="{ 'app-drag': showDesktopChrome }" title="Navora">
-            <img src="/app-icon.png" alt="Navora" draggable="false" />
-          </div>
-          <SidebarNavigation :panels="sidebarPanels" :active="sidebarRail.active" :inactive="settingsOpen || !!creatorKind" @activate="toggleSidebarGroup" />
-        </div>
-        <div class="sidebar-foot">
-        <div class="sidebar-foot-actions">
-          <v-menu
-            v-model="sidebarMoreOpen"
-            location="top start"
-            :close-on-content-click="true"
-            content-class="sidebar-more-menu"
-          >
-            <template #activator="{ props: menuProps }">
-              <button
-                type="button"
-                class="sidebar-icon-btn"
-                title="更多"
-                aria-label="更多"
-                v-bind="menuProps"
-              >
-                <AppIcon icon="ellipsis" />
-              </button>
-            </template>
-            <div class="sidebar-more-panel" role="menu">
-              <button
-                v-if="!isWebRemote()"
-                type="button"
-                class="sidebar-more-item"
-                role="menuitem"
-                @click="router.push('/literature')"
-              >
-                <AppIcon icon="book" />
-                <span>文献检索</span>
-              </button>
-              <button
-                type="button"
-                class="sidebar-more-item"
-                role="menuitem"
-                @click="onMoreDocs"
-              >
-                <AppIcon icon="book" />
-                <span>使用文档</span>
-              </button>
-              <button
-                v-if="isWebRemote()"
-                type="button"
-                class="sidebar-more-item"
-                role="menuitem"
-                @click="openRemoteWindows"
-              >
-                <AppIcon icon="window-maximize" />
-                <span>远程窗口</span>
-              </button>
-              <button
-                type="button"
-                class="sidebar-more-item"
-                role="menuitem"
-                :disabled="!activeId || exportingChat"
-                @click="onMoreExport"
-              >
-                <AppIcon icon="file-export" />
-                <span>导出对话</span>
-              </button>
-              <button
-                v-if="!isWebRemote()"
-                type="button"
-                class="sidebar-more-item danger"
-                role="menuitem"
-                @click="onMoreQuit"
-              >
-                <AppIcon icon="right-from-bracket" />
-                <span>退出程序</span>
-              </button>
-            </div>
-          </v-menu>
-          <div class="sidebar-foot-end">
-            <button
-              type="button"
-              class="sidebar-icon-btn sidebar-settings-btn"
-              :class="{ selected: settingsOpen }"
-              title="设置"
-              @click="settingsOpen = true"
-            >
-              <AppIcon icon="gear" />
-            </button>
-          </div>
-        </div>
-      </div>
-      </nav>
-      <div v-if="!isMobileLayout && (!allSidebarHidden || settingsOpen || creatorKind)" class="sidebar-divider vertical" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarLayout.width" aria-valuemin="250" :aria-valuemax="sidebarWidthMaximum" tabindex="0" @pointerdown="beginSidebarResize($event, 'width')" @keydown="sidebarResizeKey($event, 'width')" />
+
+      <div v-if="!isMobileLayout && !sidebarFloating && (!allSidebarHidden || settingsOpen || creatorKind)" class="sidebar-divider vertical" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarLayout.width" aria-valuemin="292" :aria-valuemax="sidebarWidthMaximum" tabindex="0" @pointerdown="beginSidebarResize($event, 'width')" @keydown="sidebarResizeKey($event, 'width')" />
     </aside>
 
-    <main ref="mainElement" class="main" :class="{ 'resource-card-docked': resourceOpen && !resourceOverlay && !settingsOpen && !creatorKind && !fileManagerActive && !pluginWorkspaceActive && !browserWorkspaceActive, 'file-workspace-open': fileWorkspaceVisible }" :style="{ '--preview-width': `${previewWidth}px`, '--file-workspace-reserve':`${fileWorkspaceReserve}px` }">
+    <main ref="mainElement" class="main" :data-workspace-expansion="workspaceExpansionReason||'manual-or-split'" :data-workspace-width="fileWorkspaceMainWidth" :class="{ 'resource-card-docked': resourceOpen && !resourceOverlay && !settingsOpen && !creatorKind && !fileManagerActive && !pluginWorkspaceActive && !browserWorkspaceActive, 'file-workspace-open': fileWorkspaceVisible, 'workspace-single':fileWorkspaceVisible && (browserExpanded || fileWorkspaceOverlay) && !workspaceConversationActive,'workspace-chat-active':fileWorkspaceVisible && browserExpanded && workspaceConversationActive }" :style="{ '--preview-width': `${previewWidth}px`, '--file-workspace-reserve':`${fileWorkspaceReserve}px` }">
       <div v-if="showDesktopChrome && ((!settingsOpen && !creatorKind) || isMobileLayout)" class="win-drag-main" aria-hidden="true" />
       <header v-if="isMobileLayout && !settingsOpen && !creatorKind" class="mobile-topbar" :class="{'plugin-mobile-topbar':pluginWorkspaceActive}">
         <button
@@ -583,10 +407,11 @@
             aria-label="远程窗口"
             @click="openRemoteWindows"
           >
-            <AppIcon icon="window-maximize" />
+            <AppIcon icon="browser" />
           </button>
           <BrowserDownloadsMenu
             :chat-id="activeId"
+            only-active-chat
             location="bottom end"
             btn-class="mobile-topbar-btn"
           />
@@ -594,23 +419,23 @@
             type="button"
             class="mobile-topbar-btn"
             aria-label="设置"
-            @click="settingsOpen = true"
+            @click="openSettings()"
           >
             <AppIcon icon="gear" />
           </button>
         </div>
       </header>
       <CreatorWorkspace ref="creatorWorkspace" v-if="creatorKind" :key="creatorKind" :kind="creatorKind" :navigation-target="isMobileLayout ? undefined : '#creator-sidebar-nav'" @close="closeCreator" @trial="openCreatorTrial" @notify="onPanelNotify" />
-      <SettingsPage ref="settingsWorkspace" v-else-if="settingsOpen" class="settings-workspace" :initial-tab="settingsTab" @navigate="settingsTab = $event" embedded :mobile="isMobileLayout" :navigation-target="isMobileLayout ? undefined : '#settings-sidebar-nav'" @close="settingsOpen = false" @create="openCreator" />
-      <template v-else>
+      <SettingsPage ref="settingsWorkspace" v-if="settingsOpen && !creatorKind" class="settings-workspace" :initial-tab="settingsTab" :return-label="settingsReturnLabel" :focus-on-entry="browserSettingsFocusPending" @entry-focused="browserSettingsFocusPending = false" @navigate="settingsTab = $event" embedded :mobile="isMobileLayout" :navigation-target="isMobileLayout ? undefined : '#settings-sidebar-nav'" @close="completeSettingsReturn" @create="openCreator" />
+      <template v-if="!creatorKind">
       <FileManager ref="fileManagerWorkspace" v-if="fileManagerMounted" v-show="fileManagerActive" :active="fileManagerActive" :class="{'is-active':fileManagerActive}" :chat-id="fileManagerOwner?.id || ''" :title="fileManagerOwner?.title || ''" :directory="fileManagerDirectory" @browse="fileManagerDirectory=$event" @preview="openFilePreview" @back="activateSidebar('chats',false)" @notify="onPanelNotify" />
       <PluginWorkspace ref="pluginsWorkspace" v-if="pluginWorkspaceMounted" v-show="pluginWorkspaceActive" :active="pluginWorkspaceActive" :class="{'is-active':pluginWorkspaceActive}" sidebar-target="#plugins-sidebar-nav" @back="activateSidebar('chats',false)" @create="openCreator('plugin')" @selected="closeMobileSidebar" @notify="onPanelNotify" />
-      <div v-show="!fileManagerActive && !pluginWorkspaceActive && !browserWorkspaceActive" class="conversation-content" :inert="fileManagerActive || pluginWorkspaceActive || browserWorkspaceActive">
+      <div v-show="!settingsOpen && !fileManagerActive && !pluginWorkspaceActive && !browserWorkspaceActive" id="conversation-panel" class="conversation-content" :inert="settingsOpen || fileManagerActive || pluginWorkspaceActive || browserWorkspaceActive || (fileWorkspaceVisible && browserExpanded && !workspaceConversationActive)">
       <template v-if="active">
         <header
-          v-if="!isMobileLayout || agentRunning"
           class="main-top conversation-title-header"
           :class="{ compact: isMobileLayout }"
+          style="padding-right:var(--workspace-control-inset,12px)"
         >
           <div v-if="!isMobileLayout" class="main-top-text">
             <div v-if="active.kind === 'sub'" class="subchat-banner">
@@ -645,16 +470,25 @@
             <StatusIcon kind="running" :spin="false" />
             <span class="agent-live-text" :title="phaseLabel">{{ phase === 'awaiting_permission' || phase === 'awaiting_user' || phase === 'awaiting_skill_review' ? '等待确认' : phase === 'calling_tool' ? '执行中' : '生成中' }}</span>
             <span class="agent-elapsed">{{ elapsedLabel }}</span>
-            <button type="button" class="quick-stop-btn" title="停止任务（Esc）" aria-label="停止任务" @click="stopAgent"><StatusIcon kind="stopped" />停止</button>
+            <button type="button" class="quick-stop-btn" title="停止任务" aria-label="停止任务" @click="stopAgent"><StatusIcon kind="stopped" />停止</button>
           </div>
+          <Teleport :to="workspaceToolsTarget||'body'" :disabled="!workspaceHeaderActive||!workspaceConversationActive||!workspaceToolsTarget"><div class="workspace-chat-tools" @keydown="onWorkspaceChatToolKey"><button type="button" class="ui-icon-button" title="在当前聊天中查找（Ctrl/⌘ F）" aria-label="在当前聊天中查找" @click="openConversationFind"><AppIcon icon="magnifying-glass"/></button><button v-if="subchatSignals.total" type="button" class="ui-icon-button subchat-workspace-trigger" :title="`子对话 ${subchatSignals.total} 个${subchatSignals.pending?`，${subchatSignals.pending} 项需要处理`:''}${subchatSignals.unread?`，${subchatSignals.unread} 个有未读内容`:''}`" :aria-label="`打开子对话列表，${subchatSignals.total} 个子对话${subchatSignals.pending?`，${subchatSignals.pending} 项需要处理`:''}${subchatSignals.unread?`，${subchatSignals.unread} 个未读`:''}`" @click="openSubchatList"><AppIcon icon="robot" /><span v-if="subchatSignals.pending" class="subchat-pending-count">{{subchatSignals.pending}}</span><span v-else-if="subchatSignals.unread" class="subchat-unread-dot" aria-hidden="true"/></button><ChatResourcesMenu ref="browserResources" class="conversation-title-actions" context="chat" :running="agentRunning" @context-action="onPageAction" @new-browser-tab="openBrowserTab" @new-chat="createChat" @search="openConversationFind" @delete="active && askDeleteChat(active)" @stop="stopAgent" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :open="resourceOpen" :updated="resourceUpdated" :update-count="resourceUpdateCount" :pinned="!!active?.pinned" :can-export="!!active?.messages.length" :exporting="exportingChat" @rename="renameCurrentChat" @pin="active && toggleChatPinned(active)" @export="exportActiveChat" @notify="onPanelNotify" @toggle-resources="toggleResources" @show-browser="showResources('browser')" /></div></Teleport>
+          <span v-if="!fileWorkspaceVisible" class="workspace-controls-divider" aria-hidden="true" />
+          <WorkspaceLauncher v-if="!fileWorkspaceVisible" :count="fileTabsState.tabs.length" :open="false" :disabled="!activeId" @activate="toggleRightSidebar" />
         </header>
 
+        <ConversationFind ref="conversationFind" :active="conversationIsVisible" :chat-id="activeId||''" :messages="active.messages" :live-text="liveAnswerText" :root="msgBox" :display-text="message => message.role==='log' ? logFullText(message) : displayMessageContent(message)" :locate="locateFindMessage" @open="conversationFindOpen=$event;restoreFindExpansion($event)" @navigate="stickToBottom=false" />
         <div class="messages-wrap">
           <section
             ref="msgBox"
             class="messages"
             data-ctx-menu="messages"
             @scroll="onMessagesScroll"
+            @scrollend="onMessagesScrollEnd"
+            @wheel.passive="onMessagesScrollInput"
+            @touchmove.passive="onMessagesScrollInput"
+            @pointerdown="onMessagesScrollInput"
+            @keydown="onMessagesScrollInput"
             @click="onMessagesClick"
             @contextmenu.prevent="onMessagesContext"
           >
@@ -667,188 +501,11 @@
             </div>
 
             <!-- Sidebar and composer changes must not rebuild unchanged transcript rows. -->
-            <template v-for="block in messageBlocks" :key="block.key" v-memo="[block, activeId, agentRunning, expandedRuns, expandedTools, expandedLogs, expandedReasoning, logOverflowById, toolMediaSrc, chats, showReadPages, readPagesPanelOpen, readPagesPanelFromId, copiedMessageId, replyFilesById, Math.floor(nowTick / 60000)]">
-              <div v-if="block.type === 'run'" class="msg run" :data-run-key="block.key">
-                <div class="msg-row">
-                  <div class="msg-avatar run" aria-hidden="true">
-                    <AppIcon icon="wrench" />
-                  </div>
-                  <div class="msg-main">
-                    <div class="msg-role">
-                      <span>{{ TOOL_RUN_GROUP_LABEL }}</span>
-                    </div>
-                    <div
-                      class="run-card activity-group"
-                      :class="{
-                        open: isRunExpanded(block.key),
-                        live: runGroupLive(block.items),
-                        error: runGroupHasError(block.items),
-                        aborted: !runGroupHasError(block.items) && runGroupWasAborted(block.items),
-                      }"
-                    >
-                      <button
-                        type="button"
-                        class="run-card-head activity-trigger"
-                        :aria-expanded="isRunExpanded(block.key)"
-                        :aria-controls="`run-details-${block.key}`"
-                        :title="runGroupSummary(block.items)"
-                        @click="toggleRun(block.key)"
-                      >
-                        <span class="run-status">
-                          <StatusIcon :kind="runGroupLive(block.items) ? 'running' : runGroupHasError(block.items) ? 'error' : runGroupWasAborted(block.items) ? 'stopped' : 'success'" :spin="false" />
-                        </span>
-                        <span class="run-card-text">{{ runGroupSummary(block.items) }}</span>
-                        <span class="run-card-chevron">
-                          <AppIcon
-                            icon="chevron-right"
-                          />
-                        </span>
-                      </button>
-                      <DisclosureTransition>
-                      <div v-if="isRunExpanded(block.key)" :id="`run-details-${block.key}`" class="run-card-body activity-detail">
-                        <div v-if="block.reasoning" class="msg-reasoning activity-group" :class="{open:isReasoningExpanded(block.key)}">
-                          <button type="button" class="msg-reasoning-toggle activity-trigger" :aria-expanded="isReasoningExpanded(block.key)" @click="toggleReasoning(block.key)">
-                            <StatusIcon kind="thought" /><span>思考过程</span><AppIcon class="msg-reasoning-chevron" icon="chevron-right" />
-                          </button>
-                          <DisclosureTransition><div v-if="isReasoningExpanded(block.key)" class="msg-reasoning-body activity-detail">{{ block.reasoning }}</div></DisclosureTransition>
-                        </div>
-                        <template v-for="item in block.items" :key="item.id">
-                          <div v-if="item.role === 'assistant' && item.content.trim()" class="run-item process-note" :data-msg-id="item.id">
-                            <span class="process-note-label">进展</span>
-                            <ChatMarkdown :chat-id="activeId || ''" :content="item.content" @open-media="(p) => openLightbox(p.src,p.alt)" @open-file="openFilePreview" @notify="onPanelNotify" />
-                          </div>
-                          <div v-else-if="item.role === 'log'" class="run-item log" :data-msg-id="item.id">
-                            <span class="log-kind-chip">{{ logKindText(item) }}</span>
-                            <span class="run-item-text">{{ logFullText(item) }}</span>
-                          </div>
-                          <div
-                            v-else-if="item.role === 'tool'"
-                            class="run-item tool"
-                            :data-msg-id="item.id"
-                            :class="[toolStatusClass(item), `kind-${toolDisplay(item).kind}`]"
-                          >
-                            <div class="tool-card activity-group" :class="{ open: expandedTools[item.id] }">
-                              <button
-                                type="button"
-                                class="tool-head activity-trigger"
-                                @click="toggleTool(item.id)"
-                              >
-                                <span class="tool-status" :class="effectiveToolStatus(item)">
-                                  <StatusIcon :kind="effectiveToolStatus(item) === 'aborted' ? 'stopped' : effectiveToolStatus(item) === 'running' ? 'running' : effectiveToolStatus(item) === 'error' ? 'error' : 'success'" :spin="false" />
-                                </span>
-                                <span class="tool-kind-chip" :class="toolDisplay(item).kind">{{
-                                  toolDisplay(item).label
-                                }}</span>
-                                <span
-                                  v-if="toolHeadTitle(item)"
-                                  class="tool-title"
-                                  >{{ toolHeadTitle(item) }}</span
-                                >
-                                <span
-                                  v-if="toolHeadRaw(item)"
-                                  class="tool-raw"
-                                  >{{ toolHeadRaw(item) }}</span
-                                >
-                                <span class="tool-head-spacer" aria-hidden="true" />
-                                <span class="tool-chevron">
-                                  <AppIcon
-                                    icon="chevron-right"
-                                  />
-                                </span>
-                              </button>
-                      <div
-                        v-if="isSubchatSpawnTool(item)"
-                        class="subchat-spawn-bar"
-                      >
-                        <div class="subchat-spawn-main">
-                          <span
-                            class="subchat-spawn-status"
-                            :class="spawnStatusOf(item)"
-                            >{{ spawnStatusLabel(item) }}</span
-                          >
-                          <button
-                            type="button"
-                            class="subchat-spawn-goal"
-                            :class="{
-                              deleted: isSpawnSubchatDeleted(item),
-                              link: !isSpawnSubchatDeleted(item) && !!spawnSubChatId(item),
-                            }"
-                            :disabled="
-                              !spawnSubChatId(item) || isSpawnSubchatDeleted(item)
-                            "
-                            :title="
-                              isSpawnSubchatDeleted(item)
-                                ? spawnGoalLabel(item)
-                                : `打开子对话：${spawnGoalLabel(item)}`
-                            "
-                            @click.stop="openSubchatFromTool(item)"
-                          >
-                            {{ spawnGoalLabel(item) }}
-                          </button>
-                        </div>
-                      </div>
+            <template v-for="block in messageBlocks" :key="block.key" v-memo="[block, activeId, agentRunning, expandedTools, expandedLogs, findToolReveal, logOverflowById, toolMediaSrc, chats, showReadPages, readPagesPanelOpen, readPagesPanelFromId, copiedMessageId, replyFilesById, Math.floor(nowTick / 60000)]">
 
-                              <div
-                                v-if="toolDownloadProgress(item)"
-                                class="tool-dl-progress"
-                              >
-                                <div
-                                  class="tool-dl-bar"
-                                  :class="{ indeterminate: toolDownloadProgress(item)!.indeterminate }"
-                                  role="progressbar"
-                                  :aria-valuenow="toolDownloadProgress(item)!.percent ?? undefined"
-                                  aria-valuemin="0"
-                                  aria-valuemax="100"
-                                  :aria-label="toolDownloadProgressLabel(item)"
-                                >
-                                  <div
-                                    class="tool-dl-fill"
-                                    :style="
-                                      toolDownloadProgress(item)!.indeterminate
-                                        ? undefined
-                                        : { width: `${toolDownloadProgress(item)!.percent ?? 0}%` }
-                                    "
-                                  />
-                                </div>
-                                <span class="tool-dl-label">{{ toolDownloadProgressLabel(item) }}</span>
-                              </div>
-                              <div
-                                v-if="toolMediaSrc[item.id]"
-                                class="tool-media"
-                                @click.stop="
-                                  openToolMedia(item)
-                                "
-                              >
-                                <img :src="toolMediaSrc[item.id]" alt="" loading="lazy" />
-                                <span v-if="toolMediaPath(item)" class="tool-media-path">{{
-                                  toolMediaPath(item)
-                                }}</span>
-                              </div>
-                              <ToolCatalogList :message="item" />
-                              <DisclosureTransition>
-                              <div v-if="expandedTools[item.id]" class="tool-detail activity-detail">
-                                <div v-if="item.meta?.args" class="tool-section">
-                                  <div class="tool-sec-label">参数</div>
-                                  <pre>{{ formatJson(item.meta.args) }}</pre>
-                                </div>
-                                <div class="tool-section">
-                                  <div class="tool-sec-label">结果</div>
-                                  <pre>{{ item.content }}</pre>
-                                </div>
-                              </div>
-                              </DisclosureTransition>
-                            </div>
-                          </div>
-                        </template>
-                      </div>
-                      </DisclosureTransition>
-                    </div>
-                  </div>
-                </div>
-              </div>
 
               <div
-                v-else-if="block.type === 'log'"
+                v-if="block.type === 'log'"
                 class="msg log"
                 :data-msg-id="block.message.id"
                 :class="logToneClass(block.message)"
@@ -901,150 +558,28 @@
                 </div>
               </div>
 
-              <div
-                v-else-if="block.type === 'tool'"
-                class="msg"
-                :data-msg-id="block.message.id"
-                :class="['tool', toolStatusClass(block.message), `kind-${toolDisplay(block.message).kind}`]"
-              >
-                <div class="msg-row">
-                  <div
-                    class="msg-avatar tool"
-                    :class="toolDisplay(block.message).kind"
-                    aria-hidden="true"
-                  >
-                    <AppIcon :icon="toolDisplay(block.message).icon" />
-                  </div>
-                  <div class="msg-main">
-                    <div class="msg-role">
-                      <span>{{ toolDisplay(block.message).label }}</span>
-                      <span class="msg-time" :title="formatTime(block.message.createdAt)">{{
-                        formatRelative(block.message.createdAt)
-                      }}</span>
-                    </div>
-                    <div class="tool-card activity-group" :class="{ open: expandedTools[block.message.id] }">
-                      <button type="button" class="tool-head activity-trigger" @click="toggleTool(block.message.id)">
-                        <span class="tool-status" :class="effectiveToolStatus(block.message)">
-                          <StatusIcon :kind="effectiveToolStatus(block.message) === 'aborted' ? 'stopped' : effectiveToolStatus(block.message) === 'running' ? 'running' : effectiveToolStatus(block.message) === 'error' ? 'error' : 'success'" />
-                        </span>
-                        <span class="tool-title" v-if="toolHeadTitle(block.message)">{{
-                          toolHeadTitle(block.message)
-                        }}</span>
-                        <span class="tool-raw" v-if="toolHeadRaw(block.message)">{{
-                          toolHeadRaw(block.message)
-                        }}</span>
-                        <span class="tool-head-spacer" aria-hidden="true" />
-                        <span class="tool-chevron">
-                          <AppIcon
-                            icon="chevron-right"
-                          />
-                        </span>
-                      </button>
-                      <div
-                        v-if="isSubchatSpawnTool(block.message)"
-                        class="subchat-spawn-bar"
-                      >
-                        <div class="subchat-spawn-main">
-                          <span
-                            class="subchat-spawn-status"
-                            :class="spawnStatusOf(block.message)"
-                            >{{ spawnStatusLabel(block.message) }}</span
-                          >
-                          <button
-                            type="button"
-                            class="subchat-spawn-goal"
-                            :class="{
-                              deleted: isSpawnSubchatDeleted(block.message),
-                              link: !isSpawnSubchatDeleted(block.message) && !!spawnSubChatId(block.message),
-                            }"
-                            :disabled="
-                              !spawnSubChatId(block.message) || isSpawnSubchatDeleted(block.message)
-                            "
-                            :title="
-                              isSpawnSubchatDeleted(block.message)
-                                ? spawnGoalLabel(block.message)
-                                : `打开子对话：${spawnGoalLabel(block.message)}`
-                            "
-                            @click.stop="openSubchatFromTool(block.message)"
-                          >
-                            {{ spawnGoalLabel(block.message) }}
-                          </button>
-                        </div>
-                      </div>
-                      <div
-                        v-if="toolDownloadProgress(block.message)"
-                        class="tool-dl-progress"
-                      >
-                        <div
-                          class="tool-dl-bar"
-                          :class="{
-                            indeterminate: toolDownloadProgress(block.message)!.indeterminate,
-                          }"
-                          role="progressbar"
-                          :aria-valuenow="toolDownloadProgress(block.message)!.percent ?? undefined"
-                          aria-valuemin="0"
-                          aria-valuemax="100"
-                          :aria-label="toolDownloadProgressLabel(block.message)"
-                        >
-                          <div
-                            class="tool-dl-fill"
-                            :style="
-                              toolDownloadProgress(block.message)!.indeterminate
-                                ? undefined
-                                : {
-                                    width: `${toolDownloadProgress(block.message)!.percent ?? 0}%`,
-                                  }
-                            "
-                          />
-                        </div>
-                        <span class="tool-dl-label">{{
-                          toolDownloadProgressLabel(block.message)
-                        }}</span>
-                      </div>
-                      <div
-                        v-if="toolMediaSrc[block.message.id]"
-                        class="tool-media"
-                        @click.stop="
-                          openToolMedia(block.message)
-                        "
-                      >
-                        <img :src="toolMediaSrc[block.message.id]" alt="" loading="lazy" />
-                        <span v-if="toolMediaPath(block.message)" class="tool-media-path">{{
-                          toolMediaPath(block.message)
-                        }}</span>
-                      </div>
-                      <ToolCatalogList :message="block.message" />
-                      <DisclosureTransition>
-                      <div v-if="expandedTools[block.message.id]" class="tool-detail activity-detail">
-                        <div v-if="block.message.meta?.args" class="tool-section">
-                          <div class="tool-sec-label">参数</div>
-                          <pre>{{ formatJson(block.message.meta.args) }}</pre>
-                        </div>
-                        <div class="tool-section">
-                          <div class="tool-sec-label">结果</div>
-                          <pre>{{ block.message.content }}</pre>
-                        </div>
-                      </div>
-                      </DisclosureTransition>
-                    </div>
-                  </div>
-                </div>
+              <div v-else-if="block.type === 'tool'" class="msg tool transcript-tool" :data-msg-id="block.message.id">
+                <SubchatLink v-if="isSubchatSpawnTool(block.message)" :chat-id="spawnSubChatId(block.message)" :title="spawnGoalLabel(block.message)" :status="spawnStatusOf(block.message)" :pending="!!pendingAsks[spawnSubChatId(block.message)]||pendingPermRequests.some(request=>request.chatId===spawnSubChatId(block.message))" :disabled="!spawnSubChatId(block.message)||isSpawnSubchatDeleted(block.message)" @open="routeConversationTarget" />
+                <ConversationActivityRow v-else :message="block.message" :reveal="findToolReveal[block.message.id]" :label="toolActivityLabel(block.message,effectiveToolStatus(block.message),toolDisplay(block.message).label)" :icon="toolDisplay(block.message).icon" :status="effectiveToolStatus(block.message)" :expanded="isActivityExpanded(block.message.id)" @toggle="toggleTool(block.message.id)">
+                  <div v-if="toolDownloadProgress(block.message)" class="tool-dl-progress"><span class="tool-dl-label">{{ toolDownloadProgressLabel(block.message) }}</span></div>
+                  <button v-if="toolMediaSrc[block.message.id]" type="button" class="tool-media" @click="openToolMedia(block.message)"><img :src="toolMediaSrc[block.message.id]" alt="工具生成的预览" loading="lazy" /></button>
+                  <ToolCatalogList :message="block.message" />
+                </ConversationActivityRow>
               </div>
 
               <div
-                v-else
+                v-else-if="block.type === 'chat'"
                 class="msg"
                 :data-msg-id="block.message.id"
                 :class="[block.message.role]"
               >
                 <div class="msg-row">
-                  <div class="msg-avatar" :class="block.message.role" aria-hidden="true">
-                    <img v-if="block.message.role === 'assistant'" src="/app-icon.png" alt="" />
-                    <span v-else-if="block.message.role === 'user'">你</span>
+                  <div v-if="block.message.role !== 'assistant'" class="msg-avatar" :class="block.message.role" aria-hidden="true">
+                    <span v-if="block.message.role === 'user'">你</span>
                     <AppIcon v-else icon="clipboard-list" />
                   </div>
                   <div class="msg-main">
-                    <div class="msg-role">
+                    <div v-if="block.message.role !== 'assistant'" class="msg-role">
                       <span>{{ roleLabel(block.message.role) }}</span>
                       <span class="msg-time" :title="formatTime(block.message.createdAt)">{{
                         formatRelative(block.message.createdAt)
@@ -1060,6 +595,7 @@
                         {{ chipLabel(r) }}
                       </span>
                     </div>
+                    <details v-if="block.message.role==='assistant' && block.message.meta?.reasoning" class="transcript-reasoning"><summary>思考过程</summary><pre>{{ String(block.message.meta.reasoning).slice(0,24000) }}</pre></details>
                     <template v-if="block.message.role === 'assistant' || block.message.role === 'user'">
                       <ChatMarkdown
                         :chat-id="activeId || ''"
@@ -1067,7 +603,7 @@
                         :shimmer="isMessageShimmer(block.message)"
                         @open-media="(p) => openLightbox(p.src, p.alt)" @open-file="openFilePreview" @notify="onPanelNotify"
                       >
-                        <template v-if="block.message.role === 'assistant'" #footer>
+                        <template v-if="block.message.role === 'assistant' && replyFinalIds.has(block.message.id)" #footer>
                           <ReplyArtifacts v-if="replyFilesById.has(block.message.id)" :files="replyFilesById.get(block.message.id)!" @open="openFilePreview" />
                           <div class="reply-footer">
                             <button
@@ -1187,6 +723,7 @@
                 </div>
                 <ChatMarkdown
                   v-if="liveAnswerText && activeId"
+                  data-live-answer
                   :chat-id="activeId"
                   :content="liveAnswerText"
                 />
@@ -1319,41 +856,19 @@
               />
             </span>
           </button>
-          <MessageQueue :key="activeId || ''" :entries="active?.queuedMessages || []" :paused="active?.queuePaused === true" :busy="queueBusy" :max-chars="maxComposerChars" @edit="(id,content)=>changeQueue('edit',id,content)" @remove="changeQueue('remove',$event)" @insert="changeQueue('insert',$event)" @resume="changeQueue('resume')" />
-          <div v-if="contextRefs.length" class="chip-row">
-            <span v-for="r in contextRefs" :key="refKey(r)" class="chip editable" :class="r.kind">
-              <span class="chip-text">{{ chipLabel(r) }}</span>
-              <button type="button" class="chip-x" aria-label="移除" @click="removeRef(r)">
-                <AppIcon icon="xmark" />
-              </button>
-            </span>
-            <button type="button" class="chip-clear" @click="contextRefs = []">清空</button>
-          </div>
+          <MessageQueue :key="activeId || ''" :chat-id="activeId || ''" :files="artifactEntries" :messages="active?.messages || []" :context-previews="contextPreviews" :entries="active?.queuedMessages || []" :paused="active?.queuePaused === true" :busy="queueBusy" :max-chars="maxComposerChars" @edit="(id,content,document,revision)=>changeQueue('edit',id,content,document,revision)" @recover="recoverComposerDocument" @open-source="openComposerSource" @notify="onPanelNotify" @remove="changeQueue('remove',$event)" @insert="changeQueue('insert',$event)" @resume="changeQueue('resume')"  @creator="openCreator" />
+          <ComposerNativePanels ref="nativeComposerPanels" :chat-id="activeId||''" :state="nativeComposerState" @model="applyChatModel" @reasoning="applyReasoningLevel" @mode="applyNativeExecutionMode" @permission="applyNativePermission" @retry="refreshAiProviders()" @update:model-query="modelQuery=$event" @notify="onPanelNotify" />
+          <p v-if="modelSelectionBusy||executionModeBusy" class="composer-validation" role="status" aria-live="polite">正在保存选择…</p><p v-else-if="modelLoadError||modelSelectionInvalid||!chatModelKey" class="composer-validation" role="status">{{modelLoadError||'请先选择可用模型后发送。'}} <button type="button" @click="openNativeComposerOrFallback('model')">选择模型</button></p>
+          <p v-if="composerProblem" class="composer-validation" role="status">{{ composerProblem }}</p>
+          <p v-if="draftUnsupported" class="composer-validation" role="alert">原始草稿使用了当前版本无法读取的格式，已完整保留。此处仅显示可读副本；请升级到兼容版本后恢复编辑和发送。</p>
+          <p v-if="active?.draftUnsupportedRecoveries?.length" class="composer-validation" role="status">另有 {{ active.draftUnsupportedRecoveries.length }} 份较新格式的草稿备份已保留，请在兼容版本中恢复。</p>
+          <div v-if="draftConflict" class="composer-draft-recovery" role="status"><strong>草稿在另一处有更新</strong><details><summary>查看两份内容</summary><p>当前编辑</p><pre>{{ draft }}</pre><p>同步版本</p><pre>{{ draftConflict.draft }}</pre></details><div><button type="button" @click="draftState.resolveConflict(true)">保留当前编辑</button><button type="button" @click="draftState.resolveConflict(false)">使用同步版本</button></div></div>
+          <div v-for="pending in visibleSubmissions" :key="pending.id" class="composer-pending-submit" role="status"><span>{{ pending.failed ? '提交失败，内容已保留' : '正在提交，下面可以继续写下一条…' }}</span><details><summary>查看内容</summary><pre>{{ pending.text }}</pre></details><button v-if="pending.failed" type="button" @click="restoreFailedSubmission(pending.id)">放回编辑器</button><button v-if="pending.failed" type="button" @click="dismissFailedSubmission(pending.id)">移除</button></div>
+          <div v-for="recovery in visibleDraftRecoveries" :key="recovery.id" class="composer-draft-recovery"><span>{{ recovery.reason==='conflict'?'已保留一份同步冲突的草稿':'有一份未确认提交的草稿快照' }}</span><details><summary>查看内容</summary><pre>{{ compileComposerDocument(recovery.document).content }}</pre></details><button v-if="recovery.reason==='send_failed'" type="button" :disabled="sending" @click="retryDraftRecovery(recovery.id)">重试提交</button><button type="button" @click="restoreDraftRecovery(recovery.id)">放回编辑器</button><button type="button" @click="dismissDraftRecovery(recovery.id)">移除</button></div>
           <div class="composer-box">
-            <ComposerResources ref="resourceCommands" :text="draft" :chat-id="activeId || ''" :files="artifactEntries" @replace="insertComposerResource" />
+
             <div class="composer-input-row">
-              <v-textarea
-                ref="draftField"
-                v-model="draft"
-                :rows="1"
-                auto-grow
-                :max-rows="10"
-                hide-details
-                variant="solo"
-                flat
-                bg-color="transparent"
-                class="composer-input"
-                :placeholder="agentRunning ? (runningMessageMode === 'insert' ? '补充想法，插入当前任务…' : '继续输入，加入待发送队列…') : '描述任务，输入 / 添加文件或浏览器…'"
-                :disabled="false"
-                :maxlength="maxComposerChars"
-                @keydown="onComposerKeydown"
-                @input="onComposerInput"
-                @click="updateComposerSelection"
-                @mouseup="updateComposerSelection"
-                @keyup="updateComposerSelection"
-                @keyup.left="resourceCommands?.onInput($event)"
-                @keyup.right="resourceCommands?.onInput($event)"
-              />
+              <ComposerEditor ref="draftField" class="composer-input" :model-value="composerDocument" :disabled="composerStaging===activeId" :readonly="draftUnsupported" :context-previews="contextPreviews" :chat-id="activeId || ''" :placeholder="agentRunning ? (runningMessageMode === 'insert' ? '补充想法，插入当前任务…' : '继续输入，加入待发送队列…') : '描述任务，输入 / 附加内容或使用工具…'" @update:model-value="draftState.edited" @submit="send" @attach="onAttachRequest" @open-source="openComposerSource" @refresh-source="refreshComposerSource" @change-source="changeComposerSource" @notify="onPanelNotify" />
 
             </div>
             <div
@@ -1365,38 +880,16 @@
             </div>
             <div class="composer-actions">
               <div class="composer-actions-left">
-                <button
-                  type="button"
-                  class="composer-perm-btn composer-link-btn"
-                  title="给选中文本添加或编辑链接"
-                  aria-label="给选中文本添加或编辑链接"
-                  :disabled="!hasComposerLinkSelection"
-                  @click="openComposerLinkEditor"
-                ><AppIcon icon="link" /></button>
-                <button
-                  type="button"
-                  class="composer-perm-btn composer-link-btn"
-                  title="移除选中文本的链接"
-                  aria-label="移除选中文本的链接"
-                  :disabled="!hasComposerLinkAtSelection"
-                  @click="removeComposerLink"
-                ><AppIcon icon="xmark" /></button>
-                <v-menu location="top start">
-                  <template #activator="{ props: attachMenuProps }"><button v-bind="attachMenuProps" type="button" class="composer-perm-btn composer-attach-trigger" title="附加上下文" aria-label="附加上下文"><AppIcon icon="paperclip" /></button></template>
-                  <div class="composer-perm-panel composer-attach-menu" role="menu" aria-label="附加上下文">
-                    <button type="button" class="composer-perm-item" role="menuitem" @click="attachContext('文件')"><AppIcon icon="file" class="composer-perm-item-icon" /><span class="composer-perm-item-label">引用对话文件</span></button>
-                    <button type="button" class="composer-perm-item" role="menuitem" @click="attachContext('浏览器')"><AppIcon icon="globe" class="composer-perm-item-icon" /><span class="composer-perm-item-label">引用浏览器页面</span></button>
-                    <button type="button" class="composer-perm-item" role="menuitem" @click="attachContext('会话')"><AppIcon icon="layer-group" class="composer-perm-item-icon" /><span class="composer-perm-item-label">引用浏览器会话</span></button>
-                  </div>
-                </v-menu>
-                <v-menu location="top start" :disabled="agentRunning">
-                  <template #activator="{ props: modeProps }"><button type="button" class="composer-perm-btn execution-mode-button" v-bind="modeProps" :disabled="agentRunning" aria-label="工作模式">{{ executionModeLabel }}<AppIcon icon="chevron-down" /></button></template>
-                  <div class="composer-perm-panel" role="menu" aria-label="工作模式">
-                    <button v-for="mode in executionModes" :key="mode.id" type="button" class="composer-perm-item" role="menuitemradio" :aria-checked="(active?.executionMode || 'auto') === mode.id" @click="applyExecutionMode(mode.id)"><span class="composer-perm-item-label">{{ mode.label }}</span><span class="composer-perm-item-desc">{{ mode.hint }}</span></button>
+                <button type="button" class="composer-perm-btn composer-attach-trigger" title="附加文件、网页或会话，也可输入 /" aria-label="附加" :disabled="!activeId||draftUnsupported" @mousedown.prevent="captureComposerSelection" @click="openAttachmentMenu()"><AppIcon icon="paperclip" /></button>
+                <v-menu location="top start" :disabled="agentRunning||nativeComposerAvailable">
+                  <template #activator="{ props: modeProps }"><button type="button" class="composer-perm-btn execution-mode-button" v-bind="modeProps" :disabled="agentRunning || sending || executionModeBusy || modelSelectionBusy" aria-label="回答方式" :aria-busy="executionModeBusy" @click="nativeComposerAvailable&&openNativeComposerOrFallback('mode',$event)"><AppIcon :icon="executionModeIcon" />{{ executionModeLabel }}<AppIcon icon="chevron-down" /></button></template>
+                  <div class="composer-perm-panel" role="menu" aria-label="回答方式">
+                    <button v-for="mode in executionModes" :key="mode.id" type="button" class="composer-perm-item" role="menuitemradio" :aria-checked="(active?.executionMode || 'auto') === mode.id" @click="applyExecutionMode(mode.id)"><AppIcon :icon="mode.icon" class="composer-perm-item-icon"/><span class="composer-perm-item-label">{{ mode.label }}</span><span class="composer-perm-item-desc">{{ mode.hint }}</span></button>
                   </div>
                 </v-menu>
                 <v-menu
                   v-model="permMenuOpen"
+                  :disabled="nativeComposerAvailable"
                   location="top start"
                   :close-on-content-click="true"
                   content-class="composer-perm-menu"
@@ -1408,6 +901,7 @@
                       v-bind="menuProps"
                       title="本会话权限预设"
                       aria-label="本会话权限预设"
+                      @click="nativeComposerAvailable&&openNativeComposerOrFallback('permission',$event)"
                     >
                       <AppIcon :icon="permPresetIcon" />
                       <span>{{ permPresetLabel }}</span>
@@ -1442,7 +936,7 @@
                   v-model="modelMenuOpen"
                   location="top end"
                   :close-on-content-click="false"
-                  :disabled="agentRunning"
+                  :disabled="agentRunning||nativeComposerAvailable"
                   content-class="composer-perm-menu"
                 >
                   <template #activator="{ props: menuProps }">
@@ -1453,46 +947,49 @@
                       :disabled="agentRunning"
                       :title="`${chatModelLabel}${reasoningLevels.length?' · '+reasoningLabel(selectedReasoningLevel):''}`"
                       aria-label="本会话模型"
+                      @click="nativeComposerAvailable&&openNativeComposerOrFallback('model',$event)"
                     >
                       <AppIcon icon="microchip" />
                       <span class="model-trigger-label">{{ chatModelLabel }}</span><span v-if="reasoningLevels.length" class="model-trigger-tier">{{ reasoningLabel(selectedReasoningLevel) }}</span><AppIcon icon="chevron-down" />
                     </button>
                   </template>
-                  <div class="composer-perm-panel unified-model-panel" role="dialog" aria-label="模型与思考等级">
+                  <div class="composer-perm-panel unified-model-panel" @keydown="modelPanelKey" role="dialog" aria-label="模型与思考等级">
                     <div class="model-panel-heading">模型与思考等级<button type="button" aria-label="关闭模型面板" @click="modelMenuOpen=false"><AppIcon icon="xmark" /></button></div>
-                    <label class="model-panel-search"><AppIcon icon="magnifying-glass" /><input v-model="modelQuery" placeholder="搜索模型或服务商" aria-label="搜索模型" @keydown.stop @keydown.esc="modelMenuOpen=false" /></label>
+                    <label class="model-panel-search"><AppIcon icon="magnifying-glass" /><input v-model="modelQuery" placeholder="搜索模型或服务商" aria-label="搜索模型" @keydown.esc="modelMenuOpen=false" /></label>
+                    <p v-if="modelLoading" role="status" class="composer-model-empty">正在读取模型…</p><div v-else-if="modelLoadError" class="composer-model-empty" role="alert">{{modelLoadError}} <button type="button" class="ui-button" @click="refreshAiProviders()">重试</button></div><p v-else-if="modelSelectionInvalid" role="alert" class="composer-model-empty">原服务商已移除，请重新选择模型。</p>
                     <div class="model-panel-options" role="group" aria-label="选择模型">
-                    <button
-                      v-for="opt in filteredModelOptions"
+                    <section v-for="group in modelOptionGroups" :key="group.id" :aria-label="group.label"><h4 class="model-provider-label">{{group.label}}</h4><button
+                      v-for="opt in group.options"
                       :key="opt.key"
                       type="button"
                       class="composer-perm-item"
                       :class="{ active: opt.key === chatModelKey }"
-                      role="radio" :aria-checked="opt.key === chatModelKey" :disabled="modelSelectionBusy || agentRunning"
-                      :title="`${opt.providerLabel} · ${opt.model}${opt.hasKey ? '' : '（未配置 Key，仍可使用）'}`"
+                      role="radio" :aria-checked="opt.key === chatModelKey" :disabled="modelSelectionBusy || executionModeBusy || modelLoading || sending || agentRunning"
+                      :title="`${opt.providerLabel} · ${opt.model}${opt.hasKey ? '' : '（未保存 Key；本地端点可能无需密钥）'}`"
                       @click="applyChatModel(opt.providerId, opt.model)"
                     >
                       <AppIcon icon="microchip" class="composer-perm-item-icon" />
                       <span class="composer-perm-item-label">{{ opt.label }}</span>
                       <span class="composer-perm-item-desc">{{
-                        opt.hasKey ? opt.providerLabel : `${opt.providerLabel} · 无 Key`
+                        `${opt.capabilities}${opt.hasKey ? '' : ' · 未保存密钥'}`
                       }}</span>
                       <AppIcon
                         v-if="opt.key === chatModelKey"
                         icon="check"
                         class="composer-perm-check"
                       />
-                    </button>
-                    <p v-if="!filteredModelOptions.length" class="composer-model-empty">
+                    </button></section>
+                    <p v-if="!modelLoading && !modelLoadError && !filteredModelOptions.length" class="composer-model-empty">
                       {{ modelMenuOptions.length ? '没有匹配的模型' : '暂无模型，请到设置添加' }}
                     </p>
                     </div>
-                    <div v-if="reasoningLevels.length" class="model-panel-reasoning" role="group" aria-label="思考等级"><span>思考等级</span><div><button v-for="level in reasoningLevels" :key="level.id" type="button" :class="{selected:selectedReasoningLevel===level.id}" :aria-pressed="selectedReasoningLevel===level.id" :disabled="modelSelectionBusy || agentRunning" @click="applyReasoningLevel(level.id)">{{ reasoningLabel(level.id) }}</button></div></div>
+                    <div v-if="reasoningLevels.length" class="model-panel-reasoning" role="group" aria-label="思考等级"><span>思考等级</span><div><button v-for="level in reasoningLevels" :key="level.id" type="button" :class="{selected:selectedReasoningLevel===level.id}" :aria-pressed="selectedReasoningLevel===level.id" :disabled="modelSelectionBusy || executionModeBusy || modelLoading || sending || agentRunning" @click="applyReasoningLevel(level.id)">{{ reasoningLabel(level.id) }}</button></div></div>
                   </div>
                 </v-menu>
 
                 <v-menu
                   v-model="usageMenuOpen"
+                  :disabled="nativeComposerAvailable"
                   location="top end"
                   :close-on-content-click="true"
                   content-class="composer-usage-menu"
@@ -1504,6 +1001,7 @@
                       v-bind="menuProps"
                       :title="`上下文估算 ${usagePctLabel}`"
                       :aria-label="`查看上下文估算，约占 ${usagePctLabel}`"
+                      @click="nativeComposerAvailable&&openNativeComposerOrFallback('usage',$event)"
                     >
                       <svg class="usage-ring" viewBox="0 0 36 36" aria-hidden="true">
                         <circle class="usage-ring-track" cx="18" cy="18" r="14" fill="none" />
@@ -1538,12 +1036,13 @@
                         <strong>未计入</strong>
                       </div>
                       <div class="composer-usage-row">
-                        <span><i class="usage-dot messages"></i>对话消息</span>
-                        <strong>~{{ formatUsageCount(usageTokensEst) }}</strong>
-                      </div>
+                        <span><i class="usage-dot message-history"></i>对话消息</span>
+                        <strong>~{{ formatUsageCount(usageHistoryEst) }}</strong>
+                      </div><div class="composer-usage-row"><span>当前输入</span><strong>~{{formatUsageCount(usageDraftEst)}}</strong></div>
                     </div>
+                    <div class="composer-usage-actual"><strong>最近一次服务返回{{actualUsageModel?` · ${actualUsageModel}`:''}}</strong><template v-if="actualUsage"><div class="composer-usage-row"><span>输入 / 输出</span><span>{{formatUsageCount(actualUsage.inputTokens)}} / {{formatUsageCount(actualUsage.outputTokens)}}</span></div><div class="composer-usage-row"><span>总用量</span><span>{{formatUsageCount(actualUsage.totalTokens)}}</span></div><div v-if="actualUsage.cachedInputTokens!==undefined" class="composer-usage-row"><span>缓存命中</span><span>{{formatUsageCount(actualUsage.cachedInputTokens)}}</span></div></template><p v-else>服务尚未返回用量数据</p></div>
                     <p class="composer-usage-note">
-                      按对话文本粗略估算，不含系统提示词、工具定义、图片和文件；实际 token 数以模型服务返回为准。输出上限 {{ chatModelSettings.max_output_tokens.toLocaleString() }} token。
+                      按历史消息及当前输入的 UTF-8 字节粗略估算，不含系统提示词、工具定义、图片和文件内容。不会代表下一次请求的完整预算。输出上限 {{ chatModelSettings.max_output_tokens.toLocaleString() }} token。
                     </p>
                   </div>
                 </v-menu>
@@ -1558,7 +1057,7 @@
                   :aria-label="agentRunning ? (runningMessageMode === 'insert' ? '插入当前任务' : '加入队列') : '发送'"
                   @click="send"
                 >
-                  <AppIcon :icon="agentRunning && runningMessageMode === 'queue' ? 'list-ul' : 'arrow-up'" />
+                  <AppIcon :icon="agentRunning && runningMessageMode === 'queue' ? 'list-ul' : 'paper-plane'" />
                   <span v-if="agentRunning">{{ runningMessageMode === 'insert' ? '插入' : '排队' }}</span>
                 </button>
                 <button
@@ -1590,8 +1089,9 @@
       <Transition name="resource-card">
         <ConversationResourcesCard v-if="resourceOpen && activeId && !settingsOpen && !creatorKind && !fileManagerActive && !pluginWorkspaceActive && !browserWorkspaceActive" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :overlay="resourceOverlay" :available-width="resourceAvailableWidth" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="locateResourceMessage({chatId:activeId!,messageId:$event})" @open-media="(p) => openLightbox(p.src,p.alt)" />
       </Transition>
-    <Transition name="file-workspace"><FileWorkspace v-if="fileWorkspaceVisible || browserWorkspaceActive" :full-page="browserWorkspaceActive" :tabs="browserWorkspaceActive?browserWorkspaceTabs:fileTabsState.tabs" :active="browserWorkspaceActive?browserWorkspaceTab:activeFileTab" :viewer-chat-id="activeId || ''" :width="fileWorkspaceWidth" :maximum="fileWorkspaceMaximum" :overlay="fileWorkspaceOverlay" :expanded="browserExpanded" :owner-label="treeOwnerLabel" @open-browser="openBrowserTab" @browser-changed="updateBrowserTab" @reorder="reorderBrowserTab" @expand="toggleBrowserExpand" @select="selectFileTab" @close="closeFileTab" @hide="browserWorkspaceActive?activateSidebar('chats',false):hideFileWorkspace()" @open-file="openFilePreview($event.path,$event.chatId)" @locate="locateResourceMessage" @resize="resizeFileWorkspace" @notify="onPanelNotify" /></Transition>
+    <Transition name="file-workspace"><FileWorkspace ref="fileWorkspace" :presented="(fileWorkspaceVisible||browserWorkspaceActive)&&!settingsOpen&&!creatorKind" v-if="fileTabsState.open || browserWorkspaceMode" v-show="!settingsOpen && (fileWorkspaceVisible || browserWorkspaceActive)" :inert="settingsOpen" @tools-target="workspaceToolsTarget=$event" @conversation-detach="restoreConversationSplit" @creator="openCreator" @select-subchat="selectWorkspaceSubchat" @locate-parent="locateSubchatParent" :full-page="browserWorkspaceMode" :tabs="browserWorkspaceMode?browserWorkspaceTabs:fileTabsState.tabs" :workspace-count="fileTabsState.tabs.length" :active="settingsOpen ? null : browserWorkspaceMode?browserWorkspaceTab:activeFileTab" :viewer-chat-id="activeId || ''" :width="fileWorkspaceWidth" :maximum="fileWorkspaceMaximum" :overlay="fileWorkspaceOverlay" :expanded="browserExpanded" :expand-preview="workspaceExpandPreview" :conversation-preview="workspaceConversationPreview" :conversation="browserExpanded&&!browserWorkspaceMode?{title:active?.title||'当前对话',active:workspaceConversationActive,status:workspaceConversationStatus}:undefined" :running="agentRunning" @conversation="showWorkspaceConversation" @stop="stopAgent" :owner-label="treeOwnerLabel" :resolve-browser="resolveBrowserTab" @open-browser="openBrowserTab" @browser-changed="updateBrowserTab" @reorder="(id,before,ids)=>reorderBrowserTab(id,before,activeId,ids)" @expand="toggleBrowserExpand" @select="selectFileTab" @close="closeFileTab" @hide="hideWorkspace" @open-file="openFilePreview($event.path,$event.chatId)" @locate="locateResourceMessage" @resize="resizeFileWorkspace" @notify="onPanelNotify" /></Transition>
     </main>
+    </div>
 
     <v-dialog
       :model-value="readPagesPanelOpen"
@@ -1733,7 +1233,7 @@
             role="menuitem"
             @click="copyText(pageCtx.selected)"
           >
-            <AppIcon icon="clipboard-list" />
+            <AppIcon icon="copy" />
             <span>复制</span>
           </button>
           <button
@@ -1761,7 +1261,7 @@
             role="menuitem"
             @click="copyText(pageCtx.messageText)"
           >
-            <AppIcon icon="clipboard-list" />
+            <AppIcon icon="copy" />
             <span>复制本条</span>
           </button>
           <button
@@ -1799,18 +1299,11 @@
       </template>
     </SidebarContextMenu>
 
-    <v-dialog v-model="composerLinkDialog" max-width="440" content-class="composer-link-dialog" aria-label="编辑文本链接" @after-enter="composerLinkInput?.focus()">
-      <form class="composer-link-panel" @submit.prevent="applyComposerLink">
-        <h2>{{ composerLinkTarget?.url ? '编辑链接' : '添加链接' }}</h2>
-        <p>文本：{{ composerLinkTarget?.label }}</p>
-        <label for="composer-link-url">链接地址</label>
-        <input id="composer-link-url" ref="composerLinkInput" v-model="composerLinkUrl" type="text" inputmode="url" placeholder="https://example.com" required />
-        <div class="composer-link-actions">
-          <button type="button" @click="composerLinkDialog=false">取消</button>
-          <button type="submit">保存链接</button>
-        </div>
-      </form>
-    </v-dialog>
+    <SidebarContextMenu ref="railContextMenu"><button type="button" class="sidebar-more-item" role="menuitemcheckbox" :aria-checked="!allSidebarHidden" :disabled="!!settingsOpen||!!creatorKind" @click="toggleSidebarVisibility"><AppIcon icon="workspace"/><span>显示侧栏</span><span class="rail-context-check" aria-hidden="true">{{allSidebarHidden?'':'✓'}}</span></button><div class="sidebar-more-divider"/><button type="button" class="sidebar-more-item" role="menuitemcheckbox" :aria-checked="sidebarPresentationMode==='fixed'" :disabled="isMobileLayout||!!settingsOpen||!!creatorKind" @click="toggleSidebarPin"><AppIcon icon="thumbtack"/><span>固定侧栏</span><span class="rail-context-check" aria-hidden="true">{{sidebarPresentationMode==='fixed'?'✓':''}}</span></button></SidebarContextMenu>
+    <ApplicationMenuBar v-if="!showDesktopChrome || isMobileLayout" ref="appMenu" mode="compact" collapsed :command-state="applicationCommandState" :context-key="activeId || ''" :app-version="applicationVersion" :shortcuts-active="!settingsOpen&&!docsOpen&&!creatorKind" :capture-target="captureApplicationTarget" :restore-target="restoreApplicationTarget" @beforeopen="refreshApplicationTarget" @command="executeApplicationCommand" @error="onPanelNotify" />
+    <ComposerAttachmentMenu ref="attachmentMenu" :context-key="activeId||''" @select="selectAttachmentSource" @creator="createFromAttachment" @closed="attachmentClosed" @notify="onPanelNotify" />
+    <ComposerSourcePicker ref="sourcePicker" :chat-id="activeId || ''" :files="artifactEntries" :messages="active?.messages || []" @insert="insertContextSources" @closed="closeContextPicker" @notify="onPanelNotify" />
+    <v-dialog v-model="applicationFilePicker" max-width="460"><section class="application-file-picker"><header><strong>打开对话文件</strong><button type="button" aria-label="关闭文件选择" @click="applicationFilePicker=false"><AppIcon icon="xmark" /></button></header><WorkspaceFilePicker :chat-id="activeId || ''" @open="path=>{applicationFilePicker=false;openFilePreview(path)}" /></section></v-dialog>
 
     <v-dialog v-model="chatSearchOpen" max-width="600" content-class="chat-search-dialog" aria-label="搜索对话" @after-enter="chatSearchInput?.focus()">
         <div class="chat-search-panel">
@@ -1872,7 +1365,7 @@
       </div>
     </Teleport>
 
-    <ChatResourcesMenu v-show="pageContext !== 'browser' && pageContext !== 'plugins'" ref="browserResources" class="global-title-actions" :context="pageContext" :running="agentRunning" @context-action="onPageAction" @new-browser-tab="openBrowserTab" @new-chat="createChat" @search="openChatSearch" @delete="active && askDeleteChat(active)" @stop="stopAgent" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :open="resourceOpen" :file-workspace-open="fileWorkspaceVisible" :has-file-tabs="fileTabsState.tabs.length>0" :pinned="!!active?.pinned" :can-export="!!active?.messages.length" :exporting="exportingChat" @rename="renameCurrentChat" @pin="active && toggleChatPinned(active)" @export="exportActiveChat" @toggle-workspace="toggleRightSidebar" @notify="onPanelNotify" @toggle-resources="toggleResources" @show-browser="showResources('browser')" />
+
 
     <DocsDialog v-if="docsOpen" v-model="docsOpen" />
     <SkillReviewHost />
@@ -1886,18 +1379,30 @@
 <script setup lang="ts">
 import AppIcon from '@/components/icons/AppIcon.vue'
 defineOptions({ name: 'ChatPage' })
-import { transcriptBlocks, executionSummary } from '@shared/message-presentation'
+import {finalOutputs} from '@shared/message-presentation'
+import {conversationOutputBlocks,toolActivityLabel} from '@shared/conversation-output'
+import ConversationActivityRow from '@/components/ConversationActivityRow.vue'
+import SubchatLink from '@/components/SubchatLink.vue'
+import {useSubchatSignals} from '@/composables/useConversationSession'
 import { replyArtifactGroups } from '@shared/workspace-resources'
 import { useWorkspaceResources } from '@/composables/useWorkspaceResources'
 import ReplyArtifacts from '@/components/ReplyArtifacts.vue'
-import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
 import StatusIcon from '@/components/StatusIcon.vue'
-import ComposerResources from '@/components/ComposerResources.vue'
+import ComposerEditor from '@/components/ComposerEditor.vue'
+import ComposerSourcePicker, {type ComposerSourceInsert} from '@/components/ComposerSourcePicker.vue'
+import ApplicationMenuBar from '@/components/ApplicationMenuBar.vue'
+import WorkspaceFilePicker from '@/components/WorkspaceFilePicker.vue'
+import {useComposerDraft} from '@/composables/useComposerDraft'
+import {compileComposerDocument,composerDocumentFromLegacy,composerSubmissionKey,composerErrorMessage,createComposerDocument,mergeComposerDocuments,normalizeComposerDocument,type ComposerDocument,type ComposerContextBlock} from '@shared/composer-document'
+import type {AppCommandId,AppCommandContext,AppCommandStateMap} from '@shared/app-commands'
+import {captureActiveComposerEditor,type ComposerSelectionBookmark,type ComposerEditorCommand,type ComposerEditorHandle} from '@/editor/composer-editor-registry'
+import {useApplicationEditTarget} from '@/composables/useApplicationEditTarget'
 import {reasoningLabel} from '@shared/composer-commands'
 import ConversationOutline from '@/components/ConversationOutline.vue'
 import DisclosureTransition from '@/components/motion/DisclosureTransition'
 import { modelCapabilities } from '@shared/model-capabilities'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import type {
   AgentAskRequest,
   AgentPhase,
@@ -1924,13 +1429,39 @@ import {
   type FollowupSuggestion,
 } from '@shared/followups'
 import { normalizeProvider, resolveModelName, resolveProvider } from '@shared/model-providers'
+import {confirmedModelSelection,type ModelSelectionIdentity} from '@shared/model-selection'
+import {estimateContextText} from '@shared/context-budget'
+import {normalizeModelUsage} from '@shared/model-usage'
+import {browserTabShortcut} from '@shared/browser-workspace'
 import ChatMarkdown from '@/components/ChatMarkdown.vue'
+import ConversationFind from '@/components/ConversationFind.vue'
+import ComposerAttachmentMenu from '@/components/ComposerAttachmentMenu.vue'
+import ComposerNativePanels from '@/components/ComposerNativePanels.vue'
+import type {ComposerNativePanelKind,ComposerNativePanelState} from '@shared/composer-native-panels'
+const conversationFind=ref<InstanceType<typeof ConversationFind>|null>(null),conversationFindOpen=ref(false),attachmentMenu=ref<InstanceType<typeof ComposerAttachmentMenu>|null>(null)
+const findToolReveal=ref<Record<string,{from:number;to:number}>>({})
+const findTemporaryExpansion={tools:new Set<string>(),logs:new Set<string>()}
+async function openConversationFind(){
+  if(activeFileTab.value?.kind==='subchats'&&fileWorkspaceVisible.value&&!conversationIsVisible.value){fileWorkspace.value?.openSubchatFind();return}
+  if(!activeId.value||!await canLeaveSettings())return
+  settingsOpen.value=false;creatorKind.value=null
+  fileManagerMode.value=false;pluginWorkspaceMode.value=false;browserWorkspaceMode.value=false
+  activateSidebar('chats',false)
+  if(fileWorkspaceOverlay.value)hideFileWorkspace()
+  else if(browserExpanded.value)workspaceConversationActive.value=true
+  await nextTick()
+  conversationFind.value?.open()
+}
+async function locateFindMessage(id:string,match?:{from:number;to:number}){if(match)findToolReveal.value={...findToolReveal.value,[id]:match};if(!isActivityExpanded(id)){expandedTools.value={...expandedTools.value,[id]:true};findTemporaryExpansion.tools.add(id)}if(!expandedLogs.value[id]){expandedLogs.value={...expandedLogs.value,[id]:true};findTemporaryExpansion.logs.add(id)}await jumpToMessage(id)}
+function restoreFindExpansion(open:boolean){if(open)return;findToolReveal.value={};for(const [state,keys] of [[expandedTools,findTemporaryExpansion.tools],[expandedLogs,findTemporaryExpansion.logs]] as const){const next={...state.value};for(const key of keys)delete next[key];state.value=next;keys.clear()}}
 import {lazyPanel} from '@/utils/lazy-panel'
 const SettingsPage=lazyPanel(()=>import('./SettingsPage.vue'),'设置')
 import { useSidebarLayout } from '@/composables/useSidebarLayout'
+import { useSidebarPresentation } from '@/composables/useSidebarPresentation'
 import SidebarNavigation from '@/components/sidebar/SidebarNavigation.vue'
 import GlobalResourcesPanel from '@/components/sidebar/GlobalResourcesPanel.vue'
 import ChatResourcesMenu from '@/components/ChatResourcesMenu.vue'
+import WorkspaceLauncher from '@/components/WorkspaceLauncher.vue'
 import MessageQueue from '@/components/MessageQueue.vue'
 const DocsDialog=lazyPanel(()=>import('@/components/DocsDialog.vue'),'帮助',true)
 import SkillReviewHost from '@/components/skills/SkillReviewHost.vue'
@@ -1977,7 +1508,6 @@ import {
 } from '@shared/run-logs'
 import {
   resolveToolDisplay,
-  TOOL_RUN_GROUP_LABEL,
   type ToolDisplayInfo,
 } from '@shared/tool-display'
 import {
@@ -1994,19 +1524,30 @@ const showDesktopChrome = computed(
 )
 const windowPlatform = window.navora?.app?.platform || 'web'
 const browserResources = ref<{ quickOpen: () => Promise<void> } | null>(null)
-type PageActionHost={apply?:()=>unknown;refresh?:()=>unknown;manage?:()=>unknown;save?:()=>unknown;export?:()=>unknown}
+type PageActionHost={refresh?:()=>unknown;manage?:()=>unknown;save?:()=>unknown;export?:()=>unknown;requestClose?:()=>Promise<boolean>;canClose?:()=>Promise<boolean>;runAction?:(action:string)=>unknown}
 const settingsWorkspace=ref<PageActionHost|null>(null),fileManagerWorkspace=ref<{refresh:()=>unknown;openFolder:()=>unknown}|null>(null),pluginsWorkspace=ref<PageActionHost|null>(null),creatorWorkspace=ref<PageActionHost|null>(null)
+let leavingSettings:Promise<boolean>|undefined
+async function canLeaveSettings(){if(!settingsOpen.value)return true;if(leavingSettings)return leavingSettings;const host=settingsWorkspace.value;leavingSettings=Promise.resolve(host?.canClose?.()??host?.runAction?.('canClose')).then(result=>result===true);try{return await leavingSettings}finally{leavingSettings=undefined}}
+onBeforeRouteLeave(()=>canLeaveSettings())
 const pageContext=computed(()=>creatorKind.value?'creator':settingsOpen.value?'settings':pluginWorkspaceActive.value?'plugins':fileManagerActive.value?'files':browserWorkspaceActive.value?'browser':'chat')
-function toggleRightSidebar(){
+async function toggleRightSidebar(){
+  if(!await canLeaveSettings())return
   const wasVisible=fileWorkspaceVisible.value
+  const hadTabs=fileTabsState.value.tabs.length>0
+  const restoreFocus=document.activeElement instanceof HTMLElement&&document.activeElement.dataset.chatResource==='workspace'
   settingsOpen.value=false;creatorKind.value=null;pluginWorkspaceMode.value=false;fileManagerMode.value=false;browserWorkspaceMode.value=false
   if(wasVisible)hideFileWorkspace()
-  else showFileWorkspace()
+  else{
+    showFileWorkspace()
+    if(hadTabs&&restoreFocus)void nextTick(()=>document.querySelector<HTMLButtonElement>('.file-workspace .workspace-launcher')?.focus({preventScroll:true}))
+  }
 }
-function onPageAction(action:string){
+function hideWorkspace(){hideFileWorkspace();if(browserWorkspaceActive.value)activateSidebar('chats',false)}
+async function onPageAction(action:string){
   const context=pageContext.value
-  if(action==='back'){if(creatorKind.value){closeCreator();return}settingsOpen.value=false;activateSidebar('chats',false);return}
-  if(context==='settings'){if(action==='apply')void settingsWorkspace.value?.apply?.();else if(action==='models')settingsTab.value='model';else if(action==='plugins'){settingsOpen.value=false;activateSidebar('plugins',false)}else if(action==='create-skill')openCreator('skill')}
+  if(context==='settings'&&(action==='back'||action==='plugins'||action==='create-skill')&&!await canLeaveSettings())return
+  if(action==='back'){if(creatorKind.value){closeCreator();return}if(settingsOpen.value){await completeSettingsReturn();return}activateSidebar('chats',false);return}
+  if(context==='settings'){if(action==='models')settingsTab.value='model';else if(action==='plugins'){settingsOpen.value=false;activateSidebar('plugins',false)}else if(action==='create-skill')openCreator('skill')}
   else if(context==='browser'){if(action==='new-browser')openBrowserTab()}
   else if(context==='files'){if(action==='refresh')fileManagerWorkspace.value?.refresh();else if(action==='folder')fileManagerWorkspace.value?.openFolder()}
   else if(context==='plugins'){if(action==='refresh')void pluginsWorkspace.value?.refresh?.();else if(action==='manage')pluginsWorkspace.value?.manage?.();else if(action==='create')openCreator('plugin')}
@@ -2014,27 +1555,33 @@ function onPageAction(action:string){
 }
 
 const executionModes = [
-  { id: 'auto' as const, label: '自动', hint: '按问题选择问答或工具' },
-  { id: 'chat' as const, label: '快速问答', hint: '直接回复，不访问浏览器与文件' },
-  { id: 'agent' as const, label: '执行任务', hint: '浏览器、工作区与插件' },
+  { id: 'auto' as const, icon:'wand-magic-sparkles', label: '自动', hint: '按问题选择问答或工具' },
+  { id: 'chat' as const, icon:'comments', label: '快速问答', hint: '直接回复，不访问浏览器与文件' },
+  { id: 'agent' as const, icon:'robot', label: '执行任务', hint: '浏览器、工作区与插件' },
 ]
+const executionModeIcon=computed(()=>executionModes.find(m=>m.id===(active.value?.executionMode||'auto'))?.icon||'wand-magic-sparkles')
 const executionModeLabel = computed(() => executionModes.find(m => m.id === (active.value?.executionMode || 'auto'))?.label || '自动')
 async function applyExecutionMode(mode: 'auto' | 'chat' | 'agent') {
-  if (!window.navora || !activeId.value || agentRunning.value) return
+  if (!window.navora || !activeId.value || agentRunning.value || sending.value || executionModeBusy.value || modelSelectionBusy.value) return
+  executionModeBusy.value=true
+  const chatId=activeId.value
   try {
-    const chat = await window.navora.chats.setExecutionMode(activeId.value, mode)
-    if (chat) { active.value = chat; await refreshList() }
-  } catch (error) { showToast(error instanceof Error ? error.message : '切换模式失败') }
+    const chat = await window.navora.chats.setExecutionMode(chatId, mode)
+    if (chat && activeId.value===chatId) active.value = chat
+    await refreshList()
+  } catch (error) { showToast(error instanceof Error ? error.message : '切换模式失败') } finally {executionModeBusy.value=false}
 }
 function onAppShortcut(event: KeyboardEvent) {
-  if (event.defaultPrevented || event.isComposing || settingsOpen.value || docsOpen.value || document.querySelector('.v-dialog.v-overlay--active,.v-menu.v-overlay--active')) return
+  if (event.defaultPrevented || event.isComposing || event.altKey || event.repeat || settingsOpen.value || docsOpen.value || document.querySelector('.v-dialog.v-overlay--active,.v-menu.v-overlay--active,.sidebar-ctx-panel:not([data-browser-tab-preview])')) return
   const key = event.key.toLowerCase()
+  if(browserExpanded.value&&fileWorkspaceVisible.value&&!(event.target instanceof Element&&event.target.closest('.file-workspace'))){const action=browserTabShortcut({key:event.key,control:event.ctrlKey,meta:event.metaKey,shift:event.shiftKey});if(action&&(['next','previous','last','close'].includes(action)||action.startsWith('index'))){event.preventDefault();void fileWorkspace.value?.shortcut(action);return}}
+  if(key==='f3'&&conversationFind.value?.opened){event.preventDefault();conversationFind.value.step(event.shiftKey?-1:1);return}
+  if((event.ctrlKey||event.metaKey)&&key==='f'&&!event.shiftKey&&!fileManagerActive.value&&!pluginWorkspaceActive.value&&!browserWorkspaceActive.value&&!(event.target instanceof Element&&event.target.closest('.file-workspace,.browser-tab-panel'))){event.preventDefault();openConversationFind();return}
   if (event.ctrlKey || event.metaKey) {
-    if (key === 'k') { event.preventDefault(); openChatSearch() }
-    else if (key === 'n') { event.preventDefault(); void createChat() }
+    if (key === 't' && event.shiftKey && activeId.value && !isWebRemote()) { event.preventDefault(); void window.navora!.browser.workspace.tabAction({chatId:activeId.value,action:'reopen'}).catch(()=>showToast('当前对话没有可恢复的标签页。')) }
+    else if (key === 't' && !event.shiftKey && activeId.value && !browserWorkspaceActive.value) { event.preventDefault(); openBrowserTab(); settingsOpen.value=false; creatorKind.value=null; pluginWorkspaceMode.value=false; fileManagerMode.value=false }
     else if (key === 'b' && event.shiftKey) { event.preventDefault(); void browserResources.value?.quickOpen() }
-  } else if (key === 'escape' && agentRunning.value && !pendingAsks.value[activeId.value || '']) {
-    event.preventDefault(); void stopAgent()
+    else if(key==='w'&&!event.shiftKey&&activeFileTab.value&&fileWorkspaceVisible.value){event.preventDefault();void closeFileTab(activeFileTab.value.key)}
   }
 }
 
@@ -2083,23 +1630,36 @@ const activeId = ref<string | null>(null)
 const active = ref<ChatSession | null>(null)
 const tree = ref<BrowserTreeSession[]>([])
 const windowCounts = ref<Record<string, number>>({})
-const draft = ref('')
+const draftState=useComposerDraft(activeId,message=>showToast(message,'warning'))
+const {document:composerDocument,text:draft,refs:contextRefs,conflict:draftConflict,unsupported:draftUnsupported}=draftState
 const maxComposerChars = ref(16000)
-/** Local last edit time for draft LWW vs remote. */
-const draftTouchedAt = ref(0)
-let applyingRemoteDraft = false
-let draftSaveTimer: ReturnType<typeof setTimeout> | undefined
-let draftSaveInflight: Promise<void> | null = null
-const contextRefs = ref<BrowserContextRef[]>([])
 const agentRunning = ref(false)
 const sending = ref(false)
 const retrying = ref(false)
-const resourceCommands = ref<InstanceType<typeof ComposerResources> | null>(null)
 const modelQuery = ref('')
-const modelSelectionBusy = ref(false)
+const modelSelectionBusy = ref(false),executionModeBusy=ref(false),modelLoading=ref(false),modelLoadError=ref('')
 const permMenuOpen = ref(false)
 const modelMenuOpen = ref(false)
 const usageMenuOpen = ref(false)
+const nativeComposerPanels=ref<InstanceType<typeof ComposerNativePanels>|null>(null)
+const nativeComposerAvailable=computed(()=>nativeComposerPanels.value?.supported===true)
+let nativeComposerKind:ComposerNativePanelKind|undefined
+async function openNativeComposerOrFallback(kind:ComposerNativePanelKind,event?:Event){
+  if(!activeId.value)return
+  const target=(event?.currentTarget as HTMLElement|null)||document.querySelector<HTMLElement>(kind==='model'?'.model-panel-trigger':kind==='usage'?'.usage-ring-btn':kind==='mode'?'.execution-mode-button':'[aria-label="本会话权限预设"]')
+  if(nativeComposerAvailable.value&&target){
+    if(nativeComposerPanels.value?.opened&&nativeComposerKind===kind){await nativeComposerPanels.value.hide();nativeComposerKind=undefined;return}
+    nativeComposerKind=kind
+    if(kind==='model'){modelQuery.value='';void refreshAiProviders()}
+    await nativeComposerPanels.value?.show(kind,target)
+    return
+  }
+  if(kind==='model')modelMenuOpen.value=true
+  else if(kind==='usage')usageMenuOpen.value=true
+  else if(kind==='permission')permMenuOpen.value=true
+}
+function applyNativeExecutionMode(mode:string){if(mode==='auto'||mode==='chat'||mode==='agent')void applyExecutionMode(mode)}
+function applyNativePermission(preset:string){if(permPresetOptions.some(option=>option.value===preset))void applyChatPreset(preset as PermissionPreset)}
 const settingsPermissions = ref<ChatPermissions | null>(null)
 const aiProviders = ref<AiProviderConfig[]>([])
 const aiDefaultProviderId = ref('')
@@ -2131,7 +1691,7 @@ const nowTick = ref(Date.now())
 
 const dropActive = ref(false)
 const msgBox = ref<HTMLElement | null>(null)
-const draftField = ref<{ focus?: () => void } | null>(null)
+const draftField = ref<InstanceType<typeof ComposerEditor> | null>(null)
 const stickToBottom = ref(true)
 const showJumpBottom = ref(false)
 const toolMediaSrc = ref<Record<string, string>>({})
@@ -2270,87 +1830,6 @@ function subchatCountOf(parentId: string): number {
   return subchatsOf(parentId).length
 }
 
-/** Expand children when this parent (or one of its subs) is the active chat. */
-function isChatBranchExpanded(parentId: string): boolean {
-  if (chatBatchMode.value) return false
-  if (!subchatCountOf(parentId)) return false
-  if (activeId.value === parentId) return true
-  const cur = chats.value.find((c) => c.id === activeId.value)
-  return Boolean(cur?.kind === 'sub' && cur.parentChatId === parentId)
-}
-
-/** Custom left rail scrollbar (native arrows cannot be reliably hidden on Windows). */
-const subScrollEls = new Map<string, HTMLElement>()
-const subScrollMetrics = ref<
-  Record<string, { top: number; thumbH: number; needsBar: boolean }>
->({})
-
-function setSubScrollEl(parentId: string, el: unknown) {
-  const node = el instanceof HTMLElement ? el : null
-  if (node) {
-    subScrollEls.set(parentId, node)
-    void nextTick(() => refreshSubScrollMetrics(parentId))
-  } else {
-    subScrollEls.delete(parentId)
-    if (subScrollMetrics.value[parentId]) {
-      const next = { ...subScrollMetrics.value }
-      delete next[parentId]
-      subScrollMetrics.value = next
-    }
-  }
-}
-
-function refreshSubScrollMetrics(parentId: string) {
-  const el = subScrollEls.get(parentId)
-  if (!el) return
-  const { scrollTop, scrollHeight, clientHeight } = el
-  const needsBar = scrollHeight > clientHeight + 1
-  if (!needsBar) {
-    if (subScrollMetrics.value[parentId]?.needsBar) {
-      subScrollMetrics.value = {
-        ...subScrollMetrics.value,
-        [parentId]: { top: 0, thumbH: 0, needsBar: false },
-      }
-    }
-    return
-  }
-  const thumbH = Math.max(14, Math.round((clientHeight * clientHeight) / scrollHeight))
-  const maxTop = Math.max(0, clientHeight - thumbH)
-  const range = Math.max(1, scrollHeight - clientHeight)
-  const top = Math.round((scrollTop / range) * maxTop)
-  const prev = subScrollMetrics.value[parentId]
-  if (prev && prev.top === top && prev.thumbH === thumbH && prev.needsBar) return
-  subScrollMetrics.value = {
-    ...subScrollMetrics.value,
-    [parentId]: { top, thumbH, needsBar: true },
-  }
-}
-
-function onSubListScroll(parentId: string) {
-  refreshSubScrollMetrics(parentId)
-}
-
-function subScrollNeedsBar(parentId: string): boolean {
-  return Boolean(subScrollMetrics.value[parentId]?.needsBar)
-}
-
-function subScrollThumbStyle(parentId: string): Record<string, string> {
-  const m = subScrollMetrics.value[parentId]
-  if (!m?.needsBar) return { opacity: '0' }
-  return {
-    height: `${m.thumbH}px`,
-    transform: `translateY(${m.top}px)`,
-  }
-}
-
-watch(
-  [activeId, () => chats.value.map((c) => `${c.id}:${c.parentChatId || ''}`).join('|')],
-  () => {
-    void nextTick(() => {
-      for (const id of subScrollEls.keys()) refreshSubScrollMetrics(id)
-    })
-  },
-)
 
 const DEFAULT_CHAT_TITLE = '新对话'
 
@@ -2400,40 +1879,52 @@ const closingSession = ref(false)
 const quitDialog = ref(false)
 const quitting = ref(false)
 const exportingChat = ref(false)
-const sidebarMoreOpen = ref(false)
-const {open:resourceOpen,tab:resourceTab,show:showResources,close:hideResources} = useConversationResources(activeId,tree)
+const {open:resourceOpen,tab:resourceTab,updated:resourceUpdated,updateCount:resourceUpdateCount,reading:resourceReading,show:showResources,close:hideResources} = useConversationResources(activeId,tree)
 function closeResources(){hideResources()}
 function toggleResources(){if(resourceOpen.value)closeResources();else showResources('overview')}
-const {current:fileTabsState,active:activeFileTab,open:openFileTab,openBrowser:openBrowserTab,updateBrowser:updateBrowserTab,syncBrowser:syncBrowserTabs,present:presentBrowserTab,reorder:reorderBrowserTab,select:selectFileTab,close:closeFileTab,hide:hideFileWorkspace,show:showFileWorkspace,removeOwner:removeFileOwner,transfer:transferFileTab}=useFileTabs(activeId)
+const {current:fileTabsState,active:activeFileTab,open:openFileTab,openBrowser:openBrowserTabBase,openSubchats:openSubchatWorkspaceTab,selectSubchat:selectWorkspaceSubchat,updateBrowser:updateBrowserTab,syncBrowser:syncBrowserTabs,presentResource:presentBrowserResource,reorder:reorderBrowserTab,select:selectFileTabBase,close:closeFileTab,hide:hideFileWorkspace,show:showFileWorkspace,removeOwner:removeFileOwner,transfer:transferFileTab,resolveBrowser:resolveBrowserTab}=useFileTabs(activeId,onPanelNotify)
 const pluginWorkspaceMode=ref(false),pluginWorkspaceMounted=ref(false),browserWorkspaceMode=ref(false)
 const fileWorkspaceVisible=computed(()=>fileTabsState.value.open&&!settingsOpen.value&&!creatorKind.value&&!pluginWorkspaceMode.value&&!browserWorkspaceMode.value)
-const browserExpanded=ref(false)
-function toggleBrowserExpand(){browserExpanded.value=!browserExpanded.value}
+async function openBrowserTab(afterKey?:string){if(!activeId.value)return;workspaceConversationActive.value=false;await openBrowserTabBase(afterKey)}
+function selectFileTab(key:string){workspaceConversationActive.value=false;selectFileTabBase(key)}
+function openSubchatList(){if(activeId.value){workspaceConversationActive.value=false;openSubchatWorkspaceTab(activeId.value)}}
+let subchatTargetRevision=0
+async function routeConversationTarget(chatId:string){
+  const revision=++subchatTargetRevision
+  if(!window.navora||!await canLeaveSettings())return
+  const child=chats.value.find(chat=>chat.id===chatId)||await window.navora.chats.get(chatId)
+  if(revision!==subchatTargetRevision)return
+  if(!child){showToast('子对话记录已删除。','warning');return}
+  if(child.kind!=='sub'||!child.parentChatId){await selectChat(child.id);return}
+  const parentId=child.parentChatId
+  if(activeId.value!==parentId)await selectChat(parentId)
+  if(revision!==subchatTargetRevision||activeId.value!==parentId)return
+  settingsOpen.value=false;creatorKind.value=null;fileManagerMode.value=false;pluginWorkspaceMode.value=false;browserWorkspaceMode.value=false
+  workspaceConversationActive.value=false;openSubchatWorkspaceTab(parentId,child.id)
+}
+async function locateSubchatParent(target:{chatId:string;toolCallId?:string}){
+  if(activeId.value!==target.chatId)await selectChat(target.chatId)
+  if(activeId.value!==target.chatId)return
+  if(browserExpanded.value)workspaceConversationActive.value=true
+  const message=target.toolCallId?active.value?.messages.find(message=>message.meta?.toolCallId===target.toolCallId):undefined
+  if(message){await nextTick();await jumpToMessage(message.id)}
+}
+const subchatSignals=useSubchatSignals(computed(()=>activeId.value||''))
+const manualBrowserExpanded=ref(false),workspaceConversationActive=ref(false),fileWorkspace=ref<InstanceType<typeof FileWorkspace>|null>(null)
+const workspaceViews=new Map<string,{expanded:boolean;conversation:boolean}>()
+watch(activeId,(id,previous)=>{if(previous)workspaceViews.set(previous,{expanded:manualBrowserExpanded.value,conversation:workspaceConversationActive.value});const saved=id?workspaceViews.get(id):undefined;manualBrowserExpanded.value=saved?.expanded||false;workspaceConversationActive.value=saved?.conversation||false},{flush:'sync'})
+watch(()=>fileTabsState.value.tabs.length,count=>{if(!count){manualBrowserExpanded.value=false;workspaceConversationActive.value=false}})
+function toggleBrowserExpand(){if(!toggleWorkspaceExpanded())showToast('当前窗口宽度不足以显示分栏。','info');workspaceConversationActive.value=false}
+function showWorkspaceConversation(){workspaceConversationActive.value=true}
+const workspaceToolsTarget=ref<HTMLElement|null>(null)
+const workspaceHeaderActive=computed(()=>fileWorkspaceVisible.value&&browserExpanded.value&&!browserWorkspaceActive.value)
+function restoreConversationSplit(){if(!requestWorkspaceSplit())showToast('扩大窗口后即可恢复分栏。','info');workspaceConversationActive.value=false}
+function onWorkspaceChatToolKey(event:KeyboardEvent){if(event.isComposing||event.keyCode===229)return;if((event.ctrlKey||event.metaKey)&&!event.altKey&&!event.shiftKey&&event.key.toLowerCase()==='f'){event.preventDefault();event.stopPropagation();void openConversationFind()}}
 const previewWidth = ref(400)
 const mainElement=ref<HTMLElement|null>(null)
 const { layout: sidebarLayout, style: sidebarStyle, resizing: sidebarResizing, maxWidth: sidebarWidthMaximum, beginResize: beginSidebarResize, resizeKey: sidebarResizeKey } = useSidebarLayout()
-const {mainWidth:fileWorkspaceMainWidth,overlay:fileWorkspaceOverlay,maximum:fileWorkspaceMaximum,width:fileWorkspaceWidth,reserve:fileWorkspaceReserve,resize:resizeFileWorkspace}=useFileWorkspaceLayout(mainElement,fileWorkspaceVisible,isMobileLayout,browserExpanded)
-const sidebarAutoCollapsed=ref(false)
-const sidebarAutoExpanded=ref(false)
-let sidebarAutoCollapseViewportWidth=window.innerWidth
-function updateSidebarAutoCollapse(mainWidth=fileWorkspaceMainWidth.value,reserve=fileWorkspaceReserve.value,mobile=isMobileLayout.value){
-  if(mobile){sidebarAutoCollapsed.value=false;return}
-  if(sidebarAutoExpanded.value)return
-  // mainWidth is measured after the sidebar is laid out. Add back the space
-  // reclaimed by auto-collapse so the decision does not oscillate at the breakpoint.
-  const available=mainWidth-reserve-(sidebarAutoCollapsed.value?Math.max(0,sidebarLayout.value.width-52):0)
-  if(!sidebarAutoCollapsed.value&&available<640)sidebarAutoCollapsed.value=true
-  else if(sidebarAutoCollapsed.value&&available>840)sidebarAutoCollapsed.value=false
-}
-watch([fileWorkspaceMainWidth,fileWorkspaceReserve,isMobileLayout],([mainWidth,reserve,mobile])=>updateSidebarAutoCollapse(mainWidth,reserve,mobile),{immediate:true})
-function onSidebarAutoCollapseViewportResize(){
-  if(window.innerWidth!==sidebarAutoCollapseViewportWidth){
-    sidebarAutoCollapseViewportWidth=window.innerWidth
-    sidebarAutoExpanded.value=false
-    updateSidebarAutoCollapse()
-  }
-}
-window.addEventListener('resize',onSidebarAutoCollapseViewportResize)
+const {mainWidth:fileWorkspaceMainWidth,overlay:fileWorkspaceOverlay,expanded:browserExpanded,automatic:workspaceExpansionReason,expandPreview:workspaceExpandPreview,conversationPreview:workspaceConversationPreview,maximum:fileWorkspaceMaximum,width:fileWorkspaceWidth,reserve:fileWorkspaceReserve,resize:resizeFileWorkspaceBase,requestSplit:requestWorkspaceSplit,toggleExpanded:toggleWorkspaceExpanded}=useFileWorkspaceLayout(mainElement,fileWorkspaceVisible,isMobileLayout,manualBrowserExpanded,activeId)
+function resizeFileWorkspace(value:number,phase:'preview'|'commit'|'cancel'='commit'){const target=resizeFileWorkspaceBase(value,phase);if(target)workspaceConversationActive.value=target==='conversation'}
 const {overlay:resourceOverlay,availableWidth:resourceAvailableWidth}=useResourceCardLayout(mainElement,previewWidth,isMobileLayout,fileWorkspaceReserve)
 try { const saved = Number(localStorage.getItem('navora.preview.width')); if (saved >= 280 && saved <= 800) previewWidth.value = saved } catch { /* optional persistence */ }
 watch(fileWorkspaceVisible,async()=>{const follow=stickToBottom.value;await nextTick();if(follow)void scrollMessages(true)})
@@ -2443,13 +1934,15 @@ function setPreviewWidth(width: number) {
 }
 function openFilePreview(path: string, chatId = activeId.value) {
   if (!chatId) return
-  try { openFileTab(chatId,path) } catch(error) { onPanelNotify(error instanceof Error?error.message:'无法打开文件');return }
+  try { openFileTab(chatId,path);workspaceConversationActive.value=false } catch(error) { onPanelNotify(error instanceof Error?error.message:'无法打开文件');return }
+  if(browserWorkspaceActive.value)activateSidebar('chats',false)
   if(fileWorkspaceOverlay.value)hideResources()
   if (isMobileLayout.value) closeMobileSidebar()
 }
 const creatorKind = ref<CreatorKind | null>(null)
 let creatorReturnToSettings = false
-function openCreator(kind: CreatorKind) {
+async function openCreator(kind: CreatorKind) {
+  if(!await canLeaveSettings())return
   creatorReturnToSettings = settingsOpen.value
   settingsOpen.value = false
   creatorKind.value = kind
@@ -2462,12 +1955,77 @@ async function openCreatorTrial(result: { chatId: string; prompt: string }) {
   activateSidebar('chats',false)
   await refreshList()
   await selectChat(result.chatId)
-  draft.value = result.prompt
+  applyDraftLocally(result.prompt,Date.now())
+  scheduleDraftSave()
 }
 const settingsTab = ref('basic')
 const settingsOpen = ref(false)
+const browserSettingsFocusPending=ref(false)
+type SettingsSourceSnapshot={chatId:string|null;tabKey?:string;expanded:boolean;conversation:boolean;sidebar:string;focus:HTMLElement|null;target?:ApplicationTarget;scrolls:{element:HTMLElement;top:number;left:number}[];label:string;context:string}
+let settingsSourceSnapshot:SettingsSourceSnapshot|undefined,settingsReturnId='',settingsNavigationEpoch=0
+const settingsReturnLabel=ref('返回进入设置前的内容（Alt ←）')
+function captureSettingsSource(target?:ApplicationTarget){
+  const label=browserWorkspaceActive.value?'浏览器':fileManagerActive.value?'文件':pluginWorkspaceActive.value?'插件':'对话'
+  if(target?.kind==='standard'&&target.bookmark.kind==='editable'&&target.bookmark.target.el instanceof HTMLInputElement&&target.bookmark.target.el.type==='password')target=undefined
+  settingsSourceSnapshot={chatId:activeId.value,tabKey:fileWorkspaceVisible.value||browserWorkspaceActive.value?activeFileTab.value?.key:undefined,expanded:manualBrowserExpanded.value,conversation:workspaceConversationActive.value,sidebar:sidebarRail.value.active,focus:document.activeElement instanceof HTMLElement?document.activeElement:null,target,scrolls:[...document.querySelectorAll<HTMLElement>('.messages,.preview-content,.file-manager-list,.plugin-detail-scroll,.plugin-results')].filter(element=>element.checkVisibility()).map(element=>({element,top:element.scrollTop,left:element.scrollLeft})),label,context:pageContext.value}
+  settingsReturnLabel.value=`返回${label}（Alt ←）`
+}
+watch(settingsOpen,open=>{if(!open){browserSettingsFocusPending.value=false;if(settingsReturnId){void window.navora?.app.returnFromSettings(settingsReturnId,false).catch(()=>{});settingsReturnId=''}settingsSourceSnapshot=undefined}})
+async function openSettings(section?:string,source?:{target?:ApplicationTarget;returnId?:string}){
+  if(document.querySelector('.v-dialog.v-overlay--active')){showToast('请先完成当前窗口中的对话框。','warning');return}
+  if(settingsOpen.value&&section&&settingsTab.value!==section&&!await canLeaveSettings())return false
+  ++settingsNavigationEpoch
+  if(!settingsOpen.value)captureSettingsSource(source?.target)
+  if(section)settingsTab.value=section
+  if(source?.returnId&&!settingsReturnId)settingsReturnId=source.returnId
+  settingsOpen.value=true;browserSettingsFocusPending.value=true
+  return true
+}
+async function toggleSettings(){if(settingsOpen.value){if(await canLeaveSettings())await completeSettingsReturn()}else await openSettings()}
+async function completeSettingsReturn(){
+  const snapshot=settingsSourceSnapshot,ticket=settingsReturnId,epoch=++settingsNavigationEpoch
+  settingsSourceSnapshot=undefined;settingsReturnId=''
+  if(!settingsOpen.value)return
+  const sameSource=!!snapshot&&snapshot.chatId===activeId.value
+  if(sameSource){
+    manualBrowserExpanded.value=snapshot.expanded;workspaceConversationActive.value=snapshot.conversation
+    sidebarRail.value.active=snapshot.sidebar
+    if(snapshot.tabKey&&fileTabsState.value.tabs.some(tab=>tab.key===snapshot.tabKey)&&activeFileTab.value?.key!==snapshot.tabKey)selectFileTabBase(snapshot.tabKey)
+  }
+  settingsOpen.value=false
+  await nextTick()
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    if(epoch!==settingsNavigationEpoch||settingsOpen.value)return
+    if(sameSource&&snapshot&&pageContext.value===snapshot.context){
+      for(const saved of snapshot.scrolls)if(saved.element.isConnected&&saved.element.checkVisibility()){saved.element.scrollTop=saved.top;saved.element.scrollLeft=saved.left}
+      const target=snapshot.target
+      const native=target?.kind==='standard'&&target.bookmark.kind==='native'
+      if(document.hasFocus()){
+        if(target&&!native)restoreApplicationTarget(target)
+        else if(snapshot.focus?.isConnected&&snapshot.focus.checkVisibility()&&!snapshot.focus.closest('[inert]'))snapshot.focus.focus({preventScroll:true})
+        else document.querySelector<HTMLButtonElement>('.sidebar-settings-btn')?.focus({preventScroll:true})
+      }
+      if(snapshot.tabKey&&!fileTabsState.value.tabs.some(tab=>tab.key===snapshot.tabKey))showToast('原标签页已关闭，已返回当前可用内容。','info')
+    }else{if(document.hasFocus()&&snapshot?.chatId&&!chats.value.some(chat=>chat.id===snapshot.chatId)){document.querySelector<HTMLButtonElement>('.sidebar-settings-btn')?.focus({preventScroll:true});showToast('原内容已关闭，已返回当前可用页面。','info')}}
+    if(ticket)void window.navora?.app.returnFromSettings(ticket,true).catch(()=>{})
+  }))
+}
 watch(settingsOpen, open => { if (open) creatorKind.value = null })
 const { panels: sidebarPanels, visible: sidebarVisible, rail: sidebarRail, activate: activateSidebar, close: closeSidebar } = useSidebarDock()
+const sidebarElement=ref<HTMLElement|null>(null),sidebarWidthForPresentation=computed(()=>sidebarLayout.value.width)
+const {mode:sidebarPresentationMode,lastPanel:sidebarLastPanel,floating:sidebarFloating,togglePin:toggleSidebarPin}=useSidebarPresentation(sidebarRail,sidebarWidthForPresentation,isMobileLayout)
+async function toggleSidebarVisibility(){if(settingsOpen.value||creatorKind.value)return;if(isMobileLayout.value){if(mobileSidebarOpen.value){closeMobileSidebar();return}if(allSidebarHidden.value)activateSidebar(sidebarPanels.value.some(panel=>panel.id===sidebarLastPanel.value)?sidebarLastPanel.value:'chats',false);mobileSidebarOpen.value=true;return}if(allSidebarHidden.value)activateSidebar(sidebarPanels.value.some(panel=>panel.id===sidebarLastPanel.value)?sidebarLastPanel.value:'chats',false);else closeSidebar()}
+const railContextMenu=ref<InstanceType<typeof SidebarContextMenu>|null>(null)
+function onRailContextKey(event:KeyboardEvent){if(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10'){event.preventDefault();event.stopPropagation();railContextMenu.value?.show(event)}}
+function dismissFloatingSidebar(event:PointerEvent|KeyboardEvent){
+  if(!sidebarFloating.value||allSidebarHidden.value||settingsOpen.value||creatorKind.value)return
+  if(event instanceof KeyboardEvent){if(event.key!=='Escape'||event.defaultPrevented||event.isComposing||event.keyCode===229)return;if(document.querySelector('.v-overlay--active,.sidebar-ctx-panel:not([data-browser-tab-preview])'))return;closeSidebar();event.preventDefault();document.querySelector<HTMLElement>('.window-sidebar-toggle')?.focus({preventScroll:true});return}
+  const target=event.target instanceof Element?event.target:null
+  if(!target||sidebarElement.value?.contains(target)||target.closest('.activity-rail,.window-sidebar-toggle,.sidebar-ctx-panel,.v-overlay--active')||sidebarResizing.value)return
+  closeSidebar()
+}
+onMounted(()=>{document.addEventListener('pointerdown',dismissFloatingSidebar,true);window.addEventListener('keydown',dismissFloatingSidebar)})
+onBeforeUnmount(()=>{document.removeEventListener('pointerdown',dismissFloatingSidebar,true);window.removeEventListener('keydown',dismissFloatingSidebar)})
 const fileManagerMounted=ref(false),fileManagerMode=ref(sidebarRail.value.active==='workspace')
 watch(()=>sidebarRail.value.active,id=>{if(id){fileManagerMode.value=id==='workspace';pluginWorkspaceMode.value=id==='plugins';browserWorkspaceMode.value=id==='browser'}},{immediate:true})
 const fileManagerOwnerId=ref(''),fileManagerDirectory=ref('.')
@@ -2484,9 +2042,44 @@ async function openResourceChat(id:string){await selectChat(id);activateSidebar(
 watch(fileManagerActive,visible=>{if(visible){fileManagerMounted.value=true;hideResources();if(activeFileTab.value?.kind==='browser')hideFileWorkspace()}},{immediate:true})
 const loadedResourcePanels=ref(new Set<string>())
 watch(()=>sidebarRail.value.active,id=>{if(id)loadedResourcePanels.value=new Set([...loadedResourcePanels.value,id])},{immediate:true})
+const conversationIsVisible=computed(()=>!settingsOpen.value&&!creatorKind.value&&!fileManagerActive.value&&!pluginWorkspaceActive.value&&!browserWorkspaceActive.value&&!(fileWorkspaceVisible.value&&(browserExpanded.value||fileWorkspaceOverlay.value)&&!workspaceConversationActive.value))
+watch([resourceOpen,conversationIsVisible],([open,visible])=>{resourceReading.value=open&&visible},{immediate:true,flush:'sync'})
+let parkedConversation:{chatId:string;top:number;follow:boolean}|undefined
+let conversationReading:{chatId:string;top:number;follow:boolean}|undefined
+let conversationScrollVersion=0,restoringConversation=false,messageJumpInProgress=false
+let messageReadingIntent=false,userMessageScroll=false,userMessageScrollPending=false
+watch(conversationIsVisible,(visible,wasVisible,onCleanup)=>{
+  if(!visible){cancelMessageJump();userMessageScroll=false;userMessageScrollPending=false}
+  const version=++conversationScrollVersion
+  if(!visible&&wasVisible&&msgBox.value&&activeId.value){
+    // A display:none layout may already report zero before an observer runs.
+    // Keep the last real reading position rather than saving that hidden zero.
+    parkedConversation=msgBox.value.checkVisibility()
+      ?{chatId:activeId.value,top:msgBox.value.scrollTop,follow:stickToBottom.value}
+      :conversationReading?.chatId===activeId.value?{...conversationReading}:undefined
+  }
+  if(!visible){restoringConversation=false;return}
+  const parked=parkedConversation
+  if(!parked||parked.chatId!==activeId.value)return
+  restoringConversation=true
+  let stale=false;onCleanup(()=>{stale=true;if(version===conversationScrollVersion)restoringConversation=false})
+  const restore=()=>{
+    if(stale||version!==conversationScrollVersion||!conversationIsVisible.value||!msgBox.value?.checkVisibility()||parked.chatId!==activeId.value)return
+    msgBox.value.scrollTop=parked.follow?msgBox.value.scrollHeight:parked.top
+    stickToBottom.value=parked.follow
+    messageReadingIntent=!parked.follow
+    showJumpBottom.value=!parked.follow&&msgBox.value.scrollHeight>msgBox.value.clientHeight+40
+    conversationReading={...parked,top:msgBox.value.scrollTop}
+    return true
+  }
+  void nextTick(()=>requestAnimationFrame(()=>{
+    if(!restore())return
+    requestAnimationFrame(()=>{if(!restore())return;parkedConversation=undefined;restoringConversation=false})
+  }))
+},{flush:'sync'})
 const allSidebarHidden = computed(() => sidebarPanels.value.every(panel => !sidebarVisible.value[panel.id]))
 watch(()=>sidebarVisible.value.chats,visible=>{if(!visible)exitChatBatchMode()})
-function toggleSidebarGroup(id:string){const force=settingsOpen.value||!!creatorKind.value||(id==='plugins'&&!pluginWorkspaceMode.value)||(id==='workspace'&&!fileManagerMode.value)||(id==='browser'&&!browserWorkspaceMode.value);if(sidebarAutoCollapsed.value){sidebarAutoCollapsed.value=false;sidebarAutoExpanded.value=true}settingsOpen.value=false;creatorKind.value=null;exitChatBatchMode();if(force){fileManagerMode.value=id==='workspace';pluginWorkspaceMode.value=id==='plugins';browserWorkspaceMode.value=id==='browser'}activateSidebar(id,!force)}
+async function toggleSidebarGroup(id:string){if(!await canLeaveSettings())return;const force=settingsOpen.value||!!creatorKind.value||(id==='plugins'&&!pluginWorkspaceMode.value)||(id==='workspace'&&!fileManagerMode.value)||(id==='browser'&&!browserWorkspaceMode.value);settingsOpen.value=false;creatorKind.value=null;exitChatBatchMode();if(force){fileManagerMode.value=id==='workspace';pluginWorkspaceMode.value=id==='plugins';browserWorkspaceMode.value=id==='browser'}activateSidebar(id,!force)}
 const docsOpen = ref(false)
 const mobileSidebarOpen = ref(false)
 const chatSearchOpen = ref(false)
@@ -2731,8 +2324,6 @@ const textFollowups = computed(() =>
 )
 const expandedTools = ref<Record<string, boolean>>({})
 const expandedLogs = ref<Record<string, boolean>>({})
-const expandedRuns = ref<Record<string, boolean>>({})
-const expandedReasoning = ref<Record<string, boolean>>({})
 const liveReasoningByChat = ref<
   Record<string, { content: string; status: 'live' | 'done'; round?: number }>
 >({})
@@ -2744,13 +2335,10 @@ const logOverflowById = ref<Record<string, boolean>>({})
 const logMeasureEls = new Map<string, HTMLElement>()
 const logResizeObservers = new Map<string, ResizeObserver>()
 
-const messageBlocks = computed(() => transcriptBlocks(active.value?.messages || [], {
-  collapseTools: collapseToolRuns.value,
-  collapseLogs: collapseRunLogs.value,
-  showLogs: showRunLogs.value,
-}))
+const messageBlocks = computed(() => conversationOutputBlocks(active.value?.messages || [],showRunLogs.value))
 const artifactChatId = computed(() => activeId.value || '')
 const {entries: artifactEntries} = useWorkspaceResources(artifactChatId)
+const replyFinalIds=computed(()=>new Set(finalOutputs(active.value?.messages||[]).map(message=>message.id)))
 const replyFilesById = computed(() => replyArtifactGroups(artifactEntries.value, active.value?.messages || []))
 
 const activeChatError = computed(() => {
@@ -2794,18 +2382,22 @@ function clearFollowups(chatId?: string) {
   if (chatId === activeId.value) followupSuggestions.value = []
 }
 
+let modelLoadSequence=0
 async function refreshAiProviders(cfg?: AppConfig | null) {
+  const sequence=++modelLoadSequence
+  modelLoading.value=true;modelLoadError.value=''
   try {
     const c = cfg ?? (await window.navora?.config.get())
-    if (!c?.ai) return
+    if (!c?.ai)throw Error('无法读取模型配置')
+    if(sequence!==modelLoadSequence)return
     aiProviders.value = (c.ai.providers || []).map((p) =>
       normalizeProvider({ ...p, models: [...(p.models || [])] }),
     )
     aiDefaultProviderId.value = c.ai.default_provider || c.ai.providers?.[0]?.id || ''
     await refreshProviderKeyFlags()
   } catch {
-    /* ignore */
-  }
+    if(sequence===modelLoadSequence)modelLoadError.value='无法读取模型配置，请重试。'
+  } finally {if(sequence===modelLoadSequence)modelLoading.value=false}
 }
 
 async function loadUiPrefs() {
@@ -2834,9 +2426,6 @@ function applyUiPrefs(cfg: AppConfig | null | undefined) {
   const max = Number(cfg.app?.max_composer_chars)
   maxComposerChars.value =
     Number.isFinite(max) && max >= 1000 ? Math.min(200000, Math.floor(max)) : 16000
-  if (draft.value.length > maxComposerChars.value) {
-    draft.value = draft.value.slice(0, maxComposerChars.value)
-  }
 }
 
 async function refreshProviderKeyFlags() {
@@ -2861,16 +2450,17 @@ async function refreshProviderKeyFlags() {
 
 const runningMessageMode = ref<'queue'|'insert'>('queue')
 const queueBusy=ref(false)
-async function changeQueue(action:'edit'|'remove'|'insert'|'resume',id='',content='') {
+async function changeQueue(action:'edit'|'remove'|'insert'|'resume',id='',content='',document?:ComposerDocument,baseRevision?:number) {
   const chatId=activeId.value,api=window.navora?.agent
   if(!chatId||!api||queueBusy.value)return
   queueBusy.value=true
   try{
-    const result=await (action==='edit'?api.queueEdit(chatId,id,content):action==='remove'?api.queueRemove(chatId,id):action==='insert'?api.queueInsert(chatId,id):api.queueResume(chatId))
+    const result=await (action==='edit'?api.queueEdit(chatId,id,content,{document,baseRevision}):action==='remove'?api.queueRemove(chatId,id):action==='insert'?api.queueInsert(chatId,id):api.queueResume(chatId))
     if(result&&active.value?.id===chatId)active.value={...active.value,queuedMessages:result.queuedMessages,queuePaused:result.queuePaused}
   }catch{showToast('队列操作失败，请重试','error')}finally{queueBusy.value=false}
 }
-const canSend = computed(() => Boolean(draft.value.trim() || contextRefs.value.length))
+const composerProblem=computed(()=>{const blocks=compileComposerDocument(composerDocument.value).contexts;const pending=blocks.find(item=>item.block.status==='loading');if(pending)return `正在准备“${pending.block.label}”，请稍候。`;const missing=blocks.find(item=>item.block.mode==='reference'&&(item.block.status==='missing'||item.block.status==='error'));return missing?`“${missing.block.label}”的来源不可用，请更换来源、移除引用或改用已有摘录。`:''})
+const canSend = computed(() => !modelSelectionBusy.value && !executionModeBusy.value && !modelLoading.value && !modelLoadError.value && !!chatModelKey.value && !modelSelectionInvalid.value && !draftUnsupported.value && !draftConflict.value && !composerProblem.value && Boolean(draft.value.trim() || contextRefs.value.length) && draft.value.length <= maxComposerChars.value)
 const draftLen = computed(() => draft.value.length)
 const draftNearLimit = computed(() => draftLen.value >= maxComposerChars.value * 0.9)
 const draftAtLimit = computed(() => draftLen.value >= maxComposerChars.value)
@@ -2943,14 +2533,15 @@ const chatModelName = computed(() => {
 })
 
 const chatModelSettings = computed(() => modelCapabilities(aiProviders.value.find(p => p.id === chatProviderId.value), chatModelName.value))
-const chatModelLabel = computed(() => chatModelSettings.value.label || chatModelName.value || '模型')
+const modelSelectionInvalid=computed(()=>!!active.value?.providerId&&!aiProviders.value.some(provider=>provider.id===active.value?.providerId))
+const chatModelLabel = computed(() => modelSelectionInvalid.value?'模型不可用':chatModelSettings.value.label || chatModelName.value || '选择模型')
 const reasoningLevels = computed(() => chatModelSettings.value.reasoning.enabled ? chatModelSettings.value.reasoning.levels : [])
 const selectedReasoningLevel = computed(() => {
   const selected = active.value?.reasoningLevel
   return reasoningLevels.value.some(l => l.id === selected) ? selected! : chatModelSettings.value.reasoning.default
 })
 async function applyReasoningLevel(level: string) {
-  if (!window.navora || !activeId.value || agentRunning.value || modelSelectionBusy.value) return
+  if (!window.navora || !activeId.value || agentRunning.value || sending.value || modelSelectionBusy.value || executionModeBusy.value) return
   modelSelectionBusy.value=true
   const chatId=activeId.value
   try{
@@ -2975,6 +2566,7 @@ const modelMenuOptions = computed(() => {
     label: string
     providerLabel: string
     hasKey: boolean
+    capabilities:string
   }[] = []
   for (const raw of aiProviders.value) {
     const p = normalizeProvider({ ...raw, models: [...(raw.models || [])] })
@@ -2987,6 +2579,7 @@ const modelMenuOptions = computed(() => {
         label: modelCapabilities(p,m).label,
         providerLabel: p.label || p.id,
         hasKey: providerKeyOk.value[p.id] === true,
+        capabilities:`${formatUsageCount(modelCapabilities(p,m).context_window)} 上下文${modelCapabilities(p,m).input_types.includes('image')?' · 图片':''}${modelCapabilities(p,m).reasoning.enabled?' · 思考':''}`,
       })
     }
   }
@@ -2995,16 +2588,21 @@ const modelMenuOptions = computed(() => {
 
 const filteredModelOptions = computed(()=>modelMenuOptions.value.filter(option=>!modelQuery.value.trim()||(option.label+' '+option.model+' '+option.providerLabel).toLocaleLowerCase().includes(modelQuery.value.trim().toLocaleLowerCase())))
 
-const usageTokensEst = computed(() => {
-  const messages = active.value?.messages || []
-  let estimate = 0
-  for (const message of messages) {
-    const content = message.content || ''
-    const cjkChars = content.match(/[\u3400-\u9fff\uf900-\ufaff]/g)?.length || 0
-    estimate += cjkChars + (content.length - cjkChars) / 4
-  }
-  return Math.ceil(estimate)
-})
+const modelOptionGroups=computed(()=>aiProviders.value.map(provider=>({id:provider.id,label:provider.label||provider.id,options:filteredModelOptions.value.filter(option=>option.providerId===provider.id)})).filter(group=>group.options.length))
+function modelPanelKey(event:KeyboardEvent){if(event.isComposing||!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;const panel=event.currentTarget as HTMLElement,items=[...panel.querySelectorAll<HTMLButtonElement>('.model-panel-options button[role=radio]:not(:disabled)')];if(!items.length)return;event.preventDefault();const at=items.indexOf(document.activeElement as HTMLButtonElement),next=event.key==='Home'?0:event.key==='End'?items.length-1:(at+(event.key==='ArrowDown'?1:-1)+items.length)%items.length;items[next]?.focus({preventScroll:true});items[next]?.scrollIntoView({block:'nearest'})}
+const usageHistoryEst=computed(()=>estimateContextText((active.value?.messages||[]).filter(message=>message.role!=='log').map(message=>message.content||'').join('\n')))
+const usageDraftEst=computed(()=>estimateContextText(draft.value))
+const usageTokensEst=computed(()=>usageHistoryEst.value+usageDraftEst.value)
+const actualUsageMessage=computed(()=>[...(active.value?.messages||[])].reverse().find(message=>message.role==='assistant'&&!message.meta?.partial&&message.meta?.phase!=='progress'))
+const actualUsage=computed(()=>normalizeModelUsage(actualUsageMessage.value?.meta?.usage))
+const actualUsageModel=computed(()=>String((actualUsageMessage.value?.meta?.usageModel as {model?:string}|undefined)?.model||''))
+const nativeComposerState=computed<ComposerNativePanelState>(()=>({
+  modelOptions:modelMenuOptions.value,modelKey:chatModelKey.value,modelQuery:modelQuery.value,modelLoading:modelLoading.value,modelError:modelLoadError.value,modelInvalid:modelSelectionInvalid.value,modelBusy:modelSelectionBusy.value||executionModeBusy.value||modelLoading.value||sending.value||agentRunning.value,
+  reasoningLevels:reasoningLevels.value.map(level=>({id:level.id,label:reasoningLabel(level.id)})),reasoningLevel:selectedReasoningLevel.value,
+  modes:executionModes.map(mode=>({id:mode.id,label:mode.label,description:mode.hint,icon:mode.icon})),mode:active.value?.executionMode||'auto',modeBusy:agentRunning.value||sending.value||executionModeBusy.value||modelSelectionBusy.value,
+  permissionOptions:permPresetOptions.map(option=>({id:option.value,label:option.title,description:option.desc,icon:option.icon})),permission:chatPermissions.value.preset,
+  usage:{estimated:usageTokensEst.value,history:usageHistoryEst.value,draft:usageDraftEst.value,window:chatModelSettings.value.context_window,maxOutput:chatModelSettings.value.max_output_tokens,actual:actualUsage.value,actualModel:actualUsageModel.value},
+}))
 const usageRatio = computed(() => usageTokensEst.value / Math.max(1, chatModelSettings.value.context_window))
 const usagePctLabel = computed(() => `${Math.round(usageRatio.value * 100)}%`)
 function formatUsageCount(value: number): string {
@@ -3037,14 +2635,15 @@ async function refreshSettingsPermissions() {
 
 async function applyChatPreset(preset: PermissionPreset) {
   if (!window.navora || !activeId.value) return
+  const chatId=activeId.value
   const modes =
     preset === 'custom'
       ? { ...chatPermissions.value.modes }
       : modesForPreset(preset)
   try {
-    const chat = await window.navora.chats.setPermissions(activeId.value, { preset, modes })
+    const chat = await window.navora.chats.setPermissions(chatId, { preset, modes })
     if (chat) {
-      active.value = chat
+      if(activeId.value===chatId)active.value = chat
       const idx = chats.value.findIndex((c) => c.id === chat.id)
       if (idx >= 0) {
         const next = chats.value.slice()
@@ -3061,7 +2660,7 @@ async function applyChatPreset(preset: PermissionPreset) {
 }
 
 async function applyChatModel(providerId: string, model: string) {
-  if (!window.navora || !activeId.value || agentRunning.value || modelSelectionBusy.value) return
+  if (!window.navora || !activeId.value || agentRunning.value || sending.value || modelSelectionBusy.value || executionModeBusy.value) return
   modelSelectionBusy.value=true
   const chatId=activeId.value
   try {
@@ -3083,6 +2682,7 @@ async function applyChatModel(providerId: string, model: string) {
   }
 }
 
+const workspaceConversationStatus=computed(()=>visiblePermRequests.value.length||activePendingAsk.value?`待处理 ${visiblePermRequests.value.length+(activePendingAsk.value?1:0)}`:agentRunning.value?phaseLabel.value:'')
 const phaseLabel = computed(() => {
   if (!agentRunning.value) return ''
   switch (phase.value) {
@@ -3131,17 +2731,6 @@ function toggleLiveReasoning() {
   liveReasoningForced.value = {
     ...liveReasoningForced.value,
     [id]: !liveReasoningOpen.value,
-  }
-}
-
-function isReasoningExpanded(id: string): boolean {
-  return expandedReasoning.value[id] === true
-}
-
-function toggleReasoning(id: string) {
-  expandedReasoning.value = {
-    ...expandedReasoning.value,
-    [id]: !expandedReasoning.value[id],
   }
 }
 
@@ -3487,16 +3076,6 @@ function toolHeadTitle(m: ChatMessage): string {
   return friendly
 }
 
-/** Show tool id only when it adds info beyond the friendly title. */
-function toolHeadRaw(m: ChatMessage): string {
-  const raw = String(m.meta?.toolName || '').trim()
-  if (!raw) return ''
-  if (raw === 'shell_exec' && toolHeadTitle(m)) return ''
-  const title = toolHeadTitle(m)
-  if (title && title === raw) return ''
-  return raw
-}
-
 /** e.g. `dir /b` from shell_exec args. */
 function shellExecHeadline(m: ChatMessage): string {
   const args = m.meta?.args
@@ -3510,24 +3089,9 @@ function shellExecHeadline(m: ChatMessage): string {
   return line.length > 72 ? `${line.slice(0, 70)}…` : line
 }
 
-function formatJson(v: unknown) {
-  try {
-    return JSON.stringify(v, null, 2)
-  } catch {
-    return String(v)
-  }
-}
-
-function toolStatusClass(m: ChatMessage) {
-  if (m.role !== 'tool') return ''
-  return `tool-${effectiveToolStatus(m)}`
-}
-
 function effectiveToolStatus(m: ChatMessage): string {
-  const status = String(m.meta?.status || 'done')
-  // While Agent is stopping, keep unfinished tools as aborted — never fake them as
-  // done/error, or the collapsed run title picks up the wrong tone.
-  if (status === 'running' && !agentRunning.value) return 'aborted'
+  const status = String(m.meta?.status || 'unconfirmed')
+  if (status === 'running' && !agentRunning.value) return 'unconfirmed'
   return status
 }
 
@@ -3546,10 +3110,9 @@ function clearLocalLoadingMarkers(chatId: string) {
       changed = true
     }
     if (m.role === 'tool' && meta?.status === 'running') {
-      // Prefer aborted for leftover running tools when the run ends (esp. user stop).
-      // Successful runs normally finish tools as done before status flips.
-      meta = { ...meta, status: 'aborted' }
-      if (content === '执行中…' || !String(content || '').trim()) content = '用户终止'
+      // The terminal event does not prove why an unfinished call ended.
+      meta = { ...meta, status: 'unconfirmed' }
+      if (content === '执行中…' || !String(content || '').trim()) content = '执行已结束，结果待确认'
       changed = true
     }
     if (meta === m.meta && content === m.content) return m
@@ -3558,21 +3121,8 @@ function clearLocalLoadingMarkers(chatId: string) {
   if (changed) active.value = { ...active.value, messages: next }
 }
 
-function toggleTool(id: string) {
-  expandedTools.value = { ...expandedTools.value, [id]: !expandedTools.value[id] }
-}
-
-function isRunExpanded(key: string): boolean {
-  return expandedRuns.value[key] === true
-}
-
-function toggleRun(key: string) {
-  expandedRuns.value = { ...expandedRuns.value, [key]: !expandedRuns.value[key] }
-}
-
-function runGroupTools(items: ChatMessage[]): ChatMessage[] {
-  return items.filter((m) => m.role === 'tool')
-}
+function isActivityExpanded(id:string){return expandedTools.value[id]??!collapseToolRuns.value}
+function toggleTool(id: string) {expandedTools.value = { ...expandedTools.value, [id]: !isActivityExpanded(id) }}
 
 function isErrorRunLog(m: ChatMessage): boolean {
   return m.role === 'log' && logKindFromMeta(m.meta?.kind) === 'error'
@@ -3615,40 +3165,8 @@ function lastUserTurnFailed(messages: ChatMessage[] | undefined | null): {
   }
 }
 
-function runGroupLive(items: ChatMessage[]): boolean {
-  if (!agentRunning.value || !items.length) return false
-  const latestRunId = active.value?.messages.at(-1)?.meta?.runId
-  if (latestRunId) return items.some(message => message.meta?.runId === latestRunId)
-  const blocks = messageBlocks.value
-  for (let index = blocks.length - 1; index >= 0; index--) {
-    const block = blocks[index]!
-    if (block.type === 'chat' && (block.message.role === 'user' || block.message.role === 'system')) return false
-    if (block.type === 'run') return block.key === `run:${items[0]!.id}`
-  }
-  return false
-}
-
 function isStopRunLog(m: ChatMessage): boolean {
   return m.role === 'log' && String(m.meta?.kind || '') === 'agent_stop'
-}
-
-function runGroupWasAborted(items: ChatMessage[]): boolean {
-  if (items.some((m) => isStopRunLog(m))) return true
-  return runGroupTools(items).some((m) => effectiveToolStatus(m) === 'aborted')
-}
-
-function runGroupHasError(items: ChatMessage[]): boolean {
-  if (runGroupTools(items).some((m) => effectiveToolStatus(m) === 'error')) return true
-  return items.some((m) => isErrorRunLog(m))
-}
-
-function runGroupSummary(items: ChatMessage[]): string {
-  const running = items.find(message => message.role === 'tool' && effectiveToolStatus(message) === 'running')
-  return executionSummary(items, {
-    live: runGroupLive(items),
-    runningLabel: running ? friendlyToolName(String(running.meta?.toolName || 'tool')) : undefined,
-    status: effectiveToolStatus,
-  })
 }
 
 function toggleLog(id: string) {
@@ -3980,24 +3498,18 @@ function isSpawnSubchatDeleted(m: ChatMessage): boolean {
   return !chats.value.some((c) => c.id === id)
 }
 
-function spawnStatusOf(m: ChatMessage): string {
-  if (isSpawnSubchatDeleted(m)) return 'deleted'
+function spawnStatusOf(m: ChatMessage): import('@shared/types').SubChatRunStatus|undefined {
+  if (isSpawnSubchatDeleted(m)) return undefined
+  const current=chats.value.find(chat=>chat.id===spawnSubChatId(m))
+  if(current?.subchatRun?.status)return current.subchatRun.status
   const fromMeta = String(m.meta?.spawnStatus || '').trim()
-  if (fromMeta) return fromMeta
+  if (['running','done','failed','cancelled','interrupted'].includes(fromMeta)) return fromMeta as import('@shared/types').SubChatRunStatus
   const result = m.meta?.result
   if (result && typeof result === 'object' && 'status' in result) {
-    return String((result as { status?: string }).status || '').trim() || 'running'
+    const status=String((result as { status?: string }).status || '').trim()
+    return ['running','done','failed','cancelled','interrupted'].includes(status)?status as import('@shared/types').SubChatRunStatus:'running'
   }
   return 'running'
-}
-
-function spawnStatusLabel(m: ChatMessage): string {
-  const s = spawnStatusOf(m)
-  if (s === 'deleted') return '已删除'
-  if (s === 'done') return '已完成'
-  if (s === 'failed') return '失败'
-  if (s === 'cancelled') return '已取消'
-  return '运行中'
 }
 
 function spawnGoalOf(m: ChatMessage): string {
@@ -4011,13 +3523,8 @@ function spawnGoalOf(m: ChatMessage): string {
 }
 
 function spawnGoalLabel(m: ChatMessage): string {
-  return spawnGoalOf(m) || '子对话'
-}
-
-async function openSubchatFromTool(m: ChatMessage) {
-  const id = spawnSubChatId(m)
-  if (!id || isSpawnSubchatDeleted(m)) return
-  await selectChat(id)
+  const child=chats.value.find(chat=>chat.id===spawnSubChatId(m))
+  return child?displaySubchatTitle(child):spawnGoalOf(m) || '子对话'
 }
 
 const chatStatusById = computed(() => {
@@ -4052,7 +3559,7 @@ function onChatStatusClick(chatId: string) {
   if (st.tone === 'key' || st.tone === 'error' || st.tone === 'stopped') {
     showToast(st.title, st.tone === 'key' ? 'warning' : st.tone === 'stopped' ? 'info' : 'error')
     if (st.tone === 'key' || st.title.includes('API Key') || st.title.includes('设置')) {
-      settingsOpen.value = true
+      void openSettings('model')
     }
   }
 }
@@ -4243,28 +3750,69 @@ function formatRelative(ts: number) {
   }
 }
 
+function resumeMessageFollow(){
+  messageReadingIntent=false;userMessageScroll=false;userMessageScrollPending=false;stickToBottom.value=true
+}
+function onMessagesScrollInput(event:Event){
+  const box=msgBox.value
+  if(!box)return
+  if(event instanceof KeyboardEvent){
+    if(!['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key))return
+    if((event.target as HTMLElement)?.closest('input,textarea,select,[contenteditable="true"]'))return
+  }else if(event instanceof PointerEvent){
+    // A press in the native scrollbar starts a real scroll gesture. Clicking a
+    // message or a control must not turn a later layout event into user input.
+    const bounds=box.getBoundingClientRect(),x=event.clientX-bounds.left
+    if(event.target!==box||x>=box.clientLeft&&x<box.clientLeft+box.clientWidth)return
+  }else if(event instanceof WheelEvent&&!event.deltaX&&!event.deltaY)return
+  userMessageScroll=true;userMessageScrollPending=true
+  cancelMessageJump()
+}
+function onMessagesScrollEnd(){
+  if(userMessageScroll){
+    const box=msgBox.value
+    // A new key/wheel gesture can arrive before the previous smooth scroll's
+    // queued scrollend. That old end must not discard the new input intent.
+    if(userMessageScrollPending&&box&&box.scrollHeight-box.clientHeight-box.scrollTop>=80)return
+    onMessagesScroll()
+  }
+  userMessageScroll=false;userMessageScrollPending=false
+}
 function onMessagesScroll() {
+  if(!conversationIsVisible.value||restoringConversation||messageJumpInProgress)return
   const el = msgBox.value
-  if (!el) return
+  if (!el?.checkVisibility()) return
   const dist = el.scrollHeight - el.scrollTop - el.clientHeight
-  stickToBottom.value = dist < 80
+  // Scroll events also arrive after native navigation and scroll anchoring.
+  // Only a real scrolling gesture can resume following an explicit read.
+  if(userMessageScroll){userMessageScrollPending=false;messageReadingIntent=dist>=80;stickToBottom.value=dist<80}
+  else if(!messageReadingIntent)stickToBottom.value=dist<80
   showJumpBottom.value = !stickToBottom.value && el.scrollHeight > el.clientHeight + 40
+  if(activeId.value)conversationReading={chatId:activeId.value,top:el.scrollTop,follow:stickToBottom.value}
 }
 
 async function scrollMessages(force = false) {
+  if(!conversationIsVisible.value||restoringConversation||messageJumpInProgress||messageReadingIntent)return
+  const version=conversationScrollVersion,chatId=activeId.value
+  if(conversationFind.value?.opened){showJumpBottom.value=true;return}
   await nextTick()
-  if (!msgBox.value) return
+  if (!msgBox.value?.checkVisibility()||!conversationIsVisible.value||restoringConversation||messageJumpInProgress||messageReadingIntent||version!==conversationScrollVersion||chatId!==activeId.value) return
   if (!force && !stickToBottom.value) {
     showJumpBottom.value = true
     return
   }
+  const last=msgBox.value.lastElementChild
+  if(last instanceof HTMLElement)positionMessageInScroller(last,msgBox.value,'end')
   msgBox.value.scrollTop = msgBox.value.scrollHeight
-  stickToBottom.value = true
+  resumeMessageFollow()
   showJumpBottom.value = false
+  if(chatId)conversationReading={chatId,top:msgBox.value.scrollTop,follow:true}
 }
 
 function jumpToBottom() {
-  stickToBottom.value = true
+  cancelMessageJump()
+  conversationFind.value?.close()
+  resumeMessageFollow()
   void scrollMessages(true)
 }
 
@@ -4284,70 +3832,149 @@ function focusComposer() {
   })
 }
 
-function clampDraftText(text: string): string {
-  const max = maxComposerChars.value
-  if (text.length <= max) return text
-  return text.slice(0, max)
-}
+function clampDraftText(text:string):string{return text}
+function applyDraftLocally(text:string,touchedAt:number,document?:ComposerDocument){draftState.applyText(text,touchedAt,document)}
+function scheduleDraftSave(){draftState.schedule()}
+async function flushDraftSave(chatId?:string|null){await draftState.flush(chatId??activeId.value)}
 
-function applyDraftLocally(text: string, touchedAt: number) {
-  applyingRemoteDraft = true
-  draft.value = clampDraftText(text)
-  draftTouchedAt.value = touchedAt
-  void nextTick(() => {
-    applyingRemoteDraft = false
-  })
-}
-
-async function persistDraftNow(chatId: string | null | undefined, text: string, touchedAt: number) {
-  if (!window.navora?.chats.setDraft || !chatId) return
-  const body = clampDraftText(text)
-  try {
-    await window.navora.chats.setDraft(chatId, body, {
-      updatedAt: touchedAt,
-      maxChars: maxComposerChars.value,
-    })
-  } catch (e) {
-    console.warn('[draft] save failed', e)
-  }
-}
-
-function scheduleDraftSave() {
-  if (applyingRemoteDraft) return
-  const chatId = activeId.value
-  if (!chatId) return
-  draftTouchedAt.value = Date.now()
-  if (draft.value.length > maxComposerChars.value) {
-    draft.value = draft.value.slice(0, maxComposerChars.value)
-  }
-  clearTimeout(draftSaveTimer)
-  draftSaveTimer = setTimeout(() => {
-    const id = activeId.value
-    if (!id) return
-    draftSaveInflight = persistDraftNow(id, draft.value, draftTouchedAt.value).finally(() => {
-      draftSaveInflight = null
-    })
-  }, 350)
-}
-
-async function flushDraftSave(chatId?: string | null) {
-  clearTimeout(draftSaveTimer)
-  if (draftSaveInflight) {
-    try {
-      await draftSaveInflight
-    } catch {
-      /* ignore */
-    }
-  }
-  const id = chatId ?? activeId.value
-  if (!id || applyingRemoteDraft) return
-  await persistDraftNow(id, draft.value, draftTouchedAt.value || Date.now())
-}
-
-watch(draft, () => {
-  if (applyingRemoteDraft) return
-  scheduleDraftSave()
+const sourcePicker=ref<InstanceType<typeof ComposerSourcePicker>|null>(null)
+const contextPreviews=ref<Record<string,string>>({})
+let previewGeneration=0
+let previewSourceKeys=new Map<string,string>()
+watch(()=>[activeId.value,composerDocument.value.id,compileComposerDocument(composerDocument.value).contexts.filter(item=>item.block.source.kind==='image').map(item=>`${item.block.id}:${item.block.source.path}:${item.block.version}`).join('|')],async()=>{
+  const request=++previewGeneration,chatId=activeId.value,documentId=composerDocument.value.id
+  if(!chatId)return
+  const blocks=compileComposerDocument(composerDocument.value).contexts.filter(item=>item.block.source.kind==='image'&&item.block.source.path).slice(0,8)
+  const keys=new Map(blocks.map(item=>[item.block.id,`${chatId}:${item.block.source.path}:${item.block.version}`]))
+  contextPreviews.value=Object.fromEntries(Object.entries(contextPreviews.value).filter(([id])=>keys.has(id)&&keys.get(id)===previewSourceKeys.get(id)));previewSourceKeys=keys
+  await Promise.allSettled(blocks.filter(item=>!contextPreviews.value[item.block.id]).map(async item=>{
+    const result=await window.navora?.workspace.preview(chatId,item.block.source.path!)
+    if(request!==previewGeneration||activeId.value!==chatId||composerDocument.value.id!==documentId||!result?.ok||!result.base64||!/^image\/(png|jpeg|webp|gif)$/.test(result.mime||''))return
+    contextPreviews.value={...contextPreviews.value,[item.block.id]:`data:${result.mime};base64,${result.base64}`}
+  }))
 })
+let sourceSelection:{chatId:string;documentId:string;bookmark:ComposerSelectionBookmark|null}|null=null
+function captureComposerSelection(){sourceSelection={chatId:activeId.value||'',documentId:composerDocument.value.id,bookmark:draftField.value?.saveSelection()||null}}
+async function openContextPicker(source='file',files?:File[],replacement?:ComposerContextBlock){
+  if(!activeId.value)return
+  if(!sourceSelection||sourceSelection.chatId!==activeId.value||sourceSelection.documentId!==composerDocument.value.id)captureComposerSelection()
+  await sourcePicker.value?.show(source,replacement,files)
+}
+function openAttachmentMenu(){captureComposerSelection();const anchor=document.querySelector<HTMLElement>('.composer-box');if(anchor)attachmentMenu.value?.show(anchor)}
+function onAttachRequest(request?:{source?:string;files?:File[]}){captureComposerSelection();if(request?.source||request?.files?.length)void openContextPicker(request?.source||'file',request?.files);else openAttachmentMenu()}
+function selectAttachmentSource(source:string){draftField.value?.consumeAttachmentTrigger();captureComposerSelection();void openContextPicker(source)}
+function createFromAttachment(kind:CreatorKind){draftField.value?.consumeAttachmentTrigger();captureComposerSelection();openCreator(kind)}
+function attachmentClosed(committed:boolean){if(!committed){draftField.value?.cancelAttachmentTrigger();closeContextPicker()}}
+watch([activeId,()=>composerDocument.value.id],()=>attachmentMenu.value?.hide(false))
+function closeContextPicker(){const selection=sourceSelection;sourceSelection=null;if(selection?.chatId===activeId.value&&selection.documentId===composerDocument.value.id&&selection.bookmark)draftField.value?.restoreSelection(selection.bookmark)}
+function insertContextSources(items:ComposerSourceInsert[],replacementId?:string){
+  const selection=sourceSelection;sourceSelection=null
+  if(!selection||selection.chatId!==activeId.value||selection.documentId!==composerDocument.value.id){showToast('对话或草稿已切换，请重新选择插入位置。','warning');return}
+  const editor=draftField.value;if(!editor)return
+  if(!replacementId&&selection.bookmark&&!editor.restoreSelection(selection.bookmark)){showToast('原插入位置已变化，请重新选择位置。','warning');return}
+  for(const item of items){
+    const applied=replacementId?editor.updateContext(replacementId,{block:item.block,text:item.text||''}):editor.insertContext(item.block,item.text)
+    if(!applied){showToast('来源块已变化，请重新选择。','warning');continue}
+    const previews={...contextPreviews.value};delete previews[item.block.id];if(item.preview)previews[item.block.id]=item.preview;contextPreviews.value=previews
+  }
+  scheduleDraftSave();focusComposer()
+}
+async function openComposerSource(block:ComposerContextBlock){
+  const source=block.source,chatId=source.chatId||activeId.value
+  if(!chatId)return
+  if(source.kind==='file'||source.kind==='image'){if(source.path)openFilePreview(source.path,chatId)}
+  else if(source.kind==='message'&&source.messageId)await locateResourceMessage({chatId,messageId:source.messageId})
+  else if(source.kind==='annotation')await window.navora?.browser.workspace.presentAnnotation(chatId,source.identity).catch(()=>showToast('标注来源已不可用。','warning'))
+  else if(source.kind==='page'){
+    try{await window.navora?.browser.workspace.command(source.browserRef?.windowId||source.identity,'focus')}catch{showToast('页面已关闭，请更换来源或使用保留的摘录。','warning')}
+  }else if(source.kind==='url'&&source.url)await window.navora?.app.openExternal(source.url)
+  else if(source.kind==='session')showResources('browser')
+}
+function sourceTab(block:ComposerContextBlock){if(block.source.identity.startsWith('skill:'))return 'skill';if(block.source.identity.startsWith('plugin:'))return 'plugin';return block.source.kind==='image'?'file':block.source.kind==='page'?'page':block.source.kind==='message'?'message':block.source.kind==='annotation'?'annotation':block.source.kind==='session'?'session':block.source.kind==='url'?'url':block.source.kind==='text'?'text':'file'}
+function changeComposerSource(block:ComposerContextBlock){captureComposerSelection();void openContextPicker(sourceTab(block),undefined,block)}
+function refreshComposerSource(block:ComposerContextBlock){showToast('重新选择来源并确认后才替换当前摘录，取消会保留编辑内容。','primary');changeComposerSource(block)}
+function markBrowserSources(windowIds:Set<string>,sessionIds:Set<string>){
+  let changed=false
+  const map=(nodes:ComposerDocument['content']):ComposerDocument['content']=>nodes.map(node=>{
+    if(node.type==='contextBlock'||node.type==='contextInline'){
+      const block=node.attrs?.block as ComposerContextBlock|undefined,ref=block?.source.browserRef
+      if(block&&ref){const valid=ref.kind==='session'?sessionIds.has(ref.sessionId):!!ref.windowId&&windowIds.has(ref.windowId),status=valid?block.status||'ready':block.mode==='excerpt'?'stale':'missing';if(block.status!==status){changed=true;return {...node,attrs:{...node.attrs,block:{...block,status}}}}}
+    }
+    return node.content?{...node,content:map(node.content)}:node
+  })
+  const content=map(composerDocument.value.content)
+  if(changed)draftState.edited({...composerDocument.value,content,updatedAt:Date.now()})
+}
+async function recoverComposerDocument(document:ComposerDocument){
+  if(document.chatId!==activeId.value){showToast('这份草稿属于其他对话，请切回原对话恢复。','warning');return false}
+  const merged=mergeComposerDocuments(composerDocument.value,document)
+  applyDraftLocally('',Date.now(),merged);scheduleDraftSave();focusComposer();return true
+}
+
+const applicationEdit=useApplicationEditTarget({nativePage:()=>activeFileTab.value?.kind==='browser'&&(fileWorkspaceVisible.value||browserWorkspaceActive.value)?activeFileTab.value.pageId:undefined,preview:()=>msgBox.value})
+type ApplicationTarget={kind:'composer';editor:ComposerEditorHandle;bookmark:ComposerSelectionBookmark|null}|{kind:'standard';bookmark:ReturnType<typeof applicationEdit.capture>}|{kind:'none'}
+const appMenu=ref<InstanceType<typeof ApplicationMenuBar>|null>(null),applicationFilePicker=ref(false),applicationVersion=ref(''),applicationTarget=ref<ApplicationTarget>({kind:'none'}),recentClosedCount=ref(0)
+function captureApplicationTarget(nativePageId?:string):ApplicationTarget{
+  const selection=window.getSelection(),anchor=selection?.anchorNode?.parentElement,focused=document.activeElement
+  const editor=!nativePageId&&((focused instanceof Element&&focused.closest('[data-composer-editor]'))||(!selection?.isCollapsed&&anchor?.closest('[data-composer-editor]')))?captureActiveComposerEditor():null
+  if(editor)return applicationTarget.value={kind:'composer',editor,bookmark:editor.saveSelection()}
+  return applicationTarget.value={kind:'standard',bookmark:applicationEdit.capture(nativePageId)}
+}
+function restoreApplicationTarget(value:unknown){
+  const target=value as ApplicationTarget|undefined
+  if(target?.kind==='composer')return target.editor.restoreSelection(target.bookmark||undefined)
+  if(target?.kind==='standard')return applicationEdit.restore(target.bookmark)
+  return false
+}
+function refreshApplicationTarget(nativePageId?:string){
+  captureApplicationTarget(nativePageId)
+  const id=activeId.value
+  if(id&&!isWebRemote())void window.navora?.browser.workspace.tabState(id).then(state=>{if(activeId.value===id)recentClosedCount.value=state.recentlyClosed.length}).catch(()=>{recentClosedCount.value=0})
+}
+const applicationCommandState=computed<AppCommandStateMap>(()=>{
+  const hasChat=!!activeId.value,reason=hasChat?undefined:'请先选择对话',target=applicationTarget.value,editor=target.kind==='composer'?target.editor.getCommandState():null,standard=target.kind==='standard'?applicationEdit.state.value:null
+  // Touch the active document so the next menu opening sees its latest command state.
+  void composerDocument.value
+  const scoped=(enabled:boolean,label?:string,checked?:boolean)=>({enabled:hasChat&&enabled,label,checked,reason:!hasChat?reason:!enabled?'当前内容不可用':undefined})
+  return {
+    'conversation.new':true,'browser.new':scoped(!isWebRemote()),'browser.reopen':scoped(!isWebRemote()&&recentClosedCount.value>0),'conversation.openFile':scoped(true),'conversation.openFolder':scoped(true),'conversation.export':scoped(!exportingChat.value),'content.close':scoped(!!activeFileTab.value&&(fileWorkspaceVisible.value||browserWorkspaceActive.value)),
+    'app.settings':true,'help.about':true,'app.quit':{enabled:!isWebRemote(),visible:!isWebRemote()},
+    'edit.undo':{enabled:editor?.undo??standard?.undo??false,reason:'当前目标没有可撤销的编辑'},'edit.redo':{enabled:editor?.redo??standard?.redo??false,reason:'当前目标没有可重做的编辑'},'edit.cut':editor?.cut??standard?.cut??false,'edit.copy':editor?.copy??standard?.copy??false,'edit.paste':editor?.paste??standard?.paste??false,'edit.pastePlain':editor?.['paste-plain']??standard?.pastePlain??false,'edit.delete':editor?.delete??standard?.delete??false,'edit.selectAll':editor?.['select-all']??standard?.selectAll??false,
+    'editor.link':{enabled:editor?.link||false,label:'添加／编辑链接…',reason:'请在消息编辑器中选择一段文字或定位到链接'},'editor.unlink':editor?.unlink||false,'editor.attach':scoped(!!editor?.attach),'conversation.search':true,'conversation.find':scoped(true),
+    'view.sidebar':{enabled:!settingsOpen.value&&!creatorKind.value,label:'显示侧栏',checked:!allSidebarHidden.value},'view.sidebarPinned':{enabled:!isMobileLayout.value&&!settingsOpen.value&&!creatorKind.value,checked:sidebarPresentationMode.value==='fixed',reason:'请先返回工作区，桌面侧栏支持固定或悬浮'},'view.workspace':scoped(true,fileWorkspaceVisible.value?'隐藏工作区':'显示工作区',fileWorkspaceVisible.value),'view.workspaceExpand':scoped(fileWorkspaceVisible.value,browserExpanded.value?'恢复分栏':'展开工作区',browserExpanded.value),'view.summary':scoped(true,resourceOpen.value?'隐藏对话摘要':'显示对话摘要',resourceOpen.value),'editor.focus':scoped(true),'help.docs':true,
+  }
+})
+const appEditCommands:Partial<Record<AppCommandId,ComposerEditorCommand>>={'edit.undo':'undo','edit.redo':'redo','edit.cut':'cut','edit.copy':'copy','edit.paste':'paste','edit.pastePlain':'paste-plain','edit.delete':'delete','edit.selectAll':'select-all','editor.link':'link','editor.unlink':'unlink','editor.attach':'attach'}
+async function executeApplicationCommand(id:AppCommandId,context?:AppCommandContext){
+  const edit=appEditCommands[id],target=(context?.target as ApplicationTarget|undefined)||applicationTarget.value
+  try{
+    if(edit){
+      restoreApplicationTarget(target)
+      if(target.kind==='composer'){await target.editor.executeCommand(edit);return}
+      if(target.kind==='standard'){const command=edit==='paste-plain'?'pastePlain':edit==='select-all'?'selectAll':edit;if(['undo','redo','cut','copy','paste','pastePlain','delete','selectAll'].includes(command))await applicationEdit.execute(command as 'undo'|'redo'|'cut'|'copy'|'paste'|'pastePlain'|'delete'|'selectAll',target.bookmark)}
+      return
+    }
+    if(id==='conversation.new')await createChat()
+    else if(id==='browser.new'){settingsOpen.value=false;creatorKind.value=null;activateSidebar('chats',false);await openBrowserTab()}
+    else if(id==='browser.reopen'&&activeId.value)await window.navora?.browser.workspace.tabAction({chatId:activeId.value,action:'reopen'})
+    else if(id==='conversation.openFile')applicationFilePicker.value=true
+    else if(id==='conversation.openFolder'&&activeId.value){const result=await window.navora?.workspace.open(activeId.value,'.');if(!result?.ok)throw Error(result?.error||'无法打开对话文件夹')}
+    else if(id==='conversation.export')await exportActiveChat()
+    else if(id==='content.close'&&activeFileTab.value)await closeFileTab(activeFileTab.value.key)
+    else if(id==='app.settings')await openSettings(undefined,{target})
+    else if(id==='help.about')await openSettings('about',{target})
+    else if(id==='app.quit')onMoreQuit()
+    else if(id==='conversation.search')openChatSearch()
+    else if(id==='conversation.find')openConversationFind()
+    else if(id==='view.sidebar')await toggleSidebarVisibility()
+    else if(id==='view.sidebarPinned'){if(!settingsOpen.value&&!creatorKind.value)toggleSidebarPin()}
+    else if(id==='view.workspace')toggleRightSidebar()
+    else if(id==='view.workspaceExpand')toggleBrowserExpand()
+    else if(id==='view.summary')toggleResources()
+    else if(id==='editor.focus'){settingsOpen.value=false;creatorKind.value=null;activateSidebar('chats',false);focusComposer()}
+    else if(id==='help.docs')onMoreDocs()
+  }catch(error){showToast(error instanceof Error?error.message:'操作未完成，请重试。','warning')}
+}
 
 async function useSuggestion(s: string | FollowupSuggestion) {
   const chatId = activeId.value
@@ -4413,202 +4040,19 @@ function onMessagesClick(e: MouseEvent) {
   void window.navora?.app.openExternal(href)
 }
 
-async function insertComposerResource(selection:{start:number;end:number;text:string;reference?:BrowserContextRef}) {
-  applyDraftLocally(clampDraftText(draft.value.slice(0,selection.start)+selection.text+draft.value.slice(selection.end)),Date.now())
-  if(selection.reference)addRef(selection.reference)
-  scheduleDraftSave()
-  await nextTick()
-  const input=document.querySelector<HTMLTextAreaElement>('.composer-input textarea')
-  input?.focus();input?.setSelectionRange(selection.start+selection.text.length,selection.start+selection.text.length)
-  updateComposerSelection()
-}
-
-type ComposerMarkdownLink = { start: number; end: number; label: string; url: string }
-type ComposerLinkTarget = { start: number; end: number; label: string; url?: string }
-const composerSelection = ref({ start: 0, end: 0 })
-const composerLinkDialog = ref(false)
-const composerLinkInput = ref<HTMLInputElement | null>(null)
-const composerLinkUrl = ref('')
-const composerLinkTarget = ref<ComposerLinkTarget | null>(null)
-
-function composerTextarea() {
-  return document.querySelector<HTMLTextAreaElement>('.composer-input textarea')
-}
-
-function updateComposerSelection() {
-  const input = composerTextarea()
-  if (input) composerSelection.value = { start: input.selectionStart, end: input.selectionEnd }
-}
-
-function findComposerMarkdownLink(text: string, start: number, end: number): ComposerMarkdownLink | null {
-  const pattern = /\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
-  let match: RegExpExecArray | null
-  while ((match = pattern.exec(text))) {
-    const matchStart = match.index
-    const matchEnd = matchStart + match[0].length
-    const labelStart = matchStart + 1
-    const labelEnd = labelStart + match[1]!.length
-    const containsCaret = start === end && start >= labelStart && start <= labelEnd
-    const overlapsLabel = start < labelEnd && end > labelStart
-    const selectsWholeLink = start <= matchStart && end >= matchEnd
-    if (!containsCaret && !overlapsLabel && !selectsWholeLink) continue
-    return { start: matchStart, end: matchEnd, label: match[1]!, url: match[2]! }
-  }
-  return null
-}
-
-const hasComposerLinkAtSelection = computed(() =>
-  Boolean(findComposerMarkdownLink(draft.value, composerSelection.value.start, composerSelection.value.end)),
-)
-const hasComposerLinkSelection = computed(() => {
-  if (hasComposerLinkAtSelection.value) return true
-  if (composerSelection.value.end <= composerSelection.value.start) return false
-  return Boolean(draft.value.slice(composerSelection.value.start, composerSelection.value.end).trim())
-})
-
-function onComposerInput(event: Event) {
-  updateComposerSelection()
-  resourceCommands.value?.onInput(event)
-}
-
-function openComposerLinkEditor() {
-  updateComposerSelection()
-  const { start, end } = composerSelection.value
-  const existing = findComposerMarkdownLink(draft.value, start, end)
-  if (!existing && end <= start) {
-    showToast('先选中要添加链接的文本', 'warning')
-    return
-  }
-  const label = existing?.label || draft.value.slice(start, end)
-  if (!label.trim()) {
-    showToast('先选中要添加链接的文本', 'warning')
-    return
-  }
-  composerLinkTarget.value = existing
-    ? { start: existing.start, end: existing.end, label: existing.label, url: existing.url }
-    : { start, end, label }
-  composerLinkUrl.value = existing?.url || ''
-  composerLinkDialog.value = true
-}
-
-function normalizeComposerLinkUrl(value: string): string | null {
-  const raw = value.trim()
-  if (!raw || /[\u0000-\u0020]/.test(raw)) return null
-  if (/^(?:#|\.\.?\/)/.test(raw)) return raw
-  const candidate = /^mailto:/i.test(raw)
-    ? raw
-    : /^https?:\/\//i.test(raw)
-      ? raw
-      : `https://${raw}`
-  try {
-    const parsed = new URL(candidate)
-    return ['http:', 'https:', 'mailto:'].includes(parsed.protocol) ? parsed.href : null
-  } catch {
-    return null
-  }
-}
-
-function replaceComposerRange(start: number, end: number, replacement: string) {
-  const next = draft.value.slice(0, start) + replacement + draft.value.slice(end)
-  if (next.length > maxComposerChars.value) {
-    showToast('链接会超过输入长度上限，请缩短链接地址', 'warning')
-    return false
-  }
-  applyDraftLocally(next, Date.now())
-  scheduleDraftSave()
-  void nextTick(() => {
-    const input = composerTextarea()
-    const caret = start + replacement.length
-    input?.focus()
-    input?.setSelectionRange(caret, caret)
-    updateComposerSelection()
-  })
-  return true
-}
-
-function applyComposerLink() {
-  const target = composerLinkTarget.value
-  if (!target) return
-  const url = normalizeComposerLinkUrl(composerLinkUrl.value)
-  if (!url) {
-    showToast('请输入有效的 http、https、mailto 或相对链接', 'warning')
-    return
-  }
-  const label = target.label.replace(/\\/g, '\\\\').replace(/\]/g, '\\]')
-  if (!replaceComposerRange(target.start, target.end, `[${label}](${url})`)) return
-  composerLinkDialog.value = false
-}
-
-function removeComposerLink() {
-  updateComposerSelection()
-  const { start, end } = composerSelection.value
-  const link = findComposerMarkdownLink(draft.value, start, end)
-  if (!link) return
-  replaceComposerRange(link.start, link.end, link.label)
-}
-
-async function attachContext(kind:'文件'|'浏览器'|'会话'){
-  const input=document.querySelector<HTMLTextAreaElement>('.composer-input textarea')
-  const start=input?.selectionStart??draft.value.length,end=input?.selectionEnd??start
-  const text=(start>0&&!/\s/.test(draft.value[start-1]||'')?' ':'')+'/'+kind+' '
-  await insertComposerResource({start,end,text})
-  resourceCommands.value?.openAt(start+text.length)
-}
-function onComposerKeydown(e: KeyboardEvent) {
-  if(resourceCommands.value?.handleKeydown(e))return
-  if (e.key === 'Escape') {
-    if (agentRunning.value) {
-      e.preventDefault()
-      void stopAgent()
-      return
-    }
-    if (contextRefs.value.length) {
-      e.preventDefault()
-      contextRefs.value = []
-    }
-    return
-  }
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-    e.preventDefault()
-    void send()
-  }
-}
-
 function refKey(r: BrowserContextRef) {
   return r.kind==='annotation'?`a:${r.annotationId}:${r.annotationRevision}`:r.kind === 'window' ? `w:${r.windowId}` : `s:${r.sessionId}`
 }
+function chipLabel(reference:BrowserContextRef){return reference.label||(reference.kind==='session'?'浏览器会话':reference.kind==='annotation'?'网页标注':'网页')}
 
-/** Strip Vue proxies so refs survive Electron IPC structured clone. */
-function plainContextRefs(list: BrowserContextRef[]): BrowserContextRef[] {
-  return list.map((r) => {
-    const out: BrowserContextRef = {
-      kind: r.kind,
-      sessionId: String(r.sessionId || ''),
-      label: String(r.label || ''),
-    }
-    if(r.annotationId)out.annotationId=String(r.annotationId)
-    if(r.annotationRevision)out.annotationRevision=Number(r.annotationRevision)
-    if (r.windowId) out.windowId = String(r.windowId)
-    if (r.url) out.url = String(r.url)
-    if (typeof r.sessionIndex === 'number' && Number.isFinite(r.sessionIndex)) {
-      out.sessionIndex = r.sessionIndex
-    }
-    return out
-  })
-}
-
-function chipLabel(r: BrowserContextRef) {
-  if(r.kind==='annotation')return `@批注 ${r.label}`
-  return r.kind === 'window' ? `@窗口 ${r.label}` : `@Session ${r.label}`
-}
-
-function addRef(ref: BrowserContextRef) {
-  if (contextRefs.value.some((x) => refKey(x) === refKey(ref))) return
-  contextRefs.value = [...contextRefs.value, ref]
-}
-
-function removeRef(ref: BrowserContextRef) {
-  contextRefs.value = contextRefs.value.filter((x) => refKey(x) !== refKey(ref))
+async function addRef(reference:BrowserContextRef){
+  if(contextRefs.value.some(saved=>refKey(saved)===refKey(reference))){focusComposer();return}
+  const chatId=activeId.value;if(!chatId)return
+  settingsOpen.value=false;creatorKind.value=null;activateSidebar('chats',false)
+  await nextTick();if(activeId.value!==chatId)return
+  const node=composerDocumentFromLegacy(chatId,'',[JSON.parse(JSON.stringify(reference))]).content.find(node=>node.type==='contextBlock')
+  const block=node?.attrs?.block as ComposerContextBlock|undefined
+  if(block)draftField.value?.insertContext(block)
 }
 
 function onDragEnter(e: DragEvent) {
@@ -4662,18 +4106,22 @@ async function refreshList() {
 let chatSelection = 0
 let chatTransition: Animation | undefined
 async function selectChat(id: string) {
+  const selection = ++chatSelection
+  const linked=chats.value.find(chat=>chat.id===id)||(window.navora?await window.navora.chats.get(id):null)
+  if(selection!==chatSelection)return
+  if(!linked)return
+  if(linked?.kind==='sub'&&linked.parentChatId){await routeConversationTarget(id);return}
+  if(!await canLeaveSettings())return
   creatorKind.value = null
   if (!window.navora) return
-  const selection = ++chatSelection
   settingsOpen.value = false
   const prev = activeId.value
   if (prev && prev !== id) {
-    await flushDraftSave(prev)
+    await flushDraftSave(prev).catch(()=>showToast('未同步的草稿已保留在当前窗口，返回该对话后可继续处理。','warning'))
   }
   if (selection !== chatSelection) return
   if (prev && prev !== id) revokeMediaUrlsForChat(prev)
   toolMediaSrc.value = {}
-  expandedRuns.value = {}
   closeLightbox()
   closeReadPagesPanel()
   activeId.value = id
@@ -4717,9 +4165,8 @@ async function selectChat(id: string) {
     phase.value = 'idle'
     phaseDetail.value = ''
   }
-  contextRefs.value = []
-  applyDraftLocally(active.value?.draft || '', active.value?.draftUpdatedAt || 0)
-  stickToBottom.value = true
+  draftState.load(active.value)
+  resumeMessageFollow()
   void hydrateActiveToolMedia()
   showJumpBottom.value = false
   followupSuggestions.value = followupsByChat.value[id] || []
@@ -4727,7 +4174,13 @@ async function selectChat(id: string) {
   if (selection !== chatSelection) return
   chatTransition?.cancel()
   if (prev !== id && msgBox.value && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    chatTransition = msgBox.value.animate([{ opacity: .35, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' })
+    const transition=msgBox.value.animate([{ opacity: .35, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' })
+    chatTransition=transition
+    // The transition can defer painting skipped transcript rows beyond the
+    // initial native end scroll. Follow once after that layout actually paints.
+    void transition.finished.then(()=>{
+      if(selection===chatSelection&&activeId.value===id&&chatTransition===transition&&stickToBottom.value&&!messageReadingIntent)void scrollMessages()
+    }).catch(()=>{})
   }
   focusComposer()
   closeMobileSidebar()
@@ -4735,6 +4188,7 @@ async function selectChat(id: string) {
 
 let creatingChat: Promise<void> | undefined
 async function createChat() {
+  if(!await canLeaveSettings())return
   activateSidebar('chats',false)
   creatorKind.value = null
   if (!window.navora) return
@@ -4982,7 +4436,7 @@ async function confirmCloseSession() {
   const sessionId = closeSessionTarget.value.sessionId
   try {
     await window.navora.browser.closeSession(sessionId)
-    contextRefs.value = contextRefs.value.filter((r) => r.sessionId !== sessionId)
+    markBrowserSources(new Set(tree.value.flatMap(session=>session.windows.map(page=>page.windowId))),new Set(tree.value.filter(session=>session.sessionId!==sessionId).map(session=>session.sessionId)))
     if (activeId.value) {
       tree.value = await window.navora.browser.tree(activeId.value)
       syncBrowserTabs(tree.value)
@@ -5033,23 +4487,15 @@ function openMobileSidebar() {
 }
 
 function openRemoteWindows() {
-  sidebarMoreOpen.value = false
   closeMobileSidebar()
   void router.push('/remote')
 }
 
 function onMoreDocs() {
-  sidebarMoreOpen.value = false
   docsOpen.value = true
 }
 
-function onMoreExport() {
-  sidebarMoreOpen.value = false
-  void exportActiveChat()
-}
-
 function onMoreQuit() {
-  sidebarMoreOpen.value = false
   quitDialog.value = true
 }
 
@@ -5275,34 +4721,117 @@ async function copyReply(message: ChatMessage) {
 
 let messageJump = 0
 let jumpFocusAnimation: Animation | null = null
+let messageJumpJob:{cancelled:boolean;detach:()=>void}|undefined
+let nearestMessageContainer:boolean|undefined
+function cancelMessageJump(){
+  messageJump++
+  if(messageJumpJob){messageJumpJob.cancelled=true;messageJumpJob.detach();messageJumpJob=undefined}
+  messageJumpInProgress=false
+}
+function positionMessageInScroller(element:HTMLElement,box:HTMLElement,block:ScrollLogicalPosition='start'){
+  const options={block,inline:'nearest',behavior:'instant'} as ScrollIntoViewOptions
+  if(nearestMessageContainer===undefined){
+    let recognized=false
+    document.createElement('span').scrollIntoView({...options,get container(){recognized=true;return 'nearest'}} as ScrollIntoViewOptions)
+    nearestMessageContainer=recognized
+  }
+  if(nearestMessageContainer){
+    element.scrollIntoView({...options,container:'nearest'} as ScrollIntoViewOptions)
+  }else{
+    // Older remote browsers ignore the container option. Preserve every outer
+    // scroller while letting native layout materialize the destination.
+    const outer:Array<{element:HTMLElement;top:number;left:number}>=[]
+    for(let parent=box.parentElement;parent;parent=parent.parentElement)outer.push({element:parent,top:parent.scrollTop,left:parent.scrollLeft})
+    element.scrollIntoView(options)
+    for(const saved of outer){saved.element.scrollTop=saved.top;saved.element.scrollLeft=saved.left}
+  }
+}
+watch(activeId,()=>{cancelMessageJump();messageReadingIntent=false;userMessageScroll=false;userMessageScrollPending=false},{flush:'sync'})
+onUnmounted(cancelMessageJump)
 async function locateResourceMessage(payload:{chatId:string;messageId:string}){
   activateSidebar('chats',false)
+  const owner=chats.value.find(chat=>chat.id===payload.chatId)||await window.navora?.chats.get(payload.chatId)
+  if(owner?.kind==='sub'){
+    await routeConversationTarget(payload.chatId)
+    if(resourceOverlay.value)closeResources()
+    await nextTick()
+    if(activeFileTab.value?.kind==='subchats'&&activeFileTab.value.selectedSubchatId===payload.chatId)await fileWorkspace.value?.locateSubchatMessage(payload.messageId)
+    return
+  }
   if(activeId.value!==payload.chatId)await selectChat(payload.chatId)
+  if(activeId.value!==payload.chatId)return
   if(resourceOverlay.value)closeResources()
   if(fileWorkspaceOverlay.value)hideFileWorkspace()
+  else if(browserExpanded.value&&fileWorkspaceVisible.value)workspaceConversationActive.value=true
   await nextTick()
   await jumpToMessage(payload.messageId)
 }
 async function jumpToMessage(id: string) {
-  const folded=messageBlocks.value.find(block=>block.type==='run'&&block.items.some(message=>message.id===id))
-  if(folded){expandedRuns.value={...expandedRuns.value,[folded.key]:true};await nextTick()}
-
-  const box = msgBox.value
-  const element = box?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`)
-  if (!box || !element) return
+  cancelMessageJump()
   const request = ++messageJump
+  const version=++conversationScrollVersion,chatId=activeId.value
+  // Explicit navigation wins over a queued restoration of a hidden chat.
+  parkedConversation=undefined;restoringConversation=false;messageJumpInProgress=true
+  messageReadingIntent=true;userMessageScroll=false;userMessageScrollPending=false
   stickToBottom.value = false
   jumpFocusAnimation?.cancel()
-  // Large smooth scrolls can drift as deferred rows acquire their real height.
-  // Jump immediately, then align again after Chromium has painted the destination.
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (request !== messageJump || !element.isConnected) return
-    element.scrollIntoView({ block:'start', behavior:'instant' })
-    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
-    if (Math.abs(element.getBoundingClientRect().top - box.getBoundingClientRect().top) < 1) break
-  }
-  if (request === messageJump && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    jumpFocusAnimation = element.animate([{ opacity:.55 },{ opacity:1 }], {duration:180,easing:'ease-out'})
+  const job={cancelled:false,detach:()=>{}}
+  messageJumpJob=job
+  const current=()=>!job.cancelled&&request===messageJump&&version===conversationScrollVersion&&chatId===activeId.value&&conversationIsVisible.value
+  try{
+    if(!current())return
+    const box=msgBox.value,element=box?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`)
+    if(!box?.checkVisibility()||!element)return
+    const interrupt=(event:Event)=>{
+      if(event instanceof KeyboardEvent&&!['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key))return
+      if(messageJumpJob===job)cancelMessageJump()
+    }
+    for(const type of ['wheel','touchstart','pointerdown','keydown'])box.addEventListener(type,interrupt,{capture:true,passive:true})
+    job.detach=()=>{for(const type of ['wheel','touchstart','pointerdown','keydown'])box.removeEventListener(type,interrupt,true)}
+    // A transform transition can make skipped rows change their layout after an
+    // otherwise stable jump. Keep cancellation live while awaiting its paint.
+    const transition=chatTransition
+    if(transition?.playState==='running'){
+      await transition.finished.catch(()=>{})
+      if(!current()||!element.isConnected)return
+    }
+    // Native scrollIntoView resolves content-visibility and preserves its own
+    // anchor while upstream skipped rows get painted. Manual scrollTop chasing
+    // can oscillate between their estimated and real heights indefinitely.
+    positionMessageInScroller(element,box)
+    let settledFrames=0
+    let stableFrames=0,corrections=0
+    let previousGeometry=''
+    // Observe a bounded set of painted frames without repeatedly moving the
+    // reader. Explicit navigation or physical scrolling cancels immediately.
+    for(let attempt=0;attempt<24;attempt++){
+      await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()))
+      if(!current()||!element.isConnected)return
+      const bounds=element.getBoundingClientRect(),top=bounds.top-box.getBoundingClientRect().top,tail=box.scrollHeight-box.clientHeight-box.scrollTop
+      const geometry=`${box.scrollHeight}:${box.clientHeight}:${Math.round(bounds.height*10)}:${Math.round(top)}`
+      const aligned=bounds.height>0&&(Math.abs(top)<1||(tail<1&&top>=0&&top+bounds.height<=box.clientHeight))
+      stableFrames=geometry===previousGeometry?stableFrames+1:0
+      settledFrames=aligned?stableFrames:0
+      previousGeometry=geometry
+      // Materializing a tail destination can shrink the remaining skipped rows
+      // and clamp the first correction. Allow two native corrections, each with
+      // its own painted-frame budget; never chase scrollTop or materialize all rows.
+      if(!aligned&&bounds.height>0&&stableFrames>=2&&corrections<2&&attempt<20){
+        corrections++;stableFrames=0;previousGeometry='';positionMessageInScroller(element,box);continue
+      }
+      if(attempt>=2&&settledFrames>=2)break
+    }
+    if(current()){
+      if(chatId)conversationReading={chatId,top:box.scrollTop,follow:false}
+      showJumpBottom.value=box.scrollHeight>box.clientHeight+40
+      if(!matchMedia('(prefers-reduced-motion: reduce)').matches)jumpFocusAnimation=element.animate([{opacity:.55},{opacity:1}],{duration:180,easing:'ease-out'})
+    }
+  }finally{
+    job.detach()
+    if(messageJumpJob===job){
+      messageJumpJob=undefined
+      messageJumpInProgress=false
+    }
   }
 }
 
@@ -5330,8 +4859,7 @@ function quoteToComposer(text: string) {
     .split('\n')
     .map((line) => `> ${line}`)
     .join('\n')
-  const cur = draft.value.trimEnd()
-  applyDraftLocally(clampDraftText(cur ? `${cur}\n\n${quoted}\n` : `${quoted}\n`), Date.now())
+  draftField.value?.insertText(quoted+'\n')
   scheduleDraftSave()
   focusComposer()
 }
@@ -5340,54 +4868,78 @@ async function openRemoteWindow(windowId: string) {
   await router.push(`/remote/${encodeURIComponent(windowId)}`)
 }
 
-async function send() {
-  const text = draft.value.trim()
-  const refs = plainContextRefs(contextRefs.value)
-  if ((!text && !refs.length) || !activeId.value || !window.navora || sending.value) {
-    return
-  }
-  if (text.length > maxComposerChars.value) {
-    showToast(`输入超过上限（${maxComposerChars.value} 字）`, 'warning')
-    return
-  }
-  const wasRunning=agentRunning.value
-  sending.value = true
-  const chatId = activeId.value
-  applyDraftLocally('', Date.now())
-  contextRefs.value = []
-  stickToBottom.value = true
-  if (chatId) clearFollowups(chatId)
-  clearChatError(chatId)
-  try {
-    const sent = await window.navora.agent.submit(chatId, {content: text, refs}, runningMessageMode.value)
-    if(activeId.value !== chatId)return
-    active.value = sent
-    const running = await window.navora.agent.isRunning(chatId)
-    setRunning(chatId, running)
-    if(activeId.value !== chatId)return
-    if (running && !wasRunning) {
-      phase.value = 'thinking'
-      phaseDetail.value = '正在理解任务…'
+type PendingComposerSubmission={id:string;chatId:string;document:ComposerDocument;text:string;failed:boolean;recoveryId?:string}
+const pendingSubmissions=ref<PendingComposerSubmission[]>([])
+const composerStaging=ref<string|null>(null)
+const visibleSubmissions=computed(()=>pendingSubmissions.value.filter(item=>item.chatId===activeId.value&&(!item.failed||!item.recoveryId)))
+function snapshotAccepted(document:ComposerDocument){let key:string;try{key=composerSubmissionKey(document)}catch{return false}const same=(candidate?:ComposerDocument)=>{try{return !!candidate&&composerSubmissionKey(candidate)===key}catch{return false}};return !!active.value?.messages.some(message=>same(message.meta?.document))||!!active.value?.queuedMessages?.some(entry=>same(entry.document))}
+const visibleDraftRecoveries=computed(()=>active.value?.draftRecoveries?.filter(entry=>!snapshotAccepted(entry.document)&&!pendingSubmissions.value.some(item=>item.recoveryId===entry.id&&!item.failed))||[])
+async function restoreFailedSubmission(id:string){const item=pendingSubmissions.value.find(item=>item.id===id);if(!item)return;try{if(!await recoverComposerDocument(item.document))return;await flushDraftSave(item.chatId);pendingSubmissions.value=pendingSubmissions.value.filter(item=>item.id!==id)}catch{showToast('内容已保留，请确认草稿同步后再移除快照。','warning')}}
+function dismissFailedSubmission(id:string){pendingSubmissions.value=pendingSubmissions.value.filter(item=>item.id!==id)}
+async function dismissDraftRecovery(id:string,owner=activeId.value){const chatId=owner;if(!chatId)return;try{const chat=await window.navora?.chats.dismissDraftRecovery(chatId,id);if(chat&&activeId.value===chatId)active.value={...active.value!,draftRecoveries:chat.draftRecoveries}}catch{showToast('暂时无法移除这份快照，请重试。','warning')}}
+async function restoreDraftRecovery(id:string){const entry=active.value?.draftRecoveries?.find(entry=>entry.id===id);if(!entry)return;try{if(!await recoverComposerDocument(entry.document))return;await flushDraftSave(entry.document.chatId);await dismissDraftRecovery(id,entry.document.chatId)}catch{showToast('内容已放回编辑器；保存成功后再移除快照。','warning')}}
+async function retryDraftRecovery(id:string){const entry=active.value?.draftRecoveries?.find(entry=>entry.id===id);if(!entry||sending.value)return;await submitComposerSnapshot(entry.document,false,id)}
+async function send(){
+  const chatId=activeId.value
+  if(!chatId||!window.navora||sending.value||!canSend.value)return
+  const modelIdentity=captureModelIdentity()
+  if(!modelIdentity)return
+  const clicked=normalizeComposerDocument(JSON.parse(JSON.stringify(composerDocument.value)),chatId)
+  composerStaging.value=chatId
+  sending.value=true
+  try{
+    await flushDraftSave(chatId)
+    if(activeId.value!==chatId)return
+    const snapshot={...clicked,revision:draftState.baseRevision()}
+    await submitComposerSnapshot(snapshot,true,undefined,modelIdentity)
+  }catch(error){showToast(error instanceof Error&&error.message==='composer_draft_conflict'?'请先处理草稿同步冲突，再发送。':'草稿保存尚未确认，内容保留在编辑器中，请重试。','warning')}
+  finally{if(composerStaging.value===chatId)composerStaging.value=null;sending.value=false}
+}
+function captureModelIdentity():ModelSelectionIdentity|undefined{
+  if(!active.value||modelSelectionInvalid.value||modelSelectionBusy.value||executionModeBusy.value||modelLoading.value||modelLoadError.value){showToast('请等待模型选择保存完成后再发送。','warning');return}
+  try{return confirmedModelSelection({ai:{providers:aiProviders.value,default_provider:aiDefaultProviderId.value}},active.value)}catch{showToast('请先选择模型，或到设置中添加服务商。','warning')}
+}
+async function submitComposerSnapshot(snapshot:ComposerDocument,rotate:boolean,knownRecoveryId?:string,selectedIdentity?:ModelSelectionIdentity){
+  if(!window.navora)return
+  const modelIdentity=selectedIdentity||captureModelIdentity()
+  if(!modelIdentity)return
+  const chatId=snapshot.chatId,compiled=compileComposerDocument(snapshot),wasRunning=!!runningChats.value[chatId]
+  if(compiled.content.length>maxComposerChars.value){showToast(`内容超过上限（${maxComposerChars.value} 字），请缩小范围或移除部分资料。`,'warning');return}
+  const id=composerSubmissionKey(snapshot)
+  if(pendingSubmissions.value.some(item=>item.id===id&&!item.failed))return
+  sending.value=true
+  const pending:PendingComposerSubmission={id,chatId,document:snapshot,text:compiled.content,failed:false,recoveryId:knownRecoveryId}
+  pendingSubmissions.value=[...pendingSubmissions.value.filter(item=>item.id!==id),pending]
+  let staged=false
+  if(rotate)composerStaging.value=chatId
+  try{
+    // Persist the frozen submission before allowing a separate next draft.
+    // A crash or lost acknowledgement leaves an explicit, idempotent recovery.
+    if(!pending.recoveryId){const saved=await window.navora.chats.saveDraftRecovery(chatId,snapshot);pending.recoveryId=saved?.draftRecoveries?.find(entry=>composerSubmissionKey(entry.document)===id)?.id;if(!pending.recoveryId)throw Error('无法保存提交快照');if(activeId.value===chatId)active.value={...active.value!,draftRecoveries:saved?.draftRecoveries}}
+    staged=true
+    if(rotate&&activeId.value===chatId&&composerDocument.value.id===snapshot.id&&JSON.stringify(composerDocument.value.content)===JSON.stringify(snapshot.content)){
+      const next=createComposerDocument(chatId);next.revision=snapshot.revision+1
+      applyDraftLocally('',Date.now(),next);scheduleDraftSave()
     }
+    if(composerStaging.value===chatId)composerStaging.value=null
+    if(activeId.value===chatId)resumeMessageFollow()
+    clearFollowups(chatId);clearChatError(chatId)
+    const sent=await window.navora.agent.submit(chatId,{content:compiled.content,refs:compiled.refs,document:snapshot,clientMessageId:id,draftRevision:snapshot.revision,modelIdentity},runningMessageMode.value)
+    if(!sent)throw Error('提交未获得确认')
+    draftState.acknowledge(sent,snapshot)
+    if(pending.recoveryId){const cleaned=await window.navora.chats.dismissDraftRecovery(chatId,pending.recoveryId).catch(()=>null);if(cleaned)sent.draftRecoveries=cleaned.draftRecoveries}
+    pendingSubmissions.value=pendingSubmissions.value.filter(item=>item.id!==id)
+    const running=await window.navora.agent.isRunning(chatId);setRunning(chatId,running)
+    if(activeId.value===chatId){active.value=sent;if(running&&!wasRunning){phase.value='thinking';phaseDetail.value='正在理解任务…'}await scrollMessages(true)}
     await refreshList()
-    await scrollMessages(true)
-  } catch (e) {
-    console.error(e)
-    if(activeId.value===chatId){
-      applyDraftLocally(clampDraftText(draft.value ? text+'\n\n'+draft.value : text), Date.now())
-      scheduleDraftSave()
-      contextRefs.value = [...refs,...contextRefs.value.filter(ref=>!refs.some(saved=>refKey(saved)===refKey(ref)))]
-    }else{await window.navora.chats.setDraft(chatId,text).catch(()=>{})}
-    const stillRunning=await window.navora.agent.isRunning(chatId).catch(()=>wasRunning)
-    setRunning(chatId,stillRunning)
-    const raw = e instanceof Error ? e.message : '发送失败，请重试'
-    if (chatId) rememberChatError(chatId, raw)
-    const formatted = formatAgentError(raw)
-    showToast(formatted.message, formatted.code === 'api_key_missing' ? 'warning' : 'error')
-  } finally {
-    sending.value = false
-    focusComposer()
-  }
+  }catch(error){
+    const retained=pendingSubmissions.value.find(item=>item.id===id);if(retained){retained.failed=true;retained.recoveryId=pending.recoveryId}
+    if(staged&&activeId.value===chatId){const chat=await window.navora.chats.get(chatId).catch(()=>null);if(chat)active.value={...active.value!,draftRecoveries:chat.draftRecoveries}}
+    const stillRunning=await window.navora.agent.isRunning(chatId).catch(()=>wasRunning);setRunning(chatId,stillRunning)
+    const raw=error instanceof Error?error.message:'发送失败';rememberChatError(chatId,raw)
+    const detail=composerErrorMessage(error)||formatAgentError(raw).message
+    showToast(staged?`${detail}；完整内容和来源已保留，可重试或放回编辑器。`:'无法保存提交快照，内容仍保留在编辑器中。','warning')
+  }finally{if(composerStaging.value===chatId)composerStaging.value=null;sending.value=false;if(activeId.value===chatId)focusComposer()}
 }
 
 async function retryLast() {
@@ -5396,7 +4948,7 @@ async function retryLast() {
   retrying.value = true
   clearChatError(chatId)
   clearFollowups(chatId)
-  stickToBottom.value = true
+  resumeMessageFollow()
   try {
     active.value = await window.navora.agent.retry(chatId)
     const running = await window.navora.agent.isRunning(chatId)
@@ -5536,6 +5088,12 @@ function openAskDialog(req: AgentAskRequest) {
 async function openPendingAsk(chatId: string) {
   const req = pendingAskForSidebar(chatId)
   if (!req) return
+  const owner=chats.value.find(chat=>chat.id===req.chatId)||await window.navora?.chats.get(req.chatId)
+  if(owner?.kind==='sub'){
+    await routeConversationTarget(req.chatId);await nextTick()
+    if(activeFileTab.value?.kind==='subchats'&&activeFileTab.value.selectedSubchatId===req.chatId)await fileWorkspace.value?.locateSubchatPending(req.id)
+    return
+  }
   if (activeId.value !== chatId) await selectChat(chatId)
   scrollToInlineDecision()
 }
@@ -5582,6 +5140,7 @@ watch(settingsOpen, async (open, wasOpen) => {
 // Agent 可能通过工具写入新服务商/模型；打开菜单时再拉一次，避免只靠缓存。
 watch(modelMenuOpen, async (open) => {
   if (!open)return
+  if(nativeComposerAvailable.value){modelMenuOpen.value=false;await openNativeComposerOrFallback('model');return}
   modelQuery.value=''
   await refreshAiProviders()
   await nextTick()
@@ -5597,12 +5156,18 @@ watch(isMobileLayout, (mobile) => {
 })
 
 watch(
-  () => route.query.settings,
-  (v) => {
-    if (v !== '1' && v !== 'true') return
-    settingsOpen.value = true
+  () => [route.query.settings,route.query.settingsRequest,route.query.settingsReturn],
+  async([v]) => {
+    if(typeof v!=='string'||!['1','true','basic','appearance','model','browser','workspace','skills','plugins','remote','permissions','fork','subchat','about'].includes(v))return
+    const request=typeof route.query.settingsRequest==='string'?route.query.settingsRequest:undefined
+    const returnId=typeof route.query.settingsReturn==='string'?route.query.settingsReturn:undefined
+    const accepted=await openSettings(v==='1'||v==='true'?undefined:v,{returnId})
+    if(request)await window.navora?.app.settingsHandled(request,accepted===true).catch(()=>{})
+    if(route.query.settings!==v||(request&&route.query.settingsRequest!==request))return
     const q = { ...route.query }
     delete q.settings
+    delete q.settingsRequest
+    delete q.settingsReturn
     void router.replace({ path: route.path || '/', query: q })
   },
   { immediate: true },
@@ -5614,21 +5179,27 @@ onMounted(async () => {
     console.warn('Navora API unavailable (open via Electron)')
     return
   }
+  void window.navora.app.info().then(info=>{applicationVersion.value=info.version}).catch(()=>{})
   if(!isWebRemote())unsubFileTransfer=window.navora.fileTabs.onTransfer(async event=>{
     try{
-      transferFileTab(event)
-      if(event.kind==='open'){if(event.viewerChatId!==activeId.value)await selectChat(event.viewerChatId);settingsOpen.value=false;creatorKind.value=null;browserWorkspaceMode.value=false;pluginWorkspaceMode.value=false}
+      const target=chats.value.find(chat=>chat.id===event.viewerChatId)||await window.navora!.chats.get(event.viewerChatId)
+      const viewer=target?.kind==='sub'&&target.parentChatId?target.parentChatId:event.viewerChatId
+      transferFileTab({...event,viewerChatId:viewer})
+      if(event.kind==='open'){if(viewer!==activeId.value)await selectChat(viewer);settingsOpen.value=false;creatorKind.value=null;browserWorkspaceMode.value=false;pluginWorkspaceMode.value=false;fileManagerMode.value=false;workspaceConversationActive.value=false;if(sidebarRail.value.active)activateSidebar('chats',false)}
       if(event.requestId)await window.navora!.fileTabs.completeTransfer(event.requestId)
     }catch(e){if(event.requestId)await window.navora!.fileTabs.completeTransfer(event.requestId,String(e))}
   })
   if(!isWebRemote())unsubBrowserPresent=window.navora.browser.workspace.onPresent(async payload=>{
     if(payload.hidden){const displayed=browserWorkspaceActive.value?browserWorkspaceTab.value:activeFileTab.value;if(displayed?.pageId===payload.pageId){browserPresentRequest++;hideFileWorkspace();if(browserWorkspaceActive.value)activateSidebar('chats',false)}return}
     const request=++browserPresentRequest
-    if(payload.chatId!==activeId.value){if(browserWorkspaceActive.value)await selectChat(payload.chatId);else await openResourceChat(payload.chatId)}
-    if(request!==browserPresentRequest||payload.chatId!==activeId.value)return
+    const resourceOwner=chats.value.find(chat=>chat.id===payload.chatId)||await window.navora!.chats.get(payload.chatId)
+    const parentId=resourceOwner?.kind==='sub'&&resourceOwner.parentChatId?resourceOwner.parentChatId:payload.chatId
+    if(parentId!==activeId.value){if(browserWorkspaceActive.value)await selectChat(parentId);else await openResourceChat(parentId)}
+    if(request!==browserPresentRequest||parentId!==activeId.value)return
     const selection=chatSelection
-    if(!tree.value.some(session=>session.windows.some(page=>page.windowId===payload.pageId&&page.presentation==='embedded'))){const nextTree=await window.navora!.browser.tree(payload.chatId);if(request!==browserPresentRequest||selection!==chatSelection||payload.chatId!==activeId.value)return;tree.value=nextTree}
-    syncBrowserTabs(tree.value);presentBrowserTab(payload.pageId)
+    if(!tree.value.some(session=>session.windows.some(page=>page.windowId===payload.pageId&&page.presentation==='embedded'))){const nextTree=await window.navora!.browser.tree(parentId);if(request!==browserPresentRequest||selection!==chatSelection||parentId!==activeId.value)return;tree.value=nextTree}
+    syncBrowserTabs(tree.value);workspaceConversationActive.value=false
+    await presentBrowserResource(payload.pageId,payload.chatId)
     if(payload.annotation){activateSidebar('chats',false);addRef(payload.annotation)}
   })
   unsubTree = window.navora.browser.onTreeUpdated((payload) => {
@@ -5638,11 +5209,10 @@ onMounted(async () => {
       syncBrowserTabs(payload.tree)
       const winIds = new Set(payload.tree.flatMap((s) => s.windows.map((w) => w.windowId)))
       const sessIds = new Set(payload.tree.map((s) => s.sessionId))
-      contextRefs.value = contextRefs.value.filter((r) => {
-        if (r.kind === 'annotation') return true
-        if (r.kind === 'session') return sessIds.has(r.sessionId)
-        return !!r.windowId && winIds.has(r.windowId)
-      })
+      markBrowserSources(winIds,sessIds)
+    }else if(chats.value.some(chat=>chat.id===payload.chatId&&chat.kind==='sub'&&chat.parentChatId===activeId.value)){
+      tree.value=[...tree.value.filter(session=>session.chatId!==payload.chatId),...payload.tree.filter(session=>session.chatId===payload.chatId)]
+      syncBrowserTabs(tree.value)
     }
   })
   unsubConfig = window.navora.config.onChanged?.(async (cfg) => {
@@ -5686,12 +5256,7 @@ onMounted(async () => {
           }
         }
       }
-      const remoteAt = fresh.draftUpdatedAt || 0
-      const remoteDraft = fresh.draft || ''
-      // Last-write-wins vs local typing.
-      if (remoteAt > draftTouchedAt.value) {
-        applyDraftLocally(remoteDraft, remoteAt)
-      }
+      draftState.acceptRemote(fresh)
     }
   })
   unsubAgent = window.navora.agent.onEvent(async (ev) => {
@@ -5818,7 +5383,7 @@ onMounted(async () => {
           : `${chats.value.find((c) => c.id === ev.chatId)?.title || '其他 Chat'}：${formatted.message}`
       showToast(tip, formatted.code === 'api_key_missing' ? 'warning' : 'error')
       if (ev.chatId === activeId.value) {
-        stickToBottom.value = true
+        if(!messageReadingIntent)stickToBottom.value=true
         void scrollMessages(true)
       }
     }
@@ -5906,7 +5471,12 @@ onMounted(async () => {
 
   const layoutTick = () => {
     if (stickToBottom.value) void scrollMessages(true)
-    else onMessagesScroll()
+    else if(conversationIsVisible.value&&!restoringConversation&&!messageJumpInProgress&&msgBox.value?.checkVisibility()){
+      // Resizing is not a user request to resume following the live answer.
+      // An explicit message jump can be close to the bottom and must stay put.
+      showJumpBottom.value=msgBox.value.scrollHeight>msgBox.value.clientHeight+40
+      if(activeId.value)conversationReading={chatId:activeId.value,top:msgBox.value.scrollTop,follow:false}
+    }
     remeasureAllLogOverflow()
   }
   stopMessageResizeWatch = watch(msgBox, (element) => {
@@ -5950,9 +5520,7 @@ onUnmounted(() => {
   chatSelection++
   chatTransition?.cancel()
   window.removeEventListener('keydown', onAppShortcut)
-  window.removeEventListener('resize', onSidebarAutoCollapseViewportResize)
-  void flushDraftSave(activeId.value)
-  clearTimeout(draftSaveTimer)
+  void flushDraftSave(activeId.value).catch(()=>{})
   unsubTree?.()
   unsubBrowserPresent?.()
   unsubFileTransfer?.()
@@ -5975,12 +5543,14 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.composer-pending-submit,.composer-draft-recovery{width:min(720px,100%);box-sizing:border-box;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 12px;border:1px solid var(--navora-stroke,#dbe3ed);border-radius:10px;margin:0 0 8px;background:var(--appearance-well,#f7f9fc);color:var(--navora-muted,#78869a);font-size:12px}
+.composer-pending-submit>span,.composer-draft-recovery>span{margin-right:auto}.composer-pending-submit details,.composer-draft-recovery details{flex:0 0 100%;font-size:11px}.composer-pending-submit summary,.composer-draft-recovery summary{color:var(--navora-accent,#3f6c9b)}.composer-pending-submit pre,.composer-draft-recovery pre{max-height:150px;overflow:auto;white-space:pre-wrap;font:inherit;padding:8px;background:var(--navora-surface,#fff);border-radius:6px;color:var(--navora-ink,#384b63)}.composer-pending-submit button,.composer-draft-recovery button{padding:3px 7px;border-radius:5px;color:var(--navora-accent,#3f6c9b)}.composer-pending-submit button:hover,.composer-draft-recovery button:hover{background:var(--control-hover,#eaf0f7)}.composer-validation{width:min(720px,100%);font-size:12px;line-height:1.5;color:var(--control-danger,#ad6456);margin:0 0 8px}
 .conversation-content{display:contents}
 .plugins-sidebar-host{display:flex;flex:1;flex-direction:column;min-height:0;height:100%}
-.shell:not(.mobile-layout)>.main:has(>.plugin-workspace.is-active){grid-template-rows:minmax(0,1fr)}
-.shell.mobile-layout>.main:has(>.plugin-workspace.is-active){grid-template-rows:auto minmax(0,1fr)}
-.shell:not(.mobile-layout)>.main:has(>.file-manager.is-active){grid-template-rows:minmax(0,1fr)}
-.shell.mobile-layout>.main:has(>.file-manager.is-active){grid-template-rows:auto minmax(0,1fr)}
+.shell:not(.mobile-layout)>.content-surface>.main:has(>.plugin-workspace.is-active){grid-template-rows:minmax(0,1fr)}
+.shell.mobile-layout>.content-surface>.main:has(>.plugin-workspace.is-active){grid-template-rows:auto minmax(0,1fr)}
+.shell:not(.mobile-layout)>.content-surface>.main:has(>.file-manager.is-active){grid-template-rows:minmax(0,1fr)}
+.shell.mobile-layout>.content-surface>.main:has(>.file-manager.is-active){grid-template-rows:auto minmax(0,1fr)}
 .shell {
   position: relative;
   display: grid;
@@ -6132,9 +5702,6 @@ onUnmounted(() => {
   margin-right: 0 !important;
 }
 /* Keep the action strip after caption drag regions in DOM order: native hit testing uses that order. */
-.global-title-actions{position:absolute;top:7px;right:12px;z-index:20;}
-.shell.frameless:not(.platform-mac)>.global-title-actions{right:154px}
-.shell.platform-mac>.global-title-actions{right:12px}
 .chat-list-actions { display:flex; align-items:center; gap:6px; flex-shrink:0; padding:3px 0 9px; }
 .chat-list-actions button { height:34px; display:flex; align-items:center; gap:9px; padding:0 10px; border:1px solid #d9e0e9; border-radius:8px; background:#fff; color:#4a607c; font:inherit; font-size:12px; cursor:default; transition:background-color 140ms ease,border-color 140ms ease,color 140ms ease; }
 .chat-list-actions .chat-new-action { flex:1; min-width:0; }
@@ -7021,9 +6588,6 @@ onUnmounted(() => {
   right: 0;
   z-index: 8;
   -webkit-app-region: no-drag;
-}
-.shell.frameless .main-top {
-  padding: 40px 20px 8px;
 }
 .shell.frameless .mobile-topbar {
   padding-right: 150px;
@@ -8232,116 +7796,6 @@ onUnmounted(() => {
   max-height: 160px;
   overflow: auto;
 }
-.run-card {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-  border: 1px solid #d5dde5;
-  border-radius: 10px;
-  background: #f5f8fa;
-  overflow: hidden;
-}
-.run-card.live {
-  border-color: #9fc0d8;
-  background: linear-gradient(90deg, #f0f7fc, #f7fafc 40%, #eef5fa);
-  background-size: 200% 100%;
-  animation: tool-shimmer 1.6s linear infinite;
-}
-.run-card.error {
-  border-color: #e8b4ae;
-  background: #fdf6f5;
-}
-.run-card.aborted {
-  border-color: #d7dde3;
-  background: #f4f6f8;
-}
-.run-card-head {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 0;
-  background: transparent;
-  padding: 8px 10px;
-  cursor: pointer;
-  text-align: left;
-  color: inherit;
-}
-.run-status {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-size: 0.65rem;
-  font-weight: 700;
-  flex-shrink: 0;
-  background: #d5e8d7;
-  color: #1e6b45;
-}
-.run-card.live .run-status {
-  background: #d6e6f2;
-  color: #1b4f72;
-}
-.run-card.error .run-status {
-  background: #f5d4cf;
-  color: #c0392b;
-}
-.run-card.aborted .run-status {
-  background: #e2e6ea;
-  color: #5d6d7e;
-}
-.run-card-text {
-  flex: 1;
-  min-width: 0;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: #1b2834;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.run-card-chevron {
-  color: #8a97a5;
-  font-size: 0.7rem;
-  flex-shrink: 0;
-}
-.run-card-body {
-  border-top: 1px solid #e2e8ee;
-  padding: 8px 10px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.run-item.log {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: 0.78rem;
-  color: #4a5a68;
-  line-height: 1.45;
-  user-select: text;
-  -webkit-user-select: text;
-}
-.run-item.log .log-kind-chip {
-  height: calc(0.78rem * 1.45);
-  user-select: none;
-  -webkit-user-select: none;
-}
-.run-item-text {
-  flex: 1;
-  min-width: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.45;
-  user-select: text;
-  -webkit-user-select: text;
-  cursor: text;
-}
-.run-item.tool .tool-card {
-  width: 100%;
-}
 .tool-kind-chip {
   flex: 0 0 auto;
   width: max-content;
@@ -8427,7 +7881,6 @@ onUnmounted(() => {
   background: #fdf6f5;
 }
 .msg.tool-aborted .tool-card,
-.run-item.tool-aborted .tool-card,
 .tool-card.tool-aborted {
   border-color: #d7dde3;
   background: #f4f6f8;
@@ -9599,6 +9052,10 @@ onUnmounted(() => {
 
 .model-panel-trigger{max-width:min(350px,40vw);gap:7px}.model-trigger-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.model-trigger-tier{font-size:10px;flex-shrink:0;color:#69809a;background:#e8eef5;border-radius:5px;padding:2px 5px}.unified-model-panel{display:flex;flex-direction:column;max-height:calc(100dvh - 110px);overflow:hidden;width:min(390px,calc(100vw - 24px));max-width:calc(100vw - 24px);padding:10px!important}.model-panel-heading{flex-shrink:0;display:flex;align-items:center;justify-content:space-between;color:#35465a;font-size:13px;font-weight:600;padding:2px 6px 9px}.model-panel-heading>button{width:26px;height:26px;border-radius:6px;color:#718095}.model-panel-heading>button:hover{background:#eaf0f6}.model-panel-search{flex-shrink:0;display:flex;align-items:center;gap:8px;background:#f7f9fb;border:1px solid #ced8e3;border-radius:8px;padding:8px 10px;margin-bottom:8px}.model-panel-search>svg{width:13px;color:#718197}.model-panel-search input{font-size:12px;min-width:0;width:100%;outline:0;color:#35465a}.model-panel-search:focus-within{border-color:#6688ad}.model-panel-options{min-height:0;flex:1;max-height:min(290px,35dvh);overflow:auto}.model-panel-options .composer-perm-item{width:100%;grid-template-columns:18px minmax(0,1fr) auto;text-align:left;gap:4px 9px;padding:9px}.model-panel-options .composer-perm-item-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.model-panel-options .composer-perm-item-desc{grid-column:2;grid-row:2;font-size:11px}.model-panel-options .composer-perm-check{grid-column:3;grid-row:1 / 3}.model-panel-reasoning{flex-shrink:0;border-top:1px solid #d5dee8;margin-top:8px;padding:12px 5px 4px;color:#5e6e82;font-size:12px}.model-panel-reasoning>div{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}.model-panel-reasoning button{padding:5px 10px;border:1px solid #d0d9e3;border-radius:7px;color:#596a80;font-size:12px}.model-panel-reasoning button:hover{background:#edf2f7}.model-panel-reasoning button.selected{color:#355c85;background:#e8f0f8;border-color:#9bb3cc}.unified-model-panel button:focus-visible{outline:2px solid #557ca8;outline-offset:-2px}
 </style>
+<style>
+.model-panel-reasoning{max-height:min(180px,25dvh);overflow:auto;overscroll-behavior:contain;flex:0 1 auto}.composer-usage-panel{max-height:calc(100dvh - 32px);overflow:auto;overscroll-behavior:contain}
+.model-provider-label{margin:8px 8px 4px;font-size:11px;font-weight:600;color:var(--navora-muted)}.composer-usage-actual{margin-top:12px;padding-top:10px;border-top:1px solid var(--navora-stroke);font-size:12px}.composer-usage-actual>strong{display:block;font-size:11px;margin-bottom:8px}.composer-usage-actual>p{font-size:11px;color:var(--navora-muted)}
+</style>
 
 <style>
 .composer-perm-menu,
@@ -9686,24 +9143,13 @@ onUnmounted(() => {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.workspace-chat-tools{display:flex;align-items:center;gap:2px;margin-left:auto}
 .conversation-title-header:not(.compact) {
-  padding-top: 48px;
-}
-.shell.frameless .conversation-title-header:not(.compact) {
-  padding-top: 56px;
+  min-height: 48px;
+  padding: 8px 20px;
 }
 .conversation-title-header:not(.compact) .main-title {
-  transform: translateY(12px);
-}
-.content-titlebar-spacer {
-  height: 44px;
-  min-height: 44px;
-  flex: 0 0 44px;
-}
-.shell.frameless .content-titlebar-spacer {
-  height: 56px;
-  min-height: 56px;
-  flex-basis: 56px;
+  transform: none;
 }
 .composer-link-btn {
   width: 30px;
@@ -9820,7 +9266,7 @@ onUnmounted(() => {
 .composer-usage-row strong{font-size:14px;font-weight:500;color:#252b33}
 .usage-dot{width:11px;height:11px;flex:0 0 11px;border-radius:3px;background:#aeb5bd}
 .usage-dot.tools{background:#a787ff}
-.usage-dot.messages{background:#4b8dff}
+.usage-dot.message-history{background:#4b8dff}
 .composer-usage-panel .composer-usage-note{border-top:1px solid #eef0f2;padding-top:9px}
 @media(max-width:420px){.composer-usage-panel{padding:14px}.composer-usage-heading{font-size:13px}.composer-usage-heading>strong{font-size:12px}}
 

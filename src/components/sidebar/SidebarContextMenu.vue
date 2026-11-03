@@ -2,15 +2,15 @@
   <Teleport to="body">
     <Transition name="ctx-scrim">
       <div
-        v-if="open"
+        v-if="domOpen"
         class="ctx-scrim"
-        @mousedown.prevent="hide"
-        @contextmenu.prevent="hide"
+        @mousedown.prevent="hide()"
+        @contextmenu.prevent="hide()"
       />
     </Transition>
     <Transition name="ctx-pop">
       <div
-        v-if="open"
+        v-if="domOpen"
         ref="panelEl"
         class="sidebar-ctx-panel"
         role="menu"
@@ -19,18 +19,27 @@
           top: `${y}px`,
           transformOrigin: origin,
         }"
-        @click="hide"
+        @click="hide()"
         @contextmenu.prevent
       >
         <slot />
       </div>
     </Transition>
+    <div v-if="nativeOpen&&!nativeItems" ref="nativeSource" hidden inert aria-hidden="true" data-native-menu-source><slot /></div>
   </Teleport>
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {BROWSER_CHROME_OPEN,requestBrowserChromeOpen} from '@shared/browser-chrome-events'
+import {useNativeUi} from '@/composables/useNativeUi'
+import {nativeMenuAnchor,nativeMenuSource} from '@/utils/native-menu-source'
+import type {NativeMenuItem} from '@shared/native-ui'
+import {NATIVE_UI_OPEN} from '@shared/native-ui'
 
+const props=defineProps<{nativeItems?:NativeMenuItem[]}>()
+const emit=defineEmits<{'native-action':[id:string]}>()
+const native=useNativeUi(),nativeOpen=ref(false),nativeSource=ref<HTMLElement>(),domOpen=computed(()=>open.value&&!nativeOpen.value)
 const open = ref(false)
 const x = ref(0)
 const y = ref(0)
@@ -40,26 +49,57 @@ let clickX = 0
 let clickY = 0
 let trigger:HTMLElement|null=null
 let resizeObserver:ResizeObserver|undefined
+let sourceObserver:MutationObserver|undefined,nativeGeneration=0,disposed=false
+const chromeId=`context-${crypto.randomUUID()}`
+function otherChrome(event:Event){if((event as CustomEvent<string>).detail!==chromeId)hide(false)}
+function otherNative(){if(!nativeOpen.value)hide(false)}
 
-function show(e: MouseEvent) {
+function show(e: MouseEvent | KeyboardEvent) {
   e.preventDefault()
   e.stopPropagation()
   const anchor=e.currentTarget instanceof HTMLElement?e.currentTarget:null
   trigger=anchor?.matches('button,[tabindex]')?anchor:anchor?.querySelector<HTMLElement>('button,[tabindex]')||document.activeElement as HTMLElement|null
-  const bounds=(anchor||trigger)?.getBoundingClientRect(),keyboard=e.clientX===0&&e.clientY===0
-  clickX = keyboard&&bounds?bounds.left:e.clientX
-  clickY = keyboard&&bounds?bounds.bottom:e.clientY
+  const bounds=(anchor||trigger)?.getBoundingClientRect(),keyboard=!('clientX' in e)||(e.clientX===0&&e.clientY===0)
+  clickX = keyboard&&bounds?bounds.left:'clientX' in e?e.clientX:0
+  clickY = keyboard&&bounds?bounds.bottom:'clientY' in e?e.clientY:0
   x.value = clickX
   y.value = clickY
   origin.value = 'top left'
-  open.value = true
-  void nextTick(()=>{clamp();panelEl.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()})
+  const location=nativeMenuAnchor(e,anchor||trigger),generation=++nativeGeneration
+  void showResolved(location,generation)
 }
 
-function hide() {
+function showDom(){
+  requestBrowserChromeOpen(chromeId);nativeOpen.value=false;open.value=true
+  void nextTick(()=>{clamp();panelEl.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()})
+}
+async function showResolved(anchor:{x:number;y:number;width:number;height:number},generation:number){
+  await native.ready();if(disposed||generation!==nativeGeneration)return
+  if(!native.menusSupported.value){showDom();return}
+  nativeOpen.value=true;open.value=true;await nextTick()
+  if(disposed||generation!==nativeGeneration)return
+  const source=nativeSource.value?nativeMenuSource(nativeSource.value):undefined
+  const items=props.nativeItems||source?.items||[],signature=JSON.stringify(items)
+  if(!items.length){hide(false);return}
+  if(source&&nativeSource.value){sourceObserver?.disconnect();sourceObserver=new MutationObserver(()=>{if(nativeSource.value&&nativeMenuSource(nativeSource.value).signature!==signature)hide(false)});sourceObserver.observe(nativeSource.value,{subtree:true,attributes:true,childList:true,characterData:true})}
+  try{
+    const result=await native.popupMenu(items,anchor,{contextKey:chromeId})
+    if(disposed||generation!==nativeGeneration)return
+    sourceObserver?.disconnect()
+    if(!result.supported){nativeOpen.value=false;showDom();return}
+    if(result.selectedId){
+      if(props.nativeItems){if(JSON.stringify(props.nativeItems)===signature)emit('native-action',result.selectedId)}
+      else if(source&&nativeSource.value&&nativeMenuSource(nativeSource.value).signature===signature){const button=source.buttons.get(result.selectedId);if(button?.isConnected&&!button.disabled)button.click()}
+      hide(false)
+    }else hide(result.reason===undefined||result.reason==='dismissed')
+  }catch{if(!disposed&&generation===nativeGeneration){nativeOpen.value=false;showDom()}}
+}
+function hide(restore=true) {
+  nativeGeneration++;sourceObserver?.disconnect()
+  if(nativeOpen.value){nativeOpen.value=false;void native.closeMenu()}
   if(!open.value)return
   open.value = false
-  if(trigger?.isConnected)trigger.focus({preventScroll:true})
+  if(restore&&trigger?.isConnected)trigger.focus({preventScroll:true})
 }
 
 function clamp() {
@@ -97,21 +137,23 @@ function onKey(e: KeyboardEvent) {
   buttons[next]?.focus()
 }
 
-watch(open, async (v) => {
+watch(domOpen, async (v) => {
   if (v) {
     window.addEventListener('keydown', onKey, true)
     window.addEventListener('resize',clamp)
     await nextTick()
-    if(open.value&&panelEl.value){resizeObserver ||= new ResizeObserver(clamp);resizeObserver.observe(panelEl.value)}
+    if(domOpen.value&&panelEl.value){resizeObserver ||= new ResizeObserver(clamp);resizeObserver.observe(panelEl.value)}
   } else {
     window.removeEventListener('keydown', onKey, true)
     window.removeEventListener('resize',clamp)
     resizeObserver?.disconnect()
   }
 })
-onBeforeUnmount(() => {window.removeEventListener('keydown', onKey, true);window.removeEventListener('resize',clamp);resizeObserver?.disconnect()})
+watch(()=>JSON.stringify(props.nativeItems),()=>{if(nativeOpen.value)hide(false)})
+onMounted(()=>{window.addEventListener(BROWSER_CHROME_OPEN,otherChrome);window.addEventListener(NATIVE_UI_OPEN,otherNative);void native.ready()})
+onBeforeUnmount(() => {disposed=true;hide(false);sourceObserver?.disconnect();window.removeEventListener(BROWSER_CHROME_OPEN,otherChrome);window.removeEventListener(NATIVE_UI_OPEN,otherNative);window.removeEventListener('keydown', onKey, true);window.removeEventListener('resize',clamp);resizeObserver?.disconnect()})
 
-defineExpose({ show, hide, open })
+defineExpose({ show, hide, open, nativeOpen })
 </script>
 
 <style scoped>
@@ -131,7 +173,7 @@ defineExpose({ show, hide, open })
   overscroll-behavior: contain;
   background: #fff;
   border: 1px solid #dfe2e7;
-  border-radius: 10px;
+  border-radius: 12px;
   box-shadow: 0 8px 28px rgba(24, 32, 48, 0.16);
   will-change: transform, opacity;
 }

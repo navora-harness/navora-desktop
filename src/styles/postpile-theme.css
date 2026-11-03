@@ -12,15 +12,14 @@
   --navora-stroke: rgba(30, 43, 66, .08);
   --navora-ease: cubic-bezier(.22, .75, .2, 1);
 }
-.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.main .main-top,
-.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.main>.settings-workspace>.top,
-.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.main .creator-header{padding-right:24px}
-.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.main.file-workspace-open .main-top{padding-right:12px}
-.navora-app .shell.platform-mac:not(.mobile-layout)>.main .main-top,
-.navora-app .shell.platform-mac:not(.mobile-layout)>.main>.settings-workspace>.top,
-.navora-app .shell:not(.frameless):not(.mobile-layout)>.main .main-top,
-.navora-app .shell:not(.frameless):not(.mobile-layout)>.main>.settings-workspace>.top{padding-right:calc(var(--title-actions-reserve,236px) - 138px)}
-@media(max-width:650px){.global-title-actions [data-chat-resource=files]{display:none}}
+.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.content-surface>.main .main-top,
+.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.content-surface>.main>.settings-workspace>.top,
+.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.content-surface>.main .creator-header{padding-right:24px}
+.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac)>.content-surface>.main.file-workspace-open .main-top{padding-right:12px}
+.navora-app .shell.platform-mac:not(.mobile-layout)>.content-surface>.main .main-top,
+.navora-app .shell.platform-mac:not(.mobile-layout)>.content-surface>.main>.settings-workspace>.top,
+.navora-app .shell:not(.frameless):not(.mobile-layout)>.content-surface>.main .main-top,
+.navora-app .shell:not(.frameless):not(.mobile-layout)>.content-surface>.main>.settings-workspace>.top{padding-right:24px}
 .navora-app { color: var(--navora-ink); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; }
 .navora-app .shell { isolation: isolate; background: var(--navora-background); }
 .navora-app .shell.frameless:not(.mobile-layout) {
@@ -59,15 +58,15 @@
   inset: 0 138px 0 120px;
   -webkit-app-region: drag;
 }
-.navora-app .shell.frameless:not(.mobile-layout) > aside.sidebar { grid-column: 1; grid-row: 2; }
-.navora-app .shell.frameless:not(.mobile-layout) > .main { grid-column: 2; grid-row: 2; }
-.navora-app .shell.frameless:not(.mobile-layout) > .main .win-drag-main { display: none; }
-.navora-app .shell.frameless:not(.mobile-layout) > .main .main-top { padding-top: 8px; padding-right: 24px; }
-.navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace { margin-top: 0; }
-.navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace > .top,
-.navora-app .shell.frameless:not(.mobile-layout) > .main .creator-header { padding-right: 24px; }
-.navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace > .top { background: var(--navora-header); }
-.navora-app .shell.frameless:not(.mobile-layout) > .main .file-manager-head {
+.navora-app .shell.frameless:not(.mobile-layout) > .content-surface > aside.sidebar { grid-column: 1; grid-row: 1; }
+.navora-app .shell.frameless:not(.mobile-layout) > .content-surface > .main { grid-column: 2; grid-row: 1; }
+.navora-app .shell.frameless:not(.mobile-layout) > .content-surface > .main .win-drag-main { display: none; }
+.navora-app .shell.frameless:not(.mobile-layout) > .content-surface > .main .main-top { padding-top: 8px; padding-right: 24px; }
+.navora-app .shell.frameless:not(.mobile-layout) > .content-surface > .main > .settings-workspace { margin-top: 0; }
+.navora-app .shell.frameless:not(.mobile-layout) > .content-surface > .main > .settings-workspace > .top,
+.navora-app .shell.frameless:not(.mobile-layout) > .content-surface > .main .creator-header { padding-right: 24px; }
+.navora-app .shell.frameless:not(.mobile-layout) > .content-surface > .main > .settings-workspace > .top { background: var(--navora-header); }
+.navora-app .shell.frameless:not(.mobile-layout) > .content-surface > .main .file-manager-head {
   box-sizing: border-box;
   height: 48px;
   min-height: 48px;
@@ -75,7 +74,7 @@
   background: var(--navora-header);
   -webkit-app-region: no-drag;
 }
-.navora-app .shell.frameless:not(.mobile-layout) > .main .plugin-workspace-head {
+.navora-app .shell.frameless:not(.mobile-layout) > .content-surface > .main .plugin-workspace-head {
   box-sizing: border-box;
   height: 48px;
   min-height: 48px;
@@ -83,7 +82,7 @@
   background: var(--navora-header);
   -webkit-app-region: no-drag;
 }
-.navora-app .shell.frameless:not(.mobile-layout) > .main > .file-workspace.full-page > .file-workspace-head {
+.navora-app .shell.frameless:not(.mobile-layout) > .content-surface > .main > .file-workspace.full-page > .file-workspace-head {
   box-sizing: border-box;
   height: 48px;
   min-height: 48px;
@@ -98,9 +97,9 @@
 .navora-app .shell .sidebar {
   background: var(--navora-sidebar); color: var(--navora-ink); border-right: 1px solid var(--navora-stroke);
 }
-.navora-app .sidebar .activity-rail { background: var(--navora-chrome); }
+.navora-app .main-shell .activity-rail { background: var(--navora-chrome); }
 .navora-app .shell .main { background: var(--navora-surface); border-radius: 0; }
-.navora-app .shell.frameless:not(.mobile-layout) > .main .main-top { background: var(--navora-header); }
+.navora-app .shell.frameless:not(.mobile-layout) > .content-surface > .main .main-top { background: var(--navora-header); }
 .navora-app .file-workspace .file-workspace-head { background: var(--navora-header); }
 .navora-app .sidebar :is(.brand-name,.chat-item,.new-chat-btn,.sidebar-icon-btn,.brand-search-btn,.chat-toolbar-icon-btn) {
   color: var(--navora-ink);
@@ -152,7 +151,7 @@
 .chat-search-dialog { align-self: flex-start; margin-top: min(14vh,100px) !important; }
 .chat-search-dialog .chat-search-panel { width: 100%; background: #fff; border-color: #dfe2e7; }
 .navora-app > .v-application__wrap { height: 100dvh; min-height: 0; overflow: hidden; }
-.navora-app .shell:has(> .sidebar) { height: 100dvh; grid-template-columns: var(--sidebar-width,310px) minmax(0,1fr); }
+.navora-app .shell:has(> .content-surface) { height: 100dvh; grid-template-columns: var(--sidebar-width,310px) minmax(0,1fr); }
 .navora-app .sidebar { padding: 0 8px 8px; }
 .navora-app .sidebar .brand { padding: 8px 4px; }
 .navora-app .sidebar .brand-search-btn { border: 0; color: #39414d; }
@@ -183,7 +182,6 @@
 .navora-app .sidebar :is(.tree-row:hover,.tree-row.active) { background: #e8eaee; }
 .navora-app .sidebar .chat-status-icon { background: #fff; border-color: #d9dfe6; opacity: 1; width: 28px; height: 28px; }
 .navora-app .main .win-drag-main { height: 40px; right: 0; }
-.navora-app .shell.frameless .main-top { padding: 48px 24px 10px; min-height: 78px; }
 .navora-app .main .main-top { border: 0; }
 .navora-app .main .main-title { font-size: 15px; }
 .navora-app .main :is(.msg.user,.msg.assistant) .msg-avatar { display: none; }
@@ -239,7 +237,7 @@
 .navora-app .shell.platform-mac .brand { padding-top: 48px; }
 .navora-app .shell.platform-mac .win-drag-main { position: fixed; left: 80px; }
 .navora-app .shell.platform-mac .main-top { padding-top: 16px; }
-.navora-app .shell.mobile-layout:has(> .sidebar) { grid-template-columns: minmax(0,1fr); }
+.navora-app .shell.mobile-layout:has(> .content-surface) { grid-template-columns: minmax(0,1fr); }
 .navora-app .shell.mobile-layout .sidebar .chat-item-track { background: #f7f7f8; }
 .navora-app .shell.mobile-layout .sidebar .chat-item.active .chat-item-track { background: #e5e8ef; }
 .navora-app .shell.mobile-layout .sidebar .chat-item:not(.active):hover .chat-item-track { background: #eceef2; }
@@ -251,7 +249,7 @@
 .navora-app :is(.app-drag,.win-drag-main) :is(button,input,a,select) { -webkit-app-region: no-drag; }
 @keyframes navora-panel-enter { from { opacity: .5; } to { opacity: 1; } }
 @media(max-width:800px) {
-  .navora-app .shell:has(> .sidebar) { grid-template-columns: minmax(0,1fr); }
+  .navora-app .shell:has(> .content-surface) { grid-template-columns: minmax(0,1fr); }
   .navora-app .main .messages { padding-inline: 12px; }
   .navora-app .main .composer { padding: 8px 10px 12px; }
   .navora-app .main .msg-empty-title { font-size: 23px; }
@@ -269,24 +267,24 @@
 /* The rail and resize handles are outside scrolling panes. Their hit areas never
    participate in popup transforms or move adjacent content during feedback. */
 .navora-app .shell .sidebar { position: relative; padding-left: 54px; padding-right: 10px; }
-.navora-app .sidebar .activity-rail { position: absolute; inset: 0 auto 8px 10px; width: 32px; display: flex; flex-direction: column; justify-content: space-between; border: 0; padding: 0; z-index: 3; }
+.navora-app .main-shell .activity-rail { position: absolute; inset: 0 auto 8px 10px; width: 32px; display: flex; flex-direction: column; justify-content: space-between; border: 0; padding: 0; z-index: 3; }
 .activity-rail-sections, .navora-app .activity-rail .sidebar-foot-actions, .navora-app .activity-rail .sidebar-foot-end { display: flex; flex-direction: column; gap: 8px; }
 .navora-app .activity-rail .sidebar-foot { border: 0; margin: 0; padding: 0; }
-.navora-app .sidebar :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn), .navora-app .mobile-topbar-btn {
+.navora-app .main-shell :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn), .navora-app .mobile-topbar-btn {
   display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 32px; min-width:32px; height: 32px; padding: 0;
   border: 1px solid transparent; border-radius: 8px; background: transparent; color: #505965; cursor: pointer;
   transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease, transform 150ms ease;
 }
-.navora-app .sidebar :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn) svg, .navora-app .mobile-topbar-btn svg { width: 16px; height: 16px; }
-.navora-app .sidebar :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn):hover, .navora-app .mobile-topbar-btn:hover { background: #e7e9ee; color: #272d36; border-color: #dce0e7; }
-.navora-app .sidebar .sidebar-icon-btn.selected { background:#edf0f5; border-color:transparent; color:#3a587d; }
+.navora-app .main-shell :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn) svg, .navora-app .mobile-topbar-btn svg { width: 16px; height: 16px; }
+.navora-app .main-shell :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn):hover, .navora-app .mobile-topbar-btn:hover { background: #e7e9ee; color: #272d36; border-color: #dce0e7; }
+.navora-app .main-shell .sidebar-icon-btn.selected { background:#edf0f5; border-color:transparent; color:#3a587d; }
 .navora-app .activity-rail .sidebar-icon-btn { position:relative; }
 .navora-app .activity-rail .sidebar-icon-btn::before { content:''; position:absolute; left:-5px; width:2px; height:12px; border-radius:2px; background:#6b87a9; opacity:0; transition:opacity 150ms ease; pointer-events:none; }
 .navora-app .activity-rail .sidebar-icon-btn.selected::before { opacity:1; }
-.navora-app .sidebar .sidebar-icon-btn.selected:hover { background:#e5eaf1; border-color:#dce1e9; }
+.navora-app .main-shell .sidebar-icon-btn.selected:hover { background:#e5eaf1; border-color:#dce1e9; }
 .navora-app .sidebar .icon-btn { border: 1px solid transparent; border-radius: 8px; transition: background-color 150ms ease, border-color 150ms ease; }
 .navora-app .sidebar .icon-btn:hover { background: #e7e9ee; border-color: #dce0e7; }
-.navora-app .sidebar :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn):active { transform: scale(.94); }
+.navora-app .main-shell :is(.sidebar-icon-btn,.chat-toolbar-icon-btn,.brand-search-btn):active { transform: scale(.94); }
 .navora-app :is(.sidebar-divider,button):focus-visible { outline: 2px solid #537ab9; outline-offset: 2px; }
 .sidebar-divider { position: relative; flex-shrink: 0; touch-action: none; z-index: 2; }
 .sidebar-divider::after { content: ''; position: absolute; border-radius: 2px; background: #c1cad7; opacity: 0; transition: opacity 140ms ease; }
@@ -312,9 +310,9 @@
 .navora-app .main .thinking-label { color: #687383; font-size: 13px; font-weight: 500; }
 .navora-app .main .thinking-reason { margin-top: 6px; }
 .navora-app .main .composer-input .v-field__input:not(.v-textarea__sizer) { min-height: max(48px,var(--v-input-control-height,48px)); padding-top: 9px; padding-bottom: 8px; }
-.navora-app .shell > .main > .settings-workspace { flex: 1; min-height: 0; height: auto; max-height: none; width: 100%; border: 0; border-radius: 0; box-shadow: none; background: #fff; }
-.navora-app .shell:not(.mobile-layout) > .main:has(> .settings-workspace) { grid-template-rows: minmax(0,1fr); }
-.navora-app .shell.frameless > .main > .settings-workspace { margin-top: 40px; }
+.navora-app .shell > .content-surface > .main > .settings-workspace { flex: 1; min-height: 0; height: auto; max-height: none; width: 100%; border: 0; border-radius: 0; box-shadow: none; background: #fff; }
+.navora-app .shell:not(.mobile-layout) > .content-surface > .main:has(> .settings-workspace) { grid-template-rows: minmax(0,1fr); }
+.navora-app .shell.frameless > .content-surface > .main > .settings-workspace { margin-top: 40px; }
 .navora-app .main .settings-workspace > .top { min-height: 44px; height: 44px; padding: 6px 24px; gap: 12px; border-bottom: 1px solid #eceef2; background: #fff; }
 .navora-app .main .settings-workspace > .shell { width: 100%; height: auto; flex: 1; min-height: 0; grid-template-columns: 160px minmax(0,1fr); grid-template-rows: minmax(0,1fr); background: #fafbfc; }
 .navora-app .main .settings-workspace .panel { border: 0; border-radius: 0; background: #fafbfc; }
@@ -345,16 +343,16 @@
 .navora-app .sidebar .settings-navigation .nav-item.active { background: #e4e9f2; }
 .navora-app .sidebar .settings-navigation .nav-item.active .nav-label { color: #294d83; }
 .navora-app .sidebar .settings-navigation .nav-item:hover { background: #e7e9ee; }
-.navora-app .shell > .main > .settings-workspace.external-navigation > .shell { grid-template-columns: minmax(0,1fr); padding: 0 !important; }
-.navora-app .shell > .main > .settings-workspace.external-navigation .content { padding: 24px 32px 40px; scrollbar-gutter: stable; }
-.navora-app .shell > .main > .settings-workspace.external-navigation .section { max-width: 940px; }
-.navora-app .shell > .main > .settings-workspace.external-navigation .section:has(> .message-display-card) { max-width: 760px; }
+.navora-app .shell > .content-surface > .main > .settings-workspace.external-navigation > .shell { grid-template-columns: minmax(0,1fr); padding: 0 !important; }
+.navora-app .shell > .content-surface > .main > .settings-workspace.external-navigation .content { padding: 24px 32px 40px; scrollbar-gutter: stable; }
+.navora-app .shell > .content-surface > .main > .settings-workspace.external-navigation .section { max-width: 940px; }
+.navora-app .shell > .content-surface > .main > .settings-workspace.external-navigation .section:has(> .message-display-card) { max-width: 760px; }
 .navora-app .settings-workspace.external-navigation .section-head { display: none; }
 /* Context headers live below the native caption row and share one compact height. */
-.navora-app .shell.frameless:not(.mobile-layout) > .main .main-top { min-height: 48px; padding: 8px 24px; gap: 18px; position: relative; z-index: 5; -webkit-app-region: no-drag; }
-.navora-app .shell.frameless:not(.mobile-layout) > .main .main-top button { -webkit-app-region: no-drag; }
-.navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace { margin-top: 0; }
-.navora-app .shell.frameless:not(.mobile-layout) > .main > .settings-workspace > .top { box-sizing: border-box; height: 48px; min-height: 48px; padding: 6px 24px; position: relative; z-index: 5; -webkit-app-region: no-drag; }
+.navora-app .shell.frameless:not(.mobile-layout) > .content-surface > .main .main-top { min-height: 48px; padding: 8px 24px; gap: 18px; position: relative; z-index: 5; -webkit-app-region: no-drag; }
+.navora-app .shell.frameless:not(.mobile-layout) > .content-surface > .main .main-top button { -webkit-app-region: no-drag; }
+.navora-app .shell.frameless:not(.mobile-layout) > .content-surface > .main > .settings-workspace { margin-top: 0; }
+.navora-app .shell.frameless:not(.mobile-layout) > .content-surface > .main > .settings-workspace > .top { box-sizing: border-box; height: 48px; min-height: 48px; padding: 6px 24px; position: relative; z-index: 5; -webkit-app-region: no-drag; }
 .navora-app .settings-workspace > .top button { -webkit-app-region: no-drag; }
 .navora-app .settings-workspace > .top h1 { font-size: 14px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .navora-app .settings-workspace > .top .top-left { gap: 10px; }
@@ -394,8 +392,8 @@
 .navora-app .settings-workspace .provider-list-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .navora-app .settings-workspace .provider-list-meta { flex-direction: row; justify-content: flex-start; flex-wrap: wrap; }
 .navora-app .main .settings-workspace.is-mobile .provider-layout { grid-template-columns: 1fr; }
-.navora-app .shell.platform-mac:not(.mobile-layout) > .main .main-top,
-.navora-app .shell.platform-mac:not(.mobile-layout) > .main > .settings-workspace > .top { padding-right: 24px; }
+.navora-app .shell.platform-mac:not(.mobile-layout) > .content-surface > .main .main-top,
+.navora-app .shell.platform-mac:not(.mobile-layout) > .content-surface > .main > .settings-workspace > .top { padding-right: 24px; }
 
 /* Compact navigation: logo in the rail; all conversation actions share a row. */
 .rail-brand { width: 32px; height: 44px; display: grid; place-items: center; flex-shrink: 0; }
@@ -414,11 +412,11 @@
 .navora-app .main .subchat-banner { flex-shrink: 0; }
 .navora-app .main .subchat-back { padding: 4px 7px; font-size: 12px; border-color: transparent; background: transparent; }
 .navora-app .main .subchat-back:hover { background: #f0f1f4; border-color: #dce0e7; }
-.navora-app .shell.mobile-layout > aside.sidebar { padding: 0 10px calc(8px + env(safe-area-inset-bottom,0px)) 54px; }
-.navora-app .shell.sidebar-collapsed:has(> .sidebar) { grid-template-columns: 52px minmax(0,1fr); }
-.navora-app .shell.sidebar-collapsed:not(.mobile-layout) > aside.sidebar { width: 100%; padding-left: 0; padding-right: 0; }
-.navora-app .shell.sidebar-collapsed.mobile-layout > aside.sidebar { width: 52px; padding-left: 0; padding-right: 0; }
-.navora-app .shell.mobile-layout > aside.sidebar { transition: transform 220ms var(--navora-ease), width 220ms var(--navora-ease); }
+.navora-app .shell.mobile-layout > .content-surface > aside.sidebar { padding: 0 10px calc(8px + env(safe-area-inset-bottom,0px)) 54px; }
+.navora-app .shell.sidebar-collapsed:has(> .content-surface) { grid-template-columns: 52px minmax(0,1fr); }
+.navora-app .shell.sidebar-collapsed:not(.mobile-layout) > .content-surface > aside.sidebar { width: 100%; padding-left: 0; padding-right: 0; }
+.navora-app .shell.sidebar-collapsed.mobile-layout > .content-surface > aside.sidebar { width: 52px; padding-left: 0; padding-right: 0; }
+.navora-app .shell.mobile-layout > .content-surface > aside.sidebar { transition: transform 220ms var(--navora-ease), width 220ms var(--navora-ease); }
 .navora-app .shell.sidebar-collapsed .sidebar-content-stack { opacity: 0; visibility: hidden; pointer-events: none; transform: translateX(-8px); }
 
 /* Resources are bounded cards with fixed headers and one scrolling body. */
@@ -476,8 +474,8 @@
 }
 /* Local motion follows Postpile's easing. Only explicit layout interactions
    resize the rail/dock; direct dragging stays one-to-one with the pointer. */
-.navora-app .shell:has(> .sidebar):not(.mobile-layout) { transition: grid-template-columns 220ms var(--navora-ease); }
-.navora-app .shell.sidebar-resizing:has(> .sidebar) { transition: none; }
+.navora-app .shell:has(> .content-surface):not(.mobile-layout) { transition: grid-template-columns 220ms var(--navora-ease); }
+.navora-app .shell.sidebar-resizing:has(> .content-surface) { transition: none; }
 .navora-app .sidebar { overflow: clip; }
 .navora-app .sidebar-content-stack { transition: opacity 160ms ease, transform 220ms var(--navora-ease), visibility 0s; }
 .navora-app .sidebar-collapsed .sidebar-content-stack { transition: opacity 120ms ease, transform 180ms var(--navora-ease), visibility 0s 180ms; }
@@ -576,7 +574,7 @@
 .navora-app :is(.sidebar-workspace-pane,.sidebar-browser-pane)[data-visible="false"]:not(.sidebar-pane-leave-active) { display:none !important; }
 
 /* Narrow desktop windows still reserve the native caption hit area. */
-.navora-app .shell.frameless.mobile-layout > .main > .settings-workspace { padding-top:40px; }
+.navora-app .shell.frameless.mobile-layout > .content-surface > .main > .settings-workspace { padding-top:40px; }
 
 .ob-connection { display:grid; gap:12px; margin-top:12px; }
 
@@ -681,17 +679,19 @@
 @media(prefers-reduced-motion:reduce) { .plugin-development-settings summary svg:last-child { transition:none; } }
 
 /* Prefer the platform's normal arrow cursor for interactive UI controls. */
-.navora-app :is(button,a,[role="button"],[role="menuitem"],[role="tab"],[role="option"],[role="treeitem"],[role="switch"],[role="checkbox"],summary) {
+.navora-app :is(button,a,[role="button"],[role="menuitem"],[role="tab"],[role="option"],[role="treeitem"],[role="switch"],[role="checkbox"],summary),
+.v-overlay-container :is(button,a,[role="button"],[role="menuitem"],[role="option"],[role="tab"],summary),
+.sidebar-ctx-panel :is(button,a,[role="menuitem"]) {
   cursor: default !important;
 }
 
 /* Keep the conversation heading compact now that the native caption has its own row. */
-.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac) > .main .conversation-title-header:not(.compact) {
+.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac) > .content-surface > .main .conversation-title-header:not(.compact) {
   box-sizing: border-box;
-  min-height: 56px;
-  padding: 8px 24px;
+  min-height: 48px;
+  padding: 8px 20px;
   align-items: center;
 }
-.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac) > .main .conversation-title-header:not(.compact) .main-title {
+.navora-app .shell.frameless:not(.mobile-layout):not(.platform-mac) > .content-surface > .main .conversation-title-header:not(.compact) .main-title {
   transform:none;
 }

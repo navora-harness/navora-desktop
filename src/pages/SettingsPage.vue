@@ -1,41 +1,29 @@
 <template>
   <div class="settings-page" :class="{ 'is-embedded': embedded, 'is-mobile': mobile, 'external-navigation': !!navigationTarget }" :aria-label="navigationTarget ? activeSettingsTitle : '设置'">
-    <div v-if="embedded && !mobile" class="settings-titlebar-spacer" aria-hidden="true" />
+    <div v-if="embedded && !mobile && !navigationTarget" class="settings-titlebar-spacer" aria-hidden="true" />
     <header class="top">
       <div class="top-left">
         <button
           v-if="embedded"
           type="button"
+          ref="backButtonEl"
           class="settings-close settings-back"
-          aria-label="关闭设置"
-          title="返回对话"
-          :disabled="saving"
-          @click="emit('close')"
-        ><AppIcon icon="arrow-left" /></button>
-        <v-btn v-if="!embedded" variant="text" class="back-btn" @click="$router.push('/')">
+          aria-label="返回上一页"
+          :title="returnLabel || '返回进入设置前的内容（Alt ←）'"
+          :disabled="exitState.phase!=='idle'"
+          @click="requestClose"
+        ><AppIcon icon="arrow-left" /><span>返回上一页</span></button>
+        <h1 v-if="navigationTarget" ref="headingEl" class="settings-current-title" tabindex="-1">{{ activeSettingsTitle }}</h1>
+        <v-btn v-if="!embedded" variant="text" class="back-btn" @click="requestClose">
           <AppIcon icon="arrow-left" class="mr-2" />
           返回
         </v-btn>
       </div>
-      <div class="top-actions">
-        <button v-if="hasPendingSettings" type="button" class="settings-discard" title="放弃未应用的修改" :disabled="saving || savingInstant" @click="discardSettings">还原</button>
-        <span class="settings-save-status" role="status">{{ saving || savingInstant ? '保存中…' : hasPendingSettings ? '有未应用更改' : '已保存' }}</span>
-        <v-btn
-          color="primary"
-          variant="flat"
-          class="save-btn"
-          size="small"
-          :loading="saving && !savingAndExit"
-          :disabled="!cfg || saving || !hasPendingSettings"
-          @click="save(false)"
-        >
-          应用
-        </v-btn>
-        <ActionMenu v-if="!mobile && !navigationTarget" label="应用选项" icon="chevron-down" :disabled="!cfg || saving" :items="[{id:'exit',label:'应用并退出',icon:'check'}]" @select="save(true)" />
-      </div>
+      <div class="top-actions"><span class="settings-save-status" role="status" aria-live="polite">{{ saving || savingInstant ? '保存中…' : instantError ? '有设置需要重试' : pendingGroupCount ? pendingGroupCount + ' 组未保存 · 返回后可继续' : '已保存' }}</span><button v-if="lastInstantUndo && !instantError" type="button" class="ui-button" :disabled="saving || savingInstant" title="仅撤销最近一批自动保存的选择；不会覆盖其它窗口后来对同一项的修改" @click="undoInstantPrefs">撤销本次修改</button></div>
     </header>
 
-    <div v-if="cfg" class="shell" :inert="saving">
+    <div v-if="exitState.phase!=='idle'" class="settings-exit-status" :class="{'needs-decision':exitState.phase==='decision'}" role="status" aria-live="polite"><span>{{ exitState.message }}</span><template v-if="exitState.phase==='decision'"><button type="button" class="ui-button" @click="exitGuard.decide('retry')">{{ exitState.reason==='failed'?'重试并返回':'继续等待' }}</button><button type="button" class="ui-button" @click="exitGuard.decide('leave')">保留草稿并返回</button><button type="button" class="ui-button" @click="exitGuard.decide('stay')">留在设置</button></template></div>
+    <div v-if="cfg" class="shell" :inert="exitState.phase!=='idle'">
       <Teleport :to="navigationTarget || 'body'" :disabled="!navigationTarget">
       <nav class="nav settings-navigation">
         <div ref="navListEl" class="nav-list">
@@ -44,6 +32,7 @@
             :key="item.value"
             type="button"
             class="nav-item"
+            :disabled="exitState.phase!=='idle'"
             :class="{ active: tab === item.value }"
             :aria-current="tab === item.value ? 'page' : undefined"
             aria-controls="settings-content"
@@ -66,6 +55,37 @@
 
       <div class="panel">
         <div id="settings-content" ref="contentEl" class="content" role="region" :aria-label="navigationTarget ? activeSettingsTitle : '设置'">
+<div v-if="instantError" class="settings-save-error" role="alert"><span>{{ instantError }}</span><button type="button" class="ui-button" :disabled="savingInstant" @click="retryInstantPrefs">重试保存</button><button type="button" class="ui-button" @click="discardFailedInstant">放弃本次修改</button></div>
+          <section v-if="tab === 'appearance'" class="section">
+            <header class="section-head"><h2>外观</h2><p>设置显示模式和主题，所有窗口同步更新</p></header>
+            <div class="card">
+              <h3 class="card-title">模式</h3>
+              <div class="appearance-options appearance-mode-options" role="group" aria-label="模式">
+                <button v-for="mode in APPEARANCE_MODES" :key="mode.id" type="button" class="appearance-option" :data-appearance-mode="mode.id"
+                  :aria-pressed="resolveAppearanceMode(cfg.app.appearance_mode) === mode.id" :disabled="saving"
+                  @click="selectAppearanceMode(mode.id)">
+                  <AppearancePreview :theme-id="resolveAppearanceTheme(cfg.app.appearance_theme).id" :mode="mode.id" split />
+                  <span class="appearance-option-name">{{ mode.name }}<span v-if="resolveAppearanceMode(cfg.app.appearance_mode) === mode.id" class="appearance-selection-badge" aria-hidden="true">✓ 已选</span></span>
+                  <span class="appearance-option-description">{{ mode.id === 'auto' ? '跟随系统自动切换' : mode.id === 'light' ? '明亮清爽的界面' : '柔和舒适的深色界面' }}</span>
+                </button>
+              </div>
+              <p class="appearance-hint">自动模式跟随系统的亮色或暗色设置。</p>
+            </div>
+            <div class="card mt-3">
+              <h3 class="card-title">主题</h3>
+              <div class="appearance-options" role="group" aria-label="主题">
+                <button v-for="theme in appearanceOptions" :key="theme.id" type="button"
+                  class="appearance-option" :data-appearance-theme="theme.id"
+                  :aria-pressed="resolveAppearanceTheme(cfg.app.appearance_theme).id === theme.id"
+                  :disabled="saving" @click="selectAppearanceTheme(theme.id)">
+                  <AppearancePreview :theme-id="theme.id" :mode="resolveAppearanceMode(cfg.app.appearance_mode)" :system-dark="appearanceUi.current.value.dark" />
+                  <span class="appearance-option-name">{{ theme.name }}<span v-if="resolveAppearanceTheme(cfg.app.appearance_theme).id === theme.id" class="appearance-selection-badge" aria-hidden="true">✓ 已选</span></span>
+                  <span class="appearance-option-description">{{ theme.description }}</span>
+                </button>
+              </div>
+              <p class="appearance-hint">选择后自动保存，并同步到所有已打开的窗口。</p>
+            </div>
+          </section>
           <!-- 基本 -->
           <section v-if="tab === 'basic'" class="section">
             <header class="section-head">
@@ -124,7 +144,7 @@
               <div class="field-row mt-2">
                 <div>
                   <div class="switch-title">输入框字数上限</div>
-                  <div class="switch-hint">默认 16000；需点「应用」后生效</div>
+                  <div class="switch-hint">默认 16000；使用下方按钮保存后生效</div>
                 </div>
                 <v-text-field
                   v-model.number="cfg.app.max_composer_chars"
@@ -139,7 +159,8 @@
                   style="max-width: 140px"
                 />
               </div>
-            </div>
+            <SettingsGroupActions v-bind="groupProps('composer')" @save="saveGroup('composer')" @cancel="cancelGroup('composer')" />
+</div>
 
             <div class="card mt-3 message-display-card">
               <h3 class="card-title">消息展示</h3>
@@ -301,7 +322,7 @@
                     <ProviderConnectionFields :provider="provider" v-model:key-draft="apiKeyDraft" :key-label="apiKeyLabel" :key-placeholder="apiKeyPreview ? '留空保留现有密钥' : '输入 API Key'">
                       <template #key-actions><button v-if="apiKeyPreview" type="button" class="provider-tool-btn danger" :disabled="clearingApiKey" @click.stop="clearApiKey">清除</button></template>
                     </ProviderConnectionFields>
-                    <button type="button" class="advanced-toggle span-2" :aria-expanded="advancedModel" @click="advancedModel = !advancedModel"><AppIcon :icon="advancedModel ? 'chevron-down' : 'chevron-right'" />高级连接配置</button>
+                    <button type="button" class="advanced-toggle span-2" :aria-expanded="advancedModel" @click="advancedModel = !advancedModel"><AppIcon :icon="advancedModel ? 'chevron-down' : 'chevron-right'" />高级连接配置 <small>{{ modelAdvancedSummary }}</small></button>
                     <DisclosureTransition><div v-if="advancedModel" class="advanced-connection span-2 form-grid">
                       <v-select v-model="provider.protocol" :items="[{title:'OpenAI Chat Completions', value:'chat_completions'}]" label="API 协议" :menu-props="selectMenuProps" />
                       <v-select v-model="provider.output_token_param" :items="['max_tokens','max_completion_tokens']" label="输出上限参数" :menu-props="selectMenuProps" />
@@ -318,9 +339,10 @@
                     />
 
                     </div></DisclosureTransition>
-                    <ModelCatalogEditor :key="provider.id" :provider="provider" :pending-credentials="!!apiKeyDraft.trim()" />
+                    <ModelCatalogEditor :key="provider.id" :provider="provider" :pending-credentials="groupDirty('models')" />
                   </div>
-                </div>
+                <SettingsGroupActions v-bind="groupProps('models')" @save="saveGroup('models')" @cancel="cancelGroup('models')" />
+</div>
               </div>
 
               <div class="card mt-3">
@@ -356,7 +378,8 @@
                     persistent-hint
                   />
                 </div>
-              </div>
+              <SettingsGroupActions v-bind="groupProps('rounds')" @save="saveGroup('rounds')" @cancel="cancelGroup('rounds')" />
+</div>
             </template>
           </section>
 
@@ -364,8 +387,47 @@
           <section v-if="tab === 'browser'" class="section">
             <header class="section-head">
               <h2>浏览器</h2>
-              <p>Agent 窗口、页面加载与访问范围</p>
+              <p>AI 自动化、窗口行为与页面加载</p>
             </header>
+            <div class="card browser-automation-settings">
+              <h3 class="card-title">AI 自动化</h3>
+              <p class="switch-hint">AI 使用这里的默认方式操作页面。你可以随时在浏览器工具栏暂停或接管。</p>
+              <div class="switch-row">
+                <div><div class="switch-title">AI Agent 操作时自动静音</div><div class="switch-hint">默认开启，仅在 Agent 使用该页面期间静音；结束或接管后恢复，保留手动静音选择</div></div>
+                <v-switch aria-label="AI Agent 操作时自动静音" v-model="cfg.browser.automation.auto_mute" color="primary" hide-details density="compact" />
+              </div>
+              <div class="switch-row" title="显示 AI 实际派发的光标位置，不移动系统鼠标">
+                <div><div class="switch-title">显示虚拟光标</div><div class="switch-hint">显示 AI 实际派发的光标位置；隐藏光标仍保留输入保护</div></div>
+                <v-switch aria-label="显示虚拟光标" v-model="cfg.browser.automation.show_virtual_cursor" color="primary" hide-details density="compact" />
+              </div>
+              <div class="switch-row">
+                <div><div class="switch-title">平滑移动光标</div><div class="switch-hint">按距离自动安排移动轨迹与用时</div></div>
+                <v-switch aria-label="平滑移动光标" v-model="cfg.browser.automation.smooth_pointer" color="primary" hide-details density="compact" />
+              </div>
+              <div class="switch-row">
+                <div><div class="switch-title">显示 AI 操作反馈</div><div class="switch-hint">通过页面边框和状态栏显示操作进度；关闭后仍保留控制与异常提示</div></div>
+                <v-switch aria-label="显示 AI 操作反馈" v-model="cfg.browser.automation.show_control_feedback" color="primary" hide-details density="compact" />
+              </div>
+              <div class="switch-row">
+                <div><div class="switch-title">防止操作相互干扰</div><div class="switch-hint automation-protection-hint">AI 持有控制权时保护页面键鼠输入，点击「接管」后交还给你；移入鼠标不打断任务</div></div>
+                <v-switch aria-label="防止操作相互干扰" v-model="cfg.browser.automation.protect_input" color="primary" hide-details density="compact" />
+              </div>
+              <div class="cursor-style-heading"><h3>虚拟光标样式</h3><p>{{ cfg.browser.automation.show_virtual_cursor?'显示 AI 的实际操作位置，不移动系统鼠标。':'开启显示后使用所选样式；现在也可以预选。' }}</p></div>
+              <BrowserCursorCards :model-value="cfg.browser.automation.cursor_style" @update:model-value="selectCursorStyle" />
+              <p v-if="cursorRuntimeIssue" class="cursor-runtime-note" role="status">{{ cursorRuntimeIssue }}<button type="button" class="ui-button" @click="refreshCursorRuntime">刷新状态</button></p>
+<div class="automation-speed" :class="{'is-disabled':!cfg.browser.automation.smooth_pointer}">
+                <div class="automation-speed-heading"><label for="automation-speed">移动速度</label><output>{{ (speedPreview ?? cfg.browser.automation.speed_multiplier).toFixed(2) }}×</output></div>
+                <input id="automation-speed" aria-label="移动速度" type="range" min="0.5" max="2" step="0.05" :disabled="!cfg.browser.automation.smooth_pointer"  :value="speedPreview ?? cfg.browser.automation.speed_multiplier" @input="speedPreview=Number(($event.target as HTMLInputElement).value)" @change="commitSpeed" />
+                <div class="automation-speed-labels"><span>从容 0.5×</span><span>标准 1×</span><span>快速 2×</span></div>
+              </div>
+              <button type="button" class="advanced-toggle automation-advanced-toggle" :aria-expanded="advancedAutomation" @click="advancedAutomation=!advancedAutomation"><AppIcon :icon="advancedAutomation?'chevron-down':'chevron-right'" />高级：移动风格与采样</button>
+              <DisclosureTransition><div v-if="advancedAutomation" class="automation-advanced-fields">
+                <v-select v-model="cfg.browser.automation.pointer_profile" :items="[{title:'自然移动',value:'natural'},{title:'精确移动',value:'precise'}]" label="移动风格" :disabled="!cfg.browser.automation.smooth_pointer" variant="outlined" density="comfortable" hide-details :menu-props="selectMenuProps" />
+                <label class="automation-number-field"><span>轨迹采样间隔（毫秒）</span><input aria-label="轨迹采样间隔（毫秒）" type="number" min="0.001" max="60000" step="0.25" :value="Number(cfg.browser.automation.interval_ms.toFixed(3))" :disabled="!cfg.browser.automation.smooth_pointer" @change="setAutomationInterval" /><small>控制输入点的密度，不改变总移动用时；默认约 8.333 毫秒</small></label>
+                <v-select v-model="cfg.browser.automation.cursor_fps" :items="automationFrameRates" label="光标显示帧率" hint="只影响光标绘制，不影响输入采样；0 表示运行时默认" persistent-hint :disabled="!cfg.browser.automation.show_virtual_cursor" variant="outlined" density="comfortable" :menu-props="selectMenuProps" />
+              <SettingsGroupActions v-bind="groupProps('movement')" @save="saveGroup('movement')" @cancel="cancelGroup('movement')" />
+</div></DisclosureTransition>
+            </div>
             <div class="card">
               <button type="button" class="advanced-toggle" :aria-expanded="advancedBrowser" @click="advancedBrowser = !advancedBrowser"><AppIcon :icon="advancedBrowser ? 'chevron-down' : 'chevron-right'" />高级：网站标识与语言</button>
               <DisclosureTransition><div v-if="advancedBrowser" class="ua-form">
@@ -385,7 +447,7 @@
                   @update:model-value="onUaPresetChange"
                 />
                 <v-textarea
-                  :model-value="cfg.browser.custom_ua"
+                  :model-value="displayBrowserUa"
                   label="User-Agent"
                   hint="修改内容后自动切换为「自定义」；选预设会填入对应 UA"
                   persistent-hint
@@ -408,7 +470,8 @@
                   color="primary"
                   base-color="#c5d0db"
                 />
-              </div></DisclosureTransition>
+              <SettingsGroupActions v-bind="groupProps('identity')" @save="saveGroup('identity')" @cancel="cancelGroup('identity')" />
+</div></DisclosureTransition>
             </div>
 
             <div class="card">
@@ -493,7 +556,8 @@
                   base-color="#c5d0db"
                 />
               </div>
-            </div>
+            <SettingsGroupActions v-bind="groupProps('waits')" @save="saveGroup('waits')" @cancel="cancelGroup('waits')" />
+</div>
 
             <div class="card">
               <h3 class="card-title">访问范围</h3>
@@ -508,7 +572,8 @@
                 hint="留空表示不限制；支持域名、通配符或完整 URL"
                 persistent-hint
               />
-            </div>
+            <SettingsGroupActions v-bind="groupProps('access')" @save="saveGroup('access')" @cancel="cancelGroup('access')" />
+</div>
 
             <div class="card">
               <h3 class="card-title">诊断</h3>
@@ -615,9 +680,10 @@
                 </v-btn>
               </div>
               <div class="switch-hint mt-3">
-                也可由 Agent 为单个 Chat 指定覆盖路径。
+                也可由 Agent 为单个 Chat 指定覆盖路径。修改根目录不会搬迁旧文件，请先保留旧路径以便恢复。
               </div>
-            </div>
+            <SettingsGroupActions v-bind="groupProps('workspace')" @save="saveGroup('workspace')" @cancel="cancelGroup('workspace')" />
+</div>
           </section>
 
           <!-- 技能 -->
@@ -920,16 +986,16 @@
                   <div class="switch-title">启用远程访问</div>
                   <div class="switch-hint">开启后监听下方端口，需账号密码登录</div>
                 </div>
-                <v-switch aria-label="启用远程访问" v-model="cfg.remote.enabled" color="primary" hide-details density="compact" />
+                <v-switch aria-label="启用远程访问" :model-value="cfg.remote.enabled" @update:model-value="onRemoteEnabled" color="primary" hide-details density="compact" />
               </div>
-              <div class="form-grid mt-2" :class="{ muted: !cfg.remote.enabled }">
+              <div class="form-grid mt-2 remote-connection-form">
                 <v-text-field
                   v-model="cfg.remote.host"
                   label="监听地址"
                   variant="outlined"
                   density="comfortable"
                   hide-details
-                  :disabled="!cfg.remote.enabled"
+
                 />
                 <v-text-field
                   v-model.number="cfg.remote.port"
@@ -938,7 +1004,7 @@
                   variant="outlined"
                   density="comfortable"
                   hide-details
-                  :disabled="!cfg.remote.enabled"
+
                 />
                 <v-text-field
                   v-model="cfg.remote.username"
@@ -946,7 +1012,7 @@
                   variant="outlined"
                   density="comfortable"
                   hide-details
-                  :disabled="!cfg.remote.enabled"
+
                 />
                 <v-text-field
                   v-model="remotePasswordDraft"
@@ -955,10 +1021,11 @@
                   variant="outlined"
                   density="comfortable"
                   hide-details
-                  :disabled="!cfg.remote.enabled"
+
                   autocomplete="new-password"
                 />
-              </div>
+              <p v-if="remoteStatus?.error" class="settings-field-error" role="alert">已保存 · 监听启动失败：{{ remoteStatus.error }}</p><button v-if="cfg.remote.enabled && !remoteStatus?.running" type="button" class="ui-button" @click="retryRemote">重试启动</button><SettingsGroupActions v-bind="groupProps('remote')" @save="saveGroup('remote')" @cancel="cancelGroup('remote')" />
+</div>
               <div v-if="cfg.remote.enabled" class="remote-url mt-3">
                 <div class="switch-title">访问地址</div>
                 <div class="switch-hint">
@@ -968,7 +1035,7 @@
                   </span>
                 </div>
                 <div class="switch-hint mt-1">
-                  首次启用请设置新密码；账号、端口和密码修改后需点「应用」。
+                  首次启用请设置新密码；启用前先保存连接。配置已保存与监听成功分别显示。
                 </div>
               </div>
             </div>
@@ -1013,7 +1080,7 @@
               <div class="field-row mt-2" :class="{ muted: askTimeoutUnlimited }">
                 <div>
                   <div class="switch-title">自定义时间</div>
-                  <div class="switch-hint">超时未选将按超时处理；关闭「不限时」后默认 2 分钟；需点「应用」后生效</div>
+                  <div class="switch-hint">超时未选将按超时处理；关闭「不限时」后默认 2 分钟；使用下方按钮保存后生效</div>
                 </div>
                 <v-text-field
                   v-model.number="askTimeoutSec"
@@ -1032,7 +1099,8 @@
                   :disabled="!cfg.fork_decision.enabled || askTimeoutUnlimited"
                 />
               </div>
-            </div>
+            <SettingsGroupActions v-bind="groupProps('timeout')" @save="saveGroup('timeout')" @cancel="cancelGroup('timeout')" />
+</div>
 
             <div class="card mt-3" :class="{ muted: !cfg.fork_decision.enabled }">
               <h3 class="card-title">决策体验</h3>
@@ -1165,7 +1233,7 @@
                   <div class="switch-title">最大并行子对话</div>
                   <div class="switch-hint">
                     同一父对话同时运行的子对话上限（不含父对话本身）；范围
-                    {{ subchatMaxMin }}～{{ subchatMaxMax }}；需点「应用」后生效
+                    {{ subchatMaxMin }}～{{ subchatMaxMax }}；使用下方按钮保存后生效
                   </div>
                 </div>
                 <v-text-field
@@ -1184,7 +1252,8 @@
                   :disabled="!cfg.subchat.enabled"
                 />
               </div>
-            </div>
+            <SettingsGroupActions v-bind="groupProps('subchat')" @save="saveGroup('subchat')" @cancel="cancelGroup('subchat')" />
+</div>
           </section>
 
           <!-- 关于 -->
@@ -1237,10 +1306,18 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useTheme } from 'vuetify'
 import { useRouter } from 'vue-router'
-import ActionMenu from '@/components/ActionMenu.vue'
-import { defaultModelCapabilities } from '@shared/model-capabilities'
+import SettingsGroupActions from '@/components/SettingsGroupActions.vue'
+import { SETTINGS_GROUPS, projectSettingsGroup, settingsGroupDirty, validateSettingsGroup, settingsPath, setSettingsPath, type SettingsGroup } from '@shared/settings-groups'
+import { createSettingsCommit, type SettingsCommit } from '@shared/settings-commit'
+import AppearancePreview from '@/components/AppearancePreview.vue'
+import BrowserCursorCards from '@/components/BrowserCursorCards.vue'
+import type {BrowserCursorStyle} from '@shared/browser-cursor'
+import {createSettingsExitGuard,type SettingsExitState} from '@shared/settings-navigation'
 import { rebaseSettingsDraft } from '@shared/settings-draft'
+import { normalizeBrowserAutomation } from '@shared/browser-automation'
+import { APPEARANCE_THEMES, APPEARANCE_MODES, resolveAppearanceTheme, resolveAppearanceMode, appearancePalette } from '@shared/appearance'
 import { settingsDraftSession, settingsCredentialDrafts } from '@/composables/settingsDraftSession'
 import ProviderConnectionFields from '@/components/ProviderConnectionFields.vue'
 import ModelCatalogEditor from '@/components/ModelCatalogEditor.vue'
@@ -1259,6 +1336,7 @@ import {
   SUBCHAT_MAX_PARALLEL_MIN,
   SUBCHAT_MAX_PARALLEL_MAX,
   syncBrowserUaFields,
+  assertRemoteAccessConfig,
   type AppConfig,
 } from '@shared/config'
 import { MODEL_PRESETS } from '@shared/model-presets'
@@ -1290,6 +1368,9 @@ const props = withDefaults(
     mobile?: boolean
     navigationTarget?: string
     initialTab?: string
+    /** Move keyboard focus into the settings destination after it mounts. */
+    focusOnEntry?: boolean
+    returnLabel?: string
   }>(),
   { embedded: false, mobile: false },
 )
@@ -1298,6 +1379,7 @@ const emit = defineEmits<{
   close: []
   create: [kind: 'plugin' | 'skill']
   navigate: [tab: string]
+  entryFocused: []
 }>()
 
 const router = useRouter()
@@ -1310,23 +1392,50 @@ function openOnboarding() {
   showOnboarding({ manual: true })
 }
 
-const tab = ref(props.initialTab || 'basic')
+const tab = ref(props.initialTab || settingsDraftSession.section || 'basic')
+const headingEl=ref<HTMLElement|null>(null),backButtonEl=ref<HTMLButtonElement|null>(null)
+function focusEntry(){
+  if(!props.focusOnEntry)return
+  const target=headingEl.value||backButtonEl.value
+  if(target?.checkVisibility()){target.focus({preventScroll:true});if(document.activeElement===target)emit('entryFocused')}
+}
+watch(()=>props.focusOnEntry,active=>{if(active)void nextTick(focusEntry)},{flush:'post'})
 watch(()=>props.initialTab,value=>{if(value&&value!==tab.value)selectTab(value)})
 const contentEl = ref<HTMLElement | null>(null)
 const navListEl = ref<HTMLElement | null>(null)
 const cfg = ref<AppConfig | null>(null)
+const appearanceUi = useTheme()
+const appearanceOptions = computed(() => APPEARANCE_THEMES.map(theme =>
+  appearancePalette(theme.id, cfg.value?.app.appearance_mode, appearanceUi.current.value.dark),
+))
 const info = ref<AppInfo | null>(null)
+const cursorRuntimeIssue=ref('')
+let cursorRuntimeRequest=0,offCursorRuntime:(()=>void)|undefined
+async function refreshCursorRuntime(){
+  const request=++cursorRuntimeRequest
+  if(tab.value!=='browser'||!window.navora?.browser?.workspace?.state)return
+  try{
+    const state=await window.navora.browser.workspace.state()
+    if(disposed||request!==cursorRuntimeRequest)return
+    const states=state.pages.flatMap(session=>session.windows).flatMap(page=>page.automation?[page.automation]:[])
+    cursorRuntimeIssue.value=states.some(state=>state.cursorAvailable===false||state.cursorImageAvailable===false)?'样式设置已保存；部分网页当前不支持自定义光标。':states.some(state=>state.error==='cursor_configuration_failed')?'设置已保存；部分网页的光标更新失败，请到该页面查看操作提示。':''
+  }catch{if(!disposed&&request===cursorRuntimeRequest)cursorRuntimeIssue.value='设置选择已保留；暂时无法确认运行页面的光标状态。'}
+}
 
 function selectTab(value: string) {
+  if(value===tab.value)return
+  if(contentEl.value)settingsDraftSession.scroll[tab.value]=contentEl.value.scrollTop
   if (tab.value === 'skills' && value !== 'skills' && skillBatchMode.value) {
     exitSkillBatchMode()
   }
   tab.value = value
+  settingsDraftSession.section=value
   emit('navigate', value)
   if (value === 'skills') void loadSkills()
+  if (value === 'browser') void refreshCursorRuntime()
   if (value === 'subchat' && cfg.value) ensureSubchat()
   void nextTick(() => {
-    contentEl.value?.scrollTo({ top: 0 })
+    contentEl.value?.scrollTo({ top: settingsDraftSession.scroll[value]||0 })
     const active = navListEl.value?.querySelector<HTMLElement>('.nav-item.active')
     active?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
   })
@@ -1362,10 +1471,12 @@ const askTimeoutUnlimited = computed({
     if (on) {
       if (fork.ask_timeout_ms === 0) return
       fork.ask_timeout_ms = 0
+      void nextTick(() => saveGroup('timeout'))
       return
     }
     if (fork.ask_timeout_ms > 0) return
     fork.ask_timeout_ms = FORK_ASK_TIMEOUT_LIMITED_MS
+    void nextTick(() => saveGroup('timeout'))
   },
 })
 
@@ -1394,6 +1505,24 @@ const savedBaseline = ref<AppConfig | null>(null)
 const apiKeyDraft = computed({ get: () => keyDrafts.value[selectedProviderId.value] || '', set: value => { keyDrafts.value[selectedProviderId.value] = value } })
 const advancedModel = ref(false)
 const advancedBrowser = ref(false)
+const advancedAutomation = ref(false)
+const automationFrameRates = computed(() => {
+  const values = [0, 30, 60, 120]
+  const current = cfg.value?.browser.automation.cursor_fps
+  if (current !== undefined && !values.includes(current)) values.push(current)
+  return values.sort((a,b)=>a-b).map(value=>({title:value===0?'运行时默认':`${value} 帧 / 秒`,value}))
+})
+function setAutomationInterval(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (!cfg.value) return
+  const value = Number(input.value)
+  if (!input.value.trim() || !Number.isFinite(value) || value <= 0 || value > 60000) {
+    input.value = String(Number(cfg.value.browser.automation.interval_ms.toFixed(3)))
+    showToast('采样间隔需大于 0 且不超过 60,000 毫秒', 'error')
+    return
+  }
+  cfg.value.browser.automation.interval_ms = value
+}
 const permissionSearch = ref('')
 const permissionGroup = ref('all')
 const permissionModified = ref(false)
@@ -1413,7 +1542,13 @@ const selectedProviderId = ref('')
 const addPresetId = ref<string | null>(null)
 const allowlistText = ref('')
 const saving = ref(false)
-const savingAndExit = ref(false)
+const savingGroup = ref<SettingsGroup | null>(null)
+const groupErrors = ref<Partial<Record<SettingsGroup, string>>>({})
+const instantError = ref('')
+const lastInstantUndo = ref<SettingsCommit | null>(null)
+let failedInstant: AppConfig | null = null
+const speedPreview = ref<number | null>(null)
+function commitSpeed(event: Event) { if (cfg.value) cfg.value.browser.automation.speed_multiplier = Number((event.target as HTMLInputElement).value); speedPreview.value = null }
 const savingInstant = ref(false)
 const hydrating = ref(false)
 const toast = ref({ show: false, text: '', color: 'success' })
@@ -1423,6 +1558,7 @@ const uaPresetSelectItems = computed(() => {
   const hasCustom = list.some((p) => p.id === 'custom')
   return hasCustom ? list : [...list, { id: 'custom', label: '自定义', ua: '' }]
 })
+const displayBrowserUa = computed(() => cfg.value ? syncBrowserUaFields(cloneConfig(cfg.value)) : '')
 
 function onUaPresetChange(id: string) {
   if (!cfg.value || hydrating.value) return
@@ -1459,12 +1595,14 @@ const remoteStatus = ref<{
   hasPassword: boolean
   username: string
   tokenTtlMs: number
+  error?: string
 } | null>(null)
 
 const navItems = [
   { value: 'basic', title: '基本', icon: 'sliders', desc: '窗口 · 对话 · 展示' },
+  { value: 'appearance', title: '外观', icon: 'sliders', desc: '配色 · 窗口层次' },
   { value: 'model', title: '模型', icon: 'microchip', desc: 'LLM 接入' },
-  { value: 'browser', title: '浏览器', icon: 'window-maximize', desc: 'UA 与超时' },
+  { value: 'browser', title: '浏览器', icon: 'browser', desc: 'UA 与超时' },
   { value: 'workspace', title: '工作区', icon: 'folder-open', desc: '文件目录' },
   { value: 'skills', title: '技能', icon: 'book', desc: '创建 · 导入' },
   { value: 'plugins', title: '插件', icon: 'puzzle-piece', desc: '运行与开发选项' },
@@ -2122,9 +2260,16 @@ async function removeSelectedProvider() {
   await refreshAllKeyFlags()
 }
 
-function setAsDefault() {
-  if (!cfg.value || !provider.value) return
+async function setAsDefault() {
+  if (!cfg.value || !provider.value || !savedBaseline.value || !window.navora || saving.value || savingInstant.value) return
+  if (!savedBaseline.value.ai.providers.some(p => p.id === provider.value!.id)) { showToast('先保存此服务商，再设为默认', 'error'); return }
+  const base = cloneConfig(savedBaseline.value), submitted = cloneConfig(base)
+  submitted.ai.default_provider = provider.value.id
   cfg.value.ai.default_provider = provider.value.id
+  savingInstant.value = true
+  try { await window.navora.config.commit(createSettingsCommit(base, submitted, crypto.randomUUID())); await acceptSaved(submitted, await window.navora.config.get()); showToast('默认服务商已保存 · 新对话使用') }
+  catch (error) { cfg.value.ai.default_provider = base.ai.default_provider; showToast(errMessage(error, '默认服务商保存失败，请重试'), 'error') }
+  finally { savingInstant.value = false; if (instantPrefsDirty) void persistInstantPrefs() }
 }
 
 async function resetProviders() {
@@ -2277,6 +2422,7 @@ function permLabel(key: string) {
 
 function onPresetChange(preset: PermissionPreset) {
   if (!cfg.value) return
+  if (preset === 'open' && cfg.value.permissions.preset !== 'open' && !window.confirm('放手预设会允许 Agent 自动执行更多文件、网络和浏览器操作。将用于新对话及继承默认设置的空对话。确认切换？')) return
   cfg.value.permissions.preset = preset
   if (preset !== 'custom') {
     cfg.value.permissions.modes = modesForPreset(preset)
@@ -2297,8 +2443,12 @@ function onModeChange(key: string, value: PermissionMode) {
 function readInstantPrefs(c: AppConfig) {
   const fork = resolveForkDecision(c)
   return {
+    appearance_theme: resolveAppearanceTheme(c.app.appearance_theme).id,
+    appearance_mode: resolveAppearanceMode(c.app.appearance_mode),
     close_to_tray: c.app.close_to_tray,
     show_main_on_start: c.app.show_main_on_start !== false,
+    running_message_mode: c.app.running_message_mode,
+    permissions: JSON.parse(JSON.stringify(c.permissions)) as AppConfig['permissions'],
     show_followup_suggestions: c.app.show_followup_suggestions,
     ai_generate_chat_title: c.app.ai_generate_chat_title,
     show_read_pages: c.app.show_read_pages,
@@ -2310,6 +2460,7 @@ function readInstantPrefs(c: AppConfig) {
     log_datadome_telemetry: c.browser.log_datadome_telemetry === true,
     wait_load: c.browser.wait.load,
     wait_network_idle: c.browser.wait.network_idle,
+    browser_automation: { ...normalizeBrowserAutomation(c.browser.automation), interval_ms: createDefaultConfig().browser.automation.interval_ms },
     remote_enabled: c.remote?.enabled === true,
     fork_enabled: fork.enabled,
     fork_allow_custom: fork.allow_custom,
@@ -2324,8 +2475,12 @@ function readInstantPrefs(c: AppConfig) {
 
 function applyInstantPrefs(target: AppConfig, source: AppConfig) {
   const s = readInstantPrefs(source)
+  target.app.appearance_theme = s.appearance_theme
+  target.app.appearance_mode = s.appearance_mode
   target.app.close_to_tray = s.close_to_tray
   target.app.show_main_on_start = s.show_main_on_start
+  target.app.running_message_mode = s.running_message_mode
+  target.permissions = s.permissions
   target.app.show_followup_suggestions = s.show_followup_suggestions
   target.app.ai_generate_chat_title = s.ai_generate_chat_title
   target.app.show_read_pages = s.show_read_pages
@@ -2337,6 +2492,7 @@ function applyInstantPrefs(target: AppConfig, source: AppConfig) {
   target.browser.log_datadome_telemetry = s.log_datadome_telemetry
   target.browser.wait.load = s.wait_load
   target.browser.wait.network_idle = s.wait_network_idle
+  target.browser.automation = { ...s.browser_automation, interval_ms: target.browser.automation.interval_ms }
   if (!target.remote) {
     target.remote = {
       enabled: false,
@@ -2369,18 +2525,6 @@ function applyInstantPrefs(target: AppConfig, source: AppConfig) {
   target.plugins.dev_mode = s.plugins_dev_mode
 }
 
-function complexSettingsKey(config: AppConfig | null): string {
-  if (!config) return ''
-  const snapshot = JSON.parse(JSON.stringify(config)) as AppConfig
-  applyInstantPrefs(snapshot, createDefaultConfig())
-  for (const p of snapshot.ai.providers) { normalizeProvider(p); p.model_settings ||= {}; for (const id of p.models) p.model_settings[id] ||= defaultModelCapabilities(id) }
-  return JSON.stringify(snapshot, (_key,value) => value && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a],[b]) => a.localeCompare(b))) : value)
-}
-const hasPendingSettings = computed(() => !!cfg.value && (
-  complexSettingsKey(cfg.value) !== complexSettingsKey(savedBaseline.value) ||
-  allowlistText.value !== (savedBaseline.value?.browser.url_allowlist || []).join('\n') ||
-  !!remotePasswordDraft.value.trim() || cfg.value.ai.providers.some(p => !!keyDrafts.value[p.id]?.trim())
-))
 const instantPrefsKey = computed(() => {
   if (!cfg.value) return ''
   return JSON.stringify(readInstantPrefs(cfg.value))
@@ -2397,7 +2541,8 @@ function persistInstantPrefs(): Promise<void> {
   return instantWrite
 }
 async function writeInstantPrefs() {
-  if (!cfg.value || !window.navora || hydrating.value || saving.value) return
+  if (!cfg.value || !window.navora || hydrating.value) return
+  if (saving.value) { instantPrefsDirty = true; return }
   if (savingInstant.value) {
     instantPrefsDirty = true
     return
@@ -2407,31 +2552,34 @@ async function writeInstantPrefs() {
   const snapshotKey = instantPrefsKey.value
   const snapshot = JSON.parse(JSON.stringify(cfg.value)) as AppConfig
   try {
-    const disk = await window.navora.config.get()
-    applyInstantPrefs(disk, snapshot)
-    const saved = await window.navora.config.save(disk)
-    if (savedBaseline.value) applyInstantPrefs(savedBaseline.value, saved)
-    // Only sync fields we own; avoid clobbering in-flight edits that landed after snapshot.
-    if (!disposed && instantPrefsKey.value === snapshotKey) {
-      applyInstantPrefs(cfg.value, saved)
-    }
-    try {
-      remoteStatus.value = await window.navora.remote.status()
-    } catch {
-      /* ignore */
-    }
+    const base = cloneConfig(savedBaseline.value || createDefaultConfig())
+    const submitted = cloneConfig(base)
+    applyInstantPrefs(submitted, snapshot)
+    const request = createSettingsCommit(base, submitted, crypto.randomUUID())
+    if (!Object.keys(request.patch).length) return
+    await window.navora.config.commit(request)
+    const saved = await window.navora.config.get()
+    await acceptSaved(submitted, saved)
+    lastInstantUndo.value = createSettingsCommit(submitted, base, crypto.randomUUID())
+    instantError.value = ''
+    failedInstant = null
+    remoteStatus.value = await window.navora.remote.status().catch(() => null)
+    void refreshCursorRuntime()
   } catch (e) {
-    console.error(e)
-    showToast(errMessage(e, '开关保存失败'), 'error')
+    failedInstant = snapshot
+    instantError.value = errMessage(e, '自动保存失败，已恢复最近保存值，可重试')
     try {
       const disk = await window.navora.config.get()
-      if (!disposed && instantPrefsKey.value === snapshotKey) applyInstantPrefs(cfg.value, disk)
-    } catch {
-      /* ignore */
-    }
+      hydrating.value = true
+      if (cfg.value) applyInstantPrefs(cfg.value, disk)
+      savedBaseline.value = cloneConfig(disk)
+      await nextTick()
+    } catch { /* preserve failed intent for retry */ }
+    finally { hydrating.value = false }
+    instantPrefsDirty = false
   } finally {
     savingInstant.value = false
-    if (instantPrefsDirty || instantPrefsKey.value !== snapshotKey) {
+    if (!instantError.value && (instantPrefsDirty || instantPrefsKey.value !== snapshotKey)) {
       instantPrefsDirty = true
     }
   }
@@ -2439,6 +2587,7 @@ async function writeInstantPrefs() {
 
 function schedulePersistInstantPrefs() {
   if (hydrating.value) return
+  if (saving.value) { instantPrefsDirty = true; return }
   clearTimeout(instantPrefsTimer)
   instantPrefsTimer = setTimeout(() => {
     instantPrefsTimer = undefined
@@ -2446,24 +2595,29 @@ function schedulePersistInstantPrefs() {
   }, 280)
 }
 
+function selectAppearanceTheme(id: typeof APPEARANCE_THEMES[number]['id']) {
+  if (!cfg.value) return
+  cfg.value.app.appearance_theme = id
+  // Queue synchronously so closing settings in the same turn still flushes it.
+  schedulePersistInstantPrefs()
+}
+
+function selectAppearanceMode(mode: typeof APPEARANCE_MODES[number]['id']) {
+  if (!cfg.value) return
+  cfg.value.app.appearance_mode = mode
+  schedulePersistInstantPrefs()
+}
+function selectCursorStyle(style:BrowserCursorStyle){if(!cfg.value)return;cfg.value.browser.automation.cursor_style=style;schedulePersistInstantPrefs()}
+
 watch(instantPrefsKey, (next, prev) => {
   if (hydrating.value || !prev || next === prev) return
   schedulePersistInstantPrefs()
 })
 
-watch(
-  () => cfg.value?.browser.url_allowlist,
-  (list) => {
-    if (!list) return
-    allowlistText.value = list.join('\n')
-  },
-)
-
 function normalizeSettingsModels(config: AppConfig) {
   for (const p of config.ai.providers) {
     normalizeProvider(p)
-    p.model_settings ||= {}
-    for (const id of p.models) p.model_settings[id] ||= defaultModelCapabilities(id)
+    // Defaults are displayed by ModelCatalogEditor without writing overrides.
   }
 }
 async function load() {
@@ -2474,16 +2628,18 @@ async function load() {
     normalizeSettingsModels(cfg.value)
     savedBaseline.value = JSON.parse(JSON.stringify(cfg.value))
     if (settingsDraftSession.base && settingsDraftSession.draft) cfg.value = rebaseSettingsDraft(settingsDraftSession.base, settingsDraftSession.draft, cfg.value)
+    cfg.value.browser.automation = normalizeBrowserAutomation(cfg.value.browser.automation)
     info.value = await window.navora.app.info()
     uaPresetItems.value = await window.navora.config.uaPresets()
     allowlistText.value = (cfg.value.browser.url_allowlist || []).join('\n')
-    syncBrowserUaFields(cfg.value)
     ensureDefaultProvider(cfg.value.ai)
     for (const p of cfg.value.ai.providers) normalizeProvider(p)
     selectedProviderId.value =
       cfg.value.ai.default_provider || cfg.value.ai.providers[0]?.id || ''
     selectedProviderId.value = cfg.value.ai.providers.some(p => p.id === settingsDraftSession.selected) ? settingsDraftSession.selected : selectedProviderId.value
     remotePasswordDraft.value = settingsDraftSession.password
+    failedInstant = settingsDraftSession.failedInstant ? cloneConfig(settingsDraftSession.failedInstant) : null
+    instantError.value = settingsDraftSession.instantError
     if (settingsDraftSession.draft) allowlistText.value = settingsDraftSession.allowlist
     if (!cfg.value.remote) {
       cfg.value.remote = {
@@ -2531,19 +2687,12 @@ async function load() {
     }
     if (tab.value === 'skills') await loadSkills()
     await nextTick()
+    contentEl.value?.scrollTo({top:settingsDraftSession.scroll[tab.value]||0})
   } finally {
     hydrating.value = false
   }
 }
 
-async function discardSettings() {
-  if (saving.value || savingInstant.value) return
-  settingsDraftSession.base = null
-  settingsDraftSession.draft = null
-  settingsDraftSession.password = ''
-  keyDrafts.value = {}
-  await load()
-}
 async function pickCustomRoot() {
   if (!cfg.value || !window.navora?.workspace) return
   try {
@@ -2571,110 +2720,198 @@ function errMessage(e: unknown, fallback: string): string {
   return fallback
 }
 
-async function save(exitAfter = false) {
-  if (!cfg.value || !window.navora || saving.value) return
-  saving.value = true
-  savingAndExit.value = exitAfter
-  clearTimeout(instantPrefsTimer)
+function cloneConfig(config: AppConfig): AppConfig { return JSON.parse(JSON.stringify(config)) as AppConfig }
+const groupNames = Object.keys(SETTINGS_GROUPS) as SettingsGroup[]
+function groupDraft(): AppConfig | null {
+  if (!cfg.value) return null
+  const draft = cloneConfig(cfg.value)
+  draft.browser.url_allowlist = [...new Set(allowlistText.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean))]
+  return draft
+}
+function groupDirty(group: SettingsGroup): boolean {
+  const draft = groupDraft(), base = savedBaseline.value
+  if (!draft || !base) return false
+  return settingsGroupDirty(base, draft, group) || (group === 'remote' && !!remotePasswordDraft.value) || (group === 'models' && Object.values(keyDrafts.value).some(Boolean))
+}
+const pendingGroupCount = computed(() => groupNames.filter(groupDirty).length)
+const modelAdvancedSummary = computed(() => {
+  if (!provider.value) return ''
+  const preset = MODEL_PRESETS.find(item => item.id === provider.value?.source_preset)
+  const custom = [provider.value.timeout_ms !== (preset?.timeout_ms ?? 120000), provider.value.output_token_param !== (preset?.id === 'openai' ? 'max_completion_tokens' : 'max_tokens')].filter(Boolean).length
+  return (custom ? custom + ' 项自定义' : '使用内置默认值') + (groupDirty('models') ? ' · 未保存' : '')
+})
+function groupProps(group: SettingsGroup) {
+  return { ...SETTINGS_GROUPS[group], dirty: groupDirty(group), saving: saving.value, error: groupErrors.value[group] }
+}
+async function acceptSaved(submitted: AppConfig, saved: AppConfig) {
+  const submittedAccessText = submitted.browser.url_allowlist.join('\n')
+  const acceptAccess = allowlistText.value === submittedAccessText
+  hydrating.value = true
   try {
-    if (instantWrite) await instantWrite
-    cfg.value.browser.url_allowlist = allowlistText.value
-      .split(/\r?\n/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-    const clamp = (n: unknown, min: number, max: number, fb: number) => {
-      const v = typeof n === 'number' ? n : Number(n)
-      if (!Number.isFinite(v)) return fb
-      return Math.min(max, Math.max(min, Math.floor(v)))
-    }
-    cfg.value.ai.max_tool_rounds = clamp(cfg.value.ai.max_tool_rounds, 4, 80, 24)
-    cfg.value.ai.continue_tool_rounds = clamp(cfg.value.ai.continue_tool_rounds, 4, 40, 12)
-    cfg.value.app.max_composer_chars = clamp(cfg.value.app.max_composer_chars, 1000, 200000, 16000)
-    cfg.value.browser.navigation_timeout_ms = clamp(cfg.value.browser.navigation_timeout_ms, 1000, 300000, 30000)
-    cfg.value.browser.action_timeout_ms = clamp(cfg.value.browser.action_timeout_ms, 1000, 120000, 15000)
-    cfg.value.browser.wait.network_idle_ms = clamp(cfg.value.browser.wait.network_idle_ms, 100, 5000, 500)
-    if (!cfg.value.fork_decision) {
-      cfg.value.fork_decision = createDefaultForkDecision()
-    }
-    cfg.value.fork_decision = resolveForkDecision(cfg.value)
-    // Force unimplemented flags off
-    cfg.value.fork_decision.inline_low_risk = false
-    cfg.value.fork_decision.allow_revise = false
-    if (!cfg.value.subchat) {
-      cfg.value.subchat = createDefaultSubchat()
-    }
-    cfg.value.subchat = resolveSubchat(cfg.value)
-    if (!cfg.value.plugins) {
-      cfg.value.plugins = { dev_mode: false }
-    }
-    cfg.value.plugins.dev_mode = resolvePluginDevMode(cfg.value)
-    syncBrowserUaFields(cfg.value)
-    if (!cfg.value.remote) {
-      cfg.value.remote = {
-        enabled: false,
-        host: '0.0.0.0',
-        port: 8790,
-        username: 'admin',
-        passwordHash: '',
-      }
-    }
-    cfg.value.remote.port = clamp(cfg.value.remote.port, 1, 65535, 8790)
-    for (const p of cfg.value.ai.providers) {
-      p.timeout_ms = clamp(p.timeout_ms, 1000, 900000, 120000)
-      normalizeProvider(p)
-    }
-    ensureDefaultProvider(cfg.value.ai)
-    const payload = JSON.parse(JSON.stringify(cfg.value)) as AppConfig & {
-      remote: AppConfig['remote'] & { password?: string }
-    }
-    if (remotePasswordDraft.value.trim()) {
-      payload.remote.password = remotePasswordDraft.value.trim()
-    }
-    // never send empty passwordHash wipe accidentally when draft empty — keep existing hash
-    const pendingKeys = cfg.value.ai.providers.flatMap(p => { const draft = keyDrafts.value[p.id] || ''; return draft.trim() ? [{ id: p.id, draft, value: draft.trim() }] : [] })
-    const latest = await window.navora.config.get()
-    normalizeSettingsModels(latest)
-    const merged = savedBaseline.value ? rebaseSettingsDraft(savedBaseline.value, payload, latest) : payload
-    cfg.value = await window.navora.config.save(merged)
-    savedBaseline.value = JSON.parse(JSON.stringify(cfg.value))
-    remotePasswordDraft.value = ''
-    settingsDraftSession.password = ''
-    ensureDefaultProvider(cfg.value.ai)
-    if (!cfg.value.ai.providers.some((p) => p.id === selectedProviderId.value)) {
-      selectedProviderId.value = cfg.value.ai.default_provider || cfg.value.ai.providers[0]?.id || ''
-    }
+    if (!disposed && cfg.value) cfg.value = rebaseSettingsDraft(submitted, cloneConfig(cfg.value), saved)
+    savedBaseline.value = cloneConfig(saved)
+    if (acceptAccess && cfg.value) allowlistText.value = cfg.value.browser.url_allowlist.join('\n')
+    await nextTick()
+  } finally { hydrating.value = false }
+}
+function cancelGroup(group: SettingsGroup) {
+  if (!cfg.value || !savedBaseline.value || saving.value) return
+  for (const path of SETTINGS_GROUPS[group].paths) setSettingsPath(cfg.value, path, settingsPath(savedBaseline.value, path))
+  if (group === 'access') allowlistText.value = savedBaseline.value.browser.url_allowlist.join('\n')
+  if (group === 'remote') remotePasswordDraft.value = ''
+  if (group === 'models') {
+    keyDrafts.value = {}
+    if (!cfg.value.ai.providers.some(p => p.id === selectedProviderId.value)) selectedProviderId.value = cfg.value.ai.default_provider
+  }
+  delete groupErrors.value[group]
+}
+async function saveGroup(group: SettingsGroup) {
+  if (!cfg.value || !window.navora || saving.value || !savedBaseline.value) return
+  clearTimeout(instantPrefsTimer)
+  instantPrefsTimer = undefined
+  if (instantWrite) await instantWrite
+  await persistInstantPrefs()
+  if (saving.value || !cfg.value || !savedBaseline.value) return
+  const base = cloneConfig(savedBaseline.value), draft = groupDraft()!
+  if (group === 'access') { cfg.value.browser.url_allowlist = [...draft.browser.url_allowlist]; allowlistText.value = draft.browser.url_allowlist.join('\n') }
+  const submitted = projectSettingsGroup(base, draft, group)
+  const validation = validateSettingsGroup(submitted, group)
+  if (validation) { groupErrors.value[group] = validation; if (group === 'models') advancedModel.value = true; return }
+  if (group === 'workspace' && !window.confirm('更新根目录不会迁移旧文件。现有默认工作区将改为从新目录读取，原文件仍留在旧目录。确认更新？')) return
+  if (group === 'remote' && window.navora.app.platform === 'web' && base.remote.enabled && !window.confirm('保存远程连接可能断开当前页面。请记录新的地址与账号，保存后使用新地址重新登录。确认保存？')) return
+  const password = remotePasswordDraft.value
+  const pendingKeys = group === 'models' ? draft.ai.providers.flatMap(p => keyDrafts.value[p.id]?.trim() ? [{ id: p.id, ref: p.api_key_ref, draft: keyDrafts.value[p.id], value: keyDrafts.value[p.id].trim() }] : []) : []
+  const request = createSettingsCommit(base, submitted, crypto.randomUUID())
+  if (group === 'remote' && password.trim()) {
+    (request.patch.remote ||= {}).password = password.trim()
+    ;(request.expected.remote ||= {}).passwordHash = base.remote.passwordHash
+  }
+  saving.value = true
+  savingGroup.value = group
+  delete groupErrors.value[group]
+  let configSaved = false
+  try {
+    await window.navora.config.commit(request)
+    configSaved = true
+    await acceptSaved(submitted, await window.navora.config.get())
+    if (group === 'remote' && remotePasswordDraft.value === password) remotePasswordDraft.value = ''
     for (const pending of pendingKeys) {
-      const savedProv = cfg.value.ai.providers.find(p => p.id === pending.id)
-      if (!savedProv?.api_key_ref) throw new Error('API Key 缺少保存路径')
-      const result = await window.navora.secrets.setApiKey(savedProv.api_key_ref, pending.value)
-      if (!result?.ok) throw new Error('API Key 保存失败，请在本机重试')
+      if (!pending.ref) throw new Error('连接已保存，密钥缺少保存路径')
+      const result = await window.navora.secrets.setApiKey(pending.ref, pending.value)
+      if (!result?.ok) throw new Error('连接已保存，密钥写入失败；请在本机重试保存密钥')
       if (keyDrafts.value[pending.id] === pending.draft) delete keyDrafts.value[pending.id]
     }
     await refreshAllKeyFlags()
     await refreshApiKeyPreview()
-    try {
-      remoteStatus.value = await window.navora.remote.status()
-    } catch {
-      /* ignore */
+    remoteStatus.value = await window.navora.remote.status().catch(() => null)
+    showToast(group === 'remote' && cfg.value.remote.enabled && !remoteStatus.value?.running ? '已保存 · 监听启动失败，可重试启动' : '已保存')
+  } catch (error) {
+    groupErrors.value[group] = group === 'remote' && window.navora.app.platform === 'web'
+      ? '远程连接已断开，无法确认保存回执。配置可能已更新，请使用新地址重新登录后检查；本页输入仍已保留。'
+      : (configSaved && pendingKeys.length ? '连接配置已保存；密钥仍需处理。' : '') + errMessage(error, '保存失败，修改已保留')
+    if (String(error).includes('config_conflict:')) {
+      groupErrors.value[group] = '此组设置已在其它窗口修改。取消修改可采用最新值，或检查后再次保存。'
+      const latest = await window.navora.config.get().catch(() => null)
+      if (latest) await acceptExternal(latest)
     }
-    await nextTick()
-    if (exitAfter) {
-      if (props.embedded) emit('close')
-      else void router.push('/')
-    } else {
-      showToast('已应用')
-    }
-  } catch (e) {
-    console.error(e)
-    showToast(errMessage(e, '应用失败'), 'error')
   } finally {
     saving.value = false
-    savingAndExit.value = false
+    savingGroup.value = null
+    if (instantPrefsDirty) { instantPrefsDirty = false; void persistInstantPrefs() }
   }
+}
+async function retryInstantPrefs() {
+  if (!failedInstant || !cfg.value) return
+  hydrating.value = true
+  applyInstantPrefs(cfg.value, failedInstant)
+  await nextTick()
+  hydrating.value = false
+  instantError.value = ''
+  await persistInstantPrefs()
+}
+function discardFailedInstant() { failedInstant = null; instantError.value = '' }
+async function undoInstantPrefs() {
+  if (!lastInstantUndo.value || !window.navora || saving.value || savingInstant.value) return
+  if (instantPrefsTimer) { showToast('请等待当前选择保存完成后再撤销', 'warning'); return }
+  const request = lastInstantUndo.value
+  savingInstant.value = true
+  try {
+    await window.navora.config.commit(JSON.parse(JSON.stringify(request)))
+    await acceptExternal(await window.navora.config.get())
+    lastInstantUndo.value = null
+    showToast('已撤销最近一批选择')
+  } catch (error) { showToast(String(error).includes('config_conflict:') ? '其它窗口已修改这些设置，未执行撤销' : errMessage(error, '撤销失败'), 'error') }
+  finally { savingInstant.value = false }
+}
+async function acceptExternal(saved: AppConfig) {
+  if (!cfg.value || !savedBaseline.value || disposed) return
+  const before = cloneConfig(savedBaseline.value), local = cloneConfig(cfg.value)
+  const acceptAccess = allowlistText.value === before.browser.url_allowlist.join('\n')
+  for (const group of groupNames) {
+    if (settingsGroupDirty(before, local, group) && settingsGroupDirty(before, saved, group)) groupErrors.value[group] = '此组有外部修改；草稿已保留，请检查后保存，或取消修改采用最新值。'
+  }
+  hydrating.value = true
+  cfg.value = rebaseSettingsDraft(before, local, saved)
+  savedBaseline.value = cloneConfig(saved)
+  if (acceptAccess) allowlistText.value = saved.browser.url_allowlist.join('\n')
+  await nextTick()
+  hydrating.value = false
+}
+let unsubConfig: (() => void) | undefined
+let incomingConfigRequest = 0
+const exitState=ref<SettingsExitState>({phase:'idle'})
+const exitGuard=createSettingsExitGuard({
+  busy:()=>saving.value||hydrating.value,
+  async flush(){clearTimeout(instantPrefsTimer);instantPrefsTimer=undefined;await persistInstantPrefs();while(instantWrite)await instantWrite},
+  retry:()=>retryInstantPrefs(),error:()=>instantError.value,
+  confirmDiscard:()=>!(remotePasswordDraft.value||Object.values(keyDrafts.value).some(Boolean))||window.confirm('连接中的密钥或密码尚未保存。离开将丢弃这些凭据，其它草稿保留在本窗口。'),
+  discardCredentials:()=>{remotePasswordDraft.value='';keyDrafts.value={}},
+  state:value=>exitState.value=value,
+})
+function canClose(){return exitGuard.request()}
+let closeRequest:Promise<boolean>|undefined
+async function requestClose() {
+  if(closeRequest)return closeRequest
+  closeRequest=(async()=>{if(!await canClose())return false;if(disposed)return false;if(props.embedded)emit('close');else await router.push('/');return true})().finally(()=>closeRequest=undefined)
+  return closeRequest
+}
+function settingsBackKey(event:KeyboardEvent){
+  if(event.defaultPrevented||event.isComposing||event.keyCode===229||event.repeat||!event.altKey||event.ctrlKey||event.metaKey||event.shiftKey||event.key!=='ArrowLeft')return
+  if(document.querySelector('.v-dialog.v-overlay--active,.v-menu.v-overlay--active,.sidebar-ctx-panel:not([data-browser-tab-preview])'))return
+  event.preventDefault();event.stopPropagation();void requestClose()
+}
+async function retryRemote() {
+  if (!window.navora || !savedBaseline.value) return
+  try { await window.navora.config.save({ remote: { enabled: savedBaseline.value.remote.enabled } }); remoteStatus.value = await window.navora.remote.status() }
+  catch (error) { showToast(errMessage(error, '监听启动失败'), 'error') }
+}
+function onRemoteEnabled(enabled: unknown) {
+  if (!cfg.value || !savedBaseline.value) return
+  if (!enabled && window.navora?.app.platform === 'web' && !window.confirm('关闭远程访问会断开当前连接。之后需要在本机重新启用，确认关闭？')) return
+  if (enabled) {
+    if (groupDirty('remote')) { showToast('请先保存远程连接，再启用访问', 'error'); return }
+    try { assertRemoteAccessConfig({ ...savedBaseline.value.remote, enabled: true }) }
+    catch (error) { showToast(errMessage(error, '请先保存有效的账号和新密码'), 'error'); return }
+    if (!['127.0.0.1', 'localhost', '::1'].includes(savedBaseline.value.remote.host) && !window.confirm('这会向局域网开放远程访问，登录后可以控制本机 Navora。确认启用？')) return
+  }
+  cfg.value.remote.enabled = !!enabled
 }
 
 onMounted(() => {
+  void nextTick(focusEntry)
+  window.addEventListener('beforeunload', guardWindowExit)
+  window.addEventListener('keydown',settingsBackKey)
   void load()
+  offCursorRuntime=window.navora?.browser?.onTreeUpdated?.(()=>{if(tab.value==='browser')void refreshCursorRuntime()})
+  void refreshCursorRuntime()
+  unsubConfig = window.navora?.config.onChanged?.(() => {
+    void refreshCursorRuntime()
+    const request = ++incomingConfigRequest
+    if (saving.value || savingInstant.value || hydrating.value) return
+    void window.navora!.config.get().then(saved => {
+      if (request === incomingConfigRequest && !disposed && !saving.value && !savingInstant.value) return acceptExternal(saved)
+    }).catch(() => { /* next notification or explicit save refreshes the baseline */ })
+  })
   unsubStoreInstalled = onStoreUiInstalled(() => {
     void onStoreInstalled()
   })
@@ -2686,23 +2923,45 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  exitGuard.dispose()
+  window.removeEventListener('keydown',settingsBackKey)
+  window.removeEventListener('beforeunload', guardWindowExit)
   if (cfg.value) {
     settingsDraftSession.base = savedBaseline.value ? JSON.parse(JSON.stringify(savedBaseline.value)) : null
     settingsDraftSession.draft = JSON.parse(JSON.stringify(cfg.value))
     settingsDraftSession.selected = selectedProviderId.value
-    settingsDraftSession.password = remotePasswordDraft.value
+    settingsDraftSession.password = ''
+    keyDrafts.value = {}
     settingsDraftSession.allowlist = allowlistText.value
+    settingsDraftSession.failedInstant = failedInstant ? cloneConfig(failedInstant) : null
+    settingsDraftSession.instantError = instantError.value
+    settingsDraftSession.section=tab.value
+    if(contentEl.value)settingsDraftSession.scroll[tab.value]=contentEl.value.scrollTop
   }
   clearTimeout(instantPrefsTimer)
   if (instantPrefsTimer) void persistInstantPrefs()
   disposed = true
+  unsubConfig?.()
+  offCursorRuntime?.()
+  cursorRuntimeRequest++
   unsubProposals?.()
   unsubStoreInstalled?.()
 })
-defineExpose({apply:()=>save(false)})
+defineExpose({ requestClose, canClose, hasPendingChanges: pendingGroupCount })
+
+function guardWindowExit(event: BeforeUnloadEvent) {
+  if (!pendingGroupCount.value && !saving.value && !savingInstant.value) return
+  if (window.confirm('设置仍有未保存修改或正在保存的内容。退出窗口会丢失未保存草稿，确认退出？')) return
+  event.preventDefault()
+  event.returnValue = ''
+}
 </script>
 
 <style scoped>
+.settings-page .cursor-style-heading h3{color:var(--appearance-ink,var(--navora-ink))}.settings-page .advanced-toggle{color:var(--appearance-muted,var(--navora-muted))}.settings-page .switch-row,.nav-foot{border-color:var(--appearance-stroke,var(--navora-stroke))}
+.cursor-runtime-note{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:12px;line-height:1.7;color:var(--navora-muted);margin-top:12px}.cursor-runtime-note button{margin-left:auto}
+.settings-back{width:auto!important;min-width:110px;display:inline-flex!important;align-items:center;gap:7px;padding-inline:9px!important;white-space:nowrap;font-size:12px}.settings-back svg{width:16px;height:16px}.settings-exit-status{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:10px 16px;border-bottom:1px solid var(--navora-stroke);background:var(--control-selected);font-size:12px;flex-shrink:0}.settings-exit-status>span{flex:1;min-width:180px}.settings-exit-status.needs-decision{border-color:var(--control-warning,var(--navora-stroke))}.cursor-style-heading{margin-top:22px}.cursor-style-heading h3{font-size:13px;font-weight:600}.cursor-style-heading p{font-size:12px;color:var(--navora-muted);margin:5px 0 0}
+.settings-save-error{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px;border:1px solid var(--control-danger);border-radius:8px;font-size:12px}.settings-save-error>span{flex:1;min-width:150px}.settings-field-error{color:var(--control-danger);font-size:12px;overflow-wrap:anywhere}.remote-connection-form>.settings-field-error{grid-column:1/-1;margin:0}.remote-connection-form>.ui-button{justify-self:start}.advanced-toggle small{font-size:11px;color:var(--navora-muted);font-weight:400}
 .settings-page {
   container-type:inline-size;
   min-width:0;
@@ -2750,6 +3009,7 @@ defineExpose({apply:()=>save(false)})
   gap: 4px;
   min-width: 0;
 }
+
 .top-titles{min-width:0}
 .top-titles h1{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .top-actions {
@@ -3572,6 +3832,21 @@ defineExpose({apply:()=>save(false)})
 }
 /* Adapt to the available pane, including a wide navigation rail. */
 .section-head h2{font-size:16px;font-weight:600;line-height:1.5}.section-head p{font-size:12px;line-height:1.6}.card{border-color:#e0e6ee;border-radius:9px}.card-title{font-size:12px;font-weight:600;letter-spacing:0;text-transform:none}
+.automation-speed{margin:16px 0 18px;padding:14px 0 0;border-top:1px solid var(--navora-stroke)}
+.automation-speed-heading{display:flex;justify-content:space-between;gap:12px;color:var(--navora-ink);font-size:12px}
+.automation-speed-heading output{font-variant-numeric:tabular-nums;color:var(--navora-accent);font-weight:600}
+.automation-speed input{display:block;width:100%;height:24px;margin:8px 0 3px;accent-color:var(--navora-accent);cursor:pointer}
+.automation-speed-labels{position:relative;height:16px;color:var(--navora-muted);font-size:10px}
+.automation-speed-labels>span:nth-child(2){position:absolute;left:33.333%;transform:translateX(-50%)}
+.automation-speed-labels>span:last-child{position:absolute;right:0}
+.automation-speed.is-disabled{opacity:.5}.automation-speed.is-disabled input{cursor:default}
+.automation-advanced-toggle{margin-top:8px}
+.automation-protection-hint.is-required{display:block!important}
+.automation-advanced-fields{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;margin-top:16px;max-width:480px}
+.automation-number-field{display:grid;gap:7px;font-size:12px;color:var(--navora-ink)}
+.automation-number-field input{width:100%;height:42px;padding:0 12px;border:1px solid var(--navora-stroke);border-radius:5px;background:var(--navora-surface);color:var(--navora-ink);font-size:13px;font-variant-numeric:tabular-nums}
+.automation-number-field input:focus-visible,.automation-speed input:focus-visible{outline:2px solid var(--control-focus,var(--navora-accent));outline-offset:2px}
+.automation-number-field small{font-size:11px;line-height:1.6;color:var(--navora-muted)}
 @container(max-width:640px){
   .settings-page .content{padding:16px!important}
   .content{padding:16px}.form-grid,.about-dl,.provider-layout{grid-template-columns:minmax(0,1fr)}.card{padding:14px}.connection-form{grid-template-columns:minmax(0,1fr)}.perm-toolbar{flex-wrap:wrap}.perm-table-head{display:none}.perm-row{grid-template-columns:minmax(0,1fr);gap:6px}.perm-id{overflow-wrap:anywhere}.provider-edit-head{flex-wrap:wrap}.switch-row{gap:12px}.settings-save-status{font-size:10px}

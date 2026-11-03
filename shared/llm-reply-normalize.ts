@@ -10,8 +10,10 @@
  */
 
 import type { ToolCall } from './openai-types.ts'
+import type { ModelUsage } from './model-usage'
 
 export type LlmChatReply = {
+  usage?: ModelUsage
   content: string | null
   reasoningContent?: string | null
   tool_calls?: ToolCall[]

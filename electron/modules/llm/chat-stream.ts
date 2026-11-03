@@ -1,6 +1,8 @@
 import type { ToolCall } from '../../../shared/openai-types'
+import { normalizeModelUsage, type ModelUsage } from '../../../shared/model-usage'
 
 export type ChatReply = {
+  usage?: ModelUsage
   content: string | null
   reasoningContent?: string | null
   tool_calls?: ToolCall[]
@@ -8,6 +10,7 @@ export type ChatReply = {
 }
 
 type StreamChunk = {
+  usage?: unknown
   error?: { message?: string }
   choices?: Array<{
     index?: number
@@ -39,12 +42,14 @@ export async function readChatStream(
   let finishReason: string | null = null
   let done = false
   let sawChoice = false
+  let usage: ModelUsage | undefined
   const calls = new Map<number, ToolCall>()
   const snapshot = (): ChatReply => ({
     content: content || null,
     reasoningContent: reasoningContent || null,
     tool_calls: calls.size ? [...calls].sort(([a], [b]) => a - b).map(([, c]) => ({ ...c, function: { ...c.function } })) : undefined,
     finish_reason: finishReason,
+    ...(usage ? { usage: { ...usage } } : {}),
   })
   const dispatch = () => {
     if (!data.length || done) return
@@ -54,8 +59,10 @@ export async function readChatStream(
     let chunk: StreamChunk
     try { chunk = JSON.parse(payload) as StreamChunk } catch { throw new Error('llm_invalid_stream_json') }
     if (chunk.error) throw new Error(`llm_stream_error:${chunk.error.message || '模型返回流错误'}`)
+    const reported = normalizeModelUsage(chunk.usage)
+    if (reported) usage = reported
     const choice = chunk.choices?.find(c => (c.index ?? 0) === 0)
-    if (!choice) return // usage-only chunks and keepalives
+    if (!choice) { if (reported) onUpdate?.(snapshot()); return }
     sawChoice = true
     const delta = choice.delta
     if (typeof delta?.content === 'string') content += delta.content

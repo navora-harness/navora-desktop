@@ -19,11 +19,11 @@ const emit=defineEmits<{replace:[selection:{start:number;end:number;text:string;
 const caret=ref(0),dismissed=ref(false),selected=ref(0),tree=ref<BrowserTreeSession[]>([]),loading=ref(false),error=ref('')
 const token=computed(()=>composerToken(props.text,caret.value))
 const heading=computed(()=>({all:'添加上下文',file:'文件',session:'浏览器会话',window:'浏览器页面'})[token.value?.kind||'all'])
-const commands:Option[]=[{key:'files',label:'文件',detail:'引用当前对话中的文件',icon:'file',command:'/文件 '},{key:'sessions',label:'会话',detail:'引用浏览器登录会话',icon:'layer-group',command:'/会话 '},{key:'windows',label:'浏览器',detail:'引用已打开的浏览器页面',icon:'window-maximize',command:'/浏览器 '}]
+const commands:Option[]=[{key:'files',label:'文件',detail:'引用当前对话中的文件',icon:'file',command:'/文件 '},{key:'sessions',label:'会话',detail:'引用浏览器登录会话',icon:'layer-group',command:'/会话 '},{key:'windows',label:'浏览器',detail:'引用已打开的浏览器页面',icon:'browser',command:'/浏览器 '}]
 const options=computed(()=>{
   const current=token.value;if(!current)return []
   const q=current.query.toLocaleLowerCase()
-  const windows:Option[]=tree.value.flatMap(s=>s.windows.map(w=>({key:w.windowId,label:w.title||'无标题页面',detail:w.url,icon:'window-maximize',reference:{kind:'window' as const,sessionId:s.sessionId,sessionIndex:s.sessionIndex,windowId:w.windowId,label:w.title||'无标题页面',url:w.url}})))
+  const windows:Option[]=tree.value.flatMap(s=>s.windows.map(w=>({key:w.windowId,label:w.title||'无标题页面',detail:w.url,icon:'browser',reference:{kind:'window' as const,sessionId:s.sessionId,sessionIndex:s.sessionIndex,windowId:w.windowId,label:w.title||'无标题页面',url:w.url}})))
   const sessions:Option[]=tree.value.map(s=>({key:s.sessionId,label:`会话 ${s.sessionIndex}`,detail:`${s.windows.length} 个页面 · ${s.persist?'已保留':'临时'}`,icon:'layer-group',reference:{kind:'session' as const,sessionId:s.sessionId,sessionIndex:s.sessionIndex,label:`会话 ${s.sessionIndex}`}}))
   const files:Option[]=props.files.map(f=>({key:f.id,label:f.name,detail:f.path,icon:'file',path:f.path}))
   const list=current.kind==='all'?commands:current.kind==='file'?files:current.kind==='session'?sessions:windows

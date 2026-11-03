@@ -1,48 +1,101 @@
-import {randomUUID} from 'node:crypto'
-import type {BrowserContextRef,ChatSession,QueuedMessage} from '../../shared/types'
-type Input={content:string;refs?:BrowserContextRef[]}
-type Deps={get:(id:string)=>ChatSession|null;save:(id:string,entries:QueuedMessage[],paused:boolean)=>void;changed:(id:string)=>void;running:(id:string)=>boolean;start:(id:string,input:Input)=>Promise<unknown>;insert:(id:string,input:Input)=>boolean;maxChars:()=>number}
+import {createHash,randomUUID} from 'node:crypto'
+import type {ChatSession,QueuedMessage} from '../../shared/types'
+import {compileComposerDocument,composerDocumentFromLegacy,normalizeComposerDocument,type ComposerSubmitInput,type ComposerQueueEditOptions} from '../../shared/composer-document'
 
-/** Main-process queue: the renderer closing or switching chats cannot lose work. */
+type Input=ComposerSubmitInput
+type Deps={
+  get:(id:string)=>ChatSession|null;save:(id:string,entries:QueuedMessage[],paused:boolean)=>void
+  changed:(id:string)=>void;running:(id:string)=>boolean;start:(id:string,input:Input)=>Promise<unknown>
+  insert:(id:string,input:Input)=>boolean;maxChars:()=>number
+  validateIncoming?:(id:string,input:Input)=>void;prepare?:(id:string,input:Input)=>Promise<Input>;accepted?:(id:string,clientMessageId:string,fingerprint:string)=>void
+}
+
+/** The main process owns immutable accepted snapshots, even while the renderer changes chats. */
 export class AgentInbox {
   private pumping=new Set<string>()
+  private submitTails=new Map<string,Promise<void>>()
   constructor(private deps:Deps){}
   private chat(id:string){const chat=this.deps.get(id);if(!chat)throw new Error('chat_not_found');return chat}
-  private input(input:Input):Input {
-    const content=String(input?.content||'').trim(),refs=Array.isArray(input?.refs)?input.refs.slice(0,100):[]
+  private input(id:string,raw:Input):Input {
+    const document=raw?.document?normalizeComposerDocument(raw.document,id):undefined
+    const compiled=document?compileComposerDocument(document):undefined
+    const content=(compiled?.content??String(raw?.content||'')).trim()
+    const refs=(compiled?.refs??(Array.isArray(raw?.refs)?raw.refs:[])).map(ref=>({...ref}))
     if(!content&&!refs.length)throw new Error('empty_message')
     if(content.length>this.deps.maxChars())throw new Error('message_too_long')
-    return {content,refs}
+    if(refs.length>100)throw new Error('too_many_context_references')
+    if(raw.clientMessageId!==undefined&&(typeof raw.clientMessageId!=='string'||!raw.clientMessageId||raw.clientMessageId.length>200||/[\u0000-\u0020]/.test(raw.clientMessageId)))throw new Error('invalid_client_message_id')
+    return {content,refs,...(document?{document}:{}),...(raw.modelIdentity?{modelIdentity:structuredClone(raw.modelIdentity)}:{}),...(raw.clientMessageId?{clientMessageId:raw.clientMessageId}:{}),...(typeof raw.draftRevision==='number'?{draftRevision:raw.draftRevision}:{})}
   }
+  private async prepare(id:string,input:Input){const normalized=this.input(id,input);return this.deps.prepare?this.input(id,await this.deps.prepare(id,normalized)):normalized}
   private save(id:string,entries:QueuedMessage[],paused=this.chat(id).queuePaused===true){this.deps.save(id,entries,paused);this.deps.changed(id)}
-  async submit(id:string,raw:Input,mode:'queue'|'insert') {
-    const input=this.input(raw),chat=this.chat(id)
-    if(mode==='insert'&&this.deps.running(id)&&this.deps.insert(id,input))return
-    if((chat.queuedMessages?.length||0)>=80)throw new Error('message_queue_full')
-    this.save(id,[...(chat.queuedMessages||[]),{id:randomUUID(),...input,createdAt:Date.now()}],chat.queuePaused===true&&Boolean(chat.queuedMessages?.length))
-    await this.pump(id)
+  private fingerprint(input:Input){
+    const document=input.document
+    const value=document?['document',document.chatId,document.id,document.revision,document.content]:['legacy',input.content.trim(),input.refs||[]]
+    return createHash('sha256').update(JSON.stringify(value)).digest('hex')
   }
-  edit(id:string,messageId:string,content:string){
-    const entries=this.chat(id).queuedMessages||[],entry=entries.find(item=>item.id===messageId)
+  private known(chat:ChatSession,input:Input){
+    const key=input.clientMessageId;if(!key)return false
+    const receipt=chat.acceptedClientMessageIds?.find(entry=>entry.id===key)
+    if(receipt){if(receipt.fingerprint&&receipt.fingerprint!==this.fingerprint(input))throw Error('client_message_id_conflict');return true}
+    const queued=chat.queuedMessages?.find(entry=>entry.clientMessageId===key)
+    const message=chat.messages.find(entry=>entry.meta?.clientMessageId===key)
+    const accepted=queued||(message?{content:message.content,refs:message.meta?.refs,document:message.meta?.document,modelIdentity:message.meta?.modelIdentity as Input['modelIdentity']}:undefined)
+    if(!accepted)return false
+    if(this.fingerprint(accepted)!==this.fingerprint(input))throw Error('client_message_id_conflict')
+    return true
+  }
+  submit(id:string,raw:Input,mode:'queue'|'insert'):Promise<boolean>{
+    const operation=(this.submitTails.get(id)||Promise.resolve()).catch(()=>{}).then(()=>this.submitNow(id,raw,mode))
+    const settled=operation.then(()=>{},()=>{});this.submitTails.set(id,settled)
+    void settled.then(()=>{if(this.submitTails.get(id)===settled)this.submitTails.delete(id)})
+    return operation
+  }
+  private async submitNow(id:string,raw:Input,mode:'queue'|'insert'){
+    const normalized=this.input(id,raw)
+    if(this.known(this.chat(id),normalized))return false
+    this.deps.validateIncoming?.(id,normalized)
+    const input=await this.prepare(id,normalized),chat=this.chat(id)
+    if(this.known(chat,input))return false
+    if(mode==='insert'&&this.deps.running(id)&&this.deps.insert(id,input)){
+      if(input.clientMessageId)this.deps.accepted?.(id,input.clientMessageId,this.fingerprint(input))
+      return true
+    }
+    if((chat.queuedMessages?.length||0)>=80)throw new Error('message_queue_full')
+    this.save(id,[...(chat.queuedMessages||[]),{id:randomUUID(),...input,revision:0,createdAt:Date.now()}],chat.queuePaused===true&&Boolean(chat.queuedMessages?.length))
+    if(input.clientMessageId)this.deps.accepted?.(id,input.clientMessageId,this.fingerprint(input))
+    await this.pump(id)
+    return true
+  }
+  async edit(id:string,messageId:string,content:string,options?:ComposerQueueEditOptions){
+    const entry=this.chat(id).queuedMessages?.find(item=>item.id===messageId)
     if(!entry)throw new Error('queued_message_not_found')
+    // A legacy/plain edit must not erase a newer structured queue document.
+    if(entry.document)normalizeComposerDocument(entry.document,id)
     if(this.pumping.has(id))throw new Error('queue_busy')
-    const input=this.input({content,refs:entry.refs})
-    this.save(id,entries.map(item=>item===entry?{...entry,...input,error:undefined}:item))
+    const previousRevision=entry.revision||0
+    if(options?.baseRevision!==undefined&&options.baseRevision!==previousRevision)throw new Error('queue_conflict')
+    const document=options?.document||(entry.document?composerDocumentFromLegacy(id,content,entry.refs||[]):undefined)
+    const input=await this.prepare(id,{content,refs:entry.refs,document,clientMessageId:entry.clientMessageId,modelIdentity:entry.modelIdentity})
+    const current=this.chat(id).queuedMessages?.find(item=>item.id===messageId)
+    if(this.pumping.has(id))throw new Error('queue_busy')
+    if(!current||(current.revision||0)!==previousRevision)throw new Error('queue_conflict')
+    this.save(id,(this.chat(id).queuedMessages||[]).map(item=>item.id===messageId?{...item,...input,revision:previousRevision+1,error:undefined}:item))
   }
   remove(id:string,messageId:string){if(this.pumping.has(id))throw new Error('queue_busy');this.save(id,(this.chat(id).queuedMessages||[]).filter(item=>item.id!==messageId))}
   pause(id:string){const chat=this.deps.get(id);if(chat)this.save(id,chat.queuedMessages||[],true)}
   async resume(id:string){this.save(id,(this.chat(id).queuedMessages||[]).map(entry=>({...entry,error:undefined})),false);await this.pump(id)}
   async insert(id:string,messageId:string){
     if(this.pumping.has(id))throw new Error('queue_busy')
-    const entry=(this.chat(id).queuedMessages||[]).find(item=>item.id===messageId)
+    const entry=this.chat(id).queuedMessages?.find(item=>item.id===messageId)
     if(!entry)throw new Error('queued_message_not_found')
-    if(this.deps.running(id)){
-      if(!this.deps.insert(id,this.input(entry)))throw new Error('agent_not_running')
-    }else{
-      this.pumping.add(id)
-      try{await this.deps.start(id,this.input(entry))}finally{this.pumping.delete(id)}
-    }
-    this.save(id,(this.chat(id).queuedMessages||[]).filter(item=>item.id!==messageId))
+    this.pumping.add(id)
+    try{
+      const input=await this.prepare(id,entry)
+      if(this.deps.running(id)){if(!this.deps.insert(id,input))throw new Error('agent_not_running')}
+      else await this.deps.start(id,input)
+      this.save(id,(this.chat(id).queuedMessages||[]).filter(item=>item.id!==messageId))
+    }finally{this.pumping.delete(id)}
     if(!this.deps.running(id))void this.pump(id)
   }
   finished(id:string){queueMicrotask(()=>void this.pump(id))}
@@ -54,9 +107,9 @@ export class AgentInbox {
     this.pumping.add(id)
     let accepted=false
     try{
-      await this.deps.start(id,this.input(entry));accepted=true
-      const current=this.deps.get(id)
-      if(current)this.save(id,(current.queuedMessages||[]).filter(item=>item.id!==entry.id))
+      const input=await this.prepare(id,entry)
+      await this.deps.start(id,input);accepted=true
+      if(this.deps.get(id))this.save(id,(this.chat(id).queuedMessages||[]).filter(item=>item.id!==entry.id))
     }catch(error){
       if(this.deps.get(id))this.save(id,(this.chat(id).queuedMessages||[]).map(item=>item.id===entry.id?{...item,error:error instanceof Error?error.message:'send_failed'}:item),true)
     }finally{

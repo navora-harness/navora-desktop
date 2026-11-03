@@ -8,11 +8,11 @@
   --control-danger:#af3946;--control-focus:var(--navora-accent);
 }
 .tab-dragging{cursor:grabbing}
-.tab-is-dragging{opacity:.38;transform:scale(.97);transition:opacity 120ms ease,transform 120ms ease}
+.tab-is-dragging{opacity:.35;flex:0 0 var(--tab-drag-slot-width)!important;min-width:var(--tab-drag-slot-width)!important;max-width:var(--tab-drag-slot-width)!important;transition:opacity 120ms ease}
 :is(.file-workspace-tab,.browser-host-tab,.file-host-tab){position:relative}
-:is(.tab-drop-before,.tab-drop-after)::after{content:'';position:absolute;inset:3px auto 3px -3px;width:3px;border-radius:3px;background:var(--navora-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--navora-accent) 14%,transparent);pointer-events:none;z-index:3}
-.tab-drop-after::after{left:auto;right:-3px}
-.tab-drag-preview{position:fixed;left:-10000px;top:-10000px;display:flex;align-items:center;gap:9px;min-width:156px;max-width:280px;height:42px;padding:0 13px;border:1px solid #cbd8e6;border-radius:11px;background:linear-gradient(180deg,#fff,#f7f9fc);color:#30465f;box-shadow:0 8px 24px #18202b2c,0 2px 5px #18202b12;font:550 13px/20px 'Segoe UI','Microsoft YaHei',sans-serif}
+.tab-drop-indicator{position:fixed;z-index:15000;width:2px;border-radius:2px;background:var(--navora-accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--navora-accent) 12%,transparent);pointer-events:none}.tab-neighbor-preview{transition:translate 150ms cubic-bezier(.2,.7,.2,1)}
+@media(prefers-reduced-motion:reduce){.tab-neighbor-preview,.tab-is-dragging{transition:none}}
+.tab-drag-preview{position:fixed;left:-10000px;top:-10000px;display:flex;align-items:center;gap:9px;box-sizing:border-box;min-width:36px;max-width:260px;height:36px;padding:0 13px;border:1px solid #cbd8e6;border-radius:11px;background:var(--navora-surface);color:var(--navora-ink);box-shadow:0 8px 24px #18202b2c,0 2px 5px #18202b12;font:550 13px/20px 'Segoe UI','Microsoft YaHei',sans-serif}
 .tab-drag-preview svg,.tab-drag-preview img{width:16px;height:16px;flex:0 0 16px;object-fit:contain;border-radius:3px}.tab-drag-preview span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .navora-app .ui-button,.navora-app .ui-icon-button{
   display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-shrink:0;
@@ -28,6 +28,13 @@
 .navora-app :is(.ui-button,.ui-icon-button)[aria-pressed=true]{background:var(--control-selected);color:var(--navora-accent)}
 .navora-app :is(.ui-button,.ui-icon-button):disabled{opacity:.45;cursor:default}
 .navora-app :is(button,a,input,textarea,select,[tabindex]):focus-visible{outline:2px solid var(--control-focus);outline-offset:-2px}
+/* Composite controls draw one ring on their rounded container. Keep the
+   independent buttons inside those controls keyboard-visible. */
+.navora-app :is(.global-resource-filter,.file-manager-search,.plugin-search,.library-search,.workspace-picker-search,.model-panel-search,.browser-address-bar,.address-bar,.browser-location,.omnibox) :is(input,textarea):focus-visible,
+.navora-app .v-field :is(input,textarea):focus-visible,
+.navora-app .composer-document-editor .composer-richtext:focus-visible{outline:none}
+.navora-app :is(.global-resource-filter,.file-manager-search,.plugin-search,.library-search,.workspace-picker-search,.model-panel-search):focus-within{border-color:var(--control-focus);box-shadow:0 0 0 2px color-mix(in srgb,var(--control-focus) 14%,transparent)}
+@media(forced-colors:active){.navora-app :is(.global-resource-filter,.file-manager-search,.plugin-search,.library-search,.workspace-picker-search,.model-panel-search,.browser-address-bar,.composer-box,.v-field):focus-within{outline:2px solid Highlight;outline-offset:1px;box-shadow:none}}
 /* The menu owns its surface. Reset the library's important overlay material
    so nested backgrounds and shadows cannot leave a second rounded edge. */
 .v-menu.v-overlay>.v-overlay__content.ui-action-menu-overlay{padding:0;border:0;border-radius:12px;background:transparent!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;overflow:visible}
@@ -112,6 +119,8 @@
 .app-toast.v-snackbar{margin:calc(52px + env(safe-area-inset-top,0px)) 12px 12px}
 .app-toast .v-snackbar__wrapper{min-width:0;min-height:40px;max-width:min(420px,calc(100vw - 24px));border:1px solid #71849c26;border-radius:8px!important;background:#fff;box-shadow:0 4px 18px #23354b14}
 .app-toast .v-snackbar__content{padding:10px 12px;font-size:12px;line-height:1.6;letter-spacing:0;overflow-wrap:anywhere}
+/* These app notices contain text only; navigation underneath stays usable. */
+.app-toast.v-snackbar,.app-toast .v-snackbar__wrapper,.app-toast .v-snackbar__content{pointer-events:none}
 .plugin-import-menu button[role=menuitem],.skill-more-panel .skill-more-item{min-height:32px;padding:6px 10px;border-radius:6px;font-size:12px;line-height:20px}
 .v-dialog .v-card-title{font-size:16px;font-weight:600;line-height:24px;white-space:normal;overflow-wrap:anywhere}
 .v-dialog .v-card-actions{flex-wrap:wrap;gap:8px}.v-dialog .v-card-actions .v-btn{min-height:var(--control-height);font-size:12px;letter-spacing:0}

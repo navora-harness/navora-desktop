@@ -1,60 +1,72 @@
 <template>
-  <div class="workspace-tab-item" :class="{active:selected,selected,'is-loading':loading}" :draggable="draggable" role="presentation">
-    <button :id="tabId" type="button" role="tab" :data-page-id="pageId" :data-file-key="fileKey" :aria-selected="selected" :aria-controls="controls" :aria-label="ariaLabel || label" :tabindex="selected?0:-1" :title="title || label" @click="$emit('select')">
-      <img v-if="faviconUrl && failedFaviconUrl!==faviconUrl" class="workspace-tab-favicon" :src="faviconUrl" alt="" @error="failedFaviconUrl=faviconUrl" />
-      <AppIcon v-else :icon="icon || (kind==='browser'?'globe':'file-lines')" class="workspace-tab-kind-icon" />
-      <span>{{ label }}</span>
+  <div ref="root" class="workspace-tab-item" :style="WORKSPACE_TAB_CSS_VARIABLES" :class="{active:selected,selected,'is-loading':loading,'is-pinned':pinned,'is-multi-selected':multiSelected,'is-context-target':contextTarget,'is-muted':muted,'is-audible':audible,'has-audio-slot':audioRetained&&!pinned}" :draggable="draggable" role="presentation" @pointerenter="scheduleHover" @pointerleave="hideHover" @pointerdown.capture="pointerDown" @pointermove="pointerMove" @pointerup="cancelTouch" @pointercancel="cancelTouch" @contextmenu.capture="hideHover" @dragstart.capture="hideHover" @focusin="focusPreview" @focusout="hideHover">
+    <button :id="tabId" type="button" role="tab" :data-page-id="pageId" :data-file-key="fileKey" :data-conversation-tab="kind==='conversation'?'':undefined" :aria-selected="selected" :aria-controls="controls" :aria-label="accessibleLabel" :aria-describedby="hoverVisible?hoverId:undefined" :tabindex="selected?0:-1" :title="fullDescription" @click="select">
+      <img v-if="!failure && safeFavicon && failedFaviconUrl!==safeFavicon" class="workspace-tab-favicon" :src="safeFavicon" alt="" referrerpolicy="no-referrer" @error="failedFaviconUrl=safeFavicon" @load="checkFavicon" />
+      <AppIcon v-else :icon="failure?'triangle-exclamation':icon || (kind==='browser'?'globe':kind==='conversation'?'comments':kind==='subchats'?'robot':workspaceFileIcon(label))" class="workspace-tab-kind-icon" />
+      <span class="workspace-tab-label"><bdi dir="auto" class="workspace-tab-stem">{{ nameParts.stem }}</bdi><bdi v-if="nameParts.extension" dir="ltr" class="workspace-tab-extension">{{ nameParts.extension }}</bdi><bdi v-if="labelSuffix" dir="auto" class="workspace-tab-secondary"> · {{ labelSuffix }}</bdi></span>
+      <small v-if="status" class="workspace-tab-status" :title="status" aria-hidden="true">{{ status }}</small>
     </button>
-    <button type="button" class="workspace-tab-close" :disabled="closeDisabled" :aria-label="closeLabel || `关闭 ${label}`" :title="`关闭 ${label}`" @click.stop="$emit('close')"><AppIcon icon="xmark" /></button>
+    <button v-if="kind==='browser'&&!pinned&&audioRetained" type="button" class="workspace-tab-audio" :class="{'is-empty':!audioActive}" :aria-hidden="!audioActive" :disabled="!audioActive" :aria-label="audioAction" :title="audioAction" :aria-pressed="muted===true" :tabindex="selected&&audioActive?0:-1" draggable="false" @pointerdown.stop @dragstart.stop.prevent @contextmenu.stop.prevent @click.stop="$emit('toggle-mute')"><BrowserTabAudioIcon :muted="muted" :audible="audible" /></button>
+    <span v-if="kind==='browser'&&pinned&&audioActive" class="workspace-pinned-audio" aria-hidden="true"><BrowserTabAudioIcon :muted="muted" :audible="audible" /></span>
+    <button v-if="closable && !pinned" type="button" class="workspace-tab-close" :disabled="closeDisabled" :aria-label="closeLabel || `关闭 ${displayTitle}`" :title="`关闭 ${displayTitle}`" :tabindex="selected?0:-1" draggable="false" @pointerdown.stop @dragstart.stop.prevent @contextmenu.stop.prevent @click.stop="$emit('close')"><AppIcon icon="xmark" /></button>
+    <span v-if="loading" class="workspace-tab-loading" aria-hidden="true" />
+    <Teleport to="body"><div v-if="hoverVisible" :id="hoverId" ref="hoverPanel" class="sidebar-ctx-panel browser-tab-hover-card" role="tooltip" data-browser-tab-preview :style="{left:`${hoverPosition.x}px`,top:`${hoverPosition.y}px`}"><strong dir="auto">{{ displayTitle }}</strong><span v-if="labelSuffix" dir="auto" class="browser-tab-hover-domain">{{ labelSuffix }}</span><span v-if="description" dir="auto" class="browser-tab-hover-domain">{{ description }}</span><span v-if="displayDomain" dir="ltr" class="browser-tab-hover-domain">{{ displayDomain }}</span><span v-if="statusLabel" class="browser-tab-hover-status">{{ statusLabel }}</span></div></Teleport>
   </div>
 </template>
-
+<script lang="ts">let dismissActiveHover:(()=>void)|undefined;</script>
 <script setup lang="ts">
-import {ref,watch} from 'vue'
+import {computed,nextTick,onBeforeUnmount,ref,useId,watch} from 'vue'
 import AppIcon from '@/components/icons/AppIcon.vue'
-
+import BrowserTabAudioIcon from './BrowserTabAudioIcon.vue'
+import {WORKSPACE_TAB_CSS_VARIABLES} from '@shared/workspace-tab-geometry'
+import {workspaceAudioLabel,workspaceDisplayText,workspaceFaviconUrl,workspaceFileIcon} from '@shared/workspace-tab-presentation'
 const props=withDefaults(defineProps<{
-  tabId?:string
-  pageId?:string
-  fileKey?:string
-  controls?:string
-  ariaLabel?:string
-  label:string
-  title?:string
-  kind:'file'|'browser'
-  icon?:string
-  faviconUrl?:string
-  loading?:boolean
-  selected:boolean
-  draggable?:boolean
-  closeDisabled?:boolean
-  closeLabel?:string
-}>(),{draggable:false,closeDisabled:false})
-defineEmits<{select:[];close:[]}>()
-const failedFaviconUrl=ref('')
-watch(()=>props.faviconUrl,()=>{failedFaviconUrl.value=''})
+  tabId?:string;pageId?:string;fileKey?:string;controls?:string;ariaLabel?:string;label:string;title?:string;fullTitle?:string;description?:string;labelSuffix?:string;documentKey?:string|number;failure?:string
+  kind:'conversation'|'file'|'browser'|'subchats';icon?:string;faviconUrl?:string;loading?:boolean;selected:boolean;draggable?:boolean;status?:string;closable?:boolean
+  closeDisabled?:boolean;closeLabel?:string;pinned?:boolean;muted?:boolean;manualMuted?:boolean;muteReason?:'manual'|'agent';audible?:boolean;multiSelected?:boolean;contextTarget?:boolean;hoverUrl?:string
+}>(),{draggable:false,closeDisabled:false,closable:true,pinned:false,multiSelected:false,contextTarget:false})
+const emit=defineEmits<{select:[event:MouseEvent];close:[];'toggle-mute':[]}>()
+const failedFaviconUrl=ref(''),root=ref<HTMLElement>(),hoverPanel=ref<HTMLElement>(),hoverId=`browser-tab-hover-${useId()}`,hoverVisible=ref(false),hoverPosition=ref({x:8,y:8}),audioRetained=ref(false)
+let hoverTimer:ReturnType<typeof setTimeout>|undefined,touchTimer:ReturnType<typeof setTimeout>|undefined,touchStart:{x:number;y:number}|undefined,suppressSelect=false,observer:MutationObserver|undefined,listening=false
+const displayTitle=computed(()=>workspaceDisplayText(props.fullTitle??props.label)),fullDescription=computed(()=>workspaceDisplayText(props.title)||[displayTitle.value,props.labelSuffix,props.description].filter(Boolean).join('，'))
+const audioActive=computed(()=>props.muted===true||props.audible===true),audioState=computed(()=>workspaceAudioLabel(props.muted,props.audible,props.muteReason)),audioAction=computed(()=>`${props.muted?'恢复本页声音':'静音此页面'}，${displayTitle.value}${audioState.value?'；'+audioState.value:''}`)
+const statusTokens=computed(()=>[props.failure?`页面无法载入：${workspaceDisplayText(props.failure)}`:'',props.status,props.loading?'正在加载':'',props.pinned?'已固定':'',audioState.value].filter((value):value is string=>!!value)),statusLabel=computed(()=>[...new Set(statusTokens.value)].join(' · '))
+const accessibleLabel=computed(()=>{const base=workspaceDisplayText(props.ariaLabel)||fullDescription.value||displayTitle.value;return [base,...statusTokens.value.filter(token=>!base.includes(token)),props.multiSelected?'已加入多选':''].filter(Boolean).join('，')})
+const safeFavicon=computed(()=>props.kind==='browser'?workspaceFaviconUrl(props.faviconUrl,props.hoverUrl):undefined)
+const displayDomain=computed(()=>{try{const url=new URL(props.hoverUrl||'');return ['http:','https:'].includes(url.protocol)?url.host:''}catch{return ''}})
+const nameParts=computed(()=>{const label=workspaceDisplayText(props.label),match=props.kind==='file'?label.match(/^(.*)(\.[^.]{1,16})$/):null;return match?{stem:match[1],extension:match[2]}:{stem:label,extension:''}})
+const overlaysOpen=()=>!!document.querySelector('.sidebar-ctx-panel:not([data-browser-tab-preview]),.v-overlay--active,.browser-address-suggestions,.browser-page-menu,.browser-downloads-menu')
+function checkFavicon(event:Event){const image=event.currentTarget as HTMLImageElement;if(!image.naturalWidth||!image.naturalHeight||image.naturalWidth>512||image.naturalHeight>512)failedFaviconUrl.value=safeFavicon.value||''}
+function hideHover(){clearTimeout(hoverTimer);hoverTimer=undefined;hoverVisible.value=false;observer?.disconnect();observer=undefined;if(dismissActiveHover===hideHover)dismissActiveHover=undefined;if(!listening)return;listening=false;window.removeEventListener('blur',hideHover);window.removeEventListener('resize',hideHover);window.removeEventListener('navora:tab-hover-dismiss',hideHover);document.removeEventListener('scroll',hideHover,true);document.removeEventListener('wheel',hideHover,true);document.removeEventListener('pointerdown',hideHover,true);document.removeEventListener('keydown',hideHover,true);document.removeEventListener('dragstart',hideHover,true)}
+function showPreview(delay:number){
+  if(overlaysOpen()||document.documentElement.classList.contains('tab-dragging'))return
+  dismissActiveHover?.();dismissActiveHover=hideHover;listening=true
+  window.addEventListener('blur',hideHover);window.addEventListener('resize',hideHover);window.addEventListener('navora:tab-hover-dismiss',hideHover);document.addEventListener('scroll',hideHover,true);document.addEventListener('wheel',hideHover,true);document.addEventListener('pointerdown',hideHover,true);document.addEventListener('keydown',hideHover,true);document.addEventListener('dragstart',hideHover,true)
+  hoverTimer=setTimeout(async()=>{const bounds=root.value?.getBoundingClientRect();if(!bounds||overlaysOpen()){hideHover();return}hoverPosition.value={x:Math.max(8,Math.min(bounds.left,innerWidth-368)),y:Math.max(8,bounds.bottom+8)};hoverVisible.value=true;await nextTick();if(!hoverVisible.value||dismissActiveHover!==hideHover)return;const card=hoverPanel.value?.getBoundingClientRect();if(card)hoverPosition.value={x:Math.max(8,Math.min(bounds.left,innerWidth-card.width-8)),y:Math.max(8,Math.min(bounds.bottom+8,innerHeight-card.height-8))};observer=new MutationObserver(()=>{if(overlaysOpen())hideHover()});observer.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['class']})},delay)
+}
+function scheduleHover(event:PointerEvent){if(event.pointerType!=='touch'&&!event.buttons)showPreview(500)}
+function focusPreview(){if(root.value?.matches(':focus-within'))showPreview(160)}
+function cancelTouch(){clearTimeout(touchTimer);touchTimer=undefined;touchStart=undefined}
+function pointerDown(event:PointerEvent){hideHover();cancelTouch();if(event.pointerType!=='touch'||(event.target as Element).closest('.workspace-tab-close,.workspace-tab-audio'))return;touchStart={x:event.clientX,y:event.clientY};touchTimer=setTimeout(()=>{suppressSelect=true;root.value?.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:event.clientX,clientY:event.clientY}));cancelTouch()},550)}
+function pointerMove(event:PointerEvent){if(touchStart&&Math.hypot(event.clientX-touchStart.x,event.clientY-touchStart.y)>8)cancelTouch()}
+function select(event:MouseEvent){if(suppressSelect){suppressSelect=false;event.preventDefault();return}emit('select',event)}
+watch(()=>[props.pageId,props.fileKey,props.documentKey??props.hoverUrl?.split('#')[0]],()=>{audioRetained.value=audioActive.value;failedFaviconUrl.value=''},{immediate:true})
+watch(audioActive,value=>{if(value)audioRetained.value=true})
+watch(()=>props.loading,value=>{if(value)audioRetained.value=audioActive.value})
+watch(()=>props.faviconUrl,()=>failedFaviconUrl.value='')
+onBeforeUnmount(()=>{hideHover();cancelTouch()})
 </script>
-
 <style>
-.workspace-tab-item{position:relative;display:flex;align-items:center;box-sizing:border-box;flex:0 1 210px;min-width:126px;max-width:228px;height:36px;overflow:hidden;border:1px solid #d5dce5;border-radius:9px;background:#f5f7fa;color:#53657b;transition:background-color 140ms ease,border-color 140ms ease,color 140ms ease,box-shadow 140ms ease}
-.workspace-tab-item::before,.workspace-tab-item::after{position:absolute;z-index:0;pointer-events:none;content:""}
-.workspace-tab-item::before{inset:0;background:linear-gradient(105deg,transparent 20%,rgba(74,132,190,.025) 34%,rgba(74,132,190,.14) 49%,rgba(74,132,190,.025) 64%,transparent 78%);opacity:0;transform:translateX(-65%)}
-.workspace-tab-item::after{inset:auto auto 0 0;width:34%;height:2px;border-radius:0 2px 0 0;background:linear-gradient(90deg,rgba(61,119,180,.2),#4a84be 72%,rgba(61,119,180,.2));opacity:0;transform:translateX(-110%)}
-.workspace-tab-item.is-loading::before{opacity:1;animation:workspace-tab-loading-sweep 1.8s ease-in-out infinite}
-.workspace-tab-item.is-loading::after{opacity:1;animation:workspace-tab-loading-line 1.8s ease-in-out infinite}
-.workspace-tab-item:hover{border-color:#bdcbd9;background:#edf2f7;color:#30465f}
-.workspace-tab-item.active{border-color:#9eb5ce;background:#fff;color:#203a57;box-shadow:0 1px 3px rgba(35,52,72,.07)}
-.workspace-tab-item>[role=tab]{display:flex;align-items:center;gap:8px;flex:1;min-width:0;height:100%;padding:0 5px 0 10px;border:0;border-radius:8px;background:transparent;color:inherit;text-align:left;font:inherit;font-size:13px;font-weight:550;white-space:nowrap;cursor:pointer}
-.workspace-tab-item>[role=tab],.workspace-tab-item>.workspace-tab-close{position:relative;z-index:1}
-.workspace-tab-item>[role=tab]>span{overflow:hidden;text-overflow:ellipsis}
-.workspace-tab-item .workspace-tab-kind-icon,.workspace-tab-item .workspace-tab-favicon{width:16px;height:16px;flex:0 0 16px;color:#5c7189;object-fit:contain}
-.workspace-tab-item.active .workspace-tab-kind-icon{color:#3c648d}
-.workspace-tab-item .workspace-tab-favicon{border-radius:3px}
-.workspace-tab-item>.workspace-tab-close{display:grid;place-items:center;width:24px;height:24px;min-height:24px;flex:0 0 24px;margin:0 4px 0 0;padding:0;border:0;border-radius:6px;background:transparent;color:#65778d;opacity:0;transition:opacity 120ms ease,background-color 120ms ease,color 120ms ease;cursor:pointer}
-.workspace-tab-item:is(:hover,.active,:focus-within)>.workspace-tab-close{opacity:1}
-.workspace-tab-item>.workspace-tab-close:hover:not(:disabled){background:#fdebec;color:#b5323c}
-.workspace-tab-item>.workspace-tab-close:focus-visible,.workspace-tab-item>[role=tab]:focus-visible{outline:2px solid #6487b1;outline-offset:-2px;opacity:1}
-@keyframes workspace-tab-loading-sweep{0%{transform:translateX(-65%)}100%{transform:translateX(65%)}}
-@keyframes workspace-tab-loading-line{0%{transform:translateX(-110%)}100%{transform:translateX(405%)}}
-@media(prefers-reduced-motion:reduce){.workspace-tab-item,.workspace-tab-item>.workspace-tab-close{transition:none}.workspace-tab-item.is-loading::before{animation:none;opacity:.7;transform:none;background:rgba(74,132,190,.08)}.workspace-tab-item.is-loading::after{animation:none;opacity:1;transform:none;width:100%}}
+:root{--workspace-tab-min-width:112px;--workspace-tab-ideal-width:220px;--workspace-tab-max-width:260px;--workspace-tab-height:36px;--workspace-tab-gap:4px;--workspace-tab-radius:9px;--workspace-tab-content-inset:10px;--workspace-tab-content-gap:8px}
+.workspace-tab-item{position:relative;display:flex;align-items:center;box-sizing:border-box;container-type:inline-size;flex:0 1 var(--workspace-tab-ideal-width);min-width:var(--workspace-tab-min-width);max-width:var(--workspace-tab-max-width);height:var(--workspace-tab-height);overflow:hidden;border:1px solid var(--tab-border,#d5dce5);border-radius:var(--workspace-tab-radius);background:var(--tab-bg,#f5f7fa);color:var(--tab-ink,#53657b);transition:background-color 120ms ease,border-color 120ms ease,color 120ms ease;cursor:default;-webkit-app-region:no-drag}
+.workspace-tab-loading{position:absolute;inset:auto 0 0;z-index:0;height:2px;background:var(--tab-accent,#4a84be);opacity:.8;pointer-events:none;animation:workspace-tab-loading-line 1.8s ease-in-out infinite;transform-origin:left center}
+.workspace-tab-item:hover{border-color:var(--tab-hover-border,#b8c9dc);background:var(--tab-hover-bg,#e8eef5);color:var(--tab-hover-ink,#30465f)}.workspace-tab-item.is-multi-selected{border-color:var(--tab-selection-border,#9db6d2);background:var(--tab-selection-bg,#e0eafa);color:var(--tab-hover-ink,#30465f)}.workspace-tab-item.active{border-color:var(--tab-active-border,#9eb5ce);background:var(--tab-active-bg,#fff);color:var(--tab-active-ink,#203a57)}.workspace-tab-item.active:hover{border-color:var(--tab-hover-border,#8faaca);background:var(--tab-active-hover-bg,#f0f5fc)}.workspace-tab-item.is-context-target{border-color:var(--tab-context-border,#a2b6cf)}.workspace-tab-item:has(>[role=tab]:focus-visible){outline:2px solid var(--tab-focus,#6487b1);outline-offset:-2px}
+.workspace-tab-item>[role=tab]{position:relative;z-index:1;display:flex;align-items:center;gap:var(--workspace-tab-content-gap);flex:1;min-width:0;height:100%;padding:0 3px 0 var(--workspace-tab-content-inset);border:0;border-radius:8px;background:transparent;color:inherit;text-align:start;font:inherit;font-size:13px;font-weight:450;white-space:nowrap;cursor:default;outline:none}.navora-app .workspace-tab-item>[role=tab]:focus-visible{outline:none;box-shadow:none}.workspace-tab-item.active>[role=tab]{font-weight:550}.workspace-tab-label{display:flex;align-items:baseline;flex:1;min-width:0;overflow:hidden}.workspace-tab-stem{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;unicode-bidi:isolate}.workspace-tab-extension{flex:0 1 auto;max-width:45%;overflow:hidden;text-overflow:ellipsis;unicode-bidi:isolate}.workspace-tab-secondary{flex:0 2 auto;max-width:45%;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--tab-ink,#53657b);font-size:11px;unicode-bidi:isolate}.workspace-tab-status{flex:0 1 auto;min-width:0;max-width:70px;overflow:hidden;text-overflow:ellipsis;font-size:10px;color:var(--tab-accent,#4a84be)}
+.workspace-tab-item .workspace-tab-kind-icon,.workspace-tab-item .workspace-tab-favicon{width:16px;height:16px;flex:0 0 16px;color:inherit;object-fit:contain}.workspace-tab-favicon{border-radius:3px}.workspace-tab-item>.workspace-tab-close,.workspace-tab-item>.workspace-tab-audio{position:relative;z-index:1;display:grid;place-items:center;width:24px;height:24px;min-height:24px;flex:0 0 24px;margin:0 2px 0 0;padding:0;border:0;border-radius:6px;background:transparent;color:inherit;cursor:default;outline:none;transition:opacity 120ms ease,background-color 120ms ease}.workspace-tab-item>.workspace-tab-close{opacity:0}.workspace-tab-item:is(:hover,.active,:focus-within,.is-context-target)>.workspace-tab-close{opacity:1}.workspace-tab-item>.workspace-tab-close:hover:not(:disabled),.workspace-tab-item>.workspace-tab-audio:hover:not(:disabled){background:var(--tab-control-hover,#dbe5ef)}.workspace-tab-item>.workspace-tab-close:disabled{opacity:.35}.workspace-tab-item>.workspace-tab-audio.is-empty{visibility:hidden;pointer-events:none}.workspace-tab-item>.workspace-tab-close:focus-visible,.workspace-tab-item>.workspace-tab-audio:focus-visible{outline:2px solid var(--tab-focus,#6487b1);outline-offset:-2px;opacity:1}.workspace-tab-close>.app-icon{width:16px;height:16px}
+.workspace-tab-item.is-pinned{flex:0 0 36px;min-width:36px;max-width:36px}.workspace-tab-item.is-pinned>[role=tab]{justify-content:center;padding:0}.workspace-tab-item.is-pinned .workspace-tab-label,.workspace-tab-item.is-pinned .workspace-tab-status{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}.workspace-pinned-audio{position:absolute;right:1px;bottom:1px;z-index:2;display:grid;place-items:center;width:12px;height:12px;border-radius:3px;background:var(--tab-active-bg,#fff);pointer-events:none}.workspace-pinned-audio .browser-tab-audio-icon{width:11px;height:11px}
+.browser-tab-hover-card{position:fixed;z-index:12000;box-sizing:border-box;width:360px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);overflow:hidden;padding:12px 14px;border:1px solid var(--tab-border,#d5dce5);border-radius:12px;background:var(--tab-active-bg,#fff);color:var(--tab-active-ink,#203a57);box-shadow:0 6px 22px #1726381c;pointer-events:none;font-size:13px;line-height:1.5}.browser-tab-hover-card>strong{display:block;overflow-wrap:anywhere;font-weight:550;unicode-bidi:isolate}.browser-tab-hover-domain,.browser-tab-hover-status{display:block;margin-top:4px;color:var(--tab-ink,#53657b);font-size:12px;overflow-wrap:anywhere;unicode-bidi:isolate}@keyframes workspace-tab-loading-line{0%{transform:translateX(-100%) scaleX(.4)}100%{transform:translateX(100%) scaleX(.4)}}
+@container(max-width:155px){.workspace-tab-item>[role=tab]{padding-inline-start:6px;gap:5px}.workspace-tab-secondary,.workspace-tab-status{display:none}}
+@media(hover:none),(pointer:coarse){.workspace-tab-item>.workspace-tab-close{opacity:1}}
+@media(prefers-reduced-motion:reduce){.workspace-tab-item,.workspace-tab-item>.workspace-tab-close,.workspace-tab-item>.workspace-tab-audio{transition:none}.workspace-tab-loading{animation:none;transform:none}}
+@media(forced-colors:active){.workspace-tab-item.active{outline:2px solid Highlight;outline-offset:-2px}.workspace-tab-loading{background:Highlight}}
 </style>

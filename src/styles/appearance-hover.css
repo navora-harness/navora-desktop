@@ -1,0 +1,96 @@
+/* Theme-aware feedback for application controls; native window controls and web pages keep their own states. */
+:root[data-navora-theme]{
+  --control-hover:var(--appearance-hover);
+  --appearance-local-hover:var(--appearance-hover);
+  --tab-hover-bg:var(--appearance-hover);
+  --tab-hover-border:var(--appearance-hover-border);
+  --tab-hover-ink:var(--appearance-hover-ink);
+  --tab-active-hover-bg:var(--appearance-selected-hover);
+  --tab-control-hover:var(--appearance-hover);
+  --navora-switch-off:var(--appearance-composer-edge);
+  --navora-switch-off-hover:var(--appearance-hover-border);
+  --navora-switch-edge:var(--appearance-composer-edge);
+  --navora-switch-on:var(--appearance-accent);
+  --navora-switch-on-hover:color-mix(in srgb,var(--appearance-accent) 80%,var(--appearance-ink));
+  --appearance-danger-hover:color-mix(in srgb,var(--control-danger) 16%,var(--appearance-surface));
+}
+:root[data-navora-color-scheme=dark]{--control-danger:#EF9DA9}
+
+/* Selected controls retain a separate hover tone without changing their geometry. */
+:root[data-navora-theme] .navora-app :is(button,[role=treeitem],.chat-item,.chat-sub-chip,.tree-row):is(.active,.selected,.is-selected,[aria-pressed=true],[aria-selected=true],[aria-current=page]){
+  --appearance-local-hover:var(--appearance-selected-hover);
+}
+/* The shared bottom shell needs a stronger tint than white content surfaces. */
+:root[data-navora-theme] .navora-app .activity-rail{--appearance-local-hover:var(--appearance-selected-hover)}
+:root[data-navora-theme] .application-menu-bar{--appearance-local-hover:var(--appearance-selected-hover)}
+:root[data-navora-theme] :is(.browser-address-suggestions,.source-options) button:is(.is-selected,[aria-selected=true]){
+  --appearance-local-hover:var(--appearance-selected-hover);
+}
+
+@media(hover:hover){
+  :root[data-navora-theme] .navora-app :is(
+    .ui-icon-button,.ui-button,.chat-resource-button,.sidebar-icon-btn,.chat-toolbar-icon-btn,
+    .brand-search-btn,.chat-new-action,.chat-search-action,.new-chat-btn,.icon-btn,
+    .chat-more-btn,.quick-browser-btn,.composer-perm-btn,.composer-link-btn,.composer-attach-trigger,.usage-ring-btn,
+    .suggest-chip,.start-recommendations button,.start-visit,.workspace-picker-file,.workspace-picker-filters button,
+    .settings-back,.settings-discard,.settings-return,.provider-tool-btn,.read-pages-bar,.reply-copy-btn,
+    .subchat-back,.activity-trigger,.run-card-head,.file-manager-icon,.creator-back,.resource-action,.application-menu-trigger,
+    .chat-item,.chat-sub-chip,.tree-row,.resource-owner-toggle,.nav-item,.provider-list-item,.appearance-option
+  ):hover:not(:disabled):not([aria-disabled=true]):not(.disabled):not(.primary):not(.danger):not(.stop){
+    background:var(--appearance-local-hover)!important;
+    color:var(--appearance-hover-ink)!important;
+    border-color:var(--appearance-hover-border)!important;
+  }
+  :root[data-navora-theme] .navora-app :is(
+    .ui-icon-button,.ui-button,.chat-resource-button,.sidebar-icon-btn,.chat-toolbar-icon-btn,.chat-new-action,
+    .composer-perm-btn,.nav-item,.appearance-option,.tree-row,.resource-owner-toggle,.workspace-picker-file,.start-visit
+  ):hover:not(:disabled):not([aria-disabled=true]):not(.primary):not(.danger):not(.stop)
+    > :is(.app-icon,.nav-label,.nav-desc,.appearance-option-name,.appearance-option-description,.owner-title){
+    color:var(--appearance-hover-ink)!important;
+  }
+  :root[data-navora-theme] .navora-app .settings-navigation .nav-item:hover :is(.nav-label,.nav-desc,.settings-nav-icon),
+  :root[data-navora-theme] .navora-app :is(.chat-item,.chat-sub-chip):hover :is(.chat-item-title,.chat-sub-chip-title),
+  :root[data-navora-theme] .navora-app .tree-row:hover .tree-name,
+  :root[data-navora-theme] .navora-app .tree-row:hover .tree-name :is(.app-icon,.tree-meta,.page-title,.session-title){
+    color:var(--appearance-hover-ink)!important;
+  }
+  :root[data-navora-theme] .navora-app .appearance-option:hover:not(:disabled){
+    box-shadow:0 0 0 1px var(--appearance-hover-border);
+  }
+  :root[data-navora-theme] .navora-app .appearance-option[aria-pressed=true]:hover:not(:disabled){
+    border-color:var(--appearance-accent)!important;
+    box-shadow:0 0 0 1px var(--appearance-accent);
+  }
+  :root[data-navora-theme] .navora-app .workspace-tab-item:hover{
+    color:var(--appearance-hover-ink);
+  }
+  :root[data-navora-theme] .navora-app .workspace-tab-item > :is(.workspace-tab-close,.workspace-tab-audio):hover:not(:disabled){
+    color:var(--appearance-hover-ink);
+    box-shadow:inset 0 0 0 1px var(--appearance-hover-border);
+  }
+  :root[data-navora-theme] :is(
+    .ui-action-menu,.conversation-actions-menu,.sidebar-ctx-panel,.sidebar-more-panel,
+    .composer-perm-panel,.model-panel,.browser-address-suggestions,.browser-tab-context-menu,.browser-agent-panel
+  ) button:is(:hover,:focus-visible):not(:disabled):not([aria-disabled=true]):not(.disabled):not(.danger),
+  :root[data-navora-theme] :is(.sidebar-more-item,.chat-more-item,.composer-perm-item):is(:hover,:focus-visible):not(:disabled):not(.disabled):not(.danger){
+    background:var(--appearance-local-hover,var(--appearance-hover))!important;
+    color:var(--appearance-hover-ink)!important;
+  }
+  :root[data-navora-theme] :is(
+    .source-picker-body nav button,.source-options button,.source-search button,.source-ranges button,
+    .source-page-actions button,.v-overlay .ui-icon-button
+  ):hover:not(:disabled):not([aria-disabled=true]):not(.danger){
+    background:var(--appearance-local-hover,var(--appearance-hover))!important;
+    color:var(--appearance-hover-ink)!important;
+    border-color:var(--appearance-hover-border)!important;
+  }
+  :root[data-navora-theme] :is(.ui-action-menu,.conversation-actions-menu,.sidebar-ctx-panel,.sidebar-more-panel,.browser-address-suggestions)
+    button:is(:hover,:focus-visible):not(:disabled):not(.danger) > :is(.app-icon,span,small),
+  :root[data-navora-theme] .browser-address-suggestions button:is(:hover,:focus-visible) :is(strong,small){
+    color:var(--appearance-hover-ink)!important;
+  }
+  :root[data-navora-theme] :is(button.danger,.sidebar-more-item.danger,.chat-more-item.danger):hover:not(:disabled){
+    background:var(--appearance-danger-hover)!important;
+    color:var(--control-danger)!important;
+  }
+}

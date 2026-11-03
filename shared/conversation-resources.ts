@@ -34,3 +34,24 @@ export class ResourceAutoOpen {
     return resources.some(id=>!previous?.has(id))
   }
 }
+
+export type SummaryResourceVersion={id:string;version:string}
+/** Loading, renaming, tab selection and empty start pages are not new summary content. */
+export function browserSummaryResources(tree:BrowserTreeSession[]):SummaryResourceVersion[]{
+  return tree.flatMap(session=>session.windows.filter(page=>/^https?:\/\//i.test(page.url)&&!page.crashed&&!page.loadError).map(page=>({id:`browser:${page.windowId}`,version:'visited'})))
+}
+
+/** Per-window unread resources. First observation establishes a silent baseline. */
+export class ResourceUnreadTracker {
+  private states=new Map<string,{versions:Map<string,string>;unread:Set<string>}>()
+  update(chatId:string,resources:SummaryResourceVersion[],reading=false):number{
+    const versions=new Map(resources.map(resource=>[resource.id,resource.version])),previous=this.states.get(chatId)
+    if(!previous){this.states.set(chatId,{versions,unread:new Set()});return 0}
+    const unread=new Set([...previous.unread].filter(id=>versions.has(id)))
+    for(const [id,version] of versions)if(previous.versions.get(id)!==version)unread.add(id)
+    if(reading)unread.clear()
+    this.states.set(chatId,{versions,unread});return unread.size
+  }
+  count(chatId:string){return this.states.get(chatId)?.unread.size||0}
+  markRead(chatId:string){this.states.get(chatId)?.unread.clear()}
+}

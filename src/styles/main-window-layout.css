@@ -1,0 +1,44 @@
+/* Main-window geometry. The rail lives on the chrome; only the composite
+   context-panel + content surface owns an outer corner. Internal joins stay square. */
+:root{--navora-content-radius:12px;--workspace-control-inset:12px;--workspace-header-height:48px}
+.navora-app .main-shell .workspace-controls-divider{display:block;align-self:center;flex:0 0 1px;width:1px;height:18px;margin:0 3px;background:var(--navora-stroke,#dce3ec);pointer-events:none;user-select:none}
+.navora-app .shell.main-shell:not(.mobile-layout){grid-template-columns:52px minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:0;background:var(--navora-chrome);transition:none}
+.navora-app .shell.main-shell.frameless:not(.mobile-layout){grid-template-rows:44px minmax(0,1fr)}
+.navora-app .main-shell>.content-surface{display:grid;grid-template-columns:calc(var(--sidebar-width,312px) - 52px) minmax(0,1fr);grid-template-rows:minmax(0,1fr);grid-column:2;grid-row:1;min-width:0;min-height:0;overflow:hidden;margin:0;border-radius:var(--navora-content-radius) 0 0 0;background:var(--navora-surface);isolation:isolate;transition:grid-template-columns 220ms var(--navora-ease)}
+.navora-app .main-shell.frameless:not(.mobile-layout)>.content-surface{grid-row:2}
+.navora-app .main-shell.sidebar-collapsed>.content-surface{grid-template-columns:0 minmax(0,1fr)}
+.navora-app .main-shell.sidebar-resizing>.content-surface{transition:none}
+.navora-app .main-shell:not(.mobile-layout)>.content-surface>aside.sidebar{grid-column:1;grid-row:1;padding:0 10px 8px 12px;border-radius:0;background:var(--navora-sidebar)}
+.navora-app .main-shell.sidebar-collapsed:not(.mobile-layout)>.content-surface>aside.sidebar{padding:0;border:0;visibility:hidden;pointer-events:none}
+.navora-app .main-shell:not(.mobile-layout)>.content-surface>.main{grid-column:2;grid-row:1;border-radius:0;min-width:0;min-height:0}
+.navora-app .shell.main-shell>.activity-rail{position:relative;inset:auto;grid-column:1;grid-row:1;align-self:stretch;width:52px;min-height:0;display:flex;flex-direction:column;justify-content:space-between;padding:0 10px 8px;border:0;background:var(--navora-chrome);z-index:3}
+.navora-app .shell.main-shell.frameless:not(.mobile-layout)>.activity-rail{grid-row:2}
+.navora-app .main-shell .rail-panel-groups{max-height:calc(100dvh - 220px)}
+.navora-app .main-shell .window-titlebar{padding-right:150px}
+.navora-app .main-shell.platform-mac .window-titlebar{padding-right:12px}
+.navora-app .main-shell:not(.mobile-layout) .conversation-title-header{box-sizing:border-box;height:var(--workspace-header-height);min-height:var(--workspace-header-height);padding:8px var(--workspace-control-inset) 8px 20px;align-items:center;gap:4px;overflow:hidden;background:var(--navora-header);-webkit-app-region:no-drag}
+.navora-app .main-shell .conversation-title-header .main-title{transform:none;font-size:14px;line-height:20px}
+.navora-app .main-shell .conversation-title-actions{position:static;flex:0 0 auto;margin-left:auto;gap:2px}
+.navora-app .main-shell .conversation-title-actions button{-webkit-app-region:no-drag}
+/* Keep action groups compact over the broader main-top spacing rule. */
+.navora-app .shell.main-shell:not(.mobile-layout)>.content-surface>.main .main-top.conversation-title-header{gap:4px}
+.navora-app .main-shell .settings-current-title{margin:0 0 0 10px;font-size:14px;font-weight:600;line-height:20px}
+.navora-app .main-shell .dock-header,.navora-app .main-shell .settings-sidebar-heading{box-sizing:border-box;height:48px;min-height:48px}
+.navora-app .main-shell .file-workspace .file-workspace-head{box-sizing:border-box;height:var(--workspace-header-height);min-height:var(--workspace-header-height);padding:8px var(--workspace-control-inset);background:var(--navora-header);gap:4px}
+.navora-app .main-shell .file-workspace.overlay{box-shadow:none}
+.navora-app .main-shell .file-workspace-enter-from,.navora-app .main-shell .file-workspace-leave-to{transform:none}
+.navora-app .main-shell .main.workspace-single .conversation-content{display:none}
+.navora-app .main-shell .main.workspace-single>.conversation-resource-card{display:none}
+/* Mobile keeps its full-height drawer; the rail travels with it. */
+.navora-app .main-shell.mobile-layout>.content-surface{display:contents}
+.navora-app .main-shell.mobile-layout>.activity-rail{position:fixed;inset:0 auto 0 0;height:100dvh;padding-top:8px;z-index:1201;transform:translateX(-105%);transition:transform 220ms var(--navora-ease)}
+.navora-app .main-shell.mobile-layout.sidebar-open>.activity-rail{transform:translateX(0)}
+.navora-app .main-shell.mobile-layout .conversation-title-header.compact{display:flex;justify-content:flex-end;height:40px;min-height:40px;padding:4px 10px;gap:6px}
+.navora-app .main-shell.mobile-layout .conversation-title-header.compact .agent-live{margin-right:auto}
+@media(prefers-reduced-motion:reduce){.navora-app .main-shell>.content-surface,.navora-app .main-shell.mobile-layout>.activity-rail{transition:none}}
+.navora-app .shell.main-shell.frameless:not(.mobile-layout):not(.platform-mac)>.window-titlebar{padding-left:15px}
+.navora-app .main-shell .window-titlebar-brand{gap:8px;margin-right:20px;font-size:13px;line-height:20px;flex-shrink:0}
+.navora-app .main-shell .window-titlebar-brand img{width:22px;height:22px}
+.navora-app .main-shell .window-titlebar-drag{position:static;inset:auto;flex:1;min-width:20px;height:100%;align-self:stretch}
+.navora-app .main-shell.platform-mac>.window-titlebar{padding-left:84px}
+.navora-app .shell.main-shell.frameless:not(.mobile-layout)>.activity-rail{padding-top:12px}

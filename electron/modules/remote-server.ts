@@ -2,7 +2,6 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app } from 'electron'
 import {
   createWebToken,
   hashPassword,
@@ -24,6 +23,7 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export type RemoteStatus = {
+  error?: string
   enabled: boolean
   running: boolean
   host: string
@@ -43,6 +43,9 @@ export type RemoteStatus = {
 export class RemoteServer {
   private server: http.Server | null = null
   private startedPort = 0
+  private startedHost = ''
+  private lastError = ''
+  private syncTail: Promise<void> = Promise.resolve()
   private wsClients = new Set<WsLiteSocket>()
   readonly bridge: BridgeRemoteService
   private rpc: NavoraRpcRegistry | null = null
@@ -69,12 +72,12 @@ export class RemoteServer {
 
   status(): RemoteStatus {
     const cfg = this.getConfig().remote
-    const host = cfg.host || '127.0.0.1'
+    const host = this.startedHost || cfg.host || '127.0.0.1'
     const port = this.startedPort || cfg.port || 8790
     const displayHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host
     return {
       enabled: !!cfg.enabled,
-      running: !!this.server,
+      running: !!this.server?.listening,
       host,
       port,
       url: `http://${displayHost}:${port}`,
@@ -82,6 +85,7 @@ export class RemoteServer {
       requiresPasswordChange: isDefaultRemotePasswordHash(cfg.passwordHash),
       username: cfg.username || 'admin',
       tokenTtlMs: WEB_TOKEN_TTL_MS,
+      ...(this.lastError ? { error: this.lastError } : {}),
     }
   }
 
@@ -110,15 +114,22 @@ export class RemoteServer {
     }
   }
 
-  async syncFromConfig(): Promise<void> {
+  syncFromConfig(): Promise<void> {
+    const operation = this.syncTail.catch(() => {}).then(() => this.syncLatestConfig())
+    this.syncTail = operation
+    return operation
+  }
+
+  private async syncLatestConfig(): Promise<void> {
     const cfg = this.getConfig().remote
     const port = Number(cfg.port)
     if (cfg.enabled && !this.server) await this.start()
     else if (!cfg.enabled && this.server) await this.stop()
-    else if (cfg.enabled && this.server && this.startedPort !== port) {
+    else if (cfg.enabled && this.server && (this.startedPort !== port || this.startedHost !== (cfg.host || '127.0.0.1'))) {
       await this.stop()
       await this.start()
     }
+    if (!cfg.enabled) this.lastError = ''
   }
 
   async start(): Promise<void> {
@@ -144,11 +155,26 @@ export class RemoteServer {
     if (!Number.isFinite(port) || port <= 0) {
       throw new Error(`invalid_remote_port:${String(cfg.port)}`)
     }
-    await new Promise<void>((resolve, reject) => {
-      this.server!.once('error', reject)
-      this.server!.listen(port, cfg.host || '127.0.0.1', () => resolve())
-    })
+    const server = this.server
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const failed = (error: Error) => { server.removeListener('listening', ready); reject(error) }
+        const ready = () => { server.removeListener('error', failed); resolve() }
+        server.once('error', failed)
+        server.once('listening', ready)
+        server.listen(port, cfg.host || '127.0.0.1')
+      })
+    } catch (error) {
+      this.server = null
+      this.startedPort = 0
+      this.startedHost = ''
+      this.lastError = error instanceof Error ? error.message : String(error)
+      try { server.close() } catch { /* never started */ }
+      throw error
+    }
     this.startedPort = port
+    this.startedHost = cfg.host || '127.0.0.1'
+    this.lastError = ''
     console.log(`[remote] listening http://${cfg.host || '127.0.0.1'}:${port}`)
   }
 
@@ -166,6 +192,7 @@ export class RemoteServer {
     const s = this.server
     this.server = null
     this.startedPort = 0
+    this.startedHost = ''
     await new Promise<void>((resolve) => s.close(() => resolve()))
     console.log('[remote] stopped')
   }
@@ -280,7 +307,7 @@ export class RemoteServer {
               ny: Number(msg.ny),
               deltaY: msg.deltaY,
               buttons: msg.buttons,
-            })
+            }, client)
             .then((result) => {
               client.send(JSON.stringify({ type: 'bridge.input_result', ...result }))
             })
@@ -427,10 +454,14 @@ export class RemoteServer {
     await this.serveStatic(req, pathname, res)
   }
 
-  private resolveWebDist(): string | null {
+  private async resolveWebDist(): Promise<string | null> {
+    // Only static page delivery needs the Electron application path. Keeping
+    // the listener independent allows real socket/rebind tests in Node.
+    let appPath = process.cwd()
+    try { appPath = (await import('electron')).app.getAppPath() } catch { /* standalone host */ }
     const candidates = [
       path.join(__dirname, '..', 'dist'),
-      path.join(app.getAppPath(), 'dist'),
+      path.join(appPath, 'dist'),
       path.resolve(process.cwd(), 'dist'),
     ]
     for (const dir of candidates) {
@@ -453,7 +484,7 @@ export class RemoteServer {
       await this.proxyToVite(req, res, devUrl)
       return
     }
-    const dist = this.resolveWebDist()
+    const dist = await this.resolveWebDist()
     if (!dist) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       res.end(

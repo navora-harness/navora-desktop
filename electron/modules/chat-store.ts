@@ -7,9 +7,12 @@ import type {
   ChatPermissions,
   ChatSession,
   SubChatSpawnStatus,
+  SubChatRun,
 } from '../../shared/types'
+import {interruptedSubchatRun} from '../../shared/subchat-runtime'
 import { ensureDir } from '../data-root'
 import { localChatTitle } from '../../shared/chat-title'
+import {composerDocumentFromLegacy,compileComposerDocument,normalizeComposerDocument,createComposerDocument,type ComposerDocument,type ComposerDraftOptions} from '../../shared/composer-document'
 
 /** Coalesce frequent chat writes (agent tool cards, drafts) off the main hot path. */
 const PERSIST_DEBOUNCE_MS = 100
@@ -40,6 +43,19 @@ export class ChatStore {
         if (chat?.id) {
           chat.queuedMessages=(Array.isArray(chat.queuedMessages)?chat.queuedMessages:[])
             .filter(entry=>entry&&typeof entry.id==='string'&&typeof entry.content==='string'&&entry.content.length<=200000).slice(0,80)
+          try{
+            const retained=chat.draftUnsupportedDocument
+            chat.draftDocument=retained!==undefined?normalizeComposerDocument(retained,chat.id):chat.draftDocument?normalizeComposerDocument(chat.draftDocument,chat.id):composerDocumentFromLegacy(chat.id,chat.draft||'')
+            delete chat.draftUnsupportedDocument
+            chat.draftRevision=Math.max(chat.draftRevision||0,chat.draftDocument.revision)
+            chat.draftDocument.revision=chat.draftRevision
+            chat.draftUpdatedAt=chat.draftUpdatedAt||chat.draftDocument.updatedAt
+          }catch{if(chat.draftUnsupportedDocument===undefined&&chat.draftDocument!==undefined)chat.draftUnsupportedDocument=chat.draftDocument;delete chat.draftDocument;chat.draftRevision=Math.max(0,chat.draftRevision||0)}
+          const retainedRecoveries:unknown[]=[],recoveries=[...(Array.isArray(chat.draftUnsupportedRecoveries)?chat.draftUnsupportedRecoveries:[]),...(Array.isArray(chat.draftRecoveries)?chat.draftRecoveries:[])]
+          chat.draftRecoveries=recoveries.flatMap(value=>{const entry=value as NonNullable<ChatSession['draftRecoveries']>[number];try{return [{...entry,document:normalizeComposerDocument(entry.document,chat.id)}]}catch{retainedRecoveries.push(value);return []}}).slice(-20)
+          if(retainedRecoveries.length)chat.draftUnsupportedRecoveries=retainedRecoveries;else delete chat.draftUnsupportedRecoveries
+          chat.acceptedClientMessageIds=(Array.isArray(chat.acceptedClientMessageIds)?chat.acceptedClientMessageIds:[]).filter(entry=>entry&&typeof entry.id==='string'&&typeof entry.acceptedAt==='number').slice(-200)
+          for(const entry of chat.queuedMessages)if(entry.document){try{entry.document=normalizeComposerDocument(entry.document,chat.id)}catch{entry.error='invalid_composer_document';chat.queuePaused=true}}
           // Only migrate unmistakable unlocked first-message titles. Legacy
           // locked/renamed titles have no provenance and must be preserved.
           const firstAsk = chat.messages?.find(m => m.role === 'user')?.content || ''
@@ -51,7 +67,10 @@ export class ChatStore {
           if (chat.pendingAsk && !(chat.pendingAsk.timeoutMs <= 0 && chat.pendingAsk.kind === 'user_choice')) {
             delete chat.pendingAsk
           }
+          if(chat.kind==='sub'&&!Number.isSafeInteger(chat.subchatMessageVersion))chat.subchatMessageVersion=chat.messages.length
           this.chats.set(chat.id, chat)
+          const interrupted=interruptedSubchatRun(chat,Date.now())
+          if(interrupted){chat.subchatRun=interrupted;chat.spawnStatus='failed';if(!chat.spawnResult)chat.spawnResult={runId:interrupted.id,status:'failed',summary:interrupted.summary||'运行中断'};chat.subchatRevision=(chat.subchatRevision||0)+1;this.writeNow(chat)}
         }
       } catch (e) {
         console.warn('[chat-store] skip', name, e)
@@ -104,6 +123,7 @@ export class ChatStore {
   }
 
   private persist(chat: ChatSession, mode: 'defer' | 'immediate' = 'defer'): void {
+    if(chat.kind==='sub')chat.subchatRevision=(chat.subchatRevision||0)+1
     if (mode === 'immediate') this.flushChat(chat.id)
     else this.schedulePersist(chat.id)
   }
@@ -128,6 +148,8 @@ export class ChatStore {
       permissions?: ChatPermissions
       providerId?: string
       model?: string
+      reasoningLevel?: string
+      executionMode?: ChatSession['executionMode']
       kind?: 'main' | 'sub'
       parentChatId?: string
       parentToolCallId?: string
@@ -154,6 +176,8 @@ export class ChatStore {
         : {}),
       ...(opts?.providerId ? { providerId: opts.providerId } : {}),
       ...(opts?.model ? { model: opts.model } : {}),
+      ...(opts?.reasoningLevel ? {reasoningLevel:opts.reasoningLevel}:{}),
+      ...(opts?.executionMode ? {executionMode:opts.executionMode}:{}),
       ...(kind === 'sub'
         ? {
             kind: 'sub' as const,
@@ -244,6 +268,22 @@ export class ChatStore {
     return { preset: p.preset || 'custom', modes: { ...p.modes } }
   }
 
+  beginSubchatRun(chatId:string,runId:string):SubChatRun|undefined{
+    const chat=this.chats.get(chatId);if(chat?.kind!=='sub')return
+    if(!chat.spawnResult&&!chat.subchatRun&&chat.spawnStatus&&chat.spawnStatus!=='running')chat.spawnResult={runId:`legacy:${chat.id}`,status:chat.spawnStatus,summary:chat.messages.filter(m=>m.role==='assistant').at(-1)?.content.slice(0,2000)||''}
+    const run:SubChatRun={id:runId,attempt:(chat.subchatRun?.attempt||0)+1,status:'running',startedAt:Date.now()}
+    chat.subchatRun=run;chat.spawnStatus='running';chat.updatedAt=run.startedAt!;this.persist(chat,'immediate');return run
+  }
+  finishSubchatRun(chatId:string,runId:string,status:Exclude<SubChatSpawnStatus,'running'>,summary:string,reason?:string):{chat:ChatSession;firstResult:boolean}|null{
+    const chat=this.chats.get(chatId),run=chat?.subchatRun
+    // A late completion from an old attempt must never overwrite a newer run.
+    if(!chat||chat.kind!=='sub'||!run||run.id!==runId||run.status!=='running')return null
+    const finishedAt=Date.now(),firstResult=!chat.spawnResult
+    chat.subchatRun={...run,status,finishedAt,summary,reason};chat.spawnStatus=status;chat.updatedAt=finishedAt
+    if(firstResult)chat.spawnResult={runId,status,finishedAt,summary}
+    this.persist(chat,'immediate');return {chat,firstResult}
+  }
+
   setMessageQueue(chatId:string, queuedMessages:NonNullable<ChatSession['queuedMessages']>, paused:boolean):void {
     const chat=this.chats.get(chatId)
     if(!chat)throw new Error('chat_not_found')
@@ -272,6 +312,7 @@ export class ChatStore {
       createdAt: Date.now(),
       meta: msg.meta,
     }
+    if(chat.kind==='sub'){chat.subchatMessageVersion=(chat.subchatMessageVersion||chat.messages.length)+1;full.meta={...full.meta,subchatVersion:chat.subchatMessageVersion}}
     chat.messages.push(full)
     chat.updatedAt = full.createdAt
     this.persist(chat, 'defer')
@@ -295,6 +336,7 @@ export class ChatStore {
     if (lastUserIdx < 0) return null
     if (lastUserIdx < chat.messages.length - 1) {
       chat.messages = chat.messages.slice(0, lastUserIdx + 1)
+      if(chat.kind==='sub')chat.subchatMessageVersion=(chat.subchatMessageVersion||0)+1
       chat.updatedAt = Date.now()
       this.persist(chat, 'defer')
     }
@@ -331,8 +373,10 @@ export class ChatStore {
     if (!chat) return null
     const msg = chat.messages.find((m) => m.id === messageId)
     if (!msg) return null
+    const transcriptChanged=patch.content!==undefined&&patch.content!==msg.content||patch.meta!==undefined&&JSON.stringify({...msg.meta,...patch.meta})!==JSON.stringify(msg.meta)
     if (patch.content !== undefined) msg.content = patch.content
     if (patch.meta !== undefined) msg.meta = { ...msg.meta, ...patch.meta }
+    if(chat.kind==='sub'&&transcriptChanged){chat.subchatMessageVersion=(chat.subchatMessageVersion||chat.messages.length)+1;msg.meta={...msg.meta,subchatVersion:chat.subchatMessageVersion}}
     chat.updatedAt = Date.now()
     if (opts?.persist !== false) this.persist(chat, 'defer')
     return msg
@@ -363,10 +407,7 @@ export class ChatStore {
     return chat
   }
 
-  /**
-   * Persist unsent composer draft. Does not bump `updatedAt` (list order unchanged).
-   * Empty string clears the draft fields.
-   */
+  /** Persist a parked choice without changing the chat's list order. */
   setPendingAsk(chatId: string, req: AgentAskRequest | null): ChatSession | null {
     const chat = this.chats.get(chatId)
     if (!chat) return null
@@ -379,33 +420,67 @@ export class ChatStore {
     return chat
   }
 
-  setDraft(chatId: string, text: string, opts?: { updatedAt?: number }): ChatSession | null {
+  /** Versioned draft writes retain empty tombstones and never change chat list order. */
+  setDraft(chatId: string, text: string, opts?: ComposerDraftOptions): ChatSession | null {
     const chat = this.chats.get(chatId)
     if (!chat) return null
-    const next = String(text ?? '')
+    if(chat.draftUnsupportedDocument!==undefined)throw Error('composer_document_version')
+    const incoming=opts?.document?normalizeComposerDocument(opts.document,chatId):composerDocumentFromLegacy(chatId,String(text??''))
+    const next=compileComposerDocument(incoming).content
     const at =
       typeof opts?.updatedAt === 'number' && Number.isFinite(opts.updatedAt)
         ? Math.floor(opts.updatedAt)
         : Date.now()
     const prev = chat.draft || ''
     const prevAt = chat.draftUpdatedAt || 0
-    if (next === prev && (next === '' || at <= prevAt)) {
+    const revision=chat.draftRevision||0
+    if(opts?.baseRevision!==undefined&&(!Number.isSafeInteger(opts.baseRevision)||opts.baseRevision<0))throw Error('invalid_draft_revision')
+    if(chat.draftDocument&&incoming.revision<=revision&&JSON.stringify(chat.draftDocument.content)===JSON.stringify(incoming.content)&&chat.draftDocument.id===incoming.id){
+      if(chat.draftConflict&&opts?.baseRevision===revision){delete chat.draftConflict;this.persist(chat,'defer')}
       return chat
     }
-    // Remote last-write-wins: ignore older writes.
-    if (at < prevAt && next !== prev) {
+    const followsClear=opts?.baseRevision===chat.draftClearedFromRevision&&!prev&&(incoming.id!==chat.draftDocument?.id||incoming.revision>(opts?.baseRevision??-1))
+    if((opts?.baseRevision!==undefined&&opts.baseRevision!==revision&&!followsClear)||(opts?.baseRevision===undefined&&at<prevAt&&next!==prev)){
+      const recovery=this.recoverDraft(chatId,incoming,'conflict')
+      if(recovery)chat.draftConflict={recoveryId:recovery.id,expectedRevision:opts?.baseRevision??revision,actualRevision:revision}
+      this.persist(chat,'immediate')
       return chat
     }
-    if (next) {
-      chat.draft = next
-      chat.draftUpdatedAt = at
-    } else {
-      delete chat.draft
-      delete chat.draftUpdatedAt
-    }
+    const document={...incoming,revision:Math.max(revision+1,incoming.revision),updatedAt:at}
+    chat.draftDocument=document;chat.draftRevision=document.revision;chat.draftUpdatedAt=at
+    if(next)chat.draft=next;else delete chat.draft
+    delete chat.draftConflict;delete chat.draftClearedFromRevision
     // Draft keystrokes are high-frequency — always debounce.
     this.persist(chat, 'defer')
     return chat
+  }
+
+  recoverDraft(chatId:string,document:ComposerDocument,reason:'conflict'|'send_failed'){
+    const chat=this.chats.get(chatId);if(!chat)return null
+    const normalized=normalizeComposerDocument(document,chatId),existing=chat.draftRecoveries?.find(entry=>entry.document.id===normalized.id&&entry.document.revision===normalized.revision&&JSON.stringify(entry.document.content)===JSON.stringify(normalized.content))
+    if(existing)return existing
+    const recovery={id:randomUUID(),document:normalized,createdAt:Date.now(),reason}
+    chat.draftRecoveries=[...(chat.draftRecoveries||[]),recovery].slice(-20)
+    this.persist(chat,'immediate');return recovery
+  }
+  dismissDraftRecovery(chatId:string,id:string){
+    const chat=this.chats.get(chatId);if(!chat)return null
+    chat.draftRecoveries=(chat.draftRecoveries||[]).filter(entry=>entry.id!==id)
+    if(chat.draftConflict?.recoveryId===id)delete chat.draftConflict
+    this.persist(chat,'immediate');return chat
+  }
+  clearDraftRevision(chatId:string,revision:number|undefined){
+    const chat=this.chats.get(chatId);if(!chat||revision===undefined||revision!==(chat.draftRevision||0))return chat||null
+    const document=createComposerDocument(chatId)
+    if(chat.draftDocument)document.id=chat.draftDocument.id
+    document.revision=revision+1
+    this.setDraft(chatId,'',{document,baseRevision:revision,updatedAt:Date.now()})
+    chat.draftClearedFromRevision=revision;this.persist(chat,'immediate');return chat
+  }
+  rememberAcceptedMessage(chatId:string,id:string,fingerprint?:string){
+    const chat=this.chats.get(chatId);if(!chat)return
+    if(!chat.acceptedClientMessageIds?.some(entry=>entry.id===id))chat.acceptedClientMessageIds=[...(chat.acceptedClientMessageIds||[]),{id,acceptedAt:Date.now(),...(fingerprint?{fingerprint}:{})}].slice(-200)
+    this.persist(chat,'immediate')
   }
 
   setWorkspaceRoot(chatId: string, absPath: string | null): ChatSession | null {

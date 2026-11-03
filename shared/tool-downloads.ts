@@ -14,6 +14,7 @@ export class ToolDownloadList {
           changed = true
         }
       }
+      if (changed) this.trimFinished()
       return changed
     }
     if (event.type !== 'message' && event.type !== 'message_update') return false
@@ -38,15 +39,11 @@ export class ToolDownloadList {
       canPause: false, canResume: false, canCancel: false, createdAt: previous?.createdAt || now, updatedAt: now,
     })
     // Keep active downloads; trim the oldest completed rows only.
-    if (this.entries.size > 100) {
-      for (const [key, row] of this.entries) {
-        if (row.state !== 'started') { this.entries.delete(key); if (this.entries.size <= 100) break }
-      }
-    }
+    this.trimFinished()
     return true
   }
   list(chatId?: string): BrowserDownloadEntry[] {
-    return [...this.entries.values()].filter(e => !chatId || e.chatId === chatId).sort((a,b) => b.updatedAt - a.updatedAt)
+    return [...this.entries.values()].filter(e => !chatId || e.chatId === chatId).sort((a,b) => b.createdAt - a.createdAt)
   }
   get(id: string) { return this.entries.get(id) }
   remove(id: string) {
@@ -58,4 +55,11 @@ export class ToolDownloadList {
     return { ok: true }
   }
   clear(chatId?: string) { for (const e of this.list(chatId)) if (e.state !== 'started') this.remove(e.id) }
+  private trimFinished() {
+    if (this.entries.size <= 100) return
+    for (const [id, row] of this.entries) {
+      if (row.state !== 'started') this.remove(id)
+      if (this.entries.size <= 100) break
+    }
+  }
 }

@@ -14,7 +14,7 @@
           <span>剪切</span>
         </button>
         <button type="button" class="sidebar-more-item" role="menuitem" @click="onCopy">
-          <AppIcon icon="clipboard-list" />
+          <AppIcon icon="copy" />
           <span>复制</span>
         </button>
         <button
@@ -53,7 +53,7 @@
     <template v-else-if="state?.kind === 'selection'">
       <div class="sidebar-ctx-label" role="presentation">文本</div>
       <button type="button" class="sidebar-more-item" role="menuitem" @click="onCopy">
-        <AppIcon icon="clipboard-list" />
+        <AppIcon icon="copy" />
         <span>复制</span>
       </button>
     </template>
@@ -85,6 +85,8 @@ type MenuState =
       end: number
       readonly: boolean
       password: boolean
+      text: string
+      range?: Range
     }
   | { kind: 'selection'; selected: string }
 
@@ -94,6 +96,9 @@ const state = ref<MenuState | null>(null)
 function onContextMenu(e: MouseEvent) {
   if (e.button !== 2) return
   const target = e.target
+  // Structured editors own their document selection, link commands and undo.
+  // Native title inputs inside a source block still use the ordinary menu.
+  if(target instanceof Element&&target.closest('[data-composer-editor]')&&!target.closest('input,textarea'))return
 
   const editable = findEditable(target)
   if (editable) {
@@ -116,6 +121,8 @@ function onContextMenu(e: MouseEvent) {
       end: sel.end,
       readonly,
       password,
+      text:editable.kind==='contenteditable'?editable.el.textContent||'':editable.el.value,
+      ...(editable.kind==='contenteditable'&&window.getSelection()?.rangeCount?{range:window.getSelection()!.getRangeAt(0).cloneRange()}:{}),
     }
     menu.value?.show(e)
     return
@@ -145,26 +152,37 @@ async function onCopy() {
 
 function onCut() {
   const s = state.value
-  if (!s || s.kind !== 'edit' || !s.selected || s.readonly || s.password) return
+  if (!s || s.kind !== 'edit' || !s.selected || s.readonly || s.password||!restoreEditable(s)) return
   editableCut(s.target, s.start, s.end, s.selected)
 }
 
 async function onPaste() {
   const s = state.value
-  if (!s || s.kind !== 'edit' || s.readonly) return
+  if (!s || s.kind !== 'edit' || s.readonly||!restoreEditable(s)) return
   await editablePaste(s.target, s.start, s.end)
 }
 
 function onDelete() {
   const s = state.value
-  if (!s || s.kind !== 'edit' || !s.selected || s.readonly || s.password) return
+  if (!s || s.kind !== 'edit' || !s.selected || s.readonly || s.password||!restoreEditable(s)) return
   editableDeleteSelection(s.target, s.start, s.end)
 }
 
 function onSelectAll() {
   const s = state.value
-  if (!s || s.kind !== 'edit') return
+  if (!s || s.kind !== 'edit'||!s.target.el.isConnected) return
   editableSelectAll(s.target)
+}
+
+// A native popup may return after a reactive field has changed or disappeared.
+// Restore the original contenteditable range only while its document is current.
+function restoreEditable(s:Extract<MenuState,{kind:'edit'}>){
+  if(!s.target.el.isConnected)return false
+  const text=s.target.kind==='contenteditable'?s.target.el.textContent||'':s.target.el.value
+  if(text!==s.text)return false
+  s.target.el.focus({preventScroll:true})
+  if(s.range){if(!s.range.startContainer.isConnected||!s.range.endContainer.isConnected||!s.target.el.contains(s.range.commonAncestorContainer))return false;const selection=window.getSelection();selection?.removeAllRanges();selection?.addRange(s.range)}
+  return true
 }
 
 onMounted(() => {

@@ -1,0 +1,18 @@
+/* Approved icon geometry. These rules size glyphs, not their click targets. */
+.navora-app .shell .activity-rail .sidebar-icon-btn>.app-icon{width:20px;height:20px}
+.navora-app .shell .conversation-title-header .chat-resource-button>.app-icon{width:20px;height:20px}
+.navora-app .shell .file-workspace .file-workspace-head>.ui-icon-button>.app-icon,
+.navora-app .shell .file-workspace .file-workspace-head>.file-workspace-new-tab>.app-icon{width:20px;height:20px}
+.navora-app .browser-tab-toolbar .browser-navigation .browser-nav-action>.app-icon,
+.navora-app .browser-tab-toolbar .browser-nav-action>.app-icon{width:20px;height:20px}
+.navora-app .browser-host-tabs .browser-host-new-tab>.app-icon{width:20px;height:20px}
+.navora-app .main .composer-attach-trigger>.app-icon,
+.navora-app .main .composer-send>.app-icon{width:20px;height:20px}
+.navora-app .sidebar-more-item>.app-icon,
+.v-overlay-container .sidebar-more-item>.app-icon,
+.navora-app .conversation-actions-menu button>.app-icon,
+.v-overlay-container .conversation-actions-menu button>.app-icon,
+.navora-app .ui-action-menu button>.app-icon,
+.v-overlay-container .ui-action-menu button>.app-icon{width:16px;height:16px;flex-shrink:0}
+.navora-app .conversation-actions-menu button>.app-icon.conversation-actions-check,
+.v-overlay-container .conversation-actions-menu button>.app-icon.conversation-actions-check{width:12px;height:12px}

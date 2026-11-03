@@ -17,8 +17,8 @@
       <button v-if="sources.length>3" type="button" class="resource-overview-more" @click="allSources=!allSources"><AppIcon :icon="allSources?'chevron-up':'link'" />{{ allSources?'收起来源':'查看全部来源' }}</button>
     </section>
     <section v-if="tree.length" class="resource-overview-section">
-      <header><h3>浏览器</h3><button type="button" class="resource-icon-button" data-resource-view="browser" aria-label="管理当前浏览器" title="管理当前浏览器" @click="emit('view','browser')"><AppIcon icon="window-maximize" /></button></header>
-      <button v-for="browser in windows.slice(0,3)" :key="browser.windowId" type="button" class="resource-overview-row" :title="browser.url" @click="emit('view','browser')"><AppIcon icon="window-maximize" /><span>{{ browser.title || browser.url || '新窗口' }}</span><small>{{ browser.loading?'加载中':browser.visible?'已打开':'已隐藏' }}</small></button>
+      <header><h3>浏览器</h3><button type="button" class="resource-icon-button" data-resource-view="browser" aria-label="管理当前浏览器" title="管理当前浏览器" @click="emit('view','browser')"><AppIcon icon="browser" /></button></header>
+      <button v-for="browser in windows.slice(0,3)" :key="browser.windowId" type="button" class="resource-overview-row" :title="browser.url" @click="emit('view','browser')"><AppIcon icon="browser" /><span>{{ browser.title || browser.url || '新窗口' }}</span><small>{{ browser.loading?'加载中':browser.visible?'已打开':'已隐藏' }}</small></button>
       <button v-if="!windows.length || windows.length>3" type="button" class="resource-overview-more" @click="emit('view','browser')">管理浏览器 <small>{{ windows.length }} 个窗口</small></button>
     </section>
   </div>

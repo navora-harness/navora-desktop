@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(import.meta.url)
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'navora-ui-renovation-'))
-const suite = process.env.NAVORA_UI_SUITE === 'interface' ? 'ui-interface' : process.env.NAVORA_UI_SUITE === 'browser-start' ? 'ui-browser-start' : process.env.NAVORA_UI_SUITE === 'browser-workspace' ? 'ui-browser-workspace' : process.env.NAVORA_UI_SUITE === 'creators' ? 'ui-creators' : process.env.NAVORA_UI_SUITE === 'plugins' ? 'ui-plugins' : 'ui-renovation'
+const suite = process.env.NAVORA_UI_SUITE === 'browser-tree' ? 'ui-browser-tree' : process.env.NAVORA_UI_SUITE === 'main-window' ? 'ui-main-window' : process.env.NAVORA_UI_SUITE === 'interface' ? 'ui-interface' : process.env.NAVORA_UI_SUITE === 'browser-start' ? 'ui-browser-start' : process.env.NAVORA_UI_SUITE === 'browser-workspace' ? 'ui-browser-workspace' : process.env.NAVORA_UI_SUITE === 'creators' ? 'ui-creators' : process.env.NAVORA_UI_SUITE === 'plugins' ? 'ui-plugins' : 'ui-renovation'
 const entry = path.join(root, 'dist-electron', suite+'.mjs')
 const output = path.resolve(process.env.NAVORA_UI_OUTPUT || path.join(root, 'release', suite))
 try {
@@ -21,14 +21,18 @@ try {
       name:'hidden-ui-compositor',
       setup(builder) {
         builder.onResolve({filter:/^electron$/},(args) => {
-          if(suite==='ui-browser-workspace'||suite==='ui-browser-start')return
+          if(suite==='ui-browser-workspace'||suite==='ui-browser-start'||suite==='ui-main-window'||suite==='ui-browser-tree')return
           if(args.importer.replaceAll('\\','/').endsWith('/electron/main.ts')) return {path:'ui-electron',namespace:'ui-renovation'}
         })
         builder.onLoad({filter:/.*/,namespace:'ui-renovation'},() => ({contents:`
           export * from 'electron';
           import {BrowserWindow as NativeBrowserWindow} from 'electron';
           export class BrowserWindow extends NativeBrowserWindow {
-            constructor(options) {super({...options,show:false,webPreferences:{...options.webPreferences,offscreen:true}})}
+            // Return a native instance: bundling can rename a subclass, which
+            // excludes it from Electron's constructor-name window enumeration.
+            constructor(options) {return new NativeBrowserWindow({...options,show:false,webPreferences:{...options.webPreferences,offscreen:true}})}
+            static getAllWindows() {return NativeBrowserWindow.getAllWindows()}
+            static getFocusedWindow() {return NativeBrowserWindow.getFocusedWindow()}
           }
         `,loader:'js'}))
       },
@@ -46,7 +50,7 @@ try {
     delete env.VITE_DEV_SERVER_URL
     const status = await new Promise((resolve,reject) => {
       const child = spawn(require('electron'),[entry],{cwd:root,env,stdio:'inherit',windowsHide:true})
-      const timer = setTimeout(() => {child.kill();reject(new Error('UI smoke exceeded its deadline'))},process.env.NAVORA_LIVE_CREATOR === '1' ? 120000 : 90000)
+      const timer = setTimeout(() => {child.kill();reject(new Error('UI smoke exceeded its deadline'))},process.env.NAVORA_LIVE_CREATOR === '1' ? 120000 : suite==='ui-renovation' ? 180000 : 90000)
       child.on('error',(error) => {clearTimeout(timer);reject(error)})
       child.on('exit',(code) => {clearTimeout(timer);resolve(code ?? 1)})
     })

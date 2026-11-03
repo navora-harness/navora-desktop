@@ -1,0 +1,36 @@
+<template>
+  <main>
+    <section ref="anchor" class="fixture-composer"><ComposerEditor ref="editor" v-model="document" :chat-id="chatId" @attach="menu?.show(anchor!)" @submit="submits++" @notify="notices.push($event)"/><button id="attach" @click="menu?.show(anchor!)">附加</button></section>
+    <button id="models" @click="panels?.show('model',$event.currentTarget as HTMLElement)">模型</button><button id="usage" @click="panels?.show('usage',$event.currentTarget as HTMLElement)">上下文</button><button id="mode" @click="panels?.show('mode',$event.currentTarget as HTMLElement)">回答方式</button><button id="permission" @click="panels?.show('permission',$event.currentTarget as HTMLElement)">权限</button>
+    <ComposerAttachmentMenu ref="menu" :context-key="chatId" @select="selected" @closed="menuClosed" @notify="notices.push($event)"/>
+    <ComposerNativePanels ref="panels" :chat-id="chatId" :state="state" @model="(provider,model)=>{actions.push(['model',provider,model]);state.modelKey=provider+'::'+model}" @reasoning="id=>{actions.push(['reasoning',id]);state.reasoningLevel=id}" @mode="actions.push(['mode',$event])" @permission="actions.push(['permission',$event])" @retry="actions.push(['retry'])" @update:model-query="state.modelQuery=$event" @notify="notices.push($event)"/>
+  </main>
+</template>
+<script setup lang="ts">
+import {nextTick,reactive,ref} from 'vue'
+import ComposerEditor from '../../src/components/ComposerEditor.vue'
+import ComposerAttachmentMenu from '../../src/components/ComposerAttachmentMenu.vue'
+import ComposerNativePanels from '../../src/components/ComposerNativePanels.vue'
+import {createComposerDocument,compileComposerDocument} from '../../shared/composer-document'
+import type {ComposerNativePanelState} from '../../shared/composer-native-panels'
+import type {NativePanelAction,NativePanelContent,NativePanelEvent,NativePanelShow} from '../../shared/native-ui'
+const anchor=ref<HTMLElement>(),editor=ref<InstanceType<typeof ComposerEditor>>(),menu=ref<InstanceType<typeof ComposerAttachmentMenu>>(),panels=ref<InstanceType<typeof ComposerNativePanels>>()
+const chatId=ref('chat-a'),document=ref(createComposerDocument('chat-a','保持选区和草稿')),notices=ref<string[]>([]),sources=ref<string[]>([]),closes=ref<boolean[]>([]),actions=ref<string[][]>([]),submits=ref(0)
+const state=reactive<ComposerNativePanelState>({modelOptions:[{key:'first::alpha',providerId:'first',model:'alpha',label:'Alpha',providerLabel:'服务商甲',hasKey:true,capabilities:'128K 上下文'},{key:'second::beta',providerId:'second',model:'beta',label:'Beta',providerLabel:'服务商乙',hasKey:false,capabilities:'64K 上下文'}],modelKey:'first::alpha',modelQuery:'',modelLoading:false,modelError:'',modelInvalid:false,modelBusy:false,reasoningLevels:[{id:'low',label:'低'},{id:'high',label:'高'}],reasoningLevel:'low',modes:[{id:'auto',label:'自动',description:'自动决定',icon:'robot'},{id:'agent',label:'执行任务',description:'调用工具',icon:'robot'}],mode:'auto',modeBusy:false,permissionOptions:[{id:'balanced',label:'均衡',description:'常用能力较顺畅',icon:'shield-halved'}],permission:'balanced',usage:{estimated:20,history:10,draft:10,window:100,maxOutput:50}})
+const requests:NativePanelShow[]=[],updates:unknown[]=[],hidden:string[]=[],destroyed:string[]=[],events:((event:NativePanelEvent)=>void)[]=[],visible=new Map<string,string>();let browserChrome=0,nativeOpens=0,sequence=0
+const clone=<T,>(value:T):T=>JSON.parse(JSON.stringify(value))
+;(window as any).navora={app:{platform:'win32'},nativeUi:{capabilities:async()=>({menus:true,panels:true,pageInfo:true,distributionVersion:'45.0.0-cloudbypass.5'}),showPanel:async(input:NativePanelShow)=>{requests.push(clone(input));const session='fixture-'+(++sequence);visible.set(input.id,session);return {supported:true,id:input.id,session}},updatePanel:async(id:string,session:string,patch:unknown)=>{if(visible.get(id)!==session)return false;updates.push(clone({id,session,patch}));return true},hidePanel:async(id:string,session:string)=>{if(visible.get(id)===session)visible.delete(id);hidden.push(id)},destroyPanel:async(id:string)=>{visible.delete(id);destroyed.push(id)},onPanelEvent:(callback:(event:NativePanelEvent)=>void)=>{events.push(callback);return ()=>{const index=events.indexOf(callback);if(index>=0)events.splice(index,1)}}}}
+window.addEventListener('navora:browser-chrome-open',()=>browserChrome++)
+window.addEventListener('navora:native-ui-open',()=>nativeOpens++)
+const controls=(node:NativePanelContent):NativePanelContent[]=>[node,...(node.children||[]).flatMap(controls)]
+function selected(source:string){editor.value?.consumeAttachmentTrigger();sources.value.push(source)}
+function menuClosed(committed:boolean){closes.value.push(committed);if(!committed)editor.value?.cancelAttachmentTrigger()}
+;(window as any).nativeComposerFixture={requests,updates,hidden,destroyed,visible,controls,get browserChrome(){return browserChrome},get nativeOpens(){return nativeOpens},get actions(){return clone(actions.value)},get sources(){return [...sources.value]},get notices(){return [...notices.value]},get closes(){return [...closes.value]},get document(){return clone(document.value)},get compiled(){return compileComposerDocument(document.value)},get state(){return state},get submits(){return submits.value},
+  emit(action:NativePanelAction,request= requests.at(-1),session?:string){if(!request)return;for(const callback of events)callback({id:request.id,session:session||visible.get(request.id)||'',kind:'action',action})},
+  dismiss(){const request=requests.at(-1);if(!request)return;const session=visible.get(request.id)||'';visible.delete(request.id);for(const callback of events)callback({id:request.id,session,kind:'dismissed',reason:'escape'})},
+  async switchChat(){chatId.value='chat-b';document.value=createComposerDocument('chat-b','新对话草稿');await nextTick()},
+  async selectText(text:string){const root=window.document.querySelector<HTMLElement>('.composer-richtext')!;root.focus();const walk=window.document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let node:Node|null;while(node=walk.nextNode()){const offset=node.textContent?.indexOf(text)??-1;if(offset<0)continue;const range=window.document.createRange();range.setStart(node,offset);range.setEnd(node,offset+text.length);const selection=window.getSelection()!;selection.removeAllRanges();selection.addRange(range);window.document.dispatchEvent(new Event('selectionchange'));await nextTick();return}},
+  async reset(text='保持选区和草稿'){menu.value?.hide();await panels.value?.hide();document.value=createComposerDocument(chatId.value,text);await nextTick();await nextTick();editor.value?.focus()},selection(){return editor.value?.getTextSelection()},
+}
+</script>
+<style>:root{font-family:'Segoe UI','Microsoft YaHei UI',sans-serif;--navora-ink:#283e56;--navora-muted:#78899d;--navora-surface:#fff;--navora-stroke:#dce4ed;--navora-accent:#376d9f;--control-selected:#e8f0f8;--control-hover:#edf2f7;--appearance-well:#f6f8fb;--control-danger:#ad4239}body{margin:0;background:#f2f5f9;color:var(--navora-ink)}main{margin:50px auto;max-width:850px;padding:0 16px}button{border:1px solid #ccc;background:#fff;color:inherit;padding:6px 10px;border-radius:6px;font:inherit}.fixture-composer{margin-top:260px;border:1px solid #bfcfe1;border-radius:18px;background:#f8fafc;padding:16px}.fixture-composer .composer-document-editor{min-height:80px}</style>

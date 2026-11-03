@@ -1,6 +1,9 @@
 import type { PermissionCapability, PermissionMode, PermissionPreset } from './types'
 import type { ModelCapabilities } from './model-capabilities'
+import type { AppearanceThemeId, AppearanceMode } from './appearance'
 import { DEFAULT_EDGE_UA } from './types'
+import {createDefaultAppShortcuts} from './app-shortcuts'
+import { createDefaultBrowserAutomation, type BrowserAutomationConfig } from './browser-automation'
 import { findUaPresetByUa, getUaPreset } from './ua-presets'
 import { DEFAULT_ACCEPT_LANGUAGE, DEFAULT_ACCEPT_LANGUAGE_LIST, generateAcceptLanguageHeader, toAcceptLanguageList } from './user-agent'
 
@@ -154,6 +157,8 @@ export type AiProviderConfig = {
 export type AppConfig = {
   app: {
     language: string
+    appearance_theme?: AppearanceThemeId
+    appearance_mode?: AppearanceMode
     close_to_tray: boolean
     /**
      * Show the main window after launch (default true).
@@ -183,8 +188,11 @@ export type AppConfig = {
     max_composer_chars: number
     /** First-run welcome wizard finished or skipped (default false → show on launch) */
     onboarding_completed: boolean
+    /** Application-owned shortcut bindings; absent entries use their enabled defaults. */
+    shortcuts?: import('./app-shortcuts').AppShortcutPreferences
   }
   browser: {
+    automation: BrowserAutomationConfig
     default_ua_preset: string
     custom_ua: string
     accept_language: string
@@ -268,6 +276,10 @@ export type AppConfig = {
     dev_mode: boolean
   }
 }
+
+/** Nested settings are patched by changed leaves; arrays are replaced as complete values. */
+type ConfigPatch<T> = T extends readonly unknown[] ? T : T extends object ? { [K in keyof T]?: ConfigPatch<T[K]> } : T
+export type AppConfigPatch = ConfigPatch<AppConfig>
 
 export const BALANCED_PERMISSION_MODES: Record<PermissionCapability, PermissionMode> = {
   'session.create': 'allow',
@@ -396,6 +408,8 @@ export function createDefaultConfig(): AppConfig {
   return {
     app: {
       language: 'zh-CN',
+      appearance_theme: 'mist',
+      appearance_mode: 'auto',
       close_to_tray: true,
       show_main_on_start: true,
       show_followup_suggestions: false,
@@ -407,8 +421,10 @@ export function createDefaultConfig(): AppConfig {
       collapse_run_logs: true,
       max_composer_chars: 16000,
       onboarding_completed: false,
+      shortcuts: createDefaultAppShortcuts(),
     },
     browser: {
+      automation: createDefaultBrowserAutomation(),
       default_ua_preset: 'edge152',
       custom_ua: '',
       accept_language: DEFAULT_ACCEPT_LANGUAGE,

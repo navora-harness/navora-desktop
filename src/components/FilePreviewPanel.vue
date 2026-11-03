@@ -1,7 +1,7 @@
 <template>
   <aside class="file-preview" :class="{embedded}" aria-label="文件预览" :style="{ '--preview-width': `${width}px` }">
     <div v-if="!embedded" class="preview-resizer" role="separator" aria-label="调整文件预览宽度" aria-orientation="vertical" :aria-valuenow="width" aria-valuemin="280" aria-valuemax="maximum" tabindex="0" @pointerdown="beginResize" @keydown="resizeKey" />
-    <header class="preview-head">
+    <Teleport :to="toolbarTarget||'body'" :disabled="!toolbarTarget||!headerActive"><header class="preview-head" :class="{'is-workspace-tools':!!toolbarTarget&&headerActive}">
       <AppIcon v-if="!tabbed" icon="file" />
       <div v-if="!tabbed" class="preview-name" :title="path">{{ name }}</div>
       <v-menu v-if="tabbed" location="bottom start" origin="auto" :offset="6"><template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" class="preview-type" aria-label="文件显示方式"><AppIcon :icon="data?.kind==='image'?'image':'file-lines'" />{{ data?.kind==='image'?'图像':data?.kind==='markdown'?(source?'源码':'Markdown'):data?.kind==='text'?'文本':'文件' }}<AppIcon icon="chevron-down" /></button></template><div class="preview-open-menu" role="menu"><button v-if="data?.kind==='markdown'" type="button" role="menuitem" @click="source=false">Markdown 预览</button><button v-if="data?.content!==undefined" type="button" role="menuitem" @click="source=true">文本源码</button><span v-if="data?.content===undefined">{{ data?.kind==='image'?'图像预览':'使用默认应用打开此文件' }}</span></div></v-menu>
@@ -10,7 +10,7 @@
       <button type="button" title="刷新预览" aria-label="刷新预览" :disabled="loading" @click="load(true)"><AppIcon icon="arrow-rotate-right" /></button>
       <div class="preview-open-group"><button type="button" class="preview-open-default" title="使用默认应用打开" aria-label="在系统中打开" @click="systemOpen"><AppIcon icon="folder-open" /><span>系统打开</span></button><v-menu location="bottom end" origin="auto" :offset="6"><template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" aria-label="打开文件选项"><AppIcon icon="chevron-down" /></button></template><div class="preview-open-menu" role="menu"><button type="button" role="menuitem" @click="reveal">打开所在文件夹</button><button type="button" role="menuitem" :disabled="saving" @click="saveAs">另存为…</button></div></v-menu></div>
       <SidebarMoreMenu v-if="!tabbed" label="文件预览" hide-label="隐藏文件侧栏" hide-aria-label="关闭文件预览" @hide="emit('close')" />
-    </header>
+    </header></Teleport>
     <div v-if="data?.ok" class="preview-tools">
       <span>{{ formatSize(data.size || 0) }}</span>
       <span v-if="loading" role="status">更新中…</span>
@@ -40,7 +40,7 @@ import SidebarMoreMenu from './sidebar/SidebarMoreMenu.vue'
 import {workspaceLinkPath} from '@shared/file-tabs'
 import type { WorkspacePreview } from '../../shared/workspace-preview'
 
-const props = defineProps<{ chatId: string; path: string; width: number; embedded?: boolean; tabbed?: boolean }>()
+const props = defineProps<{ chatId: string; path: string; width: number; embedded?: boolean; tabbed?: boolean; toolbarTarget?:HTMLElement|null }>()
 const emit = defineEmits<{ close: []; resize: [width: number]; notify: [text: string, color?: string]; openFile:[path:string] }>()
 const data = ref<WorkspacePreview | null>(null)
 const loading = ref(false)
@@ -50,6 +50,7 @@ const imageZoom=ref('fit'),imageNaturalWidth=ref(0)
 let active=true,dirty=false
 const copied = ref(false)
 const saving=ref(false)
+const headerActive=ref(true)
 const maximum = ref(Math.max(280, Math.min(800, innerWidth - 360)))
 const unsupportedHint=computed(()=>data.value?.reason==='image_too_large'?'图片超过 12 MB，请使用系统应用打开。':data.value?.reason==='encoding'?'仅支持 UTF-8 和带 BOM 的 UTF-16 文本，请使用系统应用打开此编码。':'支持文本、Markdown 和常见图片；PDF、Office、音视频及压缩包请使用系统应用打开。')
 const name = computed(() => props.path.split(/[\\/]/).at(-1) || props.path)
@@ -155,8 +156,8 @@ onMounted(() => {
     reloadTimer = setTimeout(() => { void load(true) }, 200)
   })
 })
-onDeactivated(()=>{active=false})
-onActivated(()=>{active=true;if(dirty){dirty=false;void load(true)}})
+onDeactivated(()=>{active=false;headerActive.value=false})
+onActivated(()=>{active=true;headerActive.value=true;if(dirty){dirty=false;void load(true)}})
 onBeforeUnmount(() => { disposed = true; sequence++; stopResize?.(); unsubscribe?.(); clearTimeout(reloadTimer); clearTimeout(copiedTimer); window.removeEventListener('resize', onResize); window.removeEventListener('keydown', onKey, true) })
 </script>
 
@@ -201,4 +202,5 @@ button:disabled { opacity:.45; cursor:default; }
 @keyframes preview-enter { from { opacity:0; transform:translateX(10px); } to { opacity:1; transform:translateX(0); } }
 @media(max-width:1100px) { .file-preview { width:min(560px,100%); box-shadow:-10px 0 30px #263b4b12; } .preview-resizer { display:none; } }
 @media(prefers-reduced-motion:reduce) { .file-preview { animation:none; } button { transition:none; } }
+.preview-head.is-workspace-tools{min-height:0;padding:0;border:0;flex-wrap:nowrap;background:transparent;gap:3px}.preview-head.is-workspace-tools .preview-spacer{display:none}.preview-head.is-workspace-tools .preview-open-default>span{display:none}.preview-head.is-workspace-tools .preview-type{font-size:11px;padding:4px 6px}.preview-head.is-workspace-tools .preview-open-group{border:0;background:transparent}.preview-head.is-workspace-tools .preview-open-default{width:28px;padding:6px}
 </style>

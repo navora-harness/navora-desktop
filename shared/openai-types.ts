@@ -1,4 +1,5 @@
 /** Minimal OpenAI Chat Completions types used by Navora. */
+import type { OpenAIUsage } from './model-usage'
 
 export type ChatCompletionTool = {
   type: 'function'
@@ -46,6 +47,7 @@ export type ChatCompletionChoice = {
 }
 
 export type ChatCompletionResponse = {
+  usage?: OpenAIUsage
   id: string
   choices: ChatCompletionChoice[]
 }

@@ -1,4 +1,4 @@
-import type {FileTab} from './file-tabs'
+import type {WorkspaceFileTab as FileTab} from './file-tabs'
 export function fileWindowError(error:unknown):string{
   const text=String(error)
   if(text.includes('file_window_busy'))return '窗口正在处理标签，请稍后重试。'

@@ -1642,13 +1642,16 @@ export class PluginStore {
     if (typeof loaded.mod.planPermissions !== 'function') {
       return { ok: false, error: 'plugin_permissions_undeclared' }
     }
-    const planCtx = {
-      hasSession: (ctx.registry.getTree(ctx.chatId) || []).length > 0,
-    }
     let capabilities: import('../../shared/types').PermissionCapability[] = []
     try {
-      const plan = loaded.mod.planPermissions(name, args, planCtx)
-      capabilities = Array.isArray(plan?.capabilities) ? plan.capabilities : []
+      if (ctx.pluginApprovedCapabilities) capabilities = [...ctx.pluginApprovedCapabilities]
+      else {
+        // Direct execution still needs actual approval; never let a second plan
+        // widen the set that was approved for this invocation.
+        const gate = await this.checkPermissions(name, args, ctx)
+        if (!gate.ok) return { ok: false, error: gate.error || 'permission_denied' }
+        capabilities = [...(gate.capabilities || [])]
+      }
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }

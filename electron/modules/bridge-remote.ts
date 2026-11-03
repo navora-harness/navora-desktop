@@ -1,6 +1,8 @@
 import type { BrowserPage } from './browser-host'
 import type { WsLiteSocket } from './ws-lite'
 import { dispatchTrustedPointer } from './trusted-input'
+import { withBrowserInputOperation } from './browser-input-context'
+import type { BrowserAutomationOperation } from './browser-automation-controller'
 
 export type BridgeInputAction = 'down' | 'move' | 'up' | 'wheel'
 
@@ -19,6 +21,19 @@ interface SubState {
   fps: number
 }
 
+type InputResult = { ok: boolean; error?: string }
+type InputPacket = { payload: BridgeInputPayload; resolve: (result: InputResult) => void }
+type RemoteGesture = {
+  page: BrowserPage
+  client?: WsLiteSocket
+  abort: AbortController
+  packets: InputPacket[]
+  wake?: () => void
+  timer?: ReturnType<typeof setTimeout>
+  done: Promise<void>
+  ending: boolean
+}
+
 const FRAME_MAGIC = Buffer.from('BRF1')
 
 /**
@@ -30,11 +45,13 @@ export class BridgeRemoteService {
   private timer: ReturnType<typeof setInterval> | null = null
   private capturing = false
   private lastSentAt = new Map<string, number>()
+  private gestures = new Map<string, RemoteGesture>()
 
   constructor(private getWindow: (windowId: string) => BrowserPage | null) {}
 
   subscribe(client: WsLiteSocket, windowId: string, fps = 8): void {
     const id = String(windowId || '').trim()
+    if (this.subs.get(client)?.windowId !== id) this.cancelClientInput(client)
     this.subs.set(client, {
       windowId: id,
       fps: Math.min(15, Math.max(2, Math.round(fps || 8))),
@@ -54,6 +71,7 @@ export class BridgeRemoteService {
   }
 
   unsubscribe(client: WsLiteSocket): void {
+    this.cancelClientInput(client)
     this.subs.delete(client)
     if (!this.subs.size) this.stopTimer()
   }
@@ -62,7 +80,7 @@ export class BridgeRemoteService {
     this.unsubscribe(client)
   }
 
-  async handleInput(payload: BridgeInputPayload): Promise<{ ok: boolean; error?: string }> {
+  async handleInput(payload: BridgeInputPayload, client?: WsLiteSocket): Promise<InputResult> {
     const windowId = String(payload.windowId || '').trim()
     const win = windowId ? this.getWindow(windowId) : null
     if (!win || win.isDestroyed()) {
@@ -74,26 +92,99 @@ export class BridgeRemoteService {
     if (!Number.isFinite(nx) || !Number.isFinite(ny)) {
       return { ok: false, error: '无效坐标' }
     }
-    const [cw, ch] = win.getContentSize()
-    if (cw <= 0 || ch <= 0) return { ok: false, error: '窗口尺寸无效' }
-    const x = Math.max(0, Math.min(cw - 1, Math.round(nx * cw)))
-    const y = Math.max(0, Math.min(ch - 1, Math.round(ny * ch)))
     const action = payload.action
     if (action !== 'down' && action !== 'move' && action !== 'up' && action !== 'wheel') {
       return { ok: false, error: '无效动作' }
     }
+    if (payload.buttons !== undefined && (!Number.isInteger(payload.buttons) || payload.buttons < 0 || payload.buttons > 1)) return { ok: false, error: '无效按键状态' }
+    const existing = this.gestures.get(windowId)
+    if (existing) {
+      if (existing.page !== win || existing.client !== client || existing.ending || action === 'down') return { ok: false, error: 'remote_pointer_busy' }
+      return this.enqueue(existing, { ...payload, nx, ny })
+    }
+    if (action === 'up' || (payload.buttons !== undefined && payload.buttons !== (action === 'down' ? 1 : 0))) {
+      return { ok: false, error: 'remote_pointer_not_owned' }
+    }
     try {
-      await dispatchTrustedPointer(win.webContents, {
-        action,
-        x,
-        y,
-        deltaY: payload.deltaY,
-        buttons: payload.buttons,
-      })
+      const expectedEpoch = win.automation.captureEpoch()
+      const expectedDocumentEpoch = win.automation.captureDocumentEpoch()
+      win.automation.assertEpoch(expectedEpoch)
+      if (action === 'down') {
+        const gesture: RemoteGesture = { page: win, client, abort: new AbortController(), packets: [], done: Promise.resolve(), ending: false }
+        this.gestures.set(windowId, gesture)
+        const accepted = this.enqueue(gesture, { ...payload, nx, ny })
+        gesture.done = win.automation.run({ expectedEpoch, expectedDocumentEpoch, signal: gesture.abort.signal, label: '远程指针操作' }, operation =>
+          withBrowserInputOperation(win.webContents, operation, () => this.runGesture(gesture, operation)),
+        ).then(() => {}, error => {
+          const message = error instanceof Error ? error.message : String(error)
+          for (const packet of gesture.packets.splice(0)) packet.resolve({ ok: false, error: message })
+        }).finally(() => {
+          if (gesture.timer) clearTimeout(gesture.timer)
+          if (this.gestures.get(windowId) === gesture) this.gestures.delete(windowId)
+          for (const packet of gesture.packets.splice(0)) packet.resolve({ ok: false, error: 'remote_pointer_closed' })
+        })
+        return accepted
+      }
+      await win.automation.run({ expectedEpoch, expectedDocumentEpoch, label: '远程指针操作' }, operation =>
+        withBrowserInputOperation(win.webContents, operation, async () => {
+          operation.assertCurrent()
+          await this.dispatchPacket(win, { ...payload, nx, ny }, false)
+          operation.assertCurrent()
+        }),
+      )
       return { ok: true }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
+  }
+
+  private cancelClientInput(client: WsLiteSocket): void {
+    for (const gesture of this.gestures.values()) if (gesture.client === client) gesture.abort.abort(new Error('remote_client_disconnected'))
+  }
+
+  private enqueue(gesture: RemoteGesture, payload: BridgeInputPayload): Promise<InputResult> {
+    if (gesture.abort.signal.aborted || gesture.ending) return Promise.resolve({ ok: false, error: 'remote_pointer_closed' })
+    if (gesture.packets.length >= 128) return Promise.resolve({ ok: false, error: 'remote_input_queue_full' })
+    if (gesture.timer) clearTimeout(gesture.timer)
+    gesture.timer = setTimeout(() => gesture.abort.abort(new Error('remote_input_idle_timeout')), 15000)
+    if (payload.action === 'up') gesture.ending = true
+    return new Promise(resolve => {
+      gesture.packets.push({ payload, resolve })
+      gesture.wake?.(); gesture.wake = undefined
+    })
+  }
+
+  private async runGesture(gesture: RemoteGesture, operation: BrowserAutomationOperation): Promise<void> {
+    const wake = () => { gesture.wake?.(); gesture.wake = undefined }
+    operation.signal.addEventListener('abort', wake)
+    try {
+      while (true) {
+        operation.assertCurrent()
+        const packet = gesture.packets.shift()
+        if (!packet) { await new Promise<void>(resolve => { gesture.wake = resolve }); continue }
+        try {
+          await this.dispatchPacket(gesture.page, packet.payload, packet.payload.action !== 'up')
+          operation.assertCurrent()
+          packet.resolve({ ok: true })
+          if (packet.payload.action === 'up') return
+        } catch (error) {
+          packet.resolve({ ok: false, error: error instanceof Error ? error.message : String(error) })
+          throw error
+        }
+      }
+    } finally { operation.signal.removeEventListener('abort', wake); gesture.wake = undefined }
+  }
+
+  private async dispatchPacket(page: BrowserPage, payload: BridgeInputPayload, pressed: boolean): Promise<void> {
+    const [cw, ch] = page.getContentSize()
+    const zoom = page.webContents.getZoomFactor()
+    if (cw <= 0 || ch <= 0 || !Number.isFinite(zoom) || zoom <= 0) throw new Error('窗口尺寸无效')
+    const x = Math.max(0, Math.min(cw - 1, Math.round(payload.nx * cw))) / zoom
+    const y = Math.max(0, Math.min(ch - 1, Math.round(payload.ny * ch))) / zoom
+    await dispatchTrustedPointer(page.webContents, {
+      action: payload.action, x, y, deltaY: payload.deltaY,
+      buttons: payload.action === 'down' || (pressed && payload.action !== 'up') ? 1 : 0,
+    })
   }
 
   status(windowId: string) {

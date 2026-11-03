@@ -38,10 +38,35 @@ test('closing the selected tab picks the following neighbor then the preceding n
   assert.equal(browserTabAfterRemoval(['a'],'a',[]),'')
 })
 
-test('tab shortcuts accept platform modifiers and reject typing or unsupported combinations',()=>{
+test('tab shortcuts retain creation, closing and visible-order switching with platform modifiers',()=>{
   assert.equal(browserTabShortcut({key:'T',control:true}),'new')
   assert.equal(browserTabShortcut({key:'w',meta:true}),'close')
   assert.equal(browserTabShortcut({key:'Tab',control:true}),'next')
   assert.equal(browserTabShortcut({key:'Tab',meta:true,shift:true}),'previous')
-  for(const input of [{key:'t'},{key:'t',control:true,shift:true},{key:'w',control:true,alt:true},{key:'w',control:true,isComposing:true},{key:'t',control:true,isAutoRepeat:true}])assert.equal(browserTabShortcut(input),undefined)
+})
+
+test('tab shortcuts expose closed-tab recovery and indexed navigation commands',()=>{
+  assert.equal(browserTabShortcut({key:'T',control:true,shift:true}),'reopen')
+  assert.equal(browserTabShortcut({key:'t',meta:true,shift:true}),'reopen')
+  for(let index=1;index<=8;index++)assert.equal(browserTabShortcut({key:String(index),control:true}),`index${index}`)
+  assert.equal(browserTabShortcut({key:'9',control:true}),'last')
+})
+
+test('tab shortcuts include address, refresh, cache-bypassing refresh and mute commands',()=>{
+  assert.equal(browserTabShortcut({key:'l',control:true}),'address')
+  assert.equal(browserTabShortcut({key:'r',meta:true}),'reload')
+  assert.equal(browserTabShortcut({key:'R',control:true,shift:true}),'reloadIgnoringCache')
+  assert.equal(browserTabShortcut({key:'F5'}),'reload')
+  assert.equal(browserTabShortcut({key:'F5',control:true}),'reloadIgnoringCache')
+  assert.equal(browserTabShortcut({key:'F5',shift:true}),'reloadIgnoringCache')
+  assert.equal(browserTabShortcut({key:'m',control:true}),'mute')
+})
+
+test('tab shortcuts suppress composing input, auto-repeat and unsupported modifier combinations',()=>{
+  for(const input of [
+    {key:'t'},{key:'w',control:true,shift:true},{key:'1',control:true,shift:true},{key:'0',control:true},
+    {key:'w',control:true,alt:true},{key:'w',control:true,isComposing:true},
+    {key:'t',control:true,isAutoRepeat:true},{key:'T',control:true,shift:true,isAutoRepeat:true},
+    {key:'F5',isComposing:true},{key:'F5',isAutoRepeat:true},{key:'F5',alt:true},
+  ])assert.equal(browserTabShortcut(input),undefined)
 })

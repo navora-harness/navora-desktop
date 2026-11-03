@@ -2,12 +2,13 @@ import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 
 type Panel = 'chats' | 'workspace' | 'browser'
 type Divider = 'width' | 'chats' | 'resources'
-const defaults = { width: 280, workspace: 155, browser: 155, chats: true, showWorkspace: true, showBrowser: true }
+// Width includes the fixed 52px rail; the context panel itself is 240–360px.
+const defaults = { width: 312, workspace: 155, browser: 155, chats: true, showWorkspace: true, showBrowser: true }
 
 export function useSidebarLayout() {
   const layout = ref({ ...defaults })
   const viewportWidth=ref(innerWidth)
-  const maxWidth=computed(()=>Math.min(460,Math.max(250,viewportWidth.value*.35)))
+  const maxWidth=computed(()=>Math.min(412,Math.max(292,viewportWidth.value*.35)))
   const resizing = ref(false)
   try {
     const saved = JSON.parse(localStorage.getItem('navora.sidebar') || '{}')
@@ -17,7 +18,7 @@ export function useSidebarLayout() {
   } catch { /* Use defaults when storage is unavailable. */ }
   const clamp = (v: number, min: number, max: number) => Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : min
   function normalize() {
-    layout.value.width = clamp(layout.value.width, 250, maxWidth.value)
+    layout.value.width = clamp(layout.value.width, 292, maxWidth.value)
     const max = Math.max(64, (innerHeight - 220) / 2)
     layout.value.workspace = clamp(layout.value.workspace, 64, max)
     layout.value.browser = clamp(layout.value.browser, 64, max)

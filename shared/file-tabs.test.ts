@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {emptyFileTabs,openFileTab,openBrowserTab,showFileWorkspace,closeFileTab,restoreFileTabs,makeFileTab,workspaceLinkPath,removeFileOwner} from './file-tabs'
+import {emptyFileTabs,openFileTab,openBrowserTab,showFileWorkspace,closeFileTab,restoreFileTabs,persistedFileTabs,makeFileTab,workspaceLinkPath,removeFileOwner,type FileTabs,type FileTab} from './file-tabs'
 test('file tabs reuse paths, distinguish resource owners and close to a neighbouring tab',()=>{
   let state=openFileTab(emptyFileTabs(),'a','folder/report.md')
   state=openFileTab(state,'a','./folder\\report.md');assert.equal(state.tabs.length,1)
@@ -18,17 +18,70 @@ test('restoration stores metadata only and rejects unsafe paths',()=>{
   assert.throws(()=>makeFileTab('owner','../private'))
 })
 
-test('browser tabs coexist with files and restore only safe navigation metadata',()=>{
+test('browser tabs coexist with files during the run and unsafe restart targets are omitted',()=>{
   let state=openBrowserTab(openFileTab(emptyFileTabs(),'owner','report.md'),'owner')
   const browser=state.tabs[1]!
   assert.equal(browser.kind,'browser')
   browser.url='javascript:alert(1)'
   const restored=restoreFileTabs(state)
-  assert.equal(restored.tabs[1]!.url,'about:blank')
-  state=closeFileTab(restored,browser.key)
+  assert.deepEqual(restored,{tabs:[state.tabs[0]!],active:state.tabs[0]!.key,open:true})
+  assert.equal(state.tabs.length,2)
+  state=closeFileTab(state,browser.key)
   assert.equal(state.active,state.tabs[0]!.key)
   assert.equal(state.tabs[0]!.path,'report.md')
   assert.equal(removeFileOwner(restored,'owner').tabs.length,0)
+})
+
+test('new browser tabs open beside the selected normal tab without reordering surrounding files',()=>{
+  const files=openFileTab(openFileTab(emptyFileTabs(),'owner','first.md'),'owner','second.md')
+  const first=files.tabs[0]!,second=files.tabs[1]!
+  const opened=openBrowserTab({...files,active:first.key},'owner')
+  assert.deepEqual(opened.tabs.map(tab=>tab.key),[first.key,opened.active,second.key])
+  assert.equal(opened.tabs[1]!.kind,'browser')
+  assert.deepEqual(opened.tabs.filter(tab=>tab.kind!=='browser'),files.tabs)
+})
+
+test('restart filtering preserves file positions and selects the retained right neighbour',()=>{
+  const first=makeFileTab('owner','first.md'),middle=makeFileTab('owner','middle.md'),last=makeFileTab('owner','last.md')
+  const visited:FileTab={key:'browser:visited',chatId:'owner',path:'新标签页',kind:'browser',url:'https://example.test/visited'}
+  const blank:FileTab={key:'browser:blank',chatId:'owner',path:'新标签页',kind:'browser',url:'about:blank'}
+  const pending:FileTab={key:'browser:pending',chatId:'owner',path:'正在加载',kind:'browser',url:'about:blank',desiredUrl:'https://example.test/pending',persistent:true,pageId:'old-page',loading:true}
+  const temporary:FileTab={key:'browser:temporary',chatId:'owner',path:'临时网页',kind:'browser',url:'https://example.test/temporary',persistent:false}
+  const state:FileTabs={tabs:[first,visited,blank,middle,temporary,pending,last],active:blank.key,open:true}
+  const before=structuredClone(state)
+  const restored=restoreFileTabs(state)
+  assert.deepEqual(restored.tabs.map(tab=>tab.key),[first.key,visited.key,middle.key,pending.key,last.key])
+  assert.equal(restored.active,middle.key)
+  assert.deepEqual(restored.tabs.filter(tab=>tab.kind!=='browser'),[first,middle,last])
+  assert.equal(restored.tabs[1]!.url,visited.url)
+  assert.equal(restored.tabs[3]!.url,pending.desiredUrl)
+  assert.equal(restored.tabs[3]!.desiredUrl,pending.desiredUrl)
+  assert.equal(restored.tabs[3]!.pageId,undefined)
+  assert.equal(restored.tabs[3]!.loading,undefined)
+  assert.deepEqual(persistedFileTabs(state),restored)
+  assert.deepEqual(state,before)
+})
+
+test('submitted loading and failed navigations survive restart through their desired URL',()=>{
+  for(const loading of [true,false]){
+    const tab:FileTab={key:'browser:submitted',chatId:'owner',path:loading?'正在加载':'加载失败',kind:'browser',url:'about:blank',desiredUrl:'https://example.test/target',loading}
+    const restored=restoreFileTabs({tabs:[tab],active:tab.key,open:true})
+    assert.equal(restored.tabs.length,1)
+    assert.equal(restored.tabs[0]!.url,tab.desiredUrl)
+    assert.equal(restored.active,tab.key)
+    assert.equal(restored.open,true)
+  }
+})
+
+test('blank-only restart snapshots close the workspace without deleting live tabs or creating a replacement',()=>{
+  const live=openBrowserTab(emptyFileTabs(),'owner')
+  assert.deepEqual(restoreFileTabs(live),emptyFileTabs())
+  assert.deepEqual(persistedFileTabs(live),emptyFileTabs())
+  assert.equal(live.tabs.length,1)
+  assert.equal(live.open,true)
+  const file=makeFileTab('owner','retained.md')
+  const mixed=restoreFileTabs({tabs:[file,...live.tabs],active:live.active,open:true})
+  assert.deepEqual(mixed,{tabs:[file],active:file.key,open:true})
 })
 test('workspace Markdown links decode local names and never accept traversal or protocols',()=>{
   assert.equal(workspaceLinkPath('./folder/report%20one.md#section'),'folder/report one.md')

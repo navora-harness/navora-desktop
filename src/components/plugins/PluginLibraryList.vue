@@ -32,7 +32,7 @@
             <div class="library-action-menu" role="menu">
               <button type="button" role="menuitem" :disabled="!plugin.hasReadme || busy" @click="emit('docs', plugin)"><AppIcon icon="book" />查看说明</button>
               <button type="button" role="menuitem" :disabled="busy" @click="emit('export', plugin.id)"><AppIcon icon="file-export" />导出插件</button>
-              <button type="button" role="menuitem" :disabled="busy" @click="copy(plugin.path)"><AppIcon icon="clipboard-list" />复制路径</button>
+              <button type="button" role="menuitem" :disabled="busy" @click="copy(plugin.path)"><AppIcon icon="copy" />复制路径</button>
               <button type="button" role="menuitem" class="danger" :disabled="protectedPlugin(plugin) || busy" @click="emit('remove', plugin)"><AppIcon icon="trash" />{{ protectedPlugin(plugin) ? '随附不可卸载' : plugin.kind === 'linked' ? '取消外链' : '卸载' }}</button>
             </div>
           </v-menu>

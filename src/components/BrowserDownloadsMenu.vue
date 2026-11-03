@@ -1,25 +1,28 @@
 <template>
-  <v-menu v-model="open" :location="location" origin="auto" :offset="6" :close-on-content-click="false" content-class="browser-downloads-menu">
+  <v-menu v-model="open" :target="menuTarget || undefined" :location="location" origin="auto" :offset="6" :close-on-content-click="false" content-class="browser-downloads-menu">
     <template #activator="{ props: menuProps }">
       <button
+        v-show="items.length > 0"
         type="button"
         :class="btnClass"
         class="browser-downloads-trigger"
-        :title="activeCount ? `下载列表，${activeCount} 项活动下载` : '下载列表'"
-        :aria-label="activeCount ? `下载列表，${activeCount} 项活动下载` : '下载列表'"
-        v-bind="menuProps"
+        :title="triggerLabel"
+        :aria-label="triggerLabel"
+        v-bind="activatorProps(menuProps)"
+        :aria-expanded="open || native.open.value"
+        :ref="el => bindActivator(el, menuProps.ref)"
+        @pointerdown="menuTarget=null"
+        @click.stop="open || native.open.value ? hide() : show()"
+        @keydown.esc.stop.prevent="hide(true)"
       >
-        <svg class="dl-progress-ring" :class="{'has-progress':progressItems.length>0,indeterminate:progressItems.length>0&&progressPercent===null,paused:!progressItems.some(item=>item.state==='started')}" viewBox="0 0 24 24" aria-hidden="true">
+        <svg class="dl-progress-ring" :class="{'has-progress':summary.progressCount>0,indeterminate:summary.progressCount>0&&summary.progressPercent===null,paused:summary.allPaused,'is-inactive':!animateTrigger}" :data-progress="summary.progressPercent ?? 'unknown'" :data-paused="summary.allPaused" viewBox="0 0 24 24" aria-hidden="true">
           <circle class="dl-progress-track" cx="12" cy="12" r="9" />
-          <circle v-if="progressItems.length" class="dl-progress-value" cx="12" cy="12" r="9" :stroke-dasharray="56.55" :stroke-dashoffset="progressPercent===null?42:56.55*(1-progressPercent/100)" />
+          <circle v-if="summary.progressCount" class="dl-progress-value" cx="12" cy="12" r="9" :stroke-dasharray="56.55" :stroke-dashoffset="summary.progressPercent===null?42:56.55*(1-summary.progressPercent/100)" />
         </svg>
         <AppIcon icon="download" />
-        <span v-if="activeCount > 0 && (!progressItems.length || activeCount > 1)" class="dl-badge" aria-hidden="true">{{
-          activeCount > 99 ? '99+' : activeCount
-        }}</span>
       </button>
     </template>
-    <div class="dl-panel" role="dialog" aria-label="下载列表">
+    <div ref="panel" class="dl-panel" :data-download-owner="chromeId" :class="{'is-inactive':!documentVisible || !active}" role="dialog" aria-label="下载列表" tabindex="-1" @keydown.esc.stop.prevent="hide(true)">
       <div class="dl-panel-head">
         <div class="dl-panel-titles">
           <strong>下载列表</strong>
@@ -35,6 +38,7 @@
           清除已结束记录
         </button>
       </div>
+      <div v-if="operationError" class="dl-operation-error" role="alert">{{ operationError }}</div>
       <div v-if="!items.length" class="dl-empty">暂无下载</div>
       <ul v-else class="dl-list">
         <li v-for="item in items" :key="item.id" class="dl-item">
@@ -121,7 +125,7 @@
                   <AppIcon icon="ellipsis" />
                 </button>
               </template>
-              <div class="dl-more-panel" role="menu" aria-label="下载更多操作">
+              <div class="dl-more-panel" :data-download-owner="chromeId" role="menu" aria-label="下载更多操作">
                 <button
                   v-if="item.state === 'completed'"
                   type="button"
@@ -150,45 +154,150 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, getCurrentInstance, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { VMenu } from 'vuetify/components'
 import type { BrowserDownloadEntry, BrowserDownloadState } from '../../shared/types'
+import { downloadsForChat, DownloadSnapshotGate, sortDownloads, summarizeDownloads } from '@shared/browser-download-presentation'
+import { downloadProgress } from '@shared/workspace-downloads'
+import { BROWSER_CHROME_OPEN, requestBrowserChromeOpen } from '@shared/browser-chrome-events'
+import AppIcon from './icons/AppIcon.vue'
+import {NATIVE_UI_OPEN} from '@shared/native-ui'
+import {browserDownloadsNativePanel} from '@shared/browser-native-panels'
+import {useNativePanel} from '@/composables/useNativeUi'
 
 const props = withDefaults(
   defineProps<{
     chatId?: string | null
     /** Scope list to current chat when true. */
     onlyActiveChat?: boolean
+    active?: boolean
     location?: InstanceType<typeof VMenu>['$props']['location']
     btnClass?: string
   }>(),
   {
     chatId: null,
     onlyActiveChat: false,
+    active: true,
     location: 'top end',
     btnClass: 'sidebar-icon-btn',
   },
 )
 
-const open = ref(false)
-const emit=defineEmits<{open:[value:boolean]}>()
-watch(open,value=>{emit('open',value);if(value)void refresh()})
+const open = ref(false), trigger = ref<HTMLButtonElement | null>(null), panel = ref<HTMLElement | null>(null)
+const menuTarget = ref<HTMLElement | [number, number] | null>(null)
+const emit=defineEmits<{open:[value:boolean];domOpen:[value:boolean]}>()
+const chromeId = `downloads-${getCurrentInstance()!.uid}`
+// An explicitly local empty scope must never turn into the global downloads view.
+const scopeChatId = computed(() => props.chatId === null && !props.onlyActiveChat ? null : String(props.chatId || '').trim())
 const items = ref<BrowserDownloadEntry[]>([])
+const operationError = ref('')
+const documentVisible = ref(!document.hidden), triggerVisible = ref(false)
+const animateTrigger = computed(() => props.active && documentVisible.value && triggerVisible.value)
+const gate = new DownloadSnapshotGate()
+let scopeGeneration = 0, alive = true, focusGeneration = 0
+let focusReturn: HTMLElement | null = null
+let observer: IntersectionObserver | null = null
 let offChanged: (() => void) | null = null
+const nativeOffset=ref(0)
+const nativePresentation=computed(()=>browserDownloadsNativePanel(items.value,{offset:nativeOffset.value,error:operationError.value}))
+const native=useNativePanel({key:chromeId,contextKey:()=>`${scopeChatId.value}:${props.active}`,onAction:action=>{
+  if(action.type!=='click'||!props.active||!alive)return
+  const command=nativePresentation.value.actions.get(action.id)
+  if(!command)return
+  if(command.action==='clear'){void clearFinished();return}
+  if(command.action==='more'){nativeOffset.value=nativePresentation.value.offset+40;return}
+  if(command.action==='previous'){nativeOffset.value=Math.max(0,nativePresentation.value.offset-40);return}
+  if(!('id' in command))return
+  const current=items.value.find(item=>item.id===command.id&&item.chatId===command.chatId)
+  if(!current||scopeChatId.value!==null&&current.chatId!==scopeChatId.value)return
+  if(command.action==='pause')void pauseItem(current.id)
+  else if(command.action==='resume')void resumeItem(current.id)
+  else if(command.action==='cancel')void cancelItem(current.id)
+  else if(command.action==='open')void openFile(current.id)
+  else if(command.action==='reveal')void revealFile(current.id)
+  else if(command.action==='remove')void removeItem(current.id)
+  else if(command.action==='stop')void stopToolTask(current.chatId)
+}})
 
-const activeCount = computed(
-  () =>
-    items.value.filter(
-      (d) => d.state === 'intercepted' || d.state === 'started' || d.state === 'paused',
-    ).length,
-)
-const progressItems=computed(()=>items.value.filter(item=>item.state==='started'||item.state==='paused'))
-const progressPercent=computed(()=>{
-  if(!progressItems.value.length||progressItems.value.some(item=>progressPct(item)===null))return null
-  const total=progressItems.value.reduce((sum,item)=>sum+Number(item.totalBytes||0),0)
-  const received=progressItems.value.reduce((sum,item)=>sum+Number(item.receivedBytes||0),0)
-  return total>0?Math.max(0,Math.min(100,Math.round(received/total*100))):null
+function activatorProps(value:Record<string,unknown>){return {...value,onClick:undefined}}
+
+function bindActivator(element: unknown, forwarded: unknown) {
+  trigger.value = element instanceof HTMLButtonElement ? element : null
+  if (typeof forwarded === 'function') forwarded(element)
+  else if (forwarded && typeof forwarded === 'object' && 'value' in forwarded) (forwarded as { value: unknown }).value = element
+}
+
+const summary = computed(() => summarizeDownloads(items.value))
+const triggerLabel = computed(() => {
+  const value = summary.value
+  const state = value.progressCount ? value.allPaused ? '已暂停' : '下载中' : items.value.some(item => item.state === 'intercepted') ? '等待确认' : items.value.some(item => item.state === 'failed') ? '包含失败记录' : ''
+  const percent = value.progressCount && value.progressPercent !== null ? `${value.progressPercent}%` : ''
+  return ['下载列表', value.activeCount ? `${value.activeCount} 项活动下载` : `${items.value.length} 项记录`, state, percent,native.error.value?'面板暂不可用，请重新打开':''].filter(Boolean).join('，')
 })
+
+watch([open,native.open], ([dom,value],previous) => {
+  const visible=dom||value
+  emit('open', visible);emit('domOpen',dom)
+  if (!visible || previous?.some(Boolean)) return
+  if(dom)requestBrowserChromeOpen(chromeId)
+  if (!focusReturn) focusReturn = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  void refresh()
+}, { flush: 'sync' })
+
+async function show(anchor?: HTMLElement) {
+  if (scopeChatId.value === '' || !props.active) return
+  const generation=++focusGeneration,scope=scopeChatId.value
+  requestBrowserChromeOpen(chromeId)
+  focusReturn = anchor || (items.value.length ? trigger.value : fallbackControl()) || (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+  // More-menu entries are removed as their menu closes; keep their final screen position.
+  const source = anchor || (items.value.length ? trigger.value : fallbackControl() || focusReturn)
+  const bounds = source?.getBoundingClientRect()
+  const shown=await native.show(nativePresentation.value.content,source||{x:window.innerWidth-16,y:48,width:1,height:1},{placement:props.location?.toString().startsWith('top')?'top-end':'bottom-end'}).catch(()=>false)
+  if(!alive||generation!==focusGeneration||scope!==scopeChatId.value||!props.active){void native.hide();return}
+  if(shown||native.supported.value)return
+  menuTarget.value = items.value.length && trigger.value ? trigger.value : bounds ? [bounds.right, bounds.bottom] : [window.innerWidth - 16, 48]
+  open.value = true
+  void nextTick(() => { if (open.value && alive) panel.value?.focus({ preventScroll: true }) })
+}
+
+function hide(restoreFocus = false) {
+  const target = items.value.length && trigger.value?.getClientRects().length ? trigger.value : focusReturn
+  const token = ++focusGeneration
+  open.value = false
+  void native.hide()
+  focusReturn = null
+  if (restoreFocus) void nextTick(() => { if (alive && token === focusGeneration && target?.isConnected && target.getClientRects().length) target.focus({ preventScroll: true }) })
+}
+defineExpose({ show, hide })
+
+function ownsFocus() {
+  const element = document.activeElement
+  return element === trigger.value || element instanceof HTMLElement && element.closest('[data-download-owner]')?.getAttribute('data-download-owner') === chromeId
+}
+function fallbackControl(): HTMLElement | null {
+  const host = trigger.value?.parentElement
+  const explicit = host?.querySelector<HTMLElement>('button[aria-label="浏览器更多操作"]')
+  if (explicit) return explicit
+  const controls = [...(host?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),[tabindex="0"]') || [])]
+  const at = controls.indexOf(trigger.value!)
+  return [...controls.slice(at + 1), ...controls.slice(0, Math.max(0, at)).reverse()].find(element => element.getClientRects().length > 0) || null
+}
+function applyEntries(entries: readonly BrowserDownloadEntry[]) {
+  const next = scopeChatId.value === null ? sortDownloads(entries) : downloadsForChat(entries, scopeChatId.value)
+  const disappeared = items.value.length > 0 && next.length === 0
+  const focused = disappeared && ownsFocus()
+  const fallback = focused ? fallbackControl() : null
+  items.value = next
+  if (disappeared) {
+    hide()
+    const token = focusGeneration
+    if (focused) void nextTick(() => { if (alive && token === focusGeneration && fallback?.isConnected && fallback.getClientRects().length) fallback.focus({ preventScroll: true }) })
+  }
+}
+
+function onChromeOpen(event: Event) { if ((event as CustomEvent<string>).detail !== chromeId) hide() }
+function onNativeChromeOpen(event:Event){if((event as CustomEvent<{id:string}>).detail?.id===native.id)open.value=false;else hide()}
+function onVisibilityChange() { documentVisible.value = !document.hidden }
 
 const finishedCount = computed(
   () => items.value.filter((d) => isTerminal(d.state)).length,
@@ -252,9 +361,10 @@ function formatBytes(n: number): string {
 function sizeText(item: BrowserDownloadEntry): string {
   const recv = item.receivedBytes
   const total = item.totalBytes
-  if (typeof total === 'number' && total > 0) {
+  if (typeof total === 'number' && Number.isFinite(total) && total > 0) {
     if (
       typeof recv === 'number' &&
+      Number.isFinite(recv) &&
       recv >= 0 &&
       (item.state === 'started' || item.state === 'paused')
     ) {
@@ -262,120 +372,111 @@ function sizeText(item: BrowserDownloadEntry): string {
     }
     return formatBytes(total)
   }
-  if (typeof recv === 'number' && recv > 0) return formatBytes(recv)
+  if (typeof recv === 'number' && Number.isFinite(recv) && recv > 0) return formatBytes(recv)
   return ''
 }
 
 function progressPct(item: BrowserDownloadEntry): number | null {
-  const total = item.totalBytes
-  const recv = item.receivedBytes
-  if (typeof total !== 'number' || total <= 0 || typeof recv !== 'number') return null
-  return Math.max(0, Math.min(100, Math.round((recv / total) * 100)))
+  return downloadProgress(item)
 }
 
 async function refresh() {
-  if (!window.navora?.downloads?.list) {
-    items.value = []
-    return
+  const chatId = scopeChatId.value
+  if (chatId === '' || !window.navora?.downloads?.list) { applyEntries([]); return }
+  const ticket = gate.begin()
+  try {
+    const entries = await window.navora.downloads.list(chatId ?? undefined)
+    if (alive && scopeChatId.value === chatId && gate.accepts(ticket)) applyEntries(entries)
+  } catch {
+    if (alive && gate.accepts(ticket)) operationError.value = '下载列表暂时无法更新，请稍后重试。'
   }
-  const chatId = props.onlyActiveChat ? props.chatId || undefined : undefined
-  items.value = await window.navora.downloads.list(chatId || undefined)
+}
+
+async function command(run: (chatId?: string) => Promise<{ ok: boolean; error?: string }> | undefined) {
+  const chatId = scopeChatId.value, generation = scopeGeneration
+  if (chatId === '') return
+  gate.changed()
+  operationError.value = ''
+  try {
+    const result = await run(chatId ?? undefined)
+    if (!alive || generation !== scopeGeneration || chatId !== scopeChatId.value) return
+    gate.changed()
+    if (result && !result.ok) operationError.value = '下载操作未完成，请根据当前状态重试。'
+    await refresh()
+  } catch {
+    if (alive && generation === scopeGeneration) operationError.value = '下载操作暂时未完成，请稍后重试。'
+  }
 }
 
 async function clearFinished() {
-  if (!window.navora?.downloads?.clear || !finishedCount.value) return
-  const chatId = props.onlyActiveChat ? props.chatId || undefined : undefined
-  await window.navora.downloads.clear(chatId || undefined)
-  await refresh()
+  if (finishedCount.value) await command(chatId => window.navora?.downloads?.clear(chatId))
 }
 
-async function removeItem(id: string) {
-  await window.navora?.downloads?.remove(id)
-  await refresh()
-}
-
-async function stopToolTask(chatId: string) { await window.navora?.agent.stop(chatId); await refresh() }
-
-async function pauseItem(id: string) {
-  const res = await window.navora?.downloads?.pause?.(id)
-  if (res && !res.ok) console.warn('[downloads] pause failed', res.error)
-  await refresh()
-}
-
-async function resumeItem(id: string) {
-  const res = await window.navora?.downloads?.resume?.(id)
-  if (res && !res.ok) console.warn('[downloads] resume failed', res.error)
-  await refresh()
-}
-
-async function cancelItem(id: string) {
-  const res = await window.navora?.downloads?.cancel?.(id)
-  if (res && !res.ok) console.warn('[downloads] cancel failed', res.error)
-  await refresh()
-}
-
-async function revealFile(id: string) {
-  await window.navora?.downloads?.reveal(id)
-}
-
-async function openFile(id: string) {
-  await window.navora?.downloads?.open(id)
+async function removeItem(id: string) { await command(chatId => window.navora?.downloads?.remove(id, chatId)) }
+async function pauseItem(id: string) { await command(chatId => window.navora?.downloads?.pause?.(id, chatId)) }
+async function resumeItem(id: string) { await command(chatId => window.navora?.downloads?.resume?.(id, chatId)) }
+async function cancelItem(id: string) { await command(chatId => window.navora?.downloads?.cancel?.(id, chatId)) }
+async function revealFile(id: string) { await command(chatId => window.navora?.downloads?.reveal(id, chatId)) }
+async function openFile(id: string) { await command(chatId => window.navora?.downloads?.open(id, chatId)) }
+async function stopToolTask(chatId: string) {
+  if (scopeChatId.value === null || chatId === scopeChatId.value) await command(async () => { await window.navora?.agent.stop(chatId); return { ok: true } })
 }
 
 watch(
-  () => [props.chatId, props.onlyActiveChat] as const,
+  scopeChatId,
   () => {
+    scopeGeneration++; gate.reset(); hide()
+    items.value = []; operationError.value = '';nativeOffset.value=0
     void refresh()
   },
 )
+watch(() => props.active, value => { if (!value) hide() })
+watch(nativePresentation,value=>{if(native.open.value)void native.update(value.content)})
 
 onMounted(() => {
-  void refresh()
   offChanged =
     window.navora?.downloads?.onChanged((payload) => {
-      const chatId = props.onlyActiveChat ? String(props.chatId || '').trim() : ''
-      items.value = chatId
-        ? payload.downloads.filter((d) => d.chatId === chatId)
-        : payload.downloads
+      if (scopeChatId.value === '') return
+      if (!gate.acceptPush(payload)) return
+      applyEntries(payload.downloads)
     }) || null
+  // Subscribe before reading the initial list so any later push invalidates that snapshot.
+  void refresh()
+  window.addEventListener(BROWSER_CHROME_OPEN, onChromeOpen)
+  window.addEventListener(NATIVE_UI_OPEN,onNativeChromeOpen)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  if (typeof IntersectionObserver !== 'undefined' && trigger.value) {
+    observer = new IntersectionObserver(entries => { triggerVisible.value = entries.some(entry => entry.isIntersecting) })
+    observer.observe(trigger.value)
+  } else triggerVisible.value = true
 })
 
 onUnmounted(() => {
+  alive = false; scopeGeneration++; gate.reset(); hide()
   offChanged?.()
   offChanged = null
+  observer?.disconnect()
+  window.removeEventListener(BROWSER_CHROME_OPEN, onChromeOpen)
+  window.removeEventListener(NATIVE_UI_OPEN,onNativeChromeOpen)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>
 
 <style scoped>
-.browser-downloads-trigger{position:relative;flex-shrink:0;color:#65717e;transition:background-color 140ms ease,color 140ms ease}
-.browser-downloads-trigger:hover:not(:disabled){color:#3d4957}
+.browser-downloads-trigger{position:relative;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;min-width:32px;min-height:32px;color:var(--navora-muted);transition:background-color 140ms ease,color 140ms ease}
+.browser-downloads-trigger:hover:not(:disabled){color:var(--navora-ink)}
 .browser-downloads-trigger>.dl-progress-ring:not(.has-progress){display:none}
-.browser-downloads-trigger>.dl-progress-ring{position:absolute;inset:6px;width:20px;height:20px;overflow:visible;pointer-events:none}
+.browser-downloads-trigger>.dl-progress-ring{position:absolute;inset:0;margin:auto;width:20px;height:20px;overflow:visible;pointer-events:none}
 .dl-progress-ring circle{fill:none;stroke-width:2}
-.dl-progress-ring .dl-progress-track{stroke:#e2e5e9}
-.dl-progress-ring .dl-progress-value{stroke:#737c86;stroke-linecap:round;transform:rotate(-90deg);transform-origin:12px 12px;transition:stroke-dashoffset 180ms ease}
+.dl-progress-ring .dl-progress-track{stroke:var(--navora-stroke)}
+.dl-progress-ring .dl-progress-value{stroke:currentColor;stroke-linecap:round;transform:rotate(-90deg);transform-origin:12px 12px;transition:stroke-dashoffset 180ms ease}
 .dl-progress-ring.indeterminate{animation:dl-ring-rotate 1.1s linear infinite}
 .dl-progress-ring.indeterminate .dl-progress-value{stroke-dasharray:14 42}
-.dl-progress-ring.indeterminate.paused{animation:none}
+.dl-progress-ring.indeterminate.paused,.dl-progress-ring.indeterminate.is-inactive{animation:none}
 .browser-downloads-trigger>.app-icon{position:relative;z-index:1;width:16px;height:16px}
 @keyframes dl-ring-rotate{to{transform:rotate(360deg)}}
-@media(prefers-reduced-motion:reduce){.dl-progress-ring.indeterminate{animation:none}}
-.dl-badge {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  border-radius: 999px;
-  background: var(--navora-accent);
-  color: #fff;
-  font-size: 9px;
-  line-height: 14px;
-  text-align: center;
-  font-weight: 700;
-  pointer-events: none;
-}
+@media(prefers-reduced-motion:reduce){.dl-progress-ring.indeterminate{animation:none}.dl-progress-ring .dl-progress-value{transition:none}.browser-downloads-trigger{transition:none}}
+@media(pointer:coarse){.browser-downloads-trigger{min-width:40px;min-height:40px}}
 .dl-panel {
   width: min(380px, calc(100vw - 24px));
   max-height: min(420px, calc(100dvh - 80px));
@@ -436,6 +537,7 @@ onUnmounted(() => {
   color: var(--navora-muted);
   font-size: 13px;
 }
+.dl-operation-error{padding:10px 12px;font-size:12px;color:var(--control-danger);border-bottom:1px solid var(--navora-stroke)}
 .dl-list {
   min-height: 0;
   overscroll-behavior: contain;
@@ -477,16 +579,16 @@ onUnmounted(() => {
   color: var(--navora-muted);
 }
 .dl-state[data-state='intercepted'] {
-  color: #d68910;
+  color: var(--navora-muted);
 }
 .dl-state[data-state='started'] {
   color: var(--navora-accent);
 }
 .dl-state[data-state='paused'] {
-  color: #b9770e;
+  color: var(--navora-muted);
 }
 .dl-state[data-state='completed'] {
-  color: #1e8449;
+  color: var(--navora-accent);
 }
 .dl-state[data-state='failed'] {
   color: var(--control-danger);
@@ -524,8 +626,9 @@ onUnmounted(() => {
 }
 .dl-bar.indeterminate.paused .dl-bar-fill {
   animation-play-state: paused;
-  background: #b9770e;
+  background: var(--navora-muted);
 }
+.dl-panel.is-inactive .dl-bar.indeterminate .dl-bar-fill{animation:none}
 .dl-item-actions {
   display: flex;
   flex-direction: row;
@@ -555,7 +658,7 @@ onUnmounted(() => {
   color: var(--control-danger);
 }
 .dl-act.danger:hover:not(:disabled) {
-  background: #fdecea;
+  background: color-mix(in srgb,var(--control-danger) 10%,transparent);
 }
 .dl-act.dl-more {
   width: 28px;
@@ -592,7 +695,7 @@ onUnmounted(() => {
   color: var(--control-danger);
 }
 .dl-more-item.danger:hover {
-  background: #fdecea;
+  background: color-mix(in srgb,var(--control-danger) 10%,transparent);
 }
 @keyframes dl-indeterminate {
   0% {
@@ -608,7 +711,7 @@ onUnmounted(() => {
 </style>
 
 <style>
-/* Activator needs relative for badge; reuse sidebar / mobile button classes. */
+/* Reuse the existing sidebar / mobile button geometry. */
 .sidebar-icon-btn,
 .mobile-topbar-btn {
   position: relative;

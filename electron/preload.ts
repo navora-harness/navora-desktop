@@ -1,8 +1,13 @@
 import type {BrowserWorkspaceApi} from '../shared/browser-workspace'
+import type {NativeUiApi} from '../shared/native-ui'
+import type {ComposerDocument,ComposerDraftOptions,ComposerSubmitInput,ComposerQueueEditOptions} from '../shared/composer-document'
+import type {ComposerSourcesApi,ComposerImportFile,ComposerExcerptInput} from '../shared/composer-sources'
 import type {FileWindowsApi,FileTransfer} from '../shared/file-windows'
-import type {FileTab} from '../shared/file-tabs'
+import type {WorkspaceFileTab as FileTab} from '../shared/file-tabs'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { AppConfig } from '../shared/config'
+import type { AppConfig, AppConfigPatch } from '../shared/config'
+import type {SettingsCommit} from '../shared/settings-commit'
+import type {BrowserSessionUpdate,BrowserSessionManageAction,BrowserSessionManageResult} from '../shared/types'
 import type {
   AgentAskRequest,
   AgentAskResponse,
@@ -10,11 +15,15 @@ import type {
   AppInfo,
   BrowserContextRef,
   BrowserDownloadEntry,
+  BrowserDownloadsApi,
+  BrowserDownloadsChanged,
   BrowserTreeSession,
   BrowserTreeWindow,
   ChatChangedEvent,
   ChatPermissions,
   ChatSession,
+  SubchatIndexItem,
+  SubchatsPending,
   PermissionDecision,
   PermissionRequest,
   SkillReviewRequest,
@@ -26,13 +35,24 @@ import type { LiteratureApi, LiteratureSearchEvent, LiteratureSearchInput } from
 
 const workspaceInvoke=(name:string,...args:unknown[])=>ipcRenderer.invoke('navora:browser.workspace.'+name,...args)
 const api = {
+  nativeUi:{
+    capabilities:()=>ipcRenderer.invoke('navora:native-ui.capabilities'),
+    popupMenu:input=>ipcRenderer.invoke('navora:native-ui.menu',input),
+    closeMenu:id=>ipcRenderer.invoke('navora:native-ui.closeMenu',id),
+    showPanel:input=>ipcRenderer.invoke('navora:native-ui.show',input),
+    updatePanel:(id,session,patch)=>ipcRenderer.invoke('navora:native-ui.update',id,session,patch),
+    hidePanel:(id,session)=>ipcRenderer.invoke('navora:native-ui.hide',id,session),
+    destroyPanel:(id,session)=>ipcRenderer.invoke('navora:native-ui.destroy',id,session),
+    showPageInfo:(id,anchor,url)=>ipcRenderer.invoke('navora:native-ui.pageInfo',id,anchor,url),
+    onPanelEvent:callback=>{const listener=(_event:Electron.IpcRendererEvent,value:Parameters<typeof callback>[0])=>callback(value);ipcRenderer.on('navora:native-ui.event',listener);return ()=>{ipcRenderer.removeListener('navora:native-ui.event',listener)}},
+  } satisfies NativeUiApi,
   literature: {
     search: (input: LiteratureSearchInput): Promise<{ searchId: string }> => ipcRenderer.invoke('navora:literature.search', input),
     cancel: (searchId: string): Promise<void> => ipcRenderer.invoke('navora:literature.cancel', searchId),
     onEvent: (callback: (event: LiteratureSearchEvent) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, payload: LiteratureSearchEvent) => callback(payload)
       ipcRenderer.on('navora:literature.event', listener)
-      return () => ipcRenderer.removeListener('navora:literature.event', listener)
+      return () => { ipcRenderer.removeListener('navora:literature.event', listener) }
     },
   } satisfies LiteratureApi,
   fileTabs:{
@@ -79,6 +99,20 @@ const api = {
   app: {
     platform: process.platform as string,
     nativeTitleBar: process.platform === 'win32' || process.platform === 'darwin',
+    openSettings: (section: import('../shared/settings-navigation').SettingsSection = 'basic'): Promise<import('../shared/settings-navigation').SettingsOpenResult> => ipcRenderer.invoke('navora:app.settings.open', section),
+    settingsReady: (): Promise<void> => ipcRenderer.invoke('navora:app.settings.ready'),
+    onSettingsReadyRequest: (callback: () => void) => {
+      const listener = () => callback()
+      ipcRenderer.on('navora:app.settings.request-ready', listener)
+      return () => { ipcRenderer.removeListener('navora:app.settings.request-ready', listener) }
+    },
+    settingsHandled: (requestId: string, accepted: boolean): Promise<void> => ipcRenderer.invoke('navora:app.settings.handled', requestId, accepted),
+    returnFromSettings: (returnId: string, restore = true): Promise<void> => ipcRenderer.invoke('navora:app.settings.return', returnId, restore),
+    onOpenSettings: (callback: (request: import('../shared/settings-navigation').SettingsOpenRequest) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, request: import('../shared/settings-navigation').SettingsOpenRequest) => callback(request)
+      ipcRenderer.on('navora:app.settings.open', listener)
+      return () => { ipcRenderer.removeListener('navora:app.settings.open', listener) }
+    },
     info: (): Promise<AppInfo> => ipcRenderer.invoke('navora:app.info'),
     openExternal: (url: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke('navora:app.openExternal', url),
@@ -98,8 +132,9 @@ const api = {
     },
   },
   config: {
+    commit: (request:SettingsCommit):Promise<AppConfig>=>ipcRenderer.invoke('navora:config.commit',request),
     get: (): Promise<AppConfig> => ipcRenderer.invoke('navora:config.get'),
-    save: (patch: Partial<AppConfig>): Promise<AppConfig> =>
+    save: (patch: AppConfigPatch): Promise<AppConfig> =>
       ipcRenderer.invoke('navora:config.save', patch),
     uaPresets: () => ipcRenderer.invoke('navora:config.uaPresets'),
     resolveUa: (): Promise<string> => ipcRenderer.invoke('navora:config.resolveUa'),
@@ -119,6 +154,11 @@ const api = {
     clearApiKey: (ref: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke('navora:secrets.clearApiKey', ref),
   },
+  composer:{
+    importContextFiles:(chatId:string,input:ComposerImportFile[])=>ipcRenderer.invoke('navora:composer.importContextFiles',chatId,input),
+    contextExcerpt:(chatId:string,input:ComposerExcerptInput)=>ipcRenderer.invoke('navora:composer.contextExcerpt',chatId,input),
+  } satisfies ComposerSourcesApi,
+  subchats:{list:(parentId:string):Promise<SubchatIndexItem[]>=>ipcRenderer.invoke('navora:subchats.list',parentId),pending:(parentId:string):Promise<SubchatsPending>=>ipcRenderer.invoke('navora:subchats.pending',parentId)},
   chats: {
     setExecutionMode: (chatId: string, mode: 'auto' | 'chat' | 'agent'): Promise<ChatSession | null> => ipcRenderer.invoke('navora:chats.setExecutionMode', chatId, mode),
     list: (): Promise<ChatSession[]> => ipcRenderer.invoke('navora:chats.list'),
@@ -153,8 +193,10 @@ const api = {
     setDraft: (
       chatId: string,
       text: string,
-      opts?: { updatedAt?: number; maxChars?: number },
+      opts?: ComposerDraftOptions,
     ): Promise<ChatSession | null> => ipcRenderer.invoke('navora:chats.setDraft', chatId, text, opts),
+    saveDraftRecovery:(chatId:string,document:ComposerDocument,reason:'send_failed'|'conflict'='send_failed'):Promise<ChatSession|null>=>ipcRenderer.invoke('navora:chats.saveDraftRecovery',chatId,document,reason),
+    dismissDraftRecovery:(chatId:string,id:string):Promise<ChatSession|null>=>ipcRenderer.invoke('navora:chats.dismissDraftRecovery',chatId,id),
     onChanged: (cb: (ev: ChatChangedEvent) => void) => {
       const listener = (_e: Electron.IpcRendererEvent, ev: ChatChangedEvent) => cb(ev)
       ipcRenderer.on('navora:chats.changed', listener)
@@ -164,14 +206,14 @@ const api = {
     },
   },
   agent: {
-    submit: (chatId:string,payload:{content:string;refs?:BrowserContextRef[]},mode?:'queue'|'insert'):Promise<ChatSession|null> => ipcRenderer.invoke('navora:agent.submit',chatId,payload,mode),
-    queueEdit:(chatId:string,id:string,content:string):Promise<ChatSession|null>=>ipcRenderer.invoke('navora:agent.queue.edit',chatId,id,content),
+    submit: (chatId:string,payload:ComposerSubmitInput,mode?:'queue'|'insert'):Promise<ChatSession|null> => ipcRenderer.invoke('navora:agent.submit',chatId,payload,mode),
+    queueEdit:(chatId:string,id:string,content:string,options?:ComposerQueueEditOptions):Promise<ChatSession|null>=>ipcRenderer.invoke('navora:agent.queue.edit',chatId,id,content,options),
     queueRemove:(chatId:string,id:string):Promise<ChatSession|null>=>ipcRenderer.invoke('navora:agent.queue.remove',chatId,id),
     queueInsert:(chatId:string,id:string):Promise<ChatSession|null>=>ipcRenderer.invoke('navora:agent.queue.insert',chatId,id),
     queueResume:(chatId:string):Promise<ChatSession|null>=>ipcRenderer.invoke('navora:agent.queue.resume',chatId),
     run: (
       chatId: string,
-      payload: { content: string; refs?: BrowserContextRef[] },
+      payload: ComposerSubmitInput,
     ): Promise<ChatSession | null> => ipcRenderer.invoke('navora:agent.run', chatId, payload),
     retry: (chatId: string): Promise<ChatSession | null> =>
       ipcRenderer.invoke('navora:agent.retry', chatId),
@@ -244,10 +286,16 @@ const api = {
       onFindResult:(cb)=>{const listener=(_e:Electron.IpcRendererEvent,value:Parameters<typeof cb>[0])=>cb(value);ipcRenderer.on('navora:browser.find-result',listener);return ()=>ipcRenderer.removeListener('navora:browser.find-result',listener)},
       onFindShortcut:(cb)=>{const listener=(_e:Electron.IpcRendererEvent,value:Parameters<typeof cb>[0])=>cb(value);ipcRenderer.on('navora:browser.find-shortcut',listener);return ()=>ipcRenderer.removeListener('navora:browser.find-shortcut',listener)},
       ensure:(...args)=>workspaceInvoke('ensure',...args),claimLayout:(pageId)=>workspaceInvoke('claimLayout',pageId),layout:(...args)=>workspaceInvoke('layout',...args),state:()=>workspaceInvoke('state'),preview:(pageId:string)=>workspaceInvoke('preview',pageId),
+      tabState:chatId=>workspaceInvoke('tabState',chatId),tabAction:input=>workspaceInvoke('tabAction',input),
+      editState:id=>workspaceInvoke('editState',id),edit:(...args)=>workspaceInvoke('edit',...args),
+      openSettings:id=>workspaceInvoke('openSettings',id),
+      onOpenSettings:cb=>{const listener=(_e:Electron.IpcRendererEvent,payload:Parameters<typeof cb>[0])=>cb(payload);ipcRenderer.on('navora:browser.open-settings',listener);return ()=>ipcRenderer.removeListener('navora:browser.open-settings',listener)},
+      onApplicationMenu:cb=>{const listener=(_e:Electron.IpcRendererEvent,payload:Parameters<typeof cb>[0])=>cb(payload);ipcRenderer.on('navora:app.menu-focus',listener);return ()=>ipcRenderer.removeListener('navora:app.menu-focus',listener)},
       command:(...args)=>workspaceInvoke('command',...args),detach:(id)=>workspaceInvoke('detach',id),attach:(id)=>workspaceInvoke('attach',id),
-      beginDrag:(id)=>workspaceInvoke('beginDrag',id),endDrag:(...args)=>workspaceInvoke('endDrag',...args),drop:(token)=>workspaceInvoke('drop',token),
+      beginDrag:(...args)=>workspaceInvoke('beginDrag',...args),endDrag:(...args)=>workspaceInvoke('endDrag',...args),drop:(token)=>workspaceInvoke('drop',token),dropTabs:token=>workspaceInvoke('dropTabs',token),
       beginAnnotation:(...args)=>workspaceInvoke('annotation.begin',...args),collectAnnotation:(...args)=>workspaceInvoke('annotation.collect',...args),
       cancelAnnotation:(...args)=>workspaceInvoke('annotation.cancel',...args),annotations:(id)=>workspaceInvoke('annotation.list',id),
+      annotationMode:(...args)=>workspaceInvoke('annotation.mode',...args),annotationTargets:(...args)=>workspaceInvoke('annotation.targets',...args),writeAnnotationTarget:(...args)=>workspaceInvoke('annotation.writeTarget',...args),commitAnnotationTarget:(...args)=>workspaceInvoke('annotation.commitTarget',...args),discardAnnotationTarget:(...args)=>workspaceInvoke('annotation.discardTarget',...args),
       updateAnnotation:(...args)=>workspaceInvoke('annotation.update',...args),removeAnnotation:(...args)=>workspaceInvoke('annotation.remove',...args),
       presentAnnotation:(...args)=>workspaceInvoke('annotation.present',...args),
       locateAnnotation:(...args)=>workspaceInvoke('annotation.locate',...args),
@@ -268,6 +316,8 @@ const api = {
       ipcRenderer.invoke('navora:browser.session.create', chatId, opts),
     closeSession: (sessionId: string): Promise<boolean> =>
       ipcRenderer.invoke('navora:browser.session.close', sessionId),
+    updateSession:(sessionId:string,patch:BrowserSessionUpdate):Promise<BrowserTreeSession>=>ipcRenderer.invoke('navora:browser.session.update',sessionId,patch),
+    manageSession:(sessionId:string,action:BrowserSessionManageAction):Promise<BrowserSessionManageResult>=>ipcRenderer.invoke('navora:browser.session.manage',sessionId,action),
     createWindow: (
       sessionId: string,
       opts?: { url?: string; show?: boolean },
@@ -392,29 +442,29 @@ const api = {
       ipcRenderer.invoke('navora:downloads.list', chatId),
     clear: (chatId?: string): Promise<{ ok: true; removed: number }> =>
       ipcRenderer.invoke('navora:downloads.clear', chatId),
-    remove: (id: string): Promise<{ ok: boolean }> =>
-      ipcRenderer.invoke('navora:downloads.remove', id),
-    pause: (id: string): Promise<{ ok: boolean; error?: string }> =>
-      ipcRenderer.invoke('navora:downloads.pause', id),
-    resume: (id: string): Promise<{ ok: boolean; error?: string }> =>
-      ipcRenderer.invoke('navora:downloads.resume', id),
-    cancel: (id: string): Promise<{ ok: boolean; error?: string }> =>
-      ipcRenderer.invoke('navora:downloads.cancel', id),
-    reveal: (id: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
-      ipcRenderer.invoke('navora:downloads.reveal', id),
-    open: (id: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
-      ipcRenderer.invoke('navora:downloads.open', id),
-    onChanged: (cb: (payload: { downloads: BrowserDownloadEntry[] }) => void) => {
+    remove: (id: string, chatId?: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('navora:downloads.remove', id, chatId),
+    pause: (id: string, chatId?: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('navora:downloads.pause', id, chatId),
+    resume: (id: string, chatId?: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('navora:downloads.resume', id, chatId),
+    cancel: (id: string, chatId?: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('navora:downloads.cancel', id, chatId),
+    reveal: (id: string, chatId?: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
+      ipcRenderer.invoke('navora:downloads.reveal', id, chatId),
+    open: (id: string, chatId?: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
+      ipcRenderer.invoke('navora:downloads.open', id, chatId),
+    onChanged: (cb: (payload: BrowserDownloadsChanged) => void) => {
       const listener = (
         _e: Electron.IpcRendererEvent,
-        payload: { downloads: BrowserDownloadEntry[] },
+        payload: BrowserDownloadsChanged,
       ) => cb(payload)
       ipcRenderer.on('navora:downloads.changed', listener)
       return () => {
         ipcRenderer.removeListener('navora:downloads.changed', listener)
       }
     },
-  },
+  } satisfies BrowserDownloadsApi,
   plugins: {
     list: (): Promise<import('../shared/plugins').PluginRecord[]> =>
       ipcRenderer.invoke('navora:plugins.list'),

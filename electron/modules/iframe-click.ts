@@ -8,9 +8,11 @@
  */
 import type { WebContents, WebFrameMain } from 'electron'
 import { hasQuerySelectorDeep, querySelectorDeep, hasQuerySelectorAcrossDocuments, querySelectorAcrossDocuments } from './deep-dom'
-import { dispatchTrustedPointer } from './trusted-input'
+import { dispatchTrustedClick } from './trusted-input'
+import { assertBrowserInputCurrent, commitTrustedInput, currentBrowserInputOperation } from './browser-input-context'
 
 export type IframeClickOpts = {
+  signal?: AbortSignal
   /** Host-page iframe CSS selector (pierces closed shadow when possible). */
   iframeSelector: string
   /** Optional alternate host-page iframe selectors to try (first hit wins). */
@@ -42,6 +44,20 @@ export type IframeClickResult = {
   iframe?: { x: number; y: number; width: number; height: number }
   error?: string
   detail?: string
+  status?: string
+  dispatchedCount?: number | null
+  cleanup?: { dispatched: number; failed: number }
+}
+
+function assertCurrent(wc: WebContents, signal?: AbortSignal): void {
+  assertBrowserInputCurrent(wc)
+  if (signal?.aborted) throw new Error('aborted')
+}
+
+function trackLocator<T>(wc: WebContents, action: () => Promise<T>): Promise<T> {
+  assertBrowserInputCurrent(wc)
+  const operation = currentBrowserInputOperation(wc)
+  return operation ? operation.track(action) : action()
 }
 
 async function withBudget<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -84,29 +100,32 @@ async function resolveIframeBox(
   selector: string,
   opts?: { scrollIntoView?: boolean; budgetMs?: number },
 ): Promise<{ x: number; y: number; width: number; height: number } | null> {
+  assertBrowserInputCurrent(wc)
   const budget = Math.max(80, Math.min(2500, opts?.budgetMs ?? 400))
   const wantScroll = opts?.scrollIntoView === true
   if (hasQuerySelectorDeep(wc)) {
     try {
       const info = await withBudget(
-        querySelectorDeep(wc, selector, {
+        trackLocator(wc, () => querySelectorDeep(wc, selector, {
           pierce: true,
           // Avoid scrolling on every miss during rapid poll — only when clicking.
           scrollIntoView: wantScroll,
-        }),
+        })),
         budget,
         'iframe_deep',
       )
+      assertBrowserInputCurrent(wc)
       if (info && info.width >= 4 && info.height >= 4) {
         return { x: info.x, y: info.y, width: info.width, height: info.height }
       }
     } catch {
+      assertBrowserInputCurrent(wc)
       /* fall through */
     }
   }
   try {
     const box = (await withBudget(
-      wc.executeJavaScript(
+      trackLocator(wc, () => wc.executeJavaScript(
         `(() => {
         const pierce = (root, sel) => {
           try {
@@ -133,26 +152,45 @@ async function resolveIframeBox(
         if (r.width < 4 || r.height < 4) return null
         return { x: r.left, y: r.top, width: r.width, height: r.height }
       })()`,
-      ),
+      )),
       budget,
       'iframe_box_js',
     )) as { x: number; y: number; width: number; height: number } | null
+    assertBrowserInputCurrent(wc)
     return box
   } catch {
+    assertBrowserInputCurrent(wc)
     return null
   }
 }
 
-async function trustedClickAt(wc: WebContents, x: number, y: number): Promise<void> {
-  await withBudget(
-    (async () => {
-      await dispatchTrustedPointer(wc, { action: 'move', x, y, button: 'left' })
-      await dispatchTrustedPointer(wc, { action: 'down', x, y, button: 'left', clickCount: 1 })
-      await dispatchTrustedPointer(wc, { action: 'up', x, y, button: 'left', clickCount: 1 })
-    })(),
-    3000,
-    'iframe_pointer',
-  )
+async function trustedClickAt(wc: WebContents, x: number, y: number, signal?: AbortSignal): Promise<IframeClickResult> {
+  assertCurrent(wc, signal)
+  const api = wc as unknown as { dispatchInputSequence?: (steps: unknown[], options: { signal?: AbortSignal; timeoutMs: number }) => Promise<Record<string, unknown>> }
+  if (typeof api.dispatchInputSequence === 'function') {
+    const operation = currentBrowserInputOperation(wc)
+    const combined = signal && operation ? AbortSignal.any([signal, operation.signal]) : signal ?? operation?.signal
+    let result: Record<string, unknown>
+    try { result = await commitTrustedInput(wc, () => api.dispatchInputSequence!([
+      { kind: 'mouse', type: 'mouseMoved', x, y, atMs: 0, buttons: 0 },
+      { kind: 'mouse', type: 'mousePressed', x, y, atMs: 0, button: 'left', buttons: 1, clickCount: 1 },
+      { kind: 'mouse', type: 'mouseReleased', x, y, atMs: 10, button: 'left', buttons: 0, clickCount: 1 },
+    ], { signal: combined, timeoutMs: 3000 })) } catch (error) {
+      const failed = { status: combined?.aborted ? 'cancelled' : 'failed', reason: 'INPUT_SEQUENCE_REJECTED', dispatchedCount: null }
+      operation?.noteResult(failed)
+      return { ...failed, ok: false, error: failed.reason, detail: error instanceof Error ? error.message : String(error) }
+    }
+    return { ...result, ok: result.status === 'completed', ...(result.status === 'completed' ? {} : { error: String(result.reason || 'iframe_input_failed') }) }
+  }
+  // Do not race a UI timeout against native dispatch: it could click after ownership was handed back.
+  try {
+    await dispatchTrustedClick(wc, x, y)
+    return { ok: true }
+  } catch (error) {
+    const failed = { ok: false, status: signal?.aborted || currentBrowserInputOperation(wc)?.signal.aborted ? 'cancelled' : 'failed', dispatchedCount: null, error: 'iframe_pointer_failed', detail: error instanceof Error ? error.message : String(error) }
+    currentBrowserInputOperation(wc)?.noteResult(failed)
+    return failed
+  }
 }
 
 function clickPointFromBox(
@@ -191,6 +229,7 @@ async function probeInnerInMatchingFrames(
   wc: WebContents,
   iframeSrcHint: string | undefined,
   innerSelector: string,
+  signal?: AbortSignal,
 ): Promise<{ x: number; y: number } | null> {
   let main: WebFrameMain | null = null
   try {
@@ -247,14 +286,17 @@ async function probeInnerInMatchingFrames(
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
   })()`
   for (const frame of list) {
+    assertCurrent(wc, signal)
     try {
       const inner = (await withBudget(
-        frame.executeJavaScript(script, true),
+        trackLocator(wc, () => frame.executeJavaScript(script, true)),
         800,
         'iframe_inner',
       )) as { x: number; y: number } | null
+      assertCurrent(wc, signal)
       if (inner && Number.isFinite(inner.x) && Number.isFinite(inner.y)) return inner
     } catch {
+      assertCurrent(wc, signal)
       /* timeout / cross-origin / closed shadow */
     }
   }
@@ -269,6 +311,7 @@ export async function clickInIframe(
   wc: WebContents,
   opts: IframeClickOpts,
 ): Promise<IframeClickResult> {
+  assertCurrent(wc, opts.signal)
   const iframeSelector = String(opts.iframeSelector || '').trim()
   if (!iframeSelector) {
     return { ok: false, error: 'iframe_selector_required' }
@@ -277,6 +320,7 @@ export async function clickInIframe(
     scrollIntoView: true,
     budgetMs: opts.locateBudgetMs ?? 600,
   })
+  assertCurrent(wc, opts.signal)
   if (!box) {
     return {
       ok: false,
@@ -296,9 +340,9 @@ export async function clickInIframe(
 
   const doOffset = async (method: string, detail?: string): Promise<IframeClickResult> => {
     const pt = clickPointFromBox(box, opts)
-    await trustedClickAt(wc, pt.x, pt.y)
+    const input = await trustedClickAt(wc, pt.x, pt.y, opts.signal)
     return {
-      ok: true,
+      ...input,
       method,
       iframeSelector,
       innerSelector: innerSelector || undefined,
@@ -322,23 +366,25 @@ export async function clickInIframe(
     if (hasQuerySelectorAcrossDocuments(wc)) {
       // The native frame-hop parser needs an explicit frame tag, even for #id scopes.
       const frameScope = iframeSelector.includes('>>>') ? iframeSelector : `iframe:is(${iframeSelector})`
-      const native = await withBudget(querySelectorAcrossDocuments(wc, `${frameScope} ${innerSelector}`, {
+      const native = await withBudget(trackLocator(wc, () => querySelectorAcrossDocuments(wc, `${frameScope} ${innerSelector}`, {
         pierce: true, scrollIntoView: true,
-      }), opts.locateBudgetMs ?? 600, 'iframe_native')
+      })), opts.locateBudgetMs ?? 600, 'iframe_native')
+      assertCurrent(wc, opts.signal)
       if (native && native.width > 0 && native.height > 0) {
         const x = native.x + native.width / 2
         const y = native.y + native.height / 2
-        await trustedClickAt(wc, x, y)
-        return {ok:true,method:'iframe-native-selector',iframeSelector,innerSelector,x,y,iframe:box}
+        const input = await trustedClickAt(wc, x, y, opts.signal)
+        return {...input,method:'iframe-native-selector',iframeSelector,innerSelector,x,y,iframe:box}
       }
     }
-    const probed = await probeInnerInMatchingFrames(wc, iframeSelector, innerSelector)
+    const probed = await probeInnerInMatchingFrames(wc, iframeSelector, innerSelector, opts.signal)
+    assertCurrent(wc, opts.signal)
     if (probed) {
       const x = box.x + probed.x
       const y = box.y + probed.y
-      await trustedClickAt(wc, x, y)
+      const input = await trustedClickAt(wc, x, y, opts.signal)
       return {
-        ok: true,
+        ...input,
         method: 'iframe-inner-selector',
         iframeSelector,
         innerSelector,
@@ -442,7 +488,7 @@ export async function clickInIframeWhenReady(
   }
 
   while (Date.now() < deadline) {
-    if (when.signal.aborted) throw new Error('aborted')
+    assertCurrent(wc, when.signal)
     polls += 1
     let hitSel = ''
     let box: { x: number; y: number; width: number; height: number } | null = null
@@ -451,6 +497,7 @@ export async function clickInIframeWhenReady(
         scrollIntoView: false,
         budgetMs: 180,
       })
+      assertCurrent(wc, when.signal)
       if (box && box.width >= minWidth && box.height >= minHeight) {
         hitSel = sel
         break
@@ -479,6 +526,7 @@ export async function clickInIframeWhenReady(
           scrollIntoView: false,
           budgetMs: 250,
         })
+        assertCurrent(wc, when.signal)
         if (!again || again.width < minWidth || again.height < minHeight) {
           lastStable = null
           stableSince = 0
@@ -490,6 +538,7 @@ export async function clickInIframeWhenReady(
       }
       const clicked = await clickInIframe(wc, {
         ...opts,
+        signal: when.signal,
         iframeSelector: hitSel,
         preferOffset: opts.preferOffset !== false,
         locateBudgetMs: 500,

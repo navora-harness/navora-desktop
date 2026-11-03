@@ -1,0 +1,144 @@
+/* Theme surfaces shared by every Navora renderer. Geometry stays in main-window-layout.css. */
+:root[data-navora-theme]{
+ --appearance-chrome:var(--appearance-shell);--appearance-chrome-ink:var(--appearance-ink);
+ --appearance-rail:var(--appearance-shell);--appearance-start:var(--appearance-surface);
+ --appearance-gradient:var(--appearance-selection);--appearance-focus-glow:transparent;
+ --control-selected:var(--appearance-selection);
+ /* Themes supply values; shared tab state selectors own hover, current and focus. */
+ --tab-bg:color-mix(in srgb,var(--appearance-header) 75%,var(--appearance-surface));
+ --tab-border:var(--appearance-stroke);--tab-ink:var(--appearance-muted);
+ --tab-hover-bg:color-mix(in srgb,var(--appearance-selection) 64%,var(--appearance-surface));
+ --tab-hover-border:var(--appearance-composer-edge);--tab-hover-ink:var(--appearance-ink);
+ --tab-active-bg:var(--appearance-surface);--tab-active-ink:var(--appearance-ink);--tab-active-border:var(--appearance-composer-edge);
+ --tab-active-hover-bg:color-mix(in srgb,var(--appearance-selection) 28%,var(--appearance-surface));
+ --tab-selection-bg:var(--appearance-selection);--tab-selection-border:var(--appearance-composer-edge);
+ --tab-context-border:var(--appearance-accent);--tab-control-hover:var(--appearance-selection);
+ --tab-focus:var(--appearance-accent);--tab-accent:var(--appearance-accent);
+}
+
+:root[data-navora-theme]{--navora-background:var(--appearance-sidebar);--navora-chrome:var(--appearance-chrome);--navora-header:var(--appearance-header);--navora-sidebar:var(--appearance-sidebar);--navora-surface:var(--appearance-surface);--navora-ink:var(--appearance-ink);--navora-muted:var(--appearance-muted);--navora-accent:var(--appearance-accent);--navora-stroke:var(--appearance-stroke);--control-hover:var(--appearance-selection);--control-border:var(--appearance-stroke);--control-color:var(--appearance-ink);--control-muted:var(--appearance-muted);--control-focus:var(--appearance-accent)}
+:root[data-navora-theme] .navora-app{background:var(--appearance-surface)!important;color:var(--appearance-ink)!important}
+:root[data-navora-theme] .navora-app .window-titlebar{background:var(--appearance-chrome)!important;color:var(--appearance-chrome-ink)!important}
+:root[data-navora-theme] .navora-app .window-titlebar-brand{color:var(--appearance-chrome-ink)!important}
+:root[data-navora-theme] .navora-app .main-shell>.activity-rail{background:var(--appearance-rail)!important;color:var(--appearance-rail-ink)!important}
+:root[data-navora-theme] .navora-app .activity-rail :is(button,.sidebar-icon-btn){color:var(--appearance-rail-ink)!important}
+:root[data-navora-theme] .navora-app .activity-rail :is([aria-pressed=true],[aria-selected=true],.active,.selected){background:var(--appearance-rail-active)!important;color:#fff!important}
+:root[data-navora-theme] .navora-app .main-shell>.content-surface>aside.sidebar{background:var(--appearance-sidebar)!important;border-color:var(--appearance-stroke)!important}
+:root[data-navora-theme] .navora-app .sidebar :is(.chat-item,.chat-item-title,.chat-date-label,.chat-sub-chip-title,.chat-stat,.chat-sub-chip-more,.chat-date-label,.browser-tree-count,.browser-tree-meta,.browser-tree-subtitle){color:var(--appearance-muted)!important}
+:root[data-navora-theme] .navora-app .sidebar :is(.dock-header,.dock-title,.settings-sidebar-heading,.brand-name,.sidebar-dock-title){color:var(--appearance-ink)!important}
+:root[data-navora-theme] .navora-app .sidebar :is(.chat-item.active,.chat-sub-chip.active){background:var(--appearance-selection)!important;color:var(--appearance-accent)!important;box-shadow:inset 3px 0 var(--appearance-accent)}
+:root[data-navora-theme] .navora-app .sidebar .chat-item.active :is(.chat-item-title,.chat-sub-chip-title){color:var(--appearance-accent)!important}
+:root[data-navora-theme] .navora-app :is(.chat-new-action,.chat-search-action,.sidebar-search,.browser-tree-search){background:var(--appearance-surface)!important;color:var(--appearance-ink)!important;border-color:var(--appearance-stroke)!important}
+:root[data-navora-theme] .navora-app .main-shell .conversation-title-header,:root[data-navora-theme] .navora-app .file-workspace .file-workspace-head{background:var(--appearance-header)!important;border-color:var(--appearance-stroke)!important;color:var(--appearance-ink)!important}
+:root[data-navora-theme] .navora-app :is(.main,.conversation-content,.messages,.msg-list,.content-surface,.file-workspace,.browser-host-page){background:var(--appearance-surface)!important;color:var(--appearance-ink)!important}
+:root[data-navora-theme] .navora-app :is(.main-title,.msg-empty-title,.dock-header,.msg-empty h1,.msg-empty h2){color:var(--appearance-ink)!important}
+:root[data-navora-theme] .navora-app :is(.msg-empty-desc,.composer-placeholder,.composer-status,.composer-hint,.chat-date-label){color:var(--appearance-muted)!important}
+:root[data-navora-theme] .navora-app :is(.msg-empty-card,.suggestion-card,.msg-empty-suggestion,.empty-prompt,.msg-empty-prompts button,.msg-empty-suggestions button){border-color:var(--appearance-stroke)!important;background:var(--appearance-well)!important;color:var(--appearance-ink)!important}
+:root[data-navora-theme] .navora-app .composer{background:transparent!important}
+:root[data-navora-theme] .navora-app .composer-box{background:var(--appearance-well)!important;border-color:var(--appearance-composer-edge)!important;box-shadow:0 0 0 3px var(--appearance-focus-glow)!important}
+:root[data-navora-theme] .navora-app .composer-box :is(textarea,input){color:var(--appearance-ink)!important}
+:root[data-navora-theme] .navora-app .composer-box textarea::placeholder{color:var(--appearance-muted)!important}
+:root[data-navora-theme] .navora-app .composer-box :is(button,.composer-model,.composer-mode,.composer-option){color:var(--appearance-muted)!important}
+:root[data-navora-theme] .navora-app :is(.browser-host-tabs,.detached-window-bar){background:var(--appearance-chrome)!important;border-color:var(--appearance-stroke)!important;color:var(--appearance-chrome-ink)!important}
+:root[data-navora-theme] .navora-app :is(.browser-host-new-tab,.browser-host-restore){color:var(--appearance-chrome-ink)!important}
+:root[data-navora-theme] .navora-app .browser-tab-toolbar{background:var(--appearance-header)!important;border-color:var(--appearance-stroke)!important}
+:root[data-navora-theme] .navora-app :is(.browser-navigation,.browser-address-bar,.browser-address-input,.browser-address-field){background:var(--appearance-well)!important;border-color:var(--appearance-stroke)!important;color:var(--appearance-ink)!important}
+:root[data-navora-theme] .navora-app .browser-address-bar input{background:transparent!important;color:var(--appearance-ink)!important}
+:root[data-navora-theme] .navora-app .browser-address-bar{background:var(--appearance-surface)!important;border-color:var(--appearance-stroke)!important}
+:root[data-navora-theme] .navora-app .browser-address-bar:not(.is-focused){box-shadow:none}
+:root[data-navora-theme] .navora-app .browser-address-bar.is-focused{border-color:var(--appearance-accent)!important}
+:root[data-navora-theme]{--appearance-address-hover:color-mix(in srgb,var(--appearance-ink) 12%,var(--appearance-surface))}
+:root[data-navora-color-scheme=dark]{--appearance-address-hover:color-mix(in srgb,var(--appearance-ink) 18%,var(--appearance-surface))}
+:root[data-navora-color-scheme=dark] .navora-app .address-site-info.secure{color:#8ecea8}
+:root[data-navora-color-scheme=dark] .navora-app .address-site-info.insecure{color:#e2be78}
+:root[data-navora-color-scheme=dark] .navora-app .address-site-info.certificate-error{color:var(--control-danger)}
+:root[data-navora-theme] .navora-app .browser-address-bar input::placeholder{color:var(--appearance-muted)!important}
+:root[data-navora-theme] .navora-app :is(.browser-nav-action,.browser-tab-toolbar>.ui-icon-button,.browser-tab-toolbar>.ui-button){color:var(--appearance-muted)!important}
+:root[data-navora-theme] .navora-app .browser-viewport-area.is-start,:root[data-navora-theme] .navora-app .browser-start-page{background:var(--appearance-start)!important;color:var(--appearance-ink)!important}
+:root[data-navora-theme] .navora-app .browser-start-page{min-height:100%}
+:root[data-navora-theme] .navora-app .start-heading h1{color:var(--appearance-ink)!important}
+:root[data-navora-theme] .navora-app .start-mark{background:var(--appearance-gradient)!important;color:white!important;border-color:transparent!important;box-shadow:0 8px 20px var(--appearance-focus-glow)!important}
+:root[data-navora-theme] .navora-app .start-recommendations button{background:var(--appearance-surface)!important;border-color:var(--appearance-stroke)!important;color:var(--appearance-ink)!important}
+:root[data-navora-theme] .navora-app .start-recommendations button>svg:first-child{color:var(--appearance-accent)!important}
+:root[data-navora-theme] .navora-app .workspace-file-picker{background:var(--appearance-well)!important;border-color:var(--appearance-stroke)!important;color:var(--appearance-ink)!important}
+:root[data-navora-theme] .navora-app .workspace-picker-search{background:var(--appearance-surface)!important;border-color:var(--appearance-stroke)!important;color:var(--appearance-muted)!important}
+:root[data-navora-theme] .navora-app .workspace-picker-search input{color:var(--appearance-ink)!important}
+:root[data-navora-theme] .navora-app .workspace-picker-search input::placeholder{color:var(--appearance-muted)!important}
+:root[data-navora-theme] .navora-app :is(.workspace-picker-filter,.workspace-picker-filters button,.workspace-picker-empty,.start-visit,.start-history-empty,.start-section h2,.start-heading p,.workspace-picker-search svg){color:var(--appearance-muted)!important}
+:root[data-navora-theme] .navora-app .workspace-picker-filters button[aria-pressed=true]{background:var(--appearance-selection)!important;color:var(--appearance-accent)!important;border-color:var(--appearance-stroke)!important}
+:root[data-navora-theme] .navora-app .suggest-chip{background:var(--appearance-well)!important;color:var(--appearance-ink)!important;border-color:var(--appearance-stroke)!important}
+:root[data-navora-theme] .navora-app .sidebar :is(h1,h2,h3,strong,.dock-header-title,.sidebar-dock-heading,.dock-heading,.sidebar-panel-title){color:var(--appearance-ink)!important}
+:root[data-navora-theme] .navora-app .sidebar :is(.chat-toolbar-icon-btn,.sidebar-icon-btn,.sidebar-close-btn){color:var(--appearance-muted)!important}
+:root[data-navora-theme] .navora-app .workspace-picker-status{color:var(--appearance-muted)!important}
+/* One continuous base shell, with one composite workspace above it. */
+:root[data-navora-theme] .navora-app .shell.main-shell{background:var(--appearance-chrome)!important}
+:root[data-navora-theme] .navora-app .shell.main-shell>.window-titlebar,:root[data-navora-theme] .navora-app .shell.main-shell>.activity-rail{background:var(--appearance-chrome)!important}
+:root[data-navora-theme] .navora-app .shell.main-shell:not(.mobile-layout)>.content-surface{position:relative;z-index:2;margin:0 7px 7px 0!important;border-radius:12px!important;box-shadow:0 2px 7px #24374a10,0 0 0 1px #24374a0b!important;overflow:hidden}
+:root[data-navora-theme] .navora-app .activity-rail :is([aria-pressed=true],[aria-selected=true],.active,.selected){color:var(--appearance-accent)!important}
+:root[data-navora-theme] .navora-app .sidebar .chat-item.active{box-shadow:none!important}
+:root[data-navora-theme] .navora-app .start-mark{background:var(--appearance-selection)!important;color:var(--appearance-accent)!important;border:1px solid var(--appearance-stroke)!important;box-shadow:none!important}
+:root[data-navora-theme] .navora-app .composer-box{box-shadow:none!important}
+:root[data-navora-theme] .navora-app .sidebar .ui-icon-button{color:var(--appearance-muted)!important}
+
+/* Color all settings surfaces without adding another workspace layer. */
+:root[data-navora-theme] .navora-app .settings-page{background:var(--appearance-surface);color:var(--appearance-ink)}
+:root[data-navora-theme] .navora-app .settings-page :is(.content,.panel,.shell){background:var(--appearance-surface)}
+:root[data-navora-theme] .navora-app .settings-page .card{border-color:var(--appearance-stroke);background:var(--appearance-surface)}
+:root[data-navora-theme] .navora-app .settings-navigation{background:var(--appearance-sidebar)}
+:root[data-navora-theme] .navora-app .settings-navigation .nav-item.active{background:var(--appearance-selection);color:var(--appearance-accent)}
+.appearance-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:16px}
+.appearance-option{display:flex;flex-direction:column;gap:9px;padding:12px;border:1px solid var(--appearance-stroke);border-radius:12px;text-align:left;cursor:pointer;background:var(--appearance-surface);color:var(--appearance-ink)}
+.appearance-option:hover{border-color:var(--appearance-composer-edge)}
+.appearance-option[aria-pressed=true]{background:var(--appearance-selection);border-color:var(--appearance-accent);box-shadow:0 0 0 1px var(--appearance-accent)}
+.appearance-option:disabled{opacity:.6;cursor:default}
+.appearance-preview{display:block;width:100%;height:auto;flex-shrink:0;border-radius:7px;overflow:hidden}
+.appearance-option-name{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:24px;font-size:13px;font-weight:600}
+.appearance-option[aria-pressed=true] :is(.appearance-option-name,.appearance-option-description){color:var(--appearance-ink)}
+.appearance-selection-badge{display:inline-flex;align-items:center;flex-shrink:0;min-height:20px;padding:2px 7px;border-radius:6px;background:var(--appearance-accent);color:#fff;font-size:11px;font-weight:600;line-height:16px;white-space:nowrap}
+:root[data-navora-color-scheme=dark] .appearance-selection-badge{color:var(--appearance-shell)}
+.appearance-option:focus-visible{outline:2px solid var(--appearance-accent);outline-offset:4px}
+.appearance-option-description,.appearance-hint{font-size:12px;color:var(--appearance-muted);line-height:1.7}
+.appearance-hint{margin:18px 0 0}
+@container(max-width:680px){.appearance-options{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@container(max-width:420px){.appearance-options{grid-template-columns:minmax(0,1fr)}}
+:root[data-navora-color-scheme=dark] body{background:var(--appearance-shell)}
+:root[data-navora-color-scheme=dark] .navora-app :is(.settings-page,.settings-workspace) :is(.top,.section-head,.card-title,.switch-title,.nav-label,.settings-current-title){color:var(--appearance-ink)!important}
+:root[data-navora-color-scheme=dark] .navora-app :is(.settings-page,.settings-workspace) :is(.switch-hint,.section-head p,.nav-desc,.settings-save-status){color:var(--appearance-muted)!important}
+:root[data-navora-color-scheme=dark] .navora-app :is(.settings-page,.settings-workspace) .top{background:var(--appearance-header)!important;border-color:var(--appearance-stroke)!important}
+:root[data-navora-color-scheme=dark] .navora-app .settings-navigation .nav-item{color:var(--appearance-muted)}
+:root[data-navora-color-scheme=dark] .navora-app .settings-navigation .nav-item.active{color:var(--appearance-accent)}
+:root[data-navora-color-scheme=dark] .navora-app .settings-navigation .nav-item :is(.nav-label,.nav-desc,.settings-nav-icon){color:var(--appearance-muted)!important}
+:root[data-navora-color-scheme=dark] .navora-app .settings-navigation .nav-item.active :is(.nav-label,.settings-nav-icon){color:var(--appearance-accent)!important}
+:root[data-navora-color-scheme=dark] .navora-app .settings-back{color:var(--appearance-muted)!important}
+:root[data-navora-color-scheme=dark] .navora-app :is(.composer-box,.main-title,.msg-body,.msg-user,.msg-assistant){color:var(--appearance-ink)!important}
+:root[data-navora-color-scheme=dark] .navora-app .main .composer-input :is(textarea,.v-field){color:var(--appearance-ink)!important;caret-color:var(--appearance-ink)}
+:root[data-navora-color-scheme=dark] .navora-app .sidebar .chat-item{color:var(--appearance-muted)!important}
+:root[data-navora-color-scheme=dark] .navora-app .sidebar .chat-item.active{color:var(--appearance-accent)!important}
+:root[data-navora-color-scheme=dark] .navora-app :is(.file-workspace,.browser-host-page,.file-host-page){background:var(--appearance-surface);color:var(--appearance-ink)}
+:root[data-navora-color-scheme=dark] .v-overlay :is(.v-card,.v-sheet,.v-list,.sidebar-more-panel,.sidebar-ctx-panel),:root[data-navora-color-scheme=dark] .ui-action-menu{background:var(--appearance-surface)!important;color:var(--appearance-ink)!important;border-color:var(--appearance-stroke)!important}
+:root[data-navora-color-scheme=dark] .navora-app :is(.msg-empty,.start-heading) :is(h1,h2,h3,p){color:inherit}
+:root[data-navora-color-scheme=dark] :is(.sidebar-ctx-panel,.browser-address-suggestions,.chat-search-panel){background:var(--appearance-surface)!important;color:var(--appearance-ink)!important;border-color:var(--appearance-stroke)!important}
+:root[data-navora-color-scheme=dark] .navora-app :is(.tool-card,.run-card-body,.log-fold-setting,.advanced-connection,.plugin-development-settings){background:var(--appearance-well)!important;color:var(--appearance-ink)!important;border-color:var(--appearance-stroke)!important}
+:root[data-navora-color-scheme=dark] .navora-app .msg-body.md :is(pre,code,blockquote,th){background:var(--appearance-well)!important;color:var(--appearance-ink)!important;border-color:var(--appearance-stroke)!important}
+:root[data-navora-color-scheme=dark] .navora-app .msg-body.md :is(a){color:var(--appearance-accent)!important}
+:root[data-navora-color-scheme=dark] .navora-app :is(.run-card-head,.reply-footer,.jump-bottom){color:var(--appearance-muted)!important}
+:root[data-navora-color-scheme=dark] .navora-app :is(.run-card-head:hover,.tool-card:hover,.provider-list-item.active){background:var(--appearance-selection)!important;color:var(--appearance-ink)!important;border-color:var(--appearance-stroke)!important}
+
+/* Composer menus are teleported outside the application root. */
+:root[data-navora-theme] .v-overlay :is(.composer-perm-panel,.composer-usage-panel){background:var(--navora-surface);color:var(--navora-ink);border-color:var(--navora-stroke)}
+:root[data-navora-theme] .v-overlay :is(.composer-perm-title,.composer-perm-item,.composer-perm-item-label,.model-panel-heading,.composer-usage-heading,.composer-usage-row){color:var(--navora-ink)}
+:root[data-navora-theme] .v-overlay :is(.composer-perm-item-desc,.composer-model-empty,.model-provider-label,.composer-usage-note,.model-panel-reasoning,.model-panel-heading>button){color:var(--navora-muted)}
+:root[data-navora-theme] .v-overlay :is(.composer-perm-item-icon,.composer-perm-check){color:var(--navora-accent)}
+:root[data-navora-theme] .v-overlay :is(.composer-perm-item.active,.composer-perm-item:hover,.model-panel-heading>button:hover,.model-panel-reasoning button:hover){background:var(--control-selected)}
+:root[data-navora-theme] .v-overlay .model-panel-search{background:var(--navora-header);border-color:var(--navora-stroke);color:var(--navora-muted)}
+:root[data-navora-theme] .v-overlay .model-panel-search input{color:var(--navora-ink)}
+:root[data-navora-theme] .v-overlay .model-panel-reasoning{border-color:var(--navora-stroke)}
+:root[data-navora-theme] .v-overlay .model-panel-reasoning button{border-color:var(--navora-stroke);color:var(--navora-muted)}
+:root[data-navora-theme] .v-overlay .model-panel-reasoning button.selected{background:var(--control-selected);color:var(--navora-accent);border-color:var(--navora-accent)}
+:root[data-navora-theme] .v-overlay .composer-usage-actual{border-color:var(--navora-stroke)}
+:root[data-navora-theme] .v-overlay .composer-usage-track{background:var(--navora-header)}
+
+:root[data-navora-theme] .v-menu.v-overlay>.v-overlay__content:is(.composer-perm-menu,.composer-usage-menu){padding:0;border:0;background:transparent!important;outline:none}
+:root[data-navora-theme] .v-overlay :is(.composer-perm-panel,.composer-usage-panel){border:1px solid var(--navora-stroke)}
+:root[data-navora-theme] .v-overlay :is(.composer-usage-heading b,.composer-usage-heading>strong,.composer-usage-row strong){color:var(--navora-ink)}
+:root[data-navora-theme] .v-overlay .composer-usage-panel .composer-usage-note{border-color:var(--navora-stroke)}

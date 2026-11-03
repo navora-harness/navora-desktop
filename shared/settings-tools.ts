@@ -1,4 +1,5 @@
 import type { AppConfig, AiProviderConfig } from './config'
+import { normalizeBrowserAutomation } from './browser-automation'
 
 /** Sections the Agent may read/write. `permissions` is intentionally excluded. */
 const SETTINGS_SECTIONS = [
@@ -138,6 +139,24 @@ export function prepareSettingsPatch(raw: unknown): SettingsUpdateResult {
         next[k] = v
       }
       patch.remote = next
+      continue
+    }
+
+    if (key === 'browser') {
+      const browser = structuredClone(section) as Record<string, unknown>
+      if (browser.automation !== undefined) {
+        try {
+          const normalized = normalizeBrowserAutomation(browser.automation)
+          const supplied = browser.automation as Record<string, unknown>
+          // Keep a leaf patch; expanding defaults here would overwrite concurrent preferences.
+          browser.automation = Object.fromEntries(Object.keys(supplied)
+            .filter(name => supplied[name] !== undefined)
+            .map(name => [name, normalized[name as keyof typeof normalized]]))
+        } catch (error) {
+          return { ok: false, error: 'invalid_browser_automation', hint: error instanceof Error ? error.message : String(error) }
+        }
+      }
+      patch.browser = browser
       continue
     }
 

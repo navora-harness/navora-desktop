@@ -7,7 +7,18 @@ import { resolveAcceptLanguage } from '../../shared/config'
 import type { SkillReviewDraft, SkillReviewRequest, SkillReviewResponse } from '../../shared/types'
 import { isUrlAllowed } from '../../shared/url-allowlist'
 import { normalizeMatchPattern } from '../../shared/match-pattern'
-import { remapAgentToolCall } from '../../shared/tool-aliases'
+import { normalizeBrowserToolCall } from '../../shared/browser-tool-policy'
+import { resolvePointerMotion } from '../../shared/browser-automation'
+import {
+  browserControlFailure, captureBrowserIntentEpochs, commitBrowserInput,
+  coordinateBrowserTool, currentBrowserOperation, trackBrowserSideEffect, withBrowserIntentCancellation,
+  type BrowserIntentEpochs,
+} from './browser-tool-coordination'
+import type { BrowserAutomationOperation } from './browser-automation-controller'
+import { attachBrowserNativeRefs, resolveBrowserNativeRef } from './browser-native-refs'
+import { assertBrowserInputCurrent, currentBrowserInputOperation } from './browser-input-context'
+import { dispatchOwnedTargetMouse, dispatchOwnedTargetTouch } from './browser-target-input'
+import { startOwnedNavigation, startOwnedHistoryNavigation } from './browser-navigation-control'
 import {
   listSettingsSections,
   prepareSettingsPatch,
@@ -31,6 +42,8 @@ import {
   type PermissionGate,
 } from './permission-gate'
 import { dispatchTrustedPointer } from './trusted-input'
+import { dispatchPointerMotion, hasPointerMotion, invalidatePointerMotion, type PointerMotionSettings } from './pointer-motion'
+import type { PointerPosition } from '../../shared/pointer-trajectory'
 import { jsDialogHost } from './js-dialog-host'
 import { browserCapabilities } from './browser-capabilities'
 import { setBrowserFileInput } from './browser-file-input'
@@ -44,6 +57,7 @@ import {
   hasQuerySelectorAcrossDocuments,
   querySelectorDeep,
   querySelectorAcrossDocuments,
+  getNodeBoxModel,
 } from './deep-dom'
 import { clickInIframe, clickInIframeWhenReady } from './iframe-click'
 import { loadDocumentWithResponse } from './load-document-response'
@@ -63,11 +77,95 @@ function parseAgentTarget(value:unknown):Electron.AgentTarget|null {
   return target as Electron.AgentTarget
 }
 
+/** Keep motion parameters inside the existing browser permission/manual-control gates. */
+async function runPointerMotion(
+  wc: WebContents,
+  action: 'move' | 'click' | 'drag',
+  to: PointerPosition,
+  rawArgs: Record<string, unknown>,
+  signal: AbortSignal,
+  timeoutMs: number,
+  target?: Electron.AgentTarget,
+): Promise<Record<string, unknown>> {
+  try {
+    assertBrowserInputCurrent(wc)
+    const value = rawArgs.motion
+    if (value !== undefined && value !== true && value !== false && (!value || typeof value !== 'object' || Array.isArray(value))) {
+      throw new TypeError('motion must be an object or a boolean')
+    }
+    let from: PointerPosition | undefined
+    if (rawArgs.from !== undefined) {
+      if (!rawArgs.from || typeof rawArgs.from !== 'object' || Array.isArray(rawArgs.from)) throw new TypeError('from must contain numeric x/y')
+      const point = rawArgs.from as Record<string, unknown>
+      if (typeof point.x !== 'number' || typeof point.y !== 'number') throw new TypeError('from must contain numeric x/y')
+      from = { x: point.x, y: point.y }
+    }
+    const motion: PointerMotionSettings | undefined = value && typeof value === 'object' ? value as PointerMotionSettings : undefined
+    const buttonValue = String(rawArgs.button || 'left')
+    const button = buttonValue === 'middle' || buttonValue === 'right' || buttonValue === 'back' || buttonValue === 'forward' ? buttonValue : 'left'
+    const result = await dispatchPointerMotion(wc, {
+      action, to, from, motion, target, button, immediate: value === false,
+      clickCount: rawArgs.clickCount === undefined ? 1 : Number(rawArgs.clickCount), signal, timeoutMs,
+      beforeDispatch: () => assertBrowserInputCurrent(wc),
+    })
+    return {
+      ...result, method: 'dispatchInputSequence',
+      ...(result.ok ? {} : { error: result.reason || 'pointer_sequence_failed', ...(result.error ? { message: result.error } : {}) }),
+    }
+  } catch (error) {
+    return { ok: false, error: 'invalid_pointer_motion', message: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+async function approachNativeTarget(
+  wc: WebContents, target: Electron.AgentTarget, rawArgs: Record<string, unknown>,
+  ctx: ToolExecContext, timeoutMs: number,
+): Promise<Record<string, unknown> | null> {
+  if (rawArgs.motion === false || !hasPointerMotion(wc)) return null
+  // Snapshot bounds are frame/widget layout units, including device scale. The
+  // legacy box-model API explicitly reports CSS geometry in the main frame.
+  // It cannot route a child-frame backend ID: leave those center operations native.
+  if (target.webContentsId !== wc.id || target.processId !== wc.mainFrame.processId || target.routingId !== wc.mainFrame.routingId) return null
+  const operation = currentBrowserOperation(ctx, String(rawArgs.windowId || ''))
+  const locate = () => getNodeBoxModel(wc, target.backendNodeId, { scrollIntoView: true })
+  const box = operation ? await operation.track(locate) : await locate()
+  assertBrowserInputCurrent(wc)
+  if (!box || box.width <= 0 || box.height <= 0) return null
+  return runPointerMotion(wc, 'move', centerOf(box), rawArgs, ctx.signal, timeoutMs)
+}
+
+function targetKeyDispatcher(wc: WebContents, target: Electron.AgentTarget, ctx: ToolExecContext, windowId: string) {
+  const releases = new Map<string, () => void>()
+  return async (event: Electron.KeyEvent) => {
+    const operation = currentBrowserOperation(ctx, windowId)
+    const key = String(event.code || event.key || '')
+    if ((event.type === 'rawKeyDown' || event.type === 'keyDown') && key && operation && !releases.has(key)) {
+      const release = { ...event, target, type: 'keyUp' as const, modifiers: 0 }
+      releases.set(key, operation.registerCleanup(async () => {
+        const result = await wc.dispatchKeyEvent(release)
+        operation.noteResult(result)
+        if (result.status !== 'dispatched') throw new Error(result.reason || 'key_release_failed')
+      }))
+    }
+    const result = await commitBrowserInput(ctx, windowId, () => wc.dispatchKeyEvent({ ...event, target }))
+    if (event.type === 'keyUp' && result.status === 'dispatched') { releases.get(key)?.(); releases.delete(key) }
+    return result
+  }
+}
+
 export type ToolExecContext = {
   chatId: string
+  /** Page input protection lasts until this agent task completes. */
+  browserRunId?: string
   /** Root chat id for session-scoped plugin-dev links (parent of sub-chats). */
   pluginScopeChatId?: string
   signal: AbortSignal
+  /** Captured before permission/model waits; never refresh an old intent on resume. */
+  browserIntentEpochs?: BrowserIntentEpochs
+  /** Flow helpers reuse the complete page action instead of recursively queuing. */
+  browserOperations?: ReadonlyMap<string, BrowserAutomationOperation>
+  /** Exact set approved for this plugin invocation, not a recomputed plan. */
+  pluginApprovedCapabilities?: readonly import('../../shared/types').PermissionCapability[]
   registry: BrowserRegistry
   network: BrowserNetworkManager
   files: WorkspaceFiles
@@ -303,6 +401,16 @@ function truncateFlowResult(result: Record<string, unknown>): Record<string, unk
     'partial',
     'error',
     'method',
+    'status',
+    'reason',
+    'dispatchedCount',
+    'movementDispatchedCount',
+    'plannedSteps',
+    'lastDispatchedIndex',
+    'stoppedIndex',
+    'lastDispatchedPoint',
+    'cleanup',
+    'clickDispatch',
     'iframeSelector',
     'innerSelector',
     'x',
@@ -1021,6 +1129,9 @@ async function isolatedEval(
     }
   })()`
 
+  if (opts?.signal) assertNotAborted(opts.signal)
+  const operation = currentBrowserInputOperation(wc)
+  operation?.assertCurrent()
   const run = async () => {
     const fn = (wc as WebContents & {
       executeJavaScriptInIsolatedWorld?: (
@@ -1037,7 +1148,7 @@ async function isolatedEval(
   const timeoutMs = opts?.timeoutMs ?? 15000
   let raw: unknown
   try {
-    raw = await withTimeout(run(), timeoutMs, opts?.label || 'evaluate', opts?.signal)
+    raw = await withTimeout(operation ? operation.track(run) : run(), timeoutMs, opts?.label || 'evaluate', opts?.signal)
   } catch (e) {
     throw enrichScriptHostError(e)
   }
@@ -1104,6 +1215,7 @@ async function sessionFetch(
     userAgent?: string
     acceptLanguage?: string
     referer?: string
+    signal?: AbortSignal
   },
 ): Promise<{ status: number; url: string; headers: Record<string, string>; body: string }> {
   const redirect = init.redirect === 'error' ? 'error' : 'follow'
@@ -1130,6 +1242,7 @@ async function sessionFetch(
     body: init.body,
     redirect,
     bypassCustomProtocolHandlers: true,
+    signal: init.signal,
   }
   if (headerOrder?.length) fetchInit.headerOrder = headerOrder
 
@@ -1157,10 +1270,14 @@ async function sessionFetch(
 }
 
 export async function executeAgentTool(name:string,rawArgs:Record<string,unknown>,ctx:ToolExecContext,opts?:{skipPermission?:boolean}):Promise<unknown>{
-  const page=typeof rawArgs.windowId==='string'?ctx.registry.getWindowRecord(rawArgs.windowId)?.win:undefined
-  if(page?.manualControl&&name.startsWith('browser_'))return {ok:false,error:'browser_manual_control',hint:'用户已接管页面，等待用户恢复 AI 操作。'}
-  if(page)page.activeOperations++
-  try{return await executeAgentToolInternal(name,rawArgs,ctx,opts)}finally{if(page){page.activeOperations--;page.manager.flushLayout(page)}}
+  const normalized = normalizeBrowserToolCall(name, rawArgs)
+  const context = { ...ctx, browserIntentEpochs: ctx.browserIntentEpochs ?? captureBrowserIntentEpochs(ctx.registry, ctx.chatId) }
+  try { return await withBrowserIntentCancellation(normalized.name, normalized.args, context, next => executeAgentToolInternal(normalized.name, normalized.args, next, opts)) }
+  catch (error) {
+    const failure = browserControlFailure(error)
+    if (failure) return failure
+    throw error
+  }
 }
 
 async function executeAgentToolInternal(
@@ -1171,16 +1288,6 @@ async function executeAgentToolInternal(
 ): Promise<unknown> {
   assertNotAborted(ctx.signal)
   const cfg = ctx.getConfig()
-  if (typeof rawArgs.windowId === 'string' && name.startsWith('browser_')) {
-    const activePage=ctx.registry.getWindowRecord(rawArgs.windowId)
-    if(activePage?.win.manualControl)return {ok:false,error:'browser_manual_control',hint:'用户正在批注或已接管页面；等待用户点击恢复 AI 操作，不要重试点击。'}
-  }
-
-  const remapped = remapAgentToolCall(name, rawArgs)
-  if (remapped) {
-    name = remapped.name
-    rawArgs = remapped.args
-  }
 
   if (!opts?.skipPermission) {
     // Combined open checks both session.create and window.create.
@@ -1220,6 +1327,7 @@ async function executeAgentToolInternal(
     ) {
       const pluginGate = await ctx.plugins.checkPermissions(name, rawArgs, ctx)
       if (!pluginGate.ok) return { ok: false, error: pluginGate.error || 'permission_denied' }
+      ctx = { ...ctx, pluginApprovedCapabilities: pluginGate.capabilities }
     } else {
       let capability = toolNameToCapability(name)
       if (name === 'browser_network_rule_add') {
@@ -1238,9 +1346,19 @@ async function executeAgentToolInternal(
     }
   }
 
-  if ((name === 'browser_click' || name === 'browser_type') && rawArgs.ref) {
+  return coordinateBrowserTool(name, rawArgs, ctx, context => executeAgentToolBody(name, rawArgs, context))
+}
+
+async function executeAgentToolBody(name: string, rawArgs: Record<string, unknown>, ctx: ToolExecContext): Promise<unknown> {
+  assertNotAborted(ctx.signal)
+  const cfg = ctx.getConfig()
+  if (['browser_click', 'browser_hover', 'browser_type'].includes(name) && rawArgs.ref) {
     if (rawArgs.iframeSelector) return {ok:false,error:'ref_and_iframe_scope_conflict'}
     const rec = ctx.registry.assertWindowOwned(ctx.chatId, String(rawArgs.windowId || ''))
+    const nativeTarget = resolveBrowserNativeRef(rec.win.webContents, String(rawArgs.ref))
+    if (nativeTarget === null) return { ok: false, error: 'stale_element_ref', hint: 'Read a fresh browser_get(agent_snapshot), then use its ref.' }
+    if (nativeTarget) rawArgs = { ...rawArgs, target: nativeTarget }
+    else {
     const target = await isolatedEval(rec.win.webContents, cfg.browser.evaluate_world_id,
       pageIndexResolveScript(String(rawArgs.ref)),
       { timeoutMs: 3000, signal: ctx.signal, label: 'resolve_ref' })
@@ -1249,6 +1367,16 @@ async function executeAgentToolInternal(
     }
     if ('disabled' in target && target.disabled) return { ok: false, error: 'element_disabled' }
     rawArgs = { ...rawArgs, selector: target.selector }
+    }
+  }
+
+  const legacyMouse = name === 'browser_mouse' && (
+    !['move', 'click', 'drag'].includes(String(rawArgs.action)) ||
+    (rawArgs.motion === undefined && (rawArgs.buttons !== undefined || rawArgs.modifiers !== undefined))
+  )
+  const legacyClick = name === 'browser_click' && rawArgs.iframeSelector
+  if (['browser_click', 'browser_hover', 'browser_mouse'].includes(name) && !legacyMouse && !legacyClick) {
+    rawArgs = { ...rawArgs, motion: resolvePointerMotion(cfg.browser.automation, rawArgs.motion as Parameters<typeof resolvePointerMotion>[1]) }
   }
 
   switch (name) {
@@ -1401,6 +1529,7 @@ async function executeAgentToolInternal(
       })
       const rec = ctx.registry.assertWindowOwned(ctx.chatId, win.windowId)
       const wc = rec.win.webContents
+      if (ctx.browserRunId) await rec.win.automation.claimRun(ctx.browserRunId)
       const defaultUntil: WaitUntilMode =
         url !== 'about:blank' && (cfg.browser.wait.load || cfg.browser.wait.network_idle)
           ? 'load'
@@ -1516,7 +1645,8 @@ async function executeAgentToolInternal(
         return { ok: false, error: 'url_not_allowed' }
       }
       const result = await withTimeout(
-        sessionFetch(s.ses, url, {
+        trackBrowserSideEffect(ctx, () => sessionFetch(s.ses, url, {
+          signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(Math.max(1, Math.floor(cfg.browser.fetch_timeout_ms || 30000)))]),
           method: rawArgs.method ? String(rawArgs.method) : 'GET',
           headers: (rawArgs.headers as Record<string, string>) || undefined,
           body: rawArgs.body != null ? String(rawArgs.body) : undefined,
@@ -1528,7 +1658,7 @@ async function executeAgentToolInternal(
               ? String(rawArgs.acceptLanguage)
               : resolveAcceptLanguage(cfg),
           referer: typeof rawArgs.referer === 'string' ? rawArgs.referer : undefined,
-        }),
+        })),
         cfg.browser.fetch_timeout_ms || 30000,
         'fetch',
         ctx.signal,
@@ -1566,6 +1696,7 @@ async function executeAgentToolInternal(
       })
       const rec = ctx.registry.assertWindowOwned(ctx.chatId, win.windowId)
       const wc = rec.win.webContents
+      if (ctx.browserRunId) await rec.win.automation.claimRun(ctx.browserRunId)
       const defaultUntil: WaitUntilMode =
         url !== 'about:blank' && (cfg.browser.wait.load || cfg.browser.wait.network_idle)
           ? 'load'
@@ -1661,7 +1792,7 @@ async function executeAgentToolInternal(
           wc.session.on('will-download',onDownload)
           detachDownload=()=>wc.session.removeListener('will-download',onDownload)
         })
-        const navigation=wc.loadURL(url).then(()=>null).catch(async error=>{
+        const navigation=startOwnedNavigation(wc,ctx.signal,()=>wc.loadURL(url)).then(()=>null).catch(async error=>{
           // Chromium may reject navigation just before emitting will-download.
           // Only a matching real download can turn that abort into a successful handoff.
           if(/ERR_(?:ABORTED|FAILED)\b/.test(String(error))){
@@ -1675,6 +1806,7 @@ async function executeAgentToolInternal(
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         if (msg.startsWith('timeout:')) {
+          if (!wc.isDestroyed()) wc.stop()
           // Soft: keep window; Agent can still get partial content
           return {
             ok: true,
@@ -1743,13 +1875,13 @@ async function executeAgentToolInternal(
       const sessRec = ctx.registry.getSessionRecord(rec.sessionId)
       try {
         await withTimeout(
-          loadDocumentWithResponse(
+          startOwnedNavigation(wc, ctx.signal, () => loadDocumentWithResponse(
             wc,
             url,
             { statusCode, headers, body },
             sessRec?.ses,
             { prefer },
-          ),
+          )),
           timeout,
           'load_url_with_response',
           ctx.signal,
@@ -1757,6 +1889,7 @@ async function executeAgentToolInternal(
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         if (msg.startsWith('timeout:')) {
+          if (!wc.isDestroyed()) wc.stop()
           return {
             ok: true,
             url: wc.getURL(),
@@ -2010,6 +2143,7 @@ async function executeAgentToolInternal(
       })
       const finishClick = async (result: Record<string, unknown>) => {
         if (!result.ok) return { ...result, ...pageWaitMeta(wc, wait) }
+        await currentBrowserOperation(ctx, windowId)?.setActivity('waiting', '正在核对页面结果')
         const after = iframeSelector
           ? wait
           : await settleAfterInteraction(wc, cfg, ctx.signal, beforeUrl, 8000)
@@ -2027,14 +2161,24 @@ async function executeAgentToolInternal(
 
       if(target){
         if(iframeSelector)return {ok:false,error:'target_and_iframe_selector_are_mutually_exclusive',...meta}
+        if (hasPointerMotion(wc) && (rawArgs.x !== undefined || rawArgs.y !== undefined)) {
+          if (typeof rawArgs.x !== 'number' || typeof rawArgs.y !== 'number') return { ok: false, error: 'pointer_coordinates_required', ...meta }
+          return finishClick(await runPointerMotion(wc, 'click', { x: rawArgs.x, y: rawArgs.y }, rawArgs, ctx.signal, actionMs, target))
+        }
         if(typeof wc.clickSelector!=='function')return {ok:false,error:'target_click_unavailable',capabilities:browserCapabilities(wc),...meta}
+        if (rawArgs.motion && typeof rawArgs.motion === 'object' && Object.hasOwn(rawArgs.motion, 'holdMs')) return {ok:false,error:'coordinate_click_required_for_hold',...meta}
+        const approach = await approachNativeTarget(wc, target, rawArgs, ctx, actionMs)
+        if (approach && !approach.ok) return finishClick(approach)
+        invalidatePointerMotion(wc)
         try{
-          const result=await wc.clickSelector('',{target,button,clickCount,scrollIntoView:true})
-          return finishClick({ok:result.status==='dispatched',method:'target_clickSelector',dispatch:result,...(result.status==='failed'?{error:result.reason||'target_click_failed'}:{})})
+          const result=await commitBrowserInput(ctx, windowId, () => wc.clickSelector('',{target,button,clickCount,scrollIntoView:true}))
+          return finishClick({ok:result.status==='dispatched',method:'target_clickSelector',dispatch:result,motionApplied:!!approach,...(approach?{movementDispatchedCount:approach.dispatchedCount}:{}),...(result.status==='failed'?{error:result.reason||'target_click_failed'}:{})})
         }catch(error){return {ok:false,error:'target_click_failed',message:error instanceof Error?error.message:String(error),...meta}}
       }
 
       if (iframeSelector) {
+        if (rawArgs.motion && typeof rawArgs.motion === 'object') return { ok: false, error: 'iframe_motion_requires_agent_target', hint: 'Use browser_mouse with a fresh target and target-relative from/x/y.', ...meta }
+        invalidatePointerMotion(wc)
         const fr = await clickInIframe(wc, {
           iframeSelector,
           innerSelector: rawArgs.innerSelector
@@ -2070,14 +2214,15 @@ async function executeAgentToolInternal(
         }
       }
 
-      if (hasClickSelector(wc)) {
+      if (hasClickSelector(wc) && (!hasPointerMotion(wc) || rawArgs.motion === false)) {
+        invalidatePointerMotion(wc)
         try {
-          const ok = await clickSelector(wc, selector, {
+          const ok = await commitBrowserInput(ctx, windowId, () => clickSelector(wc, selector, {
             button,
             clickCount,
             pierce,
             scrollIntoView: true,
-          })
+          }))
           if (ok) {
             return finishClick({
               ok: true,
@@ -2087,19 +2232,21 @@ async function executeAgentToolInternal(
           }
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
-          if (/not_found|element_not_found|null/i.test(msg)) {
-            return { ok: false, error: 'element_not_found', ...meta }
-          }
+          return { ok: false, error: /not_found|element_not_found/i.test(msg) ? 'element_not_found' : 'target_click_failed', message: msg, ...meta }
         }
       }
 
       let box: { x: number; y: number } | null = null
+      let locatedBackendNodeId: number | undefined
       if (pierce && hasQuerySelectorDeep(wc)) {
         const info = await querySelectorDeep(wc, selector, {
           pierce: true,
           scrollIntoView: true,
         })
-        if (info && info.width >= 1 && info.height >= 1) box = centerOf(info)
+        if (info && info.width >= 1 && info.height >= 1) {
+          box = centerOf(info)
+          locatedBackendNodeId = info.backendNodeId
+        }
       }
       if (!box) {
         const located = await isolatedEval(
@@ -2122,6 +2269,49 @@ async function executeAgentToolInternal(
         }
       }
       if (!box) return { ok: false, error: 'element_not_found', ...meta }
+      if (hasPointerMotion(wc) && rawArgs.motion !== false) {
+        if (rawArgs.motion && typeof rawArgs.motion === 'object' && Object.hasOwn(rawArgs.motion, 'holdMs')) {
+          return { ok: false, error: 'coordinate_click_required_for_hold', hint: 'Use browser_mouse(action=click) with explicit coordinates to configure press/release dwell.', ...meta }
+        }
+        // Preserve selector identity at the press/release boundary. Layout may change
+        // during the approach; a viewport-only click could otherwise hit an overlay.
+        // Native find's selector is CSS within each shadow root; >>> belongs to
+        // the deep-query grammar, so identify that already-located node by ID.
+        const snapshot = selector.includes('>>>')
+          ? await wc.getAgentSnapshot({ maxNodes: 5000, maxFrames: 1, timeoutMs: Math.min(actionMs, 30000), pierce })
+          : await wc.findAgentElements({ selector }, { maxNodes: 64, maxFrames: 1, timeoutMs: Math.min(actionMs, 30000), pierce })
+        const element = snapshot.elements.find(item => item.target.processId === wc.mainFrame.processId && item.target.routingId === wc.mainFrame.routingId
+          && (locatedBackendNodeId === undefined || item.backendNodeId === locatedBackendNodeId))
+        if (!element) return { ok: false, error: 'element_target_unavailable', ...meta }
+        if (element.disabled) return { ok: false, error: 'element_disabled', ...meta }
+        const approach = await runPointerMotion(wc, 'move', box, rawArgs, ctx.signal, actionMs)
+        if (!approach.ok) return finishClick(approach)
+        if (ctx.signal.aborted) return finishClick({ ...approach, ok: false, status: 'cancelled', reason: 'ABORTED', error: 'aborted' })
+        // Sequence steps require explicit coordinates even in target mode. Keep the
+        // center-click native, so transforms/obstructions/stale documents are checked
+        // by the existing target implementation rather than guessing local offsets.
+        try {
+          const dispatch = await commitBrowserInput(ctx, windowId, () => wc.clickSelector('', { target: element.target, button, clickCount, scrollIntoView: true }))
+          const zeroClick = dispatch.status === 'failed' && !dispatch.deliveryWarning &&
+            ['target-resolution', 'frame-routing'].includes(dispatch.stage)
+          return finishClick({
+            ...approach, ok: dispatch.status === 'dispatched',
+            status: dispatch.status === 'dispatched' ? 'completed' : 'failed',
+            method: 'dispatchInputSequence+target_clickSelector', clickDispatch: dispatch,
+            movementDispatchedCount: approach.dispatchedCount,
+            dispatchedCount: zeroClick ? approach.dispatchedCount : null,
+            ...(zeroClick ? { clickDispatchedCount: 0 } : {}),
+            ...(dispatch.status === 'failed' ? { error: dispatch.reason || 'target_click_failed', reason: dispatch.reason } : {}),
+          })
+        } catch (error) {
+          return finishClick({ ...approach, ok: false, status: 'failed', reason: 'TARGET_CLICK_REJECTED', error: 'target_click_failed',
+            method: 'dispatchInputSequence+target_clickSelector', movementDispatchedCount: approach.dispatchedCount,
+            dispatchedCount: null, message: error instanceof Error ? error.message : String(error) })
+        } finally {
+          invalidatePointerMotion(wc)
+        }
+      }
+      invalidatePointerMotion(wc)
       await dispatchTrustedPointer(wc, {
         action: 'down',
         x: box.x,
@@ -2329,8 +2519,16 @@ async function executeAgentToolInternal(
       const isHardFail = (result: Record<string, unknown> | null | undefined) => {
         const err = String(result?.error || '')
         return (
+          result?.status === 'cancelled' ||
+          (result?.ok === false && String(result.method || '').startsWith('dispatchInputSequence')) ||
           err === 'permission_denied' ||
           err === 'aborted' ||
+          err.startsWith('browser_manual_control') ||
+          err.startsWith('browser_operation_invalidated') ||
+          err.startsWith('browser_document_changed') ||
+          err.startsWith('browser_observation_required') ||
+          err === 'release_unconfirmed' ||
+          err === 'cleanup_unconfirmed' ||
           err === 'url_not_allowed' ||
           err.startsWith('unknown_tool')
         )
@@ -2779,6 +2977,20 @@ async function executeAgentToolInternal(
           continue
         }
 
+        // A timed input may already have clicked before failing. Never replay it,
+        // including from browser_flow's retry wrappers or clearance shortcuts.
+        if (isHardFail(result)) {
+          return {
+            ok: false,
+            error: String(result.error || 'step_failed'),
+            failedStep: cursor,
+            failedResult: truncateFlowResult(result),
+            attempts,
+            steps: log,
+            ...summarizePage(),
+          }
+        }
+
         // Wait for CF iframe timed out but page already navigated away — treat as success.
         if (
           looksLikeClearanceFlow &&
@@ -2793,17 +3005,6 @@ async function executeAgentToolInternal(
             steps: log,
             ...summarizePage(),
             hint: '等待/点击未按原条件完成，但页面状态已变化，视为成功。',
-          }
-        }
-
-        if (isHardFail(result)) {
-          return {
-            ok: false,
-            error: String(result.error || 'step_failed'),
-            failedStep: cursor,
-            attempts,
-            steps: log,
-            ...summarizePage(),
           }
         }
 
@@ -2866,7 +3067,7 @@ async function executeAgentToolInternal(
       if(target){
         if(typeof wc.dispatchKeyEvent!=='function')return {ok:false,error:'target_keyboard_unavailable',capabilities:browserCapabilities(wc),...meta}
         const beforeUrl=wc.getURL()
-        const dispatch=async(event:Electron.KeyEvent)=>wc.dispatchKeyEvent({...event,target})
+        const dispatch=targetKeyDispatcher(wc,target,ctx,windowId)
         const steps:Electron.AgentDispatchResult[]=[]
         if(!append){
           steps.push(await dispatch({type:'rawKeyDown',key:'Control',code:'ControlLeft'}))
@@ -2916,8 +3117,10 @@ async function executeAgentToolInternal(
       )
       if (!okFocus) return { ok: false, error: 'element_not_found', ...meta }
       const beforeUrl = wc.getURL()
-      wc.insertText(text)
+      await commitBrowserInput(ctx, windowId, () => wc.insertText(text))
       if (submit) {
+        currentBrowserOperation(ctx, windowId)
+        assertBrowserInputCurrent(wc)
         wc.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
         wc.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
         const after = await settleAfterInteraction(wc, cfg, ctx.signal, beforeUrl, 8000)
@@ -3012,7 +3215,7 @@ async function executeAgentToolInternal(
           const snapshot = what === 'agent_snapshot'
             ? await wc.getAgentSnapshot(options)
             : await wc.findAgentElements(agentQuery,options)
-          return {ok:true,value:snapshot,native:true,capabilities:browserCapabilities(wc),...meta}
+          return {ok:true,value:attachBrowserNativeRefs(wc,snapshot),native:true,capabilities:browserCapabilities(wc),...meta}
         }
         if (what === 'snapshot') {
           const snapshot = await isolatedEval(wc, worldId, pageIndexReadScript({
@@ -3470,8 +3673,9 @@ async function executeAgentToolInternal(
         const mapped=mapKeyCode(key)
         const keyName=mapped==='Return'?'Enter':mapped==='Up'?'ArrowUp':mapped==='Down'?'ArrowDown':mapped==='Left'?'ArrowLeft':mapped==='Right'?'ArrowRight':mapped==='Space'?' ':mapped
         const code=keyName===' '?'Space':keyName.length===1?`Key${keyName.toUpperCase()}`:keyName
-        const down=await wc.dispatchKeyEvent({target,type:'rawKeyDown',key:keyName,code})
-        const up=await wc.dispatchKeyEvent({target,type:'keyUp',key:keyName,code})
+        const dispatch = targetKeyDispatcher(wc,target,ctx,windowId)
+        const down=await dispatch({type:'rawKeyDown',key:keyName,code})
+        const up=await dispatch({type:'keyUp',key:keyName,code})
         return {ok:down.status==='dispatched'&&up.status==='dispatched',key:keyName,method:'target_dispatchKeyEvent',steps:[down,up]}
       }
       const selector = rawArgs.selector ? String(rawArgs.selector) : ''
@@ -3491,6 +3695,8 @@ async function executeAgentToolInternal(
         )
       }
       const keyCode = mapKeyCode(key)
+      currentBrowserOperation(ctx, windowId)
+      assertBrowserInputCurrent(wc)
       wc.sendInputEvent({ type: 'keyDown', keyCode })
       wc.sendInputEvent({ type: 'keyUp', keyCode })
       return { ok: true, key: keyCode }
@@ -3498,21 +3704,37 @@ async function executeAgentToolInternal(
 
     case 'browser_mouse': {
       const windowId=String(rawArgs.windowId||'')
-      const target=parseAgentTarget(rawArgs.target)
-      if(!target)return {ok:false,error:'agent_target_required'}
       const action=String(rawArgs.action||'')
+      const hasTarget = rawArgs.target !== undefined && rawArgs.target !== null
+      const target=parseAgentTarget(rawArgs.target)
+      if(hasTarget&&!target)return {ok:false,error:'invalid_agent_target'}
+      const rec=ctx.registry.assertWindowOwned(ctx.chatId,windowId)
+      const wc=rec.win.webContents
+      // Retain explicit legacy button/modifier movement during a down/up interaction.
+      const legacyMove = action === 'move' && target && rawArgs.motion === undefined && (rawArgs.buttons !== undefined || rawArgs.modifiers !== undefined)
+      if ((action === 'move' && !legacyMove && hasPointerMotion(wc)) || action === 'click' || action === 'drag') {
+        if (!hasPointerMotion(wc)) return { ok: false, error: 'input_sequence_unavailable', capabilities: browserCapabilities(wc) }
+        if ((rawArgs.buttons !== undefined && rawArgs.buttons !== 0) || (rawArgs.modifiers !== undefined && rawArgs.modifiers !== 0)) {
+          return { ok: false, error: 'pointer_sequence_state_conflict', hint: 'Use action=drag for a closed press/move/release sequence. Raw held buttons/modifiers belong to the legacy target down/up path.' }
+        }
+        const x = rawArgs.x === undefined && target ? 0 : rawArgs.x
+        const y = rawArgs.y === undefined && target ? 0 : rawArgs.y
+        if (typeof x !== 'number' || typeof y !== 'number') return { ok: false, error: 'pointer_coordinates_required' }
+        return runPointerMotion(wc, action as 'move' | 'click' | 'drag', { x, y }, rawArgs, ctx.signal, cfg.browser.action_timeout_ms || 15000, target || undefined)
+      }
+      if(!target)return {ok:false,error:action==='move'?'input_sequence_unavailable':'agent_target_required'}
       const eventType:Record<string,string>={move:'mouseMoved',down:'mousePressed',up:'mouseReleased',wheel:'mouseWheel'}
       const type=eventType[action]
       if(!type)return {ok:false,error:'invalid_mouse_action'}
-      const rec=ctx.registry.assertWindowOwned(ctx.chatId,windowId)
-      const wc=rec.win.webContents
+      if (rawArgs.motion !== undefined || rawArgs.from !== undefined) return { ok: false, error: 'motion_requires_sequence_action', hint: 'Motion settings apply to move/click/drag; raw down/up/wheel use the legacy target input path.' }
       if(typeof wc.dispatchMouseEvent!=='function')return {ok:false,error:'target_mouse_unavailable',capabilities:browserCapabilities(wc)}
+      invalidatePointerMotion(wc)
       const buttonRaw=String(rawArgs.button||'left')
       const button=['left','middle','right','back','forward'].includes(buttonRaw)?buttonRaw:'left'
       const x=Number(rawArgs.x)||0,y=Number(rawArgs.y)||0
-      const buttonMask=button==='left'?1:button==='right'?2:button==='middle'?4:0
+      const buttonMask=button==='left'?1:button==='right'?2:button==='middle'?4:button==='back'?8:16
       const event:Electron.MouseEvent={type,x,y,button:action==='down'||action==='up'?button:'none',clickCount:action==='down'||action==='up'?Math.max(1,Math.min(3,Number(rawArgs.clickCount)||1)):0,...(Number.isFinite(Number(rawArgs.modifiers))?{modifiers:Number(rawArgs.modifiers)}:{}),buttons:Number.isFinite(Number(rawArgs.buttons))?Number(rawArgs.buttons):action==='down'?buttonMask:0,...(action==='wheel'?{deltaX:Number(rawArgs.deltaX)||0,deltaY:Number(rawArgs.deltaY)||0}:{})}
-      const dispatch=await wc.dispatchMouseEvent({...event,target})
+      const dispatch=await dispatchOwnedTargetMouse(wc,{...event,target})
       return {ok:dispatch.status==='dispatched',method:'target_dispatchMouseEvent',dispatch}
     }
 
@@ -3531,7 +3753,7 @@ async function executeAgentToolInternal(
         return {x:Number(item.x)||0,y:Number(item.y)||0,id:Number(item.id)||index+1,radiusX:Number(item.radiusX)||1,radiusY:Number(item.radiusY)||1,force:Number(item.force)||1}
       })
       if(type!=='touchEnd'&&type!=='touchCancel'&&!touchPoints.length)return {ok:false,error:'touch_points_required'}
-      const result=await wc.dispatchTouchEvent({target,type,touchPoints})
+      const result=await dispatchOwnedTargetTouch(wc,{target,type,touchPoints})
       return {ok:result.status==='dispatched',method:'target_dispatchTouchEvent',dispatch:result}
     }
 
@@ -3542,6 +3764,17 @@ async function executeAgentToolInternal(
       const rec = ctx.registry.assertWindowOwned(ctx.chatId, windowId)
       const wc = rec.win.webContents
       const worldId = cfg.browser.evaluate_world_id
+      const target = rawArgs.target === undefined ? null : parseAgentTarget(rawArgs.target)
+      if (rawArgs.target !== undefined && !target) return { ok: false, error: 'invalid_agent_target' }
+      if (target) {
+        if (typeof wc.dispatchMouseEvent !== 'function') return { ok: false, error: 'target_mouse_unavailable' }
+        const approach = await approachNativeTarget(wc, target, rawArgs, ctx, cfg.browser.action_timeout_ms || 15000)
+        if (approach && !approach.ok) return approach
+        const dispatch = await commitBrowserInput(ctx, windowId, () => wc.dispatchMouseEvent({ type: 'mouseMoved', target }))
+        invalidatePointerMotion(wc)
+        return { ok: dispatch.status === 'dispatched', method: 'target_dispatchMouseEvent', dispatch, motionApplied: !!approach }
+      }
+      if (!selector) return { ok: false, error: 'selector_or_ref_required' }
       await prepareActionPageWait(wc, cfg, rawArgs, { signal: ctx.signal, worldId, selector })
       const sel = await waitForSelectorSoft(
         wc,
@@ -3576,6 +3809,10 @@ async function executeAgentToolInternal(
         )) as { x: number; y: number } | null
       }
       if (!box) return { ok: false, error: 'element_not_found' }
+      if (hasPointerMotion(wc) && rawArgs.motion !== false) {
+        return { ...await runPointerMotion(wc, 'move', box, rawArgs, ctx.signal, cfg.browser.action_timeout_ms || 15000), pierce }
+      }
+      invalidatePointerMotion(wc)
       await dispatchTrustedPointer(wc, { action: 'move', x: box.x, y: box.y })
       return { ok: true, x: box.x, y: box.y, pierce, method: sel.via || 'js' }
     }
@@ -3623,16 +3860,22 @@ async function executeAgentToolInternal(
       const windowId = String(rawArgs.windowId || '')
       const rec = ctx.registry.assertWindowOwned(ctx.chatId, windowId)
       const wc = rec.win.webContents
+      const timeout = Number(rawArgs.timeoutMs) || cfg.browser.navigation_timeout_ms || 30000
+      let startNavigation: () => void
       if (name === 'browser_back') {
         if (!wc.canGoBack()) return { ok: false, error: 'cannot_go_back' }
-        wc.goBack()
+        startNavigation = () => wc.goBack()
       } else if (name === 'browser_forward') {
         if (!wc.canGoForward()) return { ok: false, error: 'cannot_go_forward' }
-        wc.goForward()
+        startNavigation = () => wc.goForward()
       } else {
-        wc.reload()
+        startNavigation = () => wc.reload()
       }
-      const timeout = Number(rawArgs.timeoutMs) || cfg.browser.navigation_timeout_ms || 30000
+      const navigation = await startOwnedHistoryNavigation(wc, ctx.signal, startNavigation, timeout)
+      if (navigation.timedOut) return {
+        ok: true, url: wc.getURL(), title: wc.getTitle(), partial: true,
+        loading: wc.isLoadingMainFrame(), waitTimedOut: true, waitReason: `timeout:${name}`,
+      }
       const wait = await applyPageWait(wc, cfg, {
         waitUntil: resolveWaitUntil(
           rawArgs.waitUntil,

@@ -1,16 +1,22 @@
 import {registerBrowserWorkspace} from './modules/browser-workspace-ipc'
+import {subchatIndex} from '../shared/subchat-presentation'
 import {BrowserStartStore} from './modules/browser-start-store'
 import {registerFileWindows} from './modules/file-windows'
+import {registerNativeUi} from './modules/native-ui'
 import { registerLiteratureSearch } from './modules/literature-search'
 import {downloadNeedsLog} from '../shared/browser-download-status'
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell, nativeTheme } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { version as productVersion } from '../package.json'
 import { applyUserDataPath, ensureDir, ensurePortableRoot, isPortableRuntime, PORTABLE_DATA_DIRNAME, resolveDataRoot } from './data-root'
 import { ConfigService } from './modules/config-service'
+import { configureBrowserAutomation } from './modules/browser-automation-controller'
 import { mainWindowChrome } from './modules/window-chrome'
+import {createSettingsNavigation,resetsSettingsDocument} from './modules/settings-navigation'
+import { appearancePalette } from '../shared/appearance'
 import { fetchOpenAiModelsList } from '../shared/openai-models'
 import { probeModel } from './modules/model-probe'
 import { CreatorService } from './modules/creator-service'
@@ -24,10 +30,32 @@ import {WorkspaceResourceIndex} from './modules/workspace-resource-index'
 import {associateResourceEvidence} from '../shared/workspace-resources'
 import { FileDownloadService } from './modules/file-download'
 import { BrowserDownloadList } from './modules/browser-download-list'
+import { assertDownloadScope, downloadChatScope, filterDownloadScope, type DownloadCaller } from './modules/browser-download-access'
 import { ToolDownloadList } from '../shared/tool-downloads'
-import type { AgentEvent } from '../shared/types'
+import type { AgentEvent, BrowserDownloadsChanged } from '../shared/types'
 const toolDownloads = new ToolDownloadList()
-function listDownloads(chatId?: string) { return [...browserDownloads.list(chatId), ...toolDownloads.list(chatId)].sort((a,b) => b.updatedAt - a.updatedAt) }
+function listDownloads(chatId?: string) { return [...browserDownloads.list(chatId), ...toolDownloads.list(chatId)].sort((a,b) => b.createdAt - a.createdAt) }
+function downloadHostChats(hostId: string): string[] {
+  return registry.hosts.hostPages(hostId).flatMap(id => {
+    const page = registry.hosts.pages.get(id)
+    return page ? [page.chatId] : []
+  })
+}
+function downloadCaller(event: Electron.IpcMainInvokeEvent | null): DownloadCaller {
+  // The remote RPC registry supplies null only after its existing authentication.
+  if (event === null) return { kind: 'remote' }
+  if (!event?.sender || event.sender.isDestroyed() || event.senderFrame !== event.sender.mainFrame) return { kind: 'denied' }
+  if (mainWindow && event.sender === mainWindow.webContents) return { kind: 'trusted' }
+  const host = registry?.hosts.hostForSender(event.sender)
+  return host && !host.embedded && !host.window.isDestroyed()
+    ? { kind: 'host', chatIds: downloadHostChats(host.id) } : { kind: 'denied' }
+}
+function downloadForRequest(event: Electron.IpcMainInvokeEvent | null, id: string, chatId?: string) {
+  const scope = downloadChatScope(downloadCaller(event), chatId)
+  const key = String(id || '').trim()
+  const entry = toolDownloads.get(key) || browserDownloads.get(key)
+  return entry ? assertDownloadScope(entry, scope) : null
+}
 import { WorkspaceShell } from './modules/workspace-shell'
 import { PermissionGate, type PermissionDecision, type PermissionRequest } from './modules/permission-gate'
 import { SecretsStore } from './modules/secrets'
@@ -37,12 +65,19 @@ import { SkillStore } from './modules/skill-store'
 import { MarketplaceClient } from './modules/marketplace-client'
 import { AgentRuntime } from './modules/agent-runtime'
 import { AgentInbox } from './modules/agent-inbox'
+import {compileComposerDocument,normalizeComposerDocument,type ComposerDraftOptions,type ComposerSubmitInput,type ComposerQueueEditOptions} from '../shared/composer-document'
+import {makeFileTab} from '../shared/file-tabs'
+import {createComposerSources} from './modules/composer-sources'
+import type {ComposerImportFile,ComposerExcerptInput} from '../shared/composer-sources'
 let agentInbox: AgentInbox | undefined
 import { createAppTray, type TrayController } from './modules/tray'
 import { RemoteServer } from './modules/remote-server'
 import { NavoraRpcRegistry } from './modules/remote-rpc'
 import { loadWindowState, trackWindowState } from './modules/window-state'
-import type { AppConfig } from '../shared/config'
+import type { AppConfig, AppConfigPatch } from '../shared/config'
+import type {SettingsCommit} from '../shared/settings-commit'
+import type {BrowserSessionUpdate,BrowserSessionManageAction} from '../shared/types'
+import {confirmedModelSelection,validateModelSelection,assertConfirmedModelSelection} from '../shared/model-selection'
 import {
   assertRemoteAccessChange,
   resolveForkDecision,
@@ -77,6 +112,7 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 let mainWindow: BrowserWindow | null = null
+const settingsNavigation=createSettingsNavigation({getMain:()=>mainWindow,createMain:()=>createWindow()})
 let tray: TrayController | null = null
 let isQuitting = false
 
@@ -126,6 +162,7 @@ let agent!: AgentRuntime
 let remote!: RemoteServer
 let browserAnnotations:ReturnType<typeof registerBrowserWorkspace>|undefined
 let fileWindows:ReturnType<typeof registerFileWindows>|undefined
+let nativeUiService:ReturnType<typeof registerNativeUi>|undefined
 const rpc = new NavoraRpcRegistry()
 
 function rpcHandle(channel: string, handler: (...args: any[]) => any): void {
@@ -138,6 +175,7 @@ const pendingPerm = new Map<
   string,
   {
     chatId: string
+    request: PermissionRequest
     timer: ReturnType<typeof setTimeout>
     resolve: (d: PermissionDecision) => void
   }
@@ -147,6 +185,7 @@ const pendingAsk = new Map<
   string,
   {
     chatId: string
+    request: AgentAskRequest
     timer: ReturnType<typeof setTimeout> | null
     resolve: (r: AgentAskResponse) => void
   }
@@ -211,19 +250,27 @@ function resolveSkillReview(id: string, response: SkillReviewResponse, notifyUi 
   return true
 }
 
-function abortAsksForChat(chatId: string): void {
+function abortAsksForChat(chatId: string): boolean {
+  let aborted=false
   for (const [id, p] of [...pendingAsk.entries()]) {
     if (p.chatId !== chatId) continue
     resolveAsk(id, { id, answer: '', source: 'aborted' }, true)
+    aborted=true
   }
+  // Unlimited choices replayed after restart have no live promise resolver.
+  const parked=chats?.get(chatId)?.pendingAsk
+  if(parked){chats.setPendingAsk(chatId,null);pushAgentAskCancel(parked.id,'aborted');pushChatChanged({type:'upsert',chatId});aborted=true}
   for (const [id, p] of [...pendingPerm.entries()]) {
     if (p.chatId !== chatId) continue
     resolvePerm(id, 'deny', true)
+    aborted=true
   }
   for (const [id, p] of [...pendingSkillReview.entries()]) {
     if (p.chatId !== chatId) continue
     resolveSkillReview(id, { id, source: 'aborted' }, true)
+    aborted=true
   }
+  return aborted
 }
 
 function abortAllAsks(opts?: { preservePersistedUnlimited?: boolean }): void {
@@ -345,6 +392,7 @@ function emitBrowserTreePayload(chatId: string): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('navora:browser.treeUpdated', payload)
   }
+  registry.hosts.notifyDetachedTreeChanged(payload)
   remote?.broadcast('navora:browser.treeUpdated', payload)
 }
 
@@ -358,6 +406,8 @@ function pushBrowserTree(chatId: string): void {
 }
 
 let downloadsPushTimer: ReturnType<typeof setTimeout> | null = null
+let downloadsRevision = 0
+const downloadsInstanceId = randomUUID()
 const workspaceChangedPending = new Set<string>()
 let workspacePushTimer: ReturnType<typeof setTimeout> | null = null
 function pushWorkspaceChanged(chatId: string): void {
@@ -381,12 +431,18 @@ function pushWorkspaceChanged(chatId: string): void {
 }
 
 function pushBrowserDownloadsChanged(): void {
+  downloadsRevision++
   if (downloadsPushTimer) return
   downloadsPushTimer = setTimeout(() => {
     downloadsPushTimer = null
-    const payload = { downloads: listDownloads() }
+    const payload: BrowserDownloadsChanged = { downloads: listDownloads(), revision: downloadsRevision, instanceId: downloadsInstanceId }
     for(const win of BrowserWindow.getAllWindows()){
-      if(!win.isDestroyed()&&(win===mainWindow||registry?.hosts.hostForSender(win.webContents)))win.webContents.send('navora:downloads.changed',payload)
+      if(win.isDestroyed())continue
+      if(win===mainWindow){win.webContents.send('navora:downloads.changed',payload);continue}
+      const host=registry?.hosts.hostForSender(win.webContents)
+      if(host&&!host.embedded)win.webContents.send('navora:downloads.changed',{
+        ...payload,downloads:filterDownloadScope(payload.downloads,new Set(downloadHostChats(host.id))),
+      } satisfies BrowserDownloadsChanged)
     }
     remote?.broadcast('navora:downloads.changed', payload)
   }, 100)
@@ -497,10 +553,19 @@ function pushChatChanged(payload: { type: 'upsert' | 'removed'; chatId: string }
 
 function pushConfigChanged(cfg: AppConfig): void {
   const payload = JSON.parse(JSON.stringify(cfg)) as AppConfig
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('navora:config.changed', payload)
+  const rendererBase = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents.getURL().split('#')[0] : ''
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed() || (win !== mainWindow && (!rendererBase || win.webContents.getURL().split('#')[0] !== rendererBase))) continue
+    updateWindowAppearance(win, cfg)
+    win.webContents.send('navora:config.changed', payload)
   }
   remote?.broadcast('navora:config.changed', payload)
+}
+
+function updateWindowAppearance(win: BrowserWindow, cfg: AppConfig): void {
+  const theme = appearancePalette(cfg.app.appearance_theme, cfg.app.appearance_mode, nativeTheme.shouldUseDarkColors)
+  win.setBackgroundColor(theme.shell)
+  if (process.platform === 'win32') win.setTitleBarOverlay({ color: theme.shell, symbolColor: theme.ink })
 }
 
 /** Prefer main window; focus it so native file dialogs are not hidden behind HTML overlays. */
@@ -657,6 +722,7 @@ async function createWindow(): Promise<void> {
     win.hide()
   })
   win.on('closed', () => {
+    settingsNavigation.dispose()
     mainWindow = null
   })
   const pushMaximized = () => {
@@ -666,6 +732,10 @@ async function createWindow(): Promise<void> {
   win.on('maximize', pushMaximized)
   win.on('unmaximize', pushMaximized)
   win.webContents.on('did-finish-load', pushMaximized)
+  win.webContents.on('did-start-navigation',(_event,_url,isInPlace,isMainFrame)=>{if(resetsSettingsDocument(isInPlace,isMainFrame))settingsNavigation.loading(win)})
+  // A fresh document must acknowledge readiness after its App listener exists.
+  // The mount announcement covers a late app boot; this request covers finish-load ordering.
+  win.webContents.on('did-finish-load',()=>{if(win===mainWindow&&!win.isDestroyed())win.webContents.send('navora:app.settings.request-ready')})
 
   const devUrl = process.env.VITE_DEV_SERVER_URL
   if (devUrl) {
@@ -677,6 +747,18 @@ async function createWindow(): Promise<void> {
 }
 
 function registerIpc(): void {
+  function settingsCaller(event:Electron.IpcMainInvokeEvent,mainOnly=false){
+    if(event.sender.isDestroyed()||event.senderFrame!==event.sender.mainFrame)throw Error('settings_ui_only')
+    const win=BrowserWindow.fromWebContents(event.sender)
+    if(!win||win.isDestroyed()||win.webContents!==event.sender)throw Error('settings_ui_only')
+    if(win===mainWindow)return win
+    if(!mainOnly&&(registry.hosts.hostForSender(event.sender)||fileWindows?.ownsSender(event.sender)))return win
+    throw Error('settings_ui_only')
+  }
+  ipcMain.handle('navora:app.settings.open',(event,section:unknown)=>settingsNavigation.open(settingsCaller(event),section))
+  ipcMain.handle('navora:app.settings.ready',event=>settingsNavigation.ready(settingsCaller(event,true)))
+  ipcMain.handle('navora:app.settings.handled',(event,id:unknown,accepted:unknown)=>{if(typeof id!=='string'||typeof accepted!=='boolean')throw Error('invalid_settings_ack');settingsNavigation.handled(settingsCaller(event,true),id,accepted)})
+  ipcMain.handle('navora:app.settings.return',(event,id:unknown,restore:unknown)=>{if(typeof id!=='string'||typeof restore!=='boolean')throw Error('invalid_settings_return');settingsNavigation.returnToSource(settingsCaller(event,true),id,restore)})
   registerLiteratureSearch(ipcMain)
   const creatorCall = async <T>(operation: () => T | Promise<T>) => {
     try { return { ok: true as const, ...await operation() } }
@@ -757,9 +839,25 @@ function registerIpc(): void {
   })
 
   rpcHandle('navora:config.get', () => config.get())
-  rpcHandle('navora:config.save', async (_e, patch: Partial<AppConfig>) => {
+  rpcHandle('navora:config.commit', async (_e, request:SettingsCommit) => {
+    const prev=JSON.parse(JSON.stringify(config.get())) as AppConfig
+    const commit=JSON.parse(JSON.stringify(request)) as SettingsCommit
+    const patch=commit.patch as AppConfigPatch & {remote?:AppConfig['remote'] & {password?:string}}
+    if(patch.remote)remote.applyPasswordFromPatch(patch.remote as unknown as Record<string,unknown>)
+    const preview={...prev,...patch,remote:{...prev.remote,...patch.remote}} as AppConfig
+    assertRemoteAccessChange(prev.remote,preview.remote)
+    const saved=config.commit(commit)
+    await configureBrowserAutomation(saved.browser.automation)
+    if(JSON.stringify(prev.remote)!==JSON.stringify(saved.remote)||(saved.remote.enabled&&!remote.status().running)){
+      try{await remote.syncFromConfig()}catch(e){console.warn('[remote] sync after config.commit failed',e)}
+    }
+    if(prev.browser.log_datadome_telemetry!==saved.browser.log_datadome_telemetry)registry.reapplyNetwork()
+    syncEmptyChatsToConfigDefaults(prev,saved);pluginDevWatch?.sync()
+    const out=JSON.parse(JSON.stringify(config.get())) as AppConfig;pushConfigChanged(out);return out
+  })
+  rpcHandle('navora:config.save', async (_e, patch: AppConfigPatch) => {
     const prev = JSON.parse(JSON.stringify(config.get())) as AppConfig
-    const next = JSON.parse(JSON.stringify(patch)) as Partial<AppConfig> & {
+    const next = JSON.parse(JSON.stringify(patch)) as AppConfigPatch & {
       remote?: AppConfig['remote'] & { password?: string }
     }
     if (next.remote) {
@@ -776,8 +874,10 @@ function registerIpc(): void {
     } as AppConfig
     assertRemoteAccessChange(prev.remote, preview.remote)
     const saved = config.update(next)
+    // Native errors belong to per-page effective state, not the persisted save.
+    await configureBrowserAutomation(saved.browser.automation)
     // Config is already on disk; remote bind failures must not fail the save.
-    if (JSON.stringify(prev.remote) !== JSON.stringify(saved.remote)) {
+    if ((JSON.stringify(prev.remote) !== JSON.stringify(saved.remote) || (saved.remote.enabled && !remote.status().running))) {
       try { await remote.syncFromConfig() }
       catch (e) { console.warn('[remote] sync after config.save failed', e) }
     }
@@ -788,7 +888,7 @@ function registerIpc(): void {
     }
     syncEmptyChatsToConfigDefaults(prev, saved)
     pluginDevWatch?.sync()
-    const out = JSON.parse(JSON.stringify(saved)) as AppConfig
+    const out = JSON.parse(JSON.stringify(config.get())) as AppConfig
     pushConfigChanged(out)
     return out
   })
@@ -1475,35 +1575,47 @@ function registerIpc(): void {
     }
   })
 
-  rpcHandle('navora:downloads.list', (_e, chatId?: string) => listDownloads(chatId))
-  rpcHandle('navora:downloads.clear', (_e, chatId?: string) => {
-    toolDownloads.clear(chatId)
-    const res = browserDownloads.clear(chatId)
+  rpcHandle('navora:downloads.list', (event, chatId?: string) => filterDownloadScope(listDownloads(), downloadChatScope(downloadCaller(event), chatId)))
+  rpcHandle('navora:downloads.clear', (event, chatId?: string) => {
+    const scope = downloadChatScope(downloadCaller(event), chatId)
+    const before = listDownloads().length
+    for (const id of scope ? [...scope] : [undefined]) {
+      toolDownloads.clear(id)
+      browserDownloads.clear(id)
+    }
     pushBrowserDownloadsChanged()
-    return res
+    return { ok: true, removed: before - listDownloads().length }
   })
-  rpcHandle('navora:downloads.remove', (_e, id: string) => {
-    const res = String(id).startsWith('tool:') ? toolDownloads.remove(id) : browserDownloads.remove(String(id || ''))
+  rpcHandle('navora:downloads.remove', (event, id: string, chatId?: string) => {
+    const entry = downloadForRequest(event, id, chatId)
+    if (!entry) return { ok: false, error: 'not_found' }
+    const res = entry.source === 'tool' ? toolDownloads.remove(entry.id) : browserDownloads.remove(entry.id)
     if (res.ok) pushBrowserDownloadsChanged()
     return res
   })
-  rpcHandle('navora:downloads.pause', (_e, id: string) => {
-    const res = browserDownloads.pause(String(id || ''))
+  rpcHandle('navora:downloads.pause', (event, id: string, chatId?: string) => {
+    const entry = downloadForRequest(event, id, chatId)
+    if (!entry) return { ok: false, error: 'not_found' }
+    const res = browserDownloads.pause(entry.id)
     if (res.ok) pushBrowserDownloadsChanged()
     return res
   })
-  rpcHandle('navora:downloads.resume', (_e, id: string) => {
-    const res = browserDownloads.resume(String(id || ''))
+  rpcHandle('navora:downloads.resume', (event, id: string, chatId?: string) => {
+    const entry = downloadForRequest(event, id, chatId)
+    if (!entry) return { ok: false, error: 'not_found' }
+    const res = browserDownloads.resume(entry.id)
     if (res.ok) pushBrowserDownloadsChanged()
     return res
   })
-  rpcHandle('navora:downloads.cancel', (_e, id: string) => {
-    const res = browserDownloads.cancel(String(id || ''))
+  rpcHandle('navora:downloads.cancel', (event, id: string, chatId?: string) => {
+    const entry = downloadForRequest(event, id, chatId)
+    if (!entry) return { ok: false, error: 'not_found' }
+    const res = browserDownloads.cancel(entry.id)
     if (res.ok) pushBrowserDownloadsChanged()
     return res
   })
-  rpcHandle('navora:downloads.reveal', async (_e, id: string) => {
-    const entry = toolDownloads.get(String(id || '')) || browserDownloads.get(String(id || ''))
+  rpcHandle('navora:downloads.reveal', async (event, id: string, chatId?: string) => {
+    const entry = downloadForRequest(event, id, chatId)
     if (!entry?.relPath) return { ok: false, error: 'not_found' }
     if (entry.state !== 'completed') return { ok: false, error: 'not_ready' }
     try {
@@ -1512,8 +1624,8 @@ function registerIpc(): void {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
   })
-  rpcHandle('navora:downloads.open', async (_e, id: string) => {
-    const entry = toolDownloads.get(String(id || '')) || browserDownloads.get(String(id || ''))
+  rpcHandle('navora:downloads.open', async (event, id: string, chatId?: string) => {
+    const entry = downloadForRequest(event, id, chatId)
     if (!entry?.relPath) return { ok: false, error: 'not_found' }
     if (entry.state !== 'completed') return { ok: false, error: 'not_ready' }
     try {
@@ -1542,6 +1654,26 @@ function registerIpc(): void {
 
   rpcHandle('navora:chats.list', () => chats.list())
   rpcHandle('navora:chats.get', (_e, id: string) => chats.get(id))
+  const subchatChildren=(parentId:string)=>{
+    const parent=chats.get(parentId)
+    if(!parent||parent.kind==='sub')throw Error('subchat_parent_not_found')
+    return chats.listChildren(parentId)
+  }
+  const subchatPending=(parentId:string)=>{
+    const children=subchatChildren(parentId),ids=new Set(children.map(c=>c.id)),asks=new Map(children.filter(c=>c.pendingAsk).map(c=>[c.pendingAsk!.id,c.pendingAsk!]))
+    for(const entry of pendingAsk.values())if(ids.has(entry.chatId))asks.set(entry.request.id,entry.request)
+    return {asks:[...asks.values()],permissions:[...pendingPerm.values()].filter(entry=>ids.has(entry.chatId)).map(entry=>entry.request)}
+  }
+  rpcHandle('navora:subchats.list',async(_e,parentId:string)=>{
+    const children=subchatChildren(parentId),pending=subchatPending(parentId)
+    return Promise.all(children.map(async chat=>{
+      const item=subchatIndex(chat,pending.asks.filter(req=>req.chatId===chat.id).length+pending.permissions.filter(req=>req.chatId===chat.id).length)
+      try{const snapshot=await workspaceResourceIndex!.resources(chat.id);if(snapshot.ok&&!snapshot.unavailable){item.resourceCount=snapshot.entries.length+registry.getTree(chat.id).reduce((n,session)=>n+session.windows.length,0);item.resourcesTruncated=snapshot.truncated}}catch{/* Unknown counts stay absent, never presented as zero. */}
+      return item
+    }))
+  })
+  rpcHandle('navora:subchats.pending',(_e,parentId:string)=>subchatPending(parentId))
+
   rpcHandle('navora:chats.export', async (_e, chatId: string) => {
     const id = String(chatId || '').trim()
     if (!id) return { ok: false, error: 'chat_id_required' }
@@ -1670,28 +1802,27 @@ function registerIpc(): void {
       _e: unknown,
       chatId: string,
       text: string,
-      opts?: { updatedAt?: number; maxChars?: number },
+      opts?: ComposerDraftOptions,
     ) => {
       if (!chatId) throw new Error('chatId_required')
       const existing = chats.get(chatId)
       if (!existing) return null
-      const max =
-        typeof opts?.maxChars === 'number' && Number.isFinite(opts.maxChars)
-          ? Math.min(200000, Math.max(1000, Math.floor(opts.maxChars)))
-          : Math.min(
-              200000,
-              Math.max(1000, Math.floor(config.get().app.max_composer_chars || 16000)),
-            )
-      let body = String(text ?? '')
-      if (body.length > max) body = body.slice(0, max)
+      const document=opts?.document?normalizeComposerDocument(opts.document,chatId):undefined
+      const body=document?compileComposerDocument(document).content:String(text??'')
+      // Draft durability is independent of the current model's sending budget.
+      // Structured drafts have schema limits; legacy strings have a transport cap.
+      if(!document&&body.length>200000)throw Error('composer_document_too_large')
       const prevDraft = existing.draft || ''
       const prevAt = existing.draftUpdatedAt || 0
+      const previousRevision=existing.draftRevision||0
+      const previousConflict=existing.draftConflict?.recoveryId
       const chat = chats.setDraft(chatId, body, {
+        ...opts,document,
         updatedAt: typeof opts?.updatedAt === 'number' ? opts.updatedAt : Date.now(),
       })
       if (
         chat &&
-        ((chat.draft || '') !== prevDraft || (chat.draftUpdatedAt || 0) !== prevAt)
+        ((chat.draft || '') !== prevDraft || (chat.draftUpdatedAt || 0) !== prevAt || (chat.draftRevision||0)!==previousRevision || chat.draftConflict?.recoveryId!==previousConflict || !!chat.draftConflict)
       ) {
         pushChatChanged({ type: 'upsert', chatId })
       }
@@ -1699,8 +1830,84 @@ function registerIpc(): void {
     },
   )
 
-  const startAgentMessage = async (chatId:string,payload:{content:string;refs?:BrowserContextRef[]}) => {
+  rpcHandle('navora:chats.saveDraftRecovery',(_e,chatId:string,document:import('../shared/composer-document').ComposerDocument,reason:'conflict'|'send_failed'='send_failed')=>{
+    if(!['conflict','send_failed'].includes(reason))throw Error('invalid_draft_recovery')
+    chats.recoverDraft(chatId,document,reason);pushChatChanged({type:'upsert',chatId});return chats.get(chatId)
+  })
+  rpcHandle('navora:chats.dismissDraftRecovery',(_e,chatId:string,id:string)=>{const chat=chats.dismissDraftRecovery(chatId,id);if(chat)pushChatChanged({type:'upsert',chatId});return chat})
+
+  const composerSources=createComposerSources({files,registry,chatExists:id=>!!chats.get(id),annotations:()=>browserAnnotations,caller:event=>{
+    if(event===null)return {kind:'remote'}
+    if(event.sender.isDestroyed()||event.senderFrame!==event.sender.mainFrame)return {kind:'denied'}
+    if(mainWindow&&!mainWindow.isDestroyed()&&event.sender===mainWindow.webContents)return {kind:'main'}
+    const host=registry.hosts.hostForSender(event.sender)
+    return host&&!host.embedded&&!host.window.isDestroyed()?{kind:'host',hostId:host.id}:{kind:'denied'}
+  }})
+  rpcHandle('navora:composer.importContextFiles',(event:Electron.IpcMainInvokeEvent|null,chatId:string,input:ComposerImportFile[])=>composerSources.importContextFiles(event,chatId,input))
+  rpcHandle('navora:composer.contextExcerpt',(event:Electron.IpcMainInvokeEvent|null,chatId:string,input:ComposerExcerptInput)=>composerSources.contextExcerpt(event,chatId,input))
+
+  const prepareComposerInput=async(chatId:string,input:ComposerSubmitInput):Promise<ComposerSubmitInput>=>{
+    if(!chats.get(chatId))throw Error('chat_not_found')
+    const modelIdentity=input.modelIdentity||confirmedModelSelection(config.get(),chats.get(chatId)!)
+    validateModelSelection(config.get(),modelIdentity)
+    const document=input.document?normalizeComposerDocument(input.document,chatId):undefined
+    const compiled=document?compileComposerDocument(document):undefined
+    const imagePaths=new Set<string>();let imageBytes=0
+    for(const {block,content:excerpt} of compiled?.contexts||[]){
+      const source=block.source
+      if(source.chatId&&source.chatId!==chatId)throw Error('composer_context_wrong_chat')
+      if(source.kind==='url'){
+        try{const url=new URL(source.url||'');if(!['http:','https:'].includes(url.protocol))throw Error()}catch{throw Error('invalid_composer_url')}
+      }
+      if(block.mode==='excerpt'){
+        if(block.status==='loading')throw Error('composer_context_unavailable')
+        if(!excerpt.trim())throw Error('composer_excerpt_empty')
+        if(source.kind==='file'||source.kind==='image')makeFileTab(chatId,source.path||'')
+        continue
+      }
+      if(block.status&&block.status!=='ready')throw Error('composer_context_unavailable')
+      if(source.kind==='file'||source.kind==='image'){
+        if(block.range?.startLine||block.range?.endLine||block.range?.pageStart||block.range?.pageEnd)throw Error('composer_reference_range_requires_excerpt')
+        const relative=makeFileTab(chatId,source.path||'').path
+        let absolute:string
+        try{absolute=await files.resolveExisting(chatId,relative)}catch{throw Error('composer_source_missing')}
+        const stat=await fs.promises.stat(absolute)
+        if(!stat.isFile())throw Error('composer_source_not_file')
+        if(block.mode==='reference'&&block.version!==undefined&&String(block.version)!==String(stat.mtimeMs)+':'+String(stat.size))throw Error('composer_source_changed')
+        if(source.kind==='image'&&!imagePaths.has(relative)){
+          imagePaths.add(relative);imageBytes+=stat.size
+          if(stat.size>12*1024*1024||imageBytes>32*1024*1024)throw Error('composer_images_budget_exceeded')
+        }
+      }else if(source.kind==='message'){
+        if(!source.messageId||!chats.get(chatId)?.messages.some(message=>message.id===source.messageId))throw Error('composer_source_missing')
+      }else if(['page','session','annotation'].includes(source.kind)&&!source.browserRef)throw Error('invalid_composer_context')
+    }
+    const refs=compiled?.refs??(Array.isArray(input.refs)?input.refs:[])
+    if(refs.length>100)throw Error('too_many_context_references')
+    for(const ref of refs){
+      const session=registry.getSessionRecord(ref.sessionId)
+      if(!session||session.chatId!==chatId)throw Error('composer_source_missing')
+      if(ref.kind==='window'){
+        const page=ref.windowId&&registry.getWindowRecord(ref.windowId)
+        if(!page||page.chatId!==chatId||page.sessionId!==ref.sessionId)throw Error('composer_source_missing')
+      }else if(ref.kind==='annotation'){
+        if(!ref.annotationId||!browserAnnotations)throw Error('composer_source_missing')
+        const annotation=browserAnnotations.get(chatId,ref.annotationId)
+        if(annotation.sessionId!==ref.sessionId)throw Error('composer_context_wrong_chat')
+        if(ref.annotationRevision&&annotation.revision!==ref.annotationRevision&&!fs.existsSync(files.resolve(chatId,'browser-annotations/'+ref.annotationId+'-r'+ref.annotationRevision+'.json')))throw Error('composer_source_changed')
+      }else if(ref.kind!=='session')throw Error('invalid_composer_context')
+    }
+    const content=compiled?.content??String(input.content||'')
+    const max=Math.min(200000,Math.max(1000,Math.floor(config.get().app.max_composer_chars||16000)))
+    if(content.length>max)throw Error('message_too_long')
+    // Source reads above can yield while another window edits this connection.
+    validateModelSelection(config.get(),modelIdentity)
+    return {...input,content,refs,document,modelIdentity}
+  }
+
+  const startAgentMessage = async (chatId:string,raw:ComposerSubmitInput) => {
       if (!chatId) throw new Error('chatId_required')
+      const payload=await prepareComposerInput(chatId,raw)
       const maxChars = Math.min(
         200000,
         Math.max(1000, Math.floor(config.get().app.max_composer_chars || 16000)),
@@ -1712,17 +1919,14 @@ function registerIpc(): void {
       const refs = payload?.refs || []
       if (!content && !refs.length) throw new Error('empty_message')
 
-      // Check before appendMessage to avoid orphan user messages on busy/parallel limit.
-      if (agent.isRunning(chatId)) throw new Error('agent_already_running')
-      const maxParallel = config.get().browser.max_parallel_agent_chats || 4
-      if (agent.runningRootChatIds().length >= maxParallel) {
-        throw new Error('max_parallel_agent_chats')
-      }
+      // Validate the same root/child quota before accepting the user message.
+      if(payload.modelIdentity)validateModelSelection(config.get(),payload.modelIdentity)
+      agent.assertCanRun(chatId)
 
       const userMsg = chats.appendMessage(chatId, {
         role: 'user',
         content: content || '（附带浏览器上下文）',
-        meta: refs.length ? { refs } : undefined,
+        meta: {modelIdentity:payload.modelIdentity,...(refs.length?{refs}:{}),...(payload.document?{document:payload.document}:{}),...(payload.clientMessageId?{clientMessageId:payload.clientMessageId}:{})},
       })
       if (userMsg) {
         pushAgentEvent({ type: 'message', chatId, message: userMsg })
@@ -1733,13 +1937,11 @@ function registerIpc(): void {
         if (provisional) {
           pushAgentEvent({ type: 'title', chatId, title: provisional, fromAi: false })
         }
-        // Clear draft after successful send (synced to remote clients).
-        chats.setDraft(chatId, '')
         pushChatChanged({ type: 'upsert', chatId })
       }
 
       // Fire-and-forget after registration; start-gate errors already thrown above.
-      void agent.run({ chatId, userText: content, refs }).catch((e) => {
+      void agent.run({ chatId, userText: content, refs,modelIdentity:payload.modelIdentity }).catch((e) => {
         console.error('[agent.run]', e)
       })
       return chats.get(chatId)
@@ -1748,34 +1950,47 @@ function registerIpc(): void {
     get:id=>chats.get(id),save:(id,entries,paused)=>chats.setMessageQueue(id,entries,paused),
     changed:chatId=>pushChatChanged({type:'upsert',chatId}),running:id=>agent.isRunning(id),
     start:startAgentMessage,insert:(id,input)=>agent.insertUserInput(id,input),
+    validateIncoming:(id,input)=>{if(input.modelIdentity)assertConfirmedModelSelection(input.modelIdentity,confirmedModelSelection(config.get(),chats.get(id)||{}))},
+    prepare:prepareComposerInput,accepted:(id,key,fingerprint)=>chats.rememberAcceptedMessage(id,key,fingerprint),
     maxChars:()=>Math.min(200000,Math.max(1000,Math.floor(config.get().app.max_composer_chars||16000))),
   })
   // Restore drafts of queued work without silently resuming automation on launch.
   for(const chat of chats.list())if(chat.queuedMessages?.length)agentInbox.pause(chat.id)
-  rpcHandle('navora:agent.run',(_e,chatId:string,payload:{content:string;refs?:BrowserContextRef[]})=>startAgentMessage(chatId,payload))
-  rpcHandle('navora:agent.submit',async(_e,chatId:string,payload:{content:string;refs?:BrowserContextRef[]},mode?:'queue'|'insert')=>{
-    await agentInbox!.submit(chatId,payload,mode==='insert'||mode==='queue'?mode:config.get().app.running_message_mode==='insert'?'insert':'queue')
-    chats.setDraft(chatId,'');pushChatChanged({type:'upsert',chatId})
-    return chats.get(chatId)
+  rpcHandle('navora:agent.run',async(_e,chatId:string,payload:ComposerSubmitInput)=>{
+    const revision=payload.draftRevision??chats.get(chatId)?.draftRevision
+    await startAgentMessage(chatId,payload);chats.clearDraftRevision(chatId,revision);pushChatChanged({type:'upsert',chatId});return chats.get(chatId)
   })
-  rpcHandle('navora:agent.queue.edit',(_e,id:string,messageId:string,content:string)=>{agentInbox!.edit(id,messageId,content);return chats.get(id)})
+  rpcHandle('navora:agent.submit',async(_e,chatId:string,payload:ComposerSubmitInput,mode?:'queue'|'insert')=>{
+    const revision=payload.draftRevision??chats.get(chatId)?.draftRevision
+    try{
+      const accepted=await agentInbox!.submit(chatId,payload,mode==='insert'||mode==='queue'?mode:config.get().app.running_message_mode==='insert'?'insert':'queue')
+      const current=chats.get(chatId)?.draftDocument
+      const unfinishedClear=!accepted&&payload.document&&current?.id===payload.document.id&&current.revision===payload.document.revision&&JSON.stringify(current.content)===JSON.stringify(payload.document.content)
+      if(accepted||unfinishedClear)chats.clearDraftRevision(chatId,revision)
+      pushChatChanged({type:'upsert',chatId});return chats.get(chatId)
+    }catch(error){
+      if(payload.document){try{chats.recoverDraft(chatId,payload.document,'send_failed');pushChatChanged({type:'upsert',chatId})}catch{/* Keep the original submission error. */}}
+      throw error
+    }
+  })
+  rpcHandle('navora:agent.queue.edit',async(_e,id:string,messageId:string,content:string,options?:ComposerQueueEditOptions)=>{await agentInbox!.edit(id,messageId,content,options);return chats.get(id)})
   rpcHandle('navora:agent.queue.remove',(_e,id:string,messageId:string)=>{agentInbox!.remove(id,messageId);return chats.get(id)})
   rpcHandle('navora:agent.queue.insert',async(_e,id:string,messageId:string)=>{await agentInbox!.insert(id,messageId);return chats.get(id)})
   rpcHandle('navora:agent.queue.resume',async(_e,id:string)=>{await agentInbox!.resume(id);return chats.get(id)})
 
   rpcHandle('navora:agent.retry', async (_e: unknown, chatId: string) => {
     if (!chatId) throw new Error('chatId_required')
-    if (agent.isRunning(chatId)) throw new Error('agent_already_running')
-    const maxParallel = config.get().browser.max_parallel_agent_chats || 4
-    if (agent.runningRootChatIds().length >= maxParallel) {
-      throw new Error('max_parallel_agent_chats')
-    }
+    agent.assertCanRun(chatId)
+    const candidate=chats.get(chatId)?.messages.slice().reverse().find(message=>message.role==='user')
+    if(!candidate)throw new Error('nothing_to_retry')
+    const retry=await prepareComposerInput(chatId,{content:candidate.content,refs:candidate.meta?.refs,document:candidate.meta?.document})
+    agent.assertCanRun(chatId)
     const lastUser = chats.trimAfterLastUser(chatId)
     if (!lastUser) throw new Error('nothing_to_retry')
-    const refs = (lastUser.meta?.refs || []) as BrowserContextRef[]
+    const refs = retry.refs || []
     pushChatChanged({ type: 'upsert', chatId })
     void agent
-      .run({ chatId, userText: lastUser.content, refs: refs.length ? refs : undefined })
+      .run({ chatId, userText: retry.content, refs: refs.length ? refs : undefined,modelIdentity:retry.modelIdentity })
       .catch((e) => {
         console.error('[agent.retry]', e)
       })
@@ -1783,9 +1998,9 @@ function registerIpc(): void {
   })
 
   rpcHandle('navora:agent.stop', (_e, chatId: string) => {
-    agentInbox?.pause(chatId)
-    abortAsksForChat(chatId)
-    const ok = agent.stop(chatId)
+    let aborted=false
+    for(const id of chats.collectCascadeIds(chatId)){agentInbox?.pause(id);aborted=abortAsksForChat(id)||aborted}
+    const ok = agent.stop(chatId)||aborted
     return { ok }
   })
 
@@ -1810,7 +2025,8 @@ function registerIpc(): void {
       const denied = payload.source === 'deny' || !payload.answer.trim()
       if (denied) {
         chats.setPendingAsk(parked.id, null)
-        void agent.continueAfterPersistedAsk(parked.id, req, payload).catch((e) => {
+        agent.assertCanRun(parked.id)
+      void agent.continueAfterPersistedAsk(parked.id, req, payload).catch((e) => {
           console.error('[ask] persist deny', e)
         })
         pushAgentAskCancel(id, 'deny')
@@ -1836,10 +2052,15 @@ function registerIpc(): void {
 
   rpcHandle('navora:browser.session.close', async (_e, sessionId: string) => {
     const ownerChatId = registry.getSessionRecord(sessionId)?.chatId
-    network.disposeSession(sessionId)
-    await registry.closeSession(sessionId, true)
-    if (ownerChatId) agent?.notifySessionClosed(ownerChatId, sessionId)
-    return true
+    const result=await registry.manageSession(sessionId,'delete')
+    if(result.deleted){network.disposeSession(sessionId);if(ownerChatId)agent?.notifySessionClosed(ownerChatId,sessionId)}
+    return result.deleted
+  })
+  rpcHandle('navora:browser.session.update',(_e,sessionId:string,patch:BrowserSessionUpdate)=>registry.updateSession(sessionId,patch))
+  rpcHandle('navora:browser.session.manage',async(_e,sessionId:string,action:BrowserSessionManageAction)=>{
+    const ownerChatId=registry.getSessionRecord(sessionId)?.chatId,result=await registry.manageSession(sessionId,action)
+    if(result.deleted){network.disposeSession(sessionId);if(ownerChatId)agent?.notifySessionClosed(ownerChatId,sessionId)}
+    return result
   })
 
   rpcHandle(
@@ -1881,6 +2102,19 @@ if (!gotLock) {
     applyUserDataPath(dataRoot)
 
     config = new ConfigService(dataRoot)
+    await configureBrowserAutomation(config.get().browser.automation)
+    nativeTheme.on('updated', () => {
+      // Native captions and renderer media queries follow the same OS preference.
+      pushConfigChanged(config.get())
+    })
+    app.on('browser-window-created', (_event, win) => {
+      win.webContents.on('did-finish-load', () => {
+        if (!mainWindow || mainWindow.isDestroyed() || win.isDestroyed()) return
+        if (win.webContents.getURL().split('#')[0] === mainWindow.webContents.getURL().split('#')[0]) {
+          updateWindowAppearance(win, config.get())
+        }
+      })
+    })
     chats = new ChatStore(dataRoot)
     secrets = new SecretsStore(dataRoot)
     skills = new SkillStore(dataRoot)
@@ -1981,7 +2215,7 @@ if (!gotLock) {
             resolvePerm(req.id, 'deny', true)
           }, req.timeoutMs || 120000)
 
-          pendingPerm.set(req.id, { chatId: req.chatId, timer, resolve })
+          pendingPerm.set(req.id, { chatId: req.chatId, request:req, timer, resolve })
 
           const hasLocal = !!(mainWindow && !mainWindow.isDestroyed())
           const remoteReady = !!(remote?.status().enabled && remote?.status().running)
@@ -2020,7 +2254,7 @@ if (!gotLock) {
       getConfig: () => config.get(),
       updateConfig: async (patch) => {
         const prev = JSON.parse(JSON.stringify(config.get())) as AppConfig
-        const next = JSON.parse(JSON.stringify(patch)) as Partial<AppConfig> & {
+        const next = JSON.parse(JSON.stringify(patch)) as AppConfigPatch & {
           remote?: AppConfig['remote'] & { password?: string }
         }
         if (next.remote) {
@@ -2036,7 +2270,8 @@ if (!gotLock) {
         } as AppConfig
         assertRemoteAccessChange(prev.remote, preview.remote)
         const saved = config.update(next)
-        if (JSON.stringify(prev.remote) !== JSON.stringify(saved.remote)) {
+        await configureBrowserAutomation(saved.browser.automation)
+        if ((JSON.stringify(prev.remote) !== JSON.stringify(saved.remote) || (saved.remote.enabled && !remote.status().running))) {
           try { await remote.syncFromConfig() }
           catch (e) { console.warn('[remote] sync after agent settings update failed', e) }
         }
@@ -2047,7 +2282,7 @@ if (!gotLock) {
         }
         syncEmptyChatsToConfigDefaults(prev, saved)
         pluginDevWatch?.sync()
-        const out = JSON.parse(JSON.stringify(saved)) as AppConfig
+        const out = JSON.parse(JSON.stringify(config.get())) as AppConfig
         pushConfigChanged(out)
         return out
       },
@@ -2104,7 +2339,7 @@ if (!gotLock) {
                 }, req.timeoutMs)
               : null
 
-          pendingAsk.set(id, { chatId: req.chatId, timer, resolve })
+          pendingAsk.set(id, { chatId: req.chatId, request:req, timer, resolve })
           if (req.timeoutMs <= 0 && req.kind === 'user_choice') {
             chats.setPendingAsk(req.chatId, req)
           }
@@ -2221,11 +2456,23 @@ if (!gotLock) {
         else void win.loadFile(path.join(__dirname,'..','dist','index.html'),{hash:route})
       }})
 
-    fileWindows=registerFileWindows({files,getMain:()=>mainWindow,chatExists:id=>!!chats.get(id),preload:path.join(__dirname,'preload.js'),load:win=>{
+    fileWindows=registerFileWindows({files,getMain:()=>mainWindow,chatExists:id=>!!chats.get(id),browserOwnsChat:(sender,chatId)=>{
+      const host=registry.hosts.hostForSender(sender)
+      return !!host&&!host.embedded&&[...host.pages].some(id=>registry.hosts.pages.get(id)?.chatId===chatId)
+    },preload:path.join(__dirname,'preload.js'),load:win=>{
       const route='/file-host'
       if(process.env.VITE_DEV_SERVER_URL)void win.loadURL(process.env.VITE_DEV_SERVER_URL+'#'+route)
       else void win.loadFile(path.join(__dirname,'..','dist','index.html'),{hash:route})
     }})
+    nativeUiService=registerNativeUi({trusted:sender=>{
+      const win=BrowserWindow.fromWebContents(sender)
+      return win&&!win.isDestroyed()&&win.webContents===sender&&(win===mainWindow||!!registry.hosts.hostForSender(sender)||!!fileWindows?.ownsSender(sender))?win:undefined
+    },source:(sender,id)=>{
+      const page=registry.hosts.pages.get(id),host=page&&registry.hosts.getHost(page.hostId||'')
+      if(!page||page.isDestroyed()||host?.window.webContents!==sender||host.active!==id)throw Error('native_ui_page_wrong_host')
+      const wc=page.webContents,epoch=page.automation.snapshot().documentEpoch,hostId=page.hostId
+      return {webContents:wc,valid:()=>{const current=registry.hosts.getHost(hostId||'');return !page.isDestroyed()&&page.hostId===hostId&&current?.window.webContents===sender&&current.active===id&&page.automation.snapshot().documentEpoch===epoch}}
+    },pageSettings:(source,_url)=>{void settingsNavigation.open(source,'browser')}})
     tray = createAppTray({
       getMainWindow: () => mainWindow,
       createWindow,
@@ -2254,6 +2501,7 @@ if (!gotLock) {
   })
 
   app.on('before-quit', () => {
+    nativeUiService?.dispose()
     try{browserStart?.flush()}catch(error){console.warn('[browser-start] quit save failed',error)}
     fileWindows?.dispose()
     plugins.dispose()

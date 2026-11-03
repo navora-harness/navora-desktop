@@ -1,5 +1,5 @@
 import {BrowserAnnotationService} from '../electron/modules/browser-annotations'
-import {dispatchTrustedPointer} from '../electron/modules/trusted-input'
+import type {TrustedPointerOpts} from '../electron/modules/trusted-input'
 import {WorkspaceFiles} from '../electron/modules/workspace-files'
 import { app, BrowserWindow } from 'electron'
 import assert from 'node:assert/strict'
@@ -8,12 +8,25 @@ import path from 'node:path'
 import http from 'node:http'
 import { executeAgentTool, type ToolExecContext } from '../electron/modules/browser-tools'
 import { createDefaultConfig } from '../shared/config'
+import { requiresBrowserObservation } from '../shared/browser-tool-policy'
 import { PluginStore } from '../electron/modules/plugin-store'
 import { ChatStore } from '../electron/modules/chat-store'
 import { AgentRuntime } from '../electron/modules/agent-runtime'
 import { BrowserRegistry } from '../electron/modules/browser-registry'
 import { createPluginHostApi } from '../electron/modules/plugin-host'
 import type { PageSnapshot } from '../shared/page-index'
+import { getBrowserAutomationController } from '../electron/modules/browser-automation-controller'
+import { startOwnedNavigation } from '../electron/modules/browser-navigation-control'
+
+// Annotation fixtures simulate user input through the native API while the AI
+// entry point remains paused; they must not bypass that gate through an Agent helper.
+async function dispatchTrustedPointer(wc: Electron.WebContents, opts: TrustedPointerOpts): Promise<void> {
+  await wc.dispatchMouseEvent({
+    type: opts.action === 'down' ? 'mousePressed' : opts.action === 'up' ? 'mouseReleased' : 'mouseMoved',
+    x: opts.x, y: opts.y, button: opts.action === 'move' ? 'none' : 'left',
+    buttons: opts.buttons ?? (opts.action === 'down' ? 1 : 0), clickCount: opts.action === 'move' ? 0 : 1,
+  })
+}
 
 const root = process.env.NAVORA_SMOKE_ROOT!
 app.setPath('userData', path.join(root, 'profile'))
@@ -50,20 +63,26 @@ config.browser.wait.network_idle = false
 config.browser.wait.delay_ms = 0
 config.browser.action_timeout_ms = 3000
 const controller = new AbortController()
+Object.assign(win, {activeOperations: 0, manager: {flushLayout() {}}})
+const record = {windowId: 'window', win}
 let permissionChecks = 0
 let fixtureServer: http.Server | undefined
 let crossFrameServer: http.Server | undefined
 const context = {
   chatId:'fixture',signal:controller.signal,getConfig:() => config,
   registry:{
-    assertWindowOwned(chatId: string, windowId: string) { assert.equal(chatId,'fixture');assert.equal(windowId,'window');return {win} },
+    assertWindowOwned(chatId: string, windowId: string) { assert.equal(chatId,'fixture');assert.equal(windowId,'window');return record },
     getTree() {return []},
-    getWindowRecord(){return undefined},
+    getWindowRecord(){return record},
   },
   gate:{async check(){permissionChecks++;return {ok:true}}},
 } as unknown as ToolExecContext
 const call = async (name: string, args: Record<string, unknown> = {}) => {
   console.log(`[browser-smoke] ${name} ${String(args.what || '')}`)
+  if (requiresBrowserObservation(name)) {
+    const observed = await executeAgentTool('browser_get',{windowId:'window',what:'text',waitUntil:'none'},context) as {ok?:boolean}
+    assert.equal(observed.ok,true,'A normal input first observes the current document')
+  }
   return await executeAgentTool(name,{windowId:'window',waitUntil:'none',...args},context) as Record<string, any>
 }
 
@@ -111,23 +130,32 @@ try {
   await wc.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
   await wc.executeJavaScript('scrollTo(0,0)')
   await annotationService.begin(titleChat.id,page.id,'element')
-  const blocked=await executeAgentTool('browser_get',{windowId:page.id,what:'title'}, {...context,chatId:titleChat.id,registry:embedded}) as {error:string}
-  assert.equal(blocked.error,'browser_manual_control','Selection temporarily pauses agent browser tools')
+  const readable=await executeAgentTool('browser_get',{windowId:page.id,what:'title'}, {...context,chatId:titleChat.id,registry:embedded}) as {ok:boolean}
+  assert.equal(readable.ok,true,'Read-only inspection remains available during annotation selection')
+  const blocked=await executeAgentTool('browser_click',{windowId:page.id,selector:'#annotate',waitUntil:'none'}, {...context,chatId:titleChat.id,registry:embedded}) as {error:string}
+  assert.equal(blocked.error,'browser_manual_control','Selection still rejects Agent input without clearing the manual gate')
   const target=await wc.executeJavaScript('(()=>{const r=document.querySelector("button").getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()')
   await dispatchTrustedPointer(wc,{action:'move',...target});await dispatchTrustedPointer(wc,{action:'down',...target});await dispatchTrustedPointer(wc,{action:'up',...target})
   await new Promise(r=>setTimeout(r,80))
   const collected=await annotationService.collect(titleChat.id,page.id)
-  assert.ok(collected.annotation,'Real pointer selection creates a saved annotation')
-  assert.equal(collected.annotation.selection.text,'Annotate target')
-  const annotation=annotationService.update(titleChat.id,collected.annotation.id,1,{comment:'Align this button',taskState:'pending'})
+  assert.ok(collected.target,'Real pointer selection creates a retained temporary target')
+  assert.equal(collected.target.selection.text,'Annotate target')
+  assert.equal(annotationService.list(titleChat.id).length,0,'Selecting never writes an empty saved annotation')
+  assert.equal(page.manualControl,true,'Selecting and editing stay inside the same explicit manual session')
+  const targetDraft=annotationService.writeTarget(titleChat.id,collected.target.id,collected.target.version,{text:'Align this button',editorId:'native-smoke',sequence:1})
+  const committed=await annotationService.commitTarget(titleChat.id,page.id,targetDraft.id,targetDraft.version)
+  assert.equal((await annotationService.commitTarget(titleChat.id,page.id,targetDraft.id,targetDraft.version)).id,committed.id,'A saved target cannot create a duplicate annotation on retry')
+  assert.equal(annotationService.listTargets(titleChat.id,page.id).length,0,'Successful save consumes the target draft')
+  const annotation=annotationService.update(titleChat.id,committed.id,1,{taskState:'pending'})
   assert.equal(annotation.revision,2)
   assert.throws(()=>annotationService.update(titleChat.id,annotation.id,1,{comment:'stale write'}),/revision_conflict/)
   assert.ok(fs.existsSync(annotationFiles.resolve(titleChat.id,annotation.screenshotPath)))
-  assert.equal((await annotationService.collect(titleChat.id,page.id)).annotation,undefined,'Selection is collected once')
-  assert.equal(page.manualControl,false,'Completing selection restores the original AI control state')
+  assert.equal((await annotationService.collect(titleChat.id,page.id)).target,undefined,'A committed target returns to selection mode')
+  assert.equal(page.manualControl,true,'Saving does not prematurely resume AI while annotation mode is still open')
   await annotationService.cancel(titleChat.id,page.id)
-  assert.equal(page.manualControl,false)
+  assert.equal(page.manualControl,false,'Explicit exit restores the valid original AI control state')
   const resized=await executeAgentTool('browser_window_set_bounds',{windowId:page.id,width:420,height:600},{...context,chatId:titleChat.id,registry:embedded}) as {width:number;height:number}
+  if (resized.width !== 420) console.log('[browser-smoke] resize result',JSON.stringify(resized))
   assert.equal(resized.width,420);assert.equal(resized.height,600);assert.deepEqual(page.getContentSize(),[420,600],'Legacy bounds tool commits its viewport before returning')
   assert.equal(await annotationService.locate(titleChat.id,annotation.id),true,'A matching current element can be highlighted')
   const annotationRef={kind:'annotation' as const,annotationId:annotation.id,annotationRevision:annotation.revision,windowId:page.id,sessionId:annotation.sessionId,label:annotation.comment}
@@ -150,11 +178,11 @@ try {
   await annotationService.begin(titleChat.id,page.id,'region')
   await dispatchTrustedPointer(wc,{action:'down',x:20,y:20});await dispatchTrustedPointer(wc,{action:'move',x:120,y:70,buttons:1});await dispatchTrustedPointer(wc,{action:'up',x:120,y:70})
   await new Promise(r=>setTimeout(r,80))
-  const region=(await annotationService.collect(titleChat.id,page.id)).annotation
+  const region=(await annotationService.collect(titleChat.id,page.id)).target
   assert.equal(region?.selection.kind,'region');assert.ok(Math.abs((region?.selection.rect.width||0)-100)<1)
   await annotationService.cancel(titleChat.id,page.id)
 
-  page.manualControl=true
+  await page.automation.takeControl()
   await annotationService.begin(titleChat.id,page.id,'element')
   const beforeCancellation=annotationService.list(titleChat.id).length
   const cancelledPoint=await wc.executeJavaScript('(()=>{const r=document.querySelector("#annotate").getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()')
@@ -165,7 +193,9 @@ try {
   await annotationService.begin(titleChat.id,page.id,'region')
   await assert.rejects(annotationService.begin(titleChat.id,page.id,'element'),/browser_busy_finish_action_first/)
   await annotationService.cancel(titleChat.id,page.id,true)
-  assert.equal(page.manualControl,false,'Explicit resume releases manual control')
+  assert.equal(page.manualControl,true,'A legacy cancel flag cannot override the original manual owner')
+  await page.automation.resume()
+  assert.equal(page.manualControl,false,'Only explicit controller resume grants AI operations')
 
   assert.equal(wc.debugger.isAttached(),false,'Annotations and migration never attach debugger')
   await embedded.closeSession(embeddedSession.sessionId,true);host.destroy()
@@ -174,6 +204,8 @@ try {
   persistentRegistry.hosts.bindMain(persistentHost);persistentRegistry.restorePersistent(persistenceFile,()=>true)
   const persistentSession=persistentRegistry.createSession(titleChat.id,{persist:true})
   const persistentPage=persistentRegistry.createWindow(persistentSession.sessionId,{url:'about:blank',show:false})
+  await persistentRegistry.getWindowRecord(persistentPage.windowId)!.win.webContents.loadURLWithResponse('https://example.com/restored-fixture',{statusCode:200,headers:{'Content-Type':'text/html'},body:'<title>Restored fixture</title>'})
+  const blankPage=persistentRegistry.createWindow(persistentSession.sessionId,{url:'about:blank',show:false})
   persistentRegistry.getWindowRecord(persistentPage.windowId)!.tabKey='browser:restored-fixture'
   persistentRegistry.savePersistent();persistentRegistry.shutdown();persistentHost.destroy()
   const restoredRegistry=new BrowserRegistry(()=>config),restoredHost=new BrowserWindow({show:false})
@@ -181,6 +213,8 @@ try {
   const restoredPage=restoredRegistry.getTree(titleChat.id)[0]!.windows[0]!
   assert.equal(restoredPage.windowId,persistentPage.windowId,'Page identity is recovered from the saved workspace')
   assert.equal(restoredPage.tabKey,'browser:restored-fixture')
+  assert.equal(restoredRegistry.getTree(titleChat.id)[0]!.windows.some(page=>page.windowId===blankPage.windowId),false,'Untouched blank pages are excluded from restart recovery')
+  assert.equal(restoredRegistry.getTree(titleChat.id)[0]!.windows.length,1,'Only the submitted real page returns after restart')
   assert.equal(restoredRegistry.getTree(titleChat.id)[0]!.partition,persistentSession.partition,'Persistent login partition is retained')
   restoredRegistry.shutdown();restoredHost.destroy()
   console.log('[browser-smoke] embedded transfer, retained state, fixed viewport and annotations passed')
@@ -268,9 +302,20 @@ try {
       document.querySelector('closed-widget').attachShadow({mode:'closed'}).innerHTML='<button id="closed-button">Closed action</button>';
       addEventListener('message',event=>{if(event.data?.type==='frame-click')window.frameTrusted=event.data.trusted});
     </script>`
+  let slowNavigation = false
+  let slowRequestStarted: (() => void) | undefined
   fixtureServer = http.createServer((request, response) => {
     if(request.url==='/broken'){response.destroy();return}
     response.setHeader('Content-Type','text/html; charset=utf-8')
+    if (request.url?.startsWith('/history-')) {
+      response.setHeader('Cache-Control','no-store')
+      const title = request.url === '/history-slow' ? 'History slow' : request.url === '/history-a' ? 'History A' : request.url === '/history-b' ? 'History B' : 'User navigation'
+      if (slowNavigation && request.url === '/history-slow') {
+        slowRequestStarted?.(); slowRequestStarted = undefined
+        setTimeout(() => response.end('<title>Late navigation</title><p>Late response must never replace the user document</p>'), 350)
+      } else response.end(`<title>${title}</title><p>${title}</p>`)
+      return
+    }
     if (request.url === '/loading') {
       response.write('<title>Loading fixture</title><p>Partial document')
       setTimeout(() => response.end('</p>'), 500)
@@ -322,7 +367,7 @@ try {
   const save = snapshot.entries.find((entry) => entry.name === '保存')!
   const clicked = await call('browser_click',{ref:save.ref})
   assert.equal(clicked.ok,true)
-  assert.equal(clicked.method,'clickSelector')
+  assert.equal(clicked.method,capabilities.value.pointerTrajectory ? 'dispatchInputSequence+target_clickSelector' : 'clickSelector')
   assert.equal(await win.webContents.executeJavaScript('window.savedTrusted'),true)
   const input = snapshot.entries.find((entry) => entry.name === '搜索产品')!
   assert.equal((await call('browser_type',{ref:input.ref,text:'Navora'})).ok,true)
@@ -413,13 +458,77 @@ try {
     captureP50Ms:percentile(captureTimes,.5),captureP95Ms:percentile(captureTimes,.95),
     queryP50Ms:percentile(queryTimes,.5),queryP95Ms:percentile(queryTimes,.95),cacheHits,lastPayloadChars:lastPayload,
     measurement:'host tool round trip, local HTML fixture; excludes model and external sites'}
+
+  await win.loadURL(fixtureUrl + '/history-a')
+  await win.loadURL(fixtureUrl + '/history-b')
+  assert.equal((await call('browser_back')).ok,true)
+  assert.equal(win.webContents.getTitle(),'History A','Back waits for its actual target document')
+  assert.equal((await call('browser_forward')).ok,true)
+  assert.equal(win.webContents.getTitle(),'History B','Forward waits for its actual target document')
+  assert.equal((await call('browser_reload')).ok,true)
+  assert.equal(win.webContents.getTitle(),'History B','Reload waits for its actual document')
+  // Native back deliberately skips script-created history without user activation.
+  // Wait for these entries' own browser events before submitting a new history action.
+  const historyEntriesCreated = new Promise<void>(resolve => {
+    const observe = (_event: unknown, url: string, mainFrame: boolean) => {
+      if (mainFrame && url.endsWith('#two')) { win.webContents.removeListener('did-navigate-in-page',observe); resolve() }
+    }
+    win.webContents.on('did-navigate-in-page',observe)
+  })
+  await win.webContents.executeJavaScript('history.pushState({},"","#one");history.pushState({},"","#two")',true)
+  await historyEntriesCreated
+  const sameDocumentBack = await call('browser_back')
+  if (!win.webContents.getURL().endsWith('#one')) console.log('[browser-smoke] same-document back result',JSON.stringify(sameDocumentBack),win.webContents.getURL())
+  assert.equal(sameDocumentBack.ok,true)
+  assert.ok(win.webContents.getURL().endsWith('#one'),'Same-document back retains history semantics')
+  assert.equal((await call('browser_forward')).ok,true)
+  assert.ok(win.webContents.getURL().endsWith('#two'),'Same-document forward retains history semantics')
+
+  await win.loadURL(fixtureUrl + '/history-slow')
+  slowNavigation = true
+  const abortedReload = new AbortController()
+  const reloadStarted = new Promise<void>(resolve => { slowRequestStarted = resolve })
+  const reloading = executeAgentTool('browser_reload',{windowId:'window',waitUntil:'none',timeoutMs:3000},
+    {...context,signal:abortedReload.signal}) as Promise<Record<string,any>>
+  await reloadStarted
+  abortedReload.abort()
+  assert.equal((await reloading).status,'cancelled','Cancelling reload retains its control cancellation result')
+  assert.equal(win.webContents.isLoadingMainFrame(),false,'Reload cancellation acknowledges stopped loading')
+  await win.loadURL(fixtureUrl + '/history-user')
+  await new Promise(resolve => setTimeout(resolve,400))
+  assert.equal(win.webContents.getTitle(),'User navigation','A cancelled delayed reload never replaces a later user page')
+
+  const nativeController = getBrowserAutomationController(win.webContents)
+  const initialStarted = new Promise<void>(resolve => { slowRequestStarted = resolve })
+  const initialNavigation = startOwnedNavigation(win.webContents,undefined,() => win.webContents.loadURL(fixtureUrl + '/history-slow'))
+  const initialFailure = initialNavigation.then(() => undefined,error => error)
+  await initialStarted
+  const handoff = await nativeController.takeControl()
+  assert.match(String(await initialFailure),/ERR_(?:ABORTED|FAILED)/,'Native stop rejects the pending initial navigation')
+  assert.equal(handoff.owner,'user','Takeover waits for an initial navigation submitted before acquiring an operation')
+  assert.equal(win.webContents.isLoadingMainFrame(),false)
+  await win.loadURL(fixtureUrl + '/history-user')
+  await new Promise(resolve => setTimeout(resolve,400))
+  assert.equal(win.webContents.getTitle(),'User navigation','An initial navigation stopped by takeover never arrives late')
+  await nativeController.resume()
+
+  slowNavigation = false
+  await win.loadURL(fixtureUrl + '/history-slow')
+  slowNavigation = true
+  const timedReload = await call('browser_reload',{timeoutMs:40})
+  assert.equal(timedReload.ok,true)
+  assert.equal(timedReload.waitTimedOut,true,'A navigation deadline remains a partial result')
+  assert.equal(win.webContents.isLoadingMainFrame(),false,'A timed-out reload stops before releasing its operation')
+  await new Promise(resolve => setTimeout(resolve,400))
+  assert.notEqual(win.webContents.getTitle(),'Late navigation','A timeout never leaves a background reload to commit later')
+  slowNavigation = false
   await win.webContents.loadURLWithResponse(fixtureUrl + '/native',{
     statusCode:200,headers:{'Content-Type':'text/html; charset=utf-8'},body:'<title>Native document</title><h1>Injected document fixture</h1>',
   })
   assert.equal(win.webContents.getTitle(),'Native document')
   assert.equal(win.webContents.debugger.isAttached(),false)
   console.log(JSON.stringify({ok:true,electron:process.versions.electron,capabilities:capabilities.value,
-    checks:['embedded-transfer-retains-webcontents-form-js-scroll','transfer-failure-preserves-source','fixed-viewport','annotation-pointer-snapshot-storage-revisions','annotation-manual-control','annotation-region','immutable-annotation-model-image-evidence','text-model-fallback','persistent-workspace-restoration','agent-controlled-browser-lifetime','terminal-subchat-retains-page-and-cookie','explicit-window-and-session-release','title-provenance-manual-rename','weather-permissions','cancelled-navigation-soft-wait','wait-deadline-listener-cleanup','snapshot','cache','trusted-click','typed-input','open-shadow','closed-shadow-query','cross-origin-frame-query-click','no-arbitrary-frame-click','native-file-input-navigation','native-dialog','native-document-response','semantic-stale-ref','navigation-stale-ref','plugin-load-execute','plugin-permissions','no-debugger'],
+    checks:['embedded-transfer-retains-webcontents-form-js-scroll','transfer-failure-preserves-source','fixed-viewport','annotation-pointer-snapshot-storage-revisions','annotation-manual-control','annotation-region','immutable-annotation-model-image-evidence','text-model-fallback','persistent-workspace-restoration','agent-controlled-browser-lifetime','terminal-subchat-retains-page-and-cookie','explicit-window-and-session-release','title-provenance-manual-rename','weather-permissions','cancelled-navigation-soft-wait','wait-deadline-listener-cleanup','snapshot','cache','trusted-click','typed-input','open-shadow','closed-shadow-query','cross-origin-frame-query-click','no-arbitrary-frame-click','native-file-input-navigation','native-dialog','native-document-response','semantic-stale-ref','navigation-stale-ref','plugin-load-execute','plugin-permissions','native-history-and-in-page-completion','cancelled-reload-never-arrives-late','takeover-stops-initial-navigation','reload-timeout-stops-background-work','no-debugger'],
     captureMs:snapshot.captureMs,permissionChecks,benchmark}))
 } catch(error) {
   console.error(error)

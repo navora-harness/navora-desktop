@@ -32,13 +32,13 @@ export class BrowserDownloadList {
   private readonly maxEntries: number
 
   constructor(maxEntries = 100) {
-    this.maxEntries = Math.max(10, maxEntries)
+    this.maxEntries = Number.isFinite(maxEntries) ? Math.max(10, Math.floor(maxEntries)) : 100
   }
 
   list(chatId?: string): BrowserDownloadEntry[] {
     const id = String(chatId || '').trim()
     const rows = id ? this.entries.filter((e) => e.chatId === id) : this.entries
-    return rows.map((e) => this.withCapabilities(e))
+    return rows.map((e) => this.withCapabilities(e)).sort((a, b) => b.createdAt - a.createdAt)
   }
 
   stateOf(info:BrowserDownloadUpsert):BrowserDownloadState|undefined {
@@ -87,8 +87,8 @@ export class BrowserDownloadList {
         error: info.error ?? (info.state === 'completed' ? undefined : prev.error),
         updatedAt: now,
       }
-      this.entries.splice(idx, 1)
-      this.entries.unshift(next)
+      this.entries[idx] = next
+      this.trimFinished()
       return this.withCapabilities(next)
     }
 
@@ -109,21 +109,18 @@ export class BrowserDownloadList {
       updatedAt: now,
     }
     this.entries.unshift(entry)
-    if (this.entries.length > this.maxEntries) {
-      const dropped = this.entries.splice(this.maxEntries)
-      for (const d of dropped) this.releaseLive(d.id)
-    }
+    this.trimFinished()
     return this.withCapabilities(entry)
   }
 
   /** Attach the Chromium DownloadItem so pause/resume/cancel can reach it. */
   bindItem(entryId: string, item: DownloadItem): void {
     const id = String(entryId || '').trim()
-    if (!id || id.startsWith('ignored_')) return
+    if (!id || id.startsWith('ignored_') || !this.find(id)) return
     this.releaseLive(id)
     this.live.set(id, item)
     item.once('done', () => {
-      this.releaseLive(id)
+      if (this.live.get(id) === item) this.releaseLive(id)
     })
   }
 
@@ -272,8 +269,17 @@ export class BrowserDownloadList {
       error: patch.error === undefined && patch.state === 'completed' ? undefined : patch.error ?? prev.error,
       updatedAt: Date.now(),
     }
-    this.entries.splice(idx, 1)
-    this.entries.unshift(next)
+    this.entries[idx] = next
+    this.trimFinished()
+  }
+
+  /** Active rows may exceed the history budget; their native controls stay reachable. */
+  private trimFinished(): void {
+    for (let index = this.entries.length - 1; index >= 0 && this.entries.length > this.maxEntries; index--) {
+      if (!FINISHED_STATES.has(this.entries[index].state)) continue
+      this.releaseLive(this.entries[index].id)
+      this.entries.splice(index, 1)
+    }
   }
 
   private releaseLive(entryId: string): void {
@@ -299,7 +305,7 @@ function matchKey(info: {
   filename?: string
 }): string {
   const save = String(info.savePath || '').trim()
-  if (save) return `p:${save}`
+  if (save) return `p:${info.chatId}:${save}`
   const rel = String(info.relPath || '').trim()
   if (rel) return `r:${info.chatId}:${rel}`
   const name = String(info.filename || '').trim()

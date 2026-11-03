@@ -1,0 +1,42 @@
+/* Shared follow-up layout: a single native scrollport owns each sidebar list. */
+:root{--sidebar-scroll-width:6px;--sidebar-scroll-gap:8px}
+.navora-app .main-shell .sidebar :is(.chat-list,.global-resource-list,.plugin-results,.settings-navigation .nav-list){min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;padding-right:var(--sidebar-scroll-gap);scrollbar-width:thin;scrollbar-color:var(--navora-muted) transparent}
+.navora-app .main-shell .sidebar :is(.chat-list,.global-resource-list,.plugin-results,.settings-navigation .nav-list)::-webkit-scrollbar{width:var(--sidebar-scroll-width);height:var(--sidebar-scroll-width)}
+.navora-app .main-shell .sidebar :is(.chat-list,.global-resource-list,.plugin-results,.settings-navigation .nav-list)::-webkit-scrollbar-track{background:transparent}
+.navora-app .main-shell .sidebar :is(.chat-list,.global-resource-list,.plugin-results,.settings-navigation .nav-list)::-webkit-scrollbar-thumb{border:0;border-radius:6px;background:color-mix(in srgb,var(--navora-muted) 48%,transparent)}
+.navora-app .main-shell .sidebar :is(.chat-list,.global-resource-list,.plugin-results,.settings-navigation .nav-list)::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--navora-muted) 75%,transparent)}
+.navora-app .main-shell .sidebar :is(.chat-list,.global-resource-list,.plugin-results,.settings-navigation .nav-list)::-webkit-scrollbar-button{display:none;width:0;height:0}
+.navora-app .main-shell .sidebar .global-resource-list :is(.res-body,.res-tree){overflow:visible;max-height:none;scrollbar-gutter:auto;padding-right:0}
+.navora-app .main-shell>.content-surface{position:relative}
+.navora-app .main-shell.sidebar-floating:not(.mobile-layout)>.content-surface{grid-template-columns:0 minmax(0,1fr)}
+.navora-app .main-shell.sidebar-floating:not(.mobile-layout)>.content-surface>aside.sidebar{position:absolute;inset:6px auto 8px 8px;z-index:30;box-sizing:border-box;width:calc(var(--sidebar-width,312px) - 52px);max-width:calc(100% - 16px);padding:0 10px 8px 12px;border:1px solid var(--navora-stroke);border-radius:14px;background:var(--navora-sidebar);box-shadow:0 12px 32px #17253424;visibility:visible;pointer-events:auto}
+.navora-app .main-shell.sidebar-floating.sidebar-collapsed:not(.mobile-layout)>.content-surface>aside.sidebar{visibility:hidden;pointer-events:none;opacity:0}
+.navora-app .main-shell .window-titlebar-brand{margin-right:7px;gap:7px}
+.navora-app .main-shell .window-sidebar-toggle{width:30px;height:30px;flex:none;margin-right:10px;-webkit-app-region:no-drag;color:var(--navora-muted)}
+.navora-app .main-shell .window-sidebar-toggle .app-icon{width:18px;height:18px}
+.navora-app .main-shell .window-titlebar .application-menu-trigger{padding-inline:9px}
+.navora-app .main-shell .window-sidebar-toggle{margin-left:10px;margin-right:0}.rail-context-check{margin-left:auto;min-width:14px;color:var(--navora-accent)}
+.workspace-expand-preview{position:absolute;z-index:5;top:60px;left:50%;transform:translateX(-50%);max-width:calc(100% - 24px);padding:8px 12px;border:1px solid var(--navora-stroke);border-radius:8px;background:var(--navora-surface);color:var(--navora-ink);box-shadow:0 3px 14px #17253415;font-size:12px;white-space:nowrap;pointer-events:none}
+.subchat-workspace-trigger{position:relative;gap:3px!important;width:auto!important;padding:0 6px!important}.subchat-workspace-trigger>span{font-size:10px;line-height:1;color:var(--navora-muted)}
+.subchat-workspace-trigger .subchat-unread-dot{width:5px;height:5px;border-radius:50%;background:var(--navora-accent)}.subchat-workspace-trigger .subchat-pending-count{color:var(--navora-accent);font-weight:650}
+.navora-app .main-shell .messages{gap:14px;padding:18px 24px 28px}
+.navora-app .main-shell .messages>.msg{width:min(960px,100%);max-width:960px;min-width:0;margin:0}
+.navora-app .main-shell .messages>.msg.assistant{padding:0;border:0;background:transparent;box-shadow:none}
+.navora-app .main-shell .messages .msg.assistant .msg-row{gap:0}
+.navora-app .main-shell .messages .msg.assistant .msg-main{min-width:0;width:100%;max-width:100%;padding:0}
+.navora-app .main-shell .messages .msg.assistant .msg-body.md{padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;color:var(--navora-ink);font-size:16px;line-height:1.75}
+.navora-app .main-shell .messages .msg.assistant .msg-md-content>:first-child{margin-top:0}
+.navora-app .main-shell .messages .msg.assistant .msg-md-content>:last-child{margin-bottom:0}
+.navora-app .main-shell .messages .transcript-tool{padding:0;background:transparent;border:0;box-shadow:none}
+.navora-app .main-shell .messages .transcript-tool .transcript-activity{margin:0}
+.navora-app .main-shell .messages .transcript-tool>.subchat-link{padding:3px 0;font-size:14px;line-height:1.75;color:var(--navora-muted)}
+.navora-app .main-shell .messages .transcript-tool>.subchat-link img{width:20px;height:20px;margin-right:2px}
+.navora-app .main-shell .messages .msg.log .msg-avatar,.navora-app .main-shell .messages .msg.log .msg-role{display:none}
+.navora-app .main-shell .messages .msg.log .msg-row{gap:0}
+.navora-app .main-shell .messages .msg.log .msg-main{width:100%;max-width:100%}
+.navora-app .main-shell .messages .msg.log .activity-trigger{padding-left:0;font-size:14px;max-width:100%;color:var(--navora-muted)}
+.navora-app .main-shell .messages .msg.log .activity-trigger .log-kind-chip{background:transparent;border:0;padding:0;font-size:12px;color:var(--navora-muted)}
+.navora-app .main-shell .messages .msg.log .activity-trigger .log-card-text{font-size:14px;line-height:1.65;color:inherit}
+.transcript-reasoning{margin-bottom:12px;font-size:13px;color:var(--navora-muted)}.transcript-reasoning summary{cursor:pointer}.transcript-reasoning pre{max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;padding:10px 14px;background:var(--navora-background);border-radius:8px;margin-top:8px}
+@media(max-width:600px){.navora-app .main-shell .messages{padding-inline:16px}.navora-app .main-shell .messages .msg.assistant .msg-body.md{font-size:15px}}
+@media(prefers-reduced-motion:reduce){.navora-app .main-shell.sidebar-floating>.content-surface>aside.sidebar{transition:none}}

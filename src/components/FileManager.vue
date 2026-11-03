@@ -98,7 +98,7 @@ function updateDownloads(items:BrowserDownloadEntry[]){
   downloads.value=next
   if(next.map(item=>`${item.id}:${item.state}:${item.relPath}`).sort().join('|')!==previous.map(item=>`${item.id}:${item.state}:${item.relPath}`).sort().join('|')){clearTimeout(timer);timer=setTimeout(()=>void load(),150)}
 }
-async function fetchDownloads(){const revision=downloadRevision,id=props.chatId;try{const items=await window.navora?.downloads.list(id);if(items&&!disposed&&revision===downloadRevision&&id===props.chatId)updateDownloads(items)}catch{ /* Keep files available if download status cannot be read. */ }}
+async function fetchDownloads(){const revision=downloadRevision,id=props.chatId;if(!id){updateDownloads([]);return}try{const items=await window.navora?.downloads.list(id);if(items&&!disposed&&revision===downloadRevision&&id===props.chatId)updateDownloads(items)}catch{ /* Keep files available if download status cannot be read. */ }}
 function downloadMenu(event:MouseEvent,entry:WsEntry){if(!entry.download)return;event.preventDefault();menuDownloadId.value=entry.download.id;downloadContextMenu.value?.show(event)}
 async function downloadAction(action:'pause'|'resume'|'cancel'|'remove'){const item=menuDownload.value;if(!item||!window.navora)return;try{const result=await window.navora.downloads[action](item.id);if(result&&!result.ok)emit('notify',('error' in result&&String(result.error))||'下载操作失败');downloadRevision++;await fetchDownloads()}catch{emit('notify','下载操作失败')}}
 async function stopDownloadTask(){const item=menuDownload.value;if(item?.source!=='tool'||!activeDownload(item))return;try{await window.navora?.agent.stop(item.chatId)}catch{emit('notify','停止任务失败')}}

@@ -27,7 +27,14 @@ try {
     bundle: true,
     sourcemap: 'inline',
     metafile: true,
-    external: ['electron'],
+    plugins: [{
+      name: 'node-unit-native-boundary',
+      setup(builder) {
+        // Pure helpers can share a module with native code. Drop only an unused
+        // Electron import after tree shaking; actual native calls remain external.
+        builder.onResolve({ filter: /^electron$/ }, () => ({ path: 'electron', external: true, sideEffects: false }))
+      },
+    }],
     logLevel: 'warning',
   })
   const output = Object.keys(result.metafile.outputs).filter((file) => file.endsWith('.mjs'))

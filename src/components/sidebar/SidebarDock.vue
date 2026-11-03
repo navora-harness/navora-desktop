@@ -4,7 +4,7 @@
       <header class="dock-header">
         <h2 :id="`dock-label-${panel.id}`" class="dock-label">{{ panel.label }}</h2>
         <div :id="`dock-actions-${panel.id}`" class="dock-panel-actions" />
-        <SidebarMoreMenu :label="`${panel.label}侧栏`" @hide="emit('close')" />
+        <button type="button" class="ui-icon-button" :aria-label="pinned?'切换为悬浮侧栏':'固定侧栏'" :title="pinned?(floating?'当前窗口较窄，侧栏临时悬浮；点击保持悬浮':'切换为悬浮侧栏'):'固定侧栏'" :aria-pressed="pinned" @click="emit('pin')"><AppIcon :icon="pinned?'thumbtack':'workspace-attach'" /></button>
         <button type="button" class="ui-icon-button" :aria-label="`隐藏${panel.label}侧栏`" :title="`隐藏${panel.label}侧栏`" @click="emit('close')"><AppIcon icon="angles-left" /></button>
       </header>
       <div :id="`dock-content-${panel.id}`" class="dock-content" :inert="active !== panel.id" />
@@ -21,9 +21,8 @@
 <script setup lang="ts">
 import {onMounted,ref} from 'vue'
 import type {SidebarPanelDefinition} from '@/composables/useSidebarDock'
-import SidebarMoreMenu from './SidebarMoreMenu.vue'
-defineProps<{panels:SidebarPanelDefinition[];active:string}>()
-const emit=defineEmits<{close:[]}>()
+defineProps<{panels:SidebarPanelDefinition[];active:string;floating?:boolean;pinned?:boolean}>()
+const emit=defineEmits<{close:[];pin:[]}>()
 const ready=ref(false)
 onMounted(()=>{ready.value=true})
 </script>

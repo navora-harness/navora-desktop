@@ -1,0 +1,23 @@
+<template>
+  <main><button id="find-trigger" type="button" @click="find?.open()">查找当前聊天</button><section class="fixture-conversation"><ConversationFind ref="find" :chat-id="chatId" :messages="messages" :live-text="liveText" :root="root||null" :display-text="displayText" :locate="locate" @open="onOpen" @navigate="navigations++"/><div ref="root" class="fixture-messages"><template v-for="message in messages" :key="message.id"><div v-if="!collapsed.has(message.id)||expanded.has(message.id)" :data-msg-id="message.id" class="fixture-message"><div v-if="message.role==='user'||message.role==='assistant'" class="msg-md-content" v-html="renderMarkdown(message.content)"/><div v-else-if="message.role==='tool'" class="tool-detail"><div class="tool-section"><pre>参数区不会误高亮 keyword</pre></div><div class="tool-section"><pre>{{ message.content }}</pre></div></div><span v-else class="run-item-text">{{ message.content }}</span></div></template><div v-if="liveText" data-live-answer><div class="msg-md-content" v-html="renderMarkdown(liveText)"/></div></div></section></main>
+</template>
+<script setup lang="ts">
+import {nextTick,ref} from 'vue'
+import ConversationFind from '../../src/components/ConversationFind.vue'
+import {renderMarkdown} from '../../src/utils/markdown'
+import type {ChatMessage} from '../../shared/types'
+const initial:ChatMessage[]=[{id:'a',role:'user',content:'keyword **keyword** [keyword](https://example.com)',createdAt:1},{id:'b',role:'assistant',content:'前缀 **跨节点**尾部 keyword\n\n`keyword`',createdAt:2},{id:'c',role:'assistant',content:'隐藏 keyword',createdAt:3},{id:'d',role:'tool',content:'tool keyword\nkeyword',createdAt:4},{id:'e',role:'log',content:'log keyword',createdAt:5}]
+const messages=ref<ChatMessage[]>(structuredClone(initial)),chatId=ref('chat-a'),liveText=ref(''),root=ref<HTMLElement>(),find=ref<InstanceType<typeof ConversationFind>>(),expanded=ref(new Set<string>()),collapsed=new Set(['c']),navigations=ref(0),locates:string[]=[],lastOpen=ref(false),delay=ref(0)
+const displayText=(message:ChatMessage)=>message.role==='tool'?'[工具名] 复制标题\n'+message.content:message.content
+function onOpen(value:boolean){lastOpen.value=value;if(!value)expanded.value=new Set()}
+async function locate(id:string){const owner=chatId.value;locates.push(id);await new Promise(resolve=>setTimeout(resolve,delay.value));if(owner!==chatId.value)return;expanded.value=new Set([...expanded.value,id]);await nextTick();root.value?.querySelector(`[data-msg-id="${id}"]`)?.scrollIntoView({block:'center'})}
+;(window as any).findFixture={
+  open(){find.value?.open()},close(){find.value?.close()},get opened(){return lastOpen.value},get navigations(){return navigations.value},get locates(){return [...locates]},get scroll(){return root.value?.scrollTop},set scroll(value:number){if(root.value)root.value.scrollTop=value},
+  stream(text:string){liveText.value=text},persist(){messages.value.push({id:'persisted',role:'assistant',content:liveText.value,createdAt:10})},switchChat(){chatId.value='chat-b';messages.value=[{id:'new',role:'user',content:'新的 keyword',createdAt:11}];liveText.value=''},delayLocate(value:number){delay.value=value},
+  get highlights(){const registry=(CSS as any).highlights;return {all:[...(registry?.get('navora-chat-find')||[])].map((range:Range)=>range.toString()),active:[...(registry?.get('navora-chat-find-active')||[])].map((range:Range)=>({text:range.toString(),message:range.startContainer.parentElement?.closest('[data-msg-id]')?.getAttribute('data-msg-id')||'__live__'}))}},
+}
+</script>
+<style>
+:root{font-family:'Segoe UI','Microsoft YaHei UI',sans-serif;--navora-ink:#283e56;--navora-muted:#78899d;--navora-surface:#fff;--navora-stroke:#dce4ed;--navora-accent:#376d9f;--control-selected:#e8f0f8;--control-hover:#edf2f7}
+body{margin:0;background:#f2f5f9;color:var(--navora-ink)}main{margin:30px auto;max-width:760px;padding:10px}button{border:0;background:transparent;color:inherit;font:inherit;cursor:default}input{font:inherit;color:inherit;border:0}.ui-icon-button{display:grid;place-items:center}.ui-icon-button svg{width:16px;height:16px}.fixture-conversation{border:1px solid var(--navora-stroke);border-radius:10px;background:white;overflow:hidden;margin-top:15px}.fixture-messages{height:260px;overflow:auto;padding:15px;position:relative}.fixture-message{padding:10px 0;border-bottom:1px solid var(--navora-stroke)}.fixture-message p{margin:5px 0}.fixture-message pre{white-space:pre-wrap}.fixture-message a{color:var(--navora-accent)}button:focus-visible,summary:focus-visible{outline:2px solid var(--navora-accent);outline-offset:1px}
+</style>

@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {createHash,randomUUID} from 'node:crypto'
 import type {WorkspaceFiles} from './workspace-files'
-import type {BrowserAnnotationDraft,BrowserDraftCopy,BrowserDraftInput,BrowserDraftIssue,BrowserDraftRecovery} from '../../shared/browser-workspace'
+import type {BrowserAnnotationDraft,BrowserDraftCopy,BrowserDraftInput,BrowserDraftIssue,BrowserDraftRecovery,BrowserAnnotationTarget} from '../../shared/browser-workspace'
 
 type ChatDrafts={rows:Map<string,BrowserAnnotationDraft>;copies:Map<string,BrowserDraftCopy>;issues:BrowserDraftIssue[]}
 /** The main process serializes atomic writes, including rejected editing buffers. */
@@ -96,4 +96,28 @@ export class BrowserAnnotationDraftStore {
     data.rows.delete(id)
     for(const row of data.copies.values())if(row.annotationId===id){fs.rmSync(this.files.resolve(chatId,`browser-annotations/drafts/conflicts/${row.id}.json`),{force:true});data.copies.delete(row.id)}
   }
+}
+
+/** Unsaved targets are separate records, never empty annotations or fake revisions. */
+export class BrowserAnnotationTargetStore{
+  constructor(private files:Pick<WorkspaceFiles,'resolve'>){}
+  private relative(id:string){if(!/^target_[a-zA-Z0-9_-]{1,120}$/.test(id))throw Error('invalid_annotation_target');return `browser-annotations/targets/${id}.json`}
+  private write(chatId:string,row:BrowserAnnotationTarget){const file=this.files.resolve(chatId,this.relative(row.id));fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file+'.tmp',JSON.stringify(row));fs.renameSync(file+'.tmp',file);return structuredClone(row)}
+  get(chatId:string,id:string):BrowserAnnotationTarget{
+    const file=this.files.resolve(chatId,this.relative(id));if(!fs.existsSync(file))throw Error('annotation_target_not_found')
+    if(fs.statSync(file).size>40000)throw Error('invalid_annotation_target')
+    const row=JSON.parse(fs.readFileSync(file,'utf8')) as BrowserAnnotationTarget
+    if(row.id!==id||row.chatId!==chatId||row.screenshotPath!==`browser-annotations/targets/${id}.png`||!Number.isSafeInteger(row.version)||row.version<1||typeof row.comment!=='string'||row.comment.length>4000||!row.selection||typeof row.pageId!=='string')throw Error('invalid_annotation_target')
+    return row
+  }
+  list(chatId:string,pageId:string){const directory=this.files.resolve(chatId,'browser-annotations/targets');if(!fs.existsSync(directory))return [];return fs.readdirSync(directory).filter(name=>/^target_[a-zA-Z0-9_-]{1,120}\.json$/.test(name)).flatMap(name=>{try{const row=this.get(chatId,name.slice(0,-5));return row.pageId===pageId?[row]:[]}catch{return []}}).sort((a,b)=>b.updatedAt-a.updatedAt)}
+  create(chatId:string,row:BrowserAnnotationTarget){const file=this.files.resolve(chatId,this.relative(row.id));if(fs.existsSync(file))return this.get(chatId,row.id);if(this.list(chatId,row.pageId).length>=40)throw Error('annotation_target_limit_40');let copied:string|undefined;if(row.conflictOf){const screenshotPath=`browser-annotations/targets/${row.id}.png`;copied=this.files.resolve(chatId,screenshotPath);fs.copyFileSync(this.files.resolve(chatId,row.screenshotPath),copied);row={...row,screenshotPath}}try{return this.write(chatId,row)}catch(error){if(copied)fs.rmSync(copied,{force:true});throw error}}
+  update(chatId:string,id:string,version:number,input:{text:string;editorId:string;sequence:number}){
+    if(!Number.isSafeInteger(version)||version<1||!input||typeof input.text!=='string'||input.text.length>4000||typeof input.editorId!=='string'||!input.editorId||input.editorId.length>100||!Number.isSafeInteger(input.sequence)||input.sequence<1)throw Error('invalid_annotation_target_draft')
+    const row=this.get(chatId,id)
+    if(row.editorId===input.editorId&&input.sequence<=row.sequence)return row
+    if(version!==row.version&&row.editorId!==input.editorId){const copyId='target_'+createHash('sha256').update(JSON.stringify([id,input.editorId])).digest('hex'),copy=this.create(chatId,{...row,id:copyId,comment:input.text,editorId:input.editorId,sequence:input.sequence,version:1,conflictOf:id,updatedAt:Date.now()});if(input.sequence>copy.sequence)this.write(chatId,{...copy,comment:input.text,sequence:input.sequence,version:copy.version+1,updatedAt:Date.now()});throw Error('annotation_target_draft_conflict')}
+    return this.write(chatId,{...row,comment:input.text,editorId:input.editorId,sequence:input.sequence,version:row.version+1,updatedAt:Date.now()})
+  }
+  remove(chatId:string,id:string,version:number){const row=this.get(chatId,id);if(row.version!==version)throw Error('annotation_target_draft_conflict');fs.rmSync(this.files.resolve(chatId,this.relative(id)),{force:true});return row}
 }

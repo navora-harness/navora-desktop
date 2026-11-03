@@ -5,6 +5,8 @@ import type {
   ChatCompletionTool,
 } from '../../../shared/openai-types'
 import { readChatStream, type ChatReply } from './chat-stream'
+import {estimateContextBudget} from '../../../shared/context-budget'
+import {normalizeModelUsage} from '../../../shared/model-usage'
 
 export type OpenAIClientOptions = {
   baseUrl: string
@@ -98,11 +100,8 @@ export class OpenAICompatibleClient {
     }
     if (this.opts.contextWindow) {
       // Approximation only; leave a safety margin for server-specific tokenizers.
-      const textOnly = messages.map(m => ({ ...m, content: Array.isArray(m.content) ? m.content.map(p => p.type === 'text' ? p.text : '[image]') : m.content }))
-      const estimated = Math.ceil(Buffer.byteLength(JSON.stringify({ messages: textOnly, tools }), 'utf8') / 3)
-      const imageCount = messages.reduce((n, m) => n + (Array.isArray(m.content) ? m.content.filter(p => p.type === 'image_url').length : 0), 0)
       const outputBudget = body.max_tokens ?? body.max_completion_tokens ?? 0
-      if (estimated + imageCount * 4096 + outputBudget > this.opts.contextWindow * .9) {
+      if (estimateContextBudget(messages,tools,outputBudget,this.opts.contextWindow).exceeds) {
         throw new Error('llm_context_limit:本次上下文接近模型容量，请新建对话或减少输入；也可在模型设置中核对上下文和输出上限。')
       }
     }
@@ -160,6 +159,7 @@ export class OpenAICompatibleClient {
         reasoningContent: choice.message.reasoning_content ?? null,
         tool_calls: choice.message.tool_calls,
         finish_reason: choice.finish_reason,
+        usage:normalizeModelUsage(data.usage),
       }
     } catch (e) {
       if (signal?.aborted && !timedOut) throw new Error('aborted')

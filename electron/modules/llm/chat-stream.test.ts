@@ -22,13 +22,21 @@ test('SSE preserves Chinese split across bytes, CRLF, reasoning, content and usa
     ': heartbeat\r\n\r\n' + chunk({ reasoning_content: '正在思考' }) +
     chunk({ content: '你' }) + chunk({ content: '好' }) +
     chunk({ content: 'wrong choice' }, null, 1) + chunk({}, 'stop') +
-    'data: {"choices":[],"usage":{"total_tokens":10}}\r\n\r\ndata: [DONE]\r\n\r\n',
+    'data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10,"prompt_tokens_details":{"cached_tokens":2}}}\r\n\r\ndata: [DONE]\r\n\r\n',
   ), reply => updates.push(reply))
   assert.equal(reply.content, '你好')
   assert.equal(reply.reasoningContent, '正在思考')
   assert.equal(reply.finish_reason, 'stop')
   assert.equal(updates[0].content, null)
   assert.equal(updates[1].content, '你')
+  assert.deepEqual(reply.usage, { inputTokens: 7, outputTokens: 3, totalTokens: 10, cachedInputTokens: 2 })
+  assert.equal(updates.at(-1)?.usage?.totalTokens, 10)
+  assert.equal(updates[0].usage, undefined)
+})
+
+test('missing and malformed stream usage never becomes a fabricated zero', async () => {
+  const reply = await readChatStream(response(chunk({ content: 'ok' }) + chunk({}, 'stop') + 'data: {"choices":[],"usage":{"prompt_tokens":-1,"completion_tokens":2}}\n\ndata: [DONE]\n\n'))
+  assert.equal(reply.usage, undefined)
 })
 
 test('interleaved parallel tools assemble by index without mutating earlier updates', async () => {
@@ -105,11 +113,12 @@ test('stream request tolerates a server returning complete JSON', async () => {
   await withServer((body, res) => {
     assert.equal(body.stream, true)
     res.setHeader('Content-Type', 'application/json')
-    res.end(JSON.stringify({ choices: [{ message: { content: 'answer', reasoning_content: 'thought' }, finish_reason: 'stop' }] }))
+    res.end(JSON.stringify({ choices: [{ message: { content: 'answer', reasoning_content: 'thought' }, finish_reason: 'stop' }], usage: { prompt_tokens: 20, completion_tokens: 4, total_tokens: 24 } }))
   }, async client => {
     const reply = await client.chat([], [], undefined, { onUpdate: () => {} })
     assert.equal(reply.content, 'answer')
     assert.equal(reply.reasoningContent, 'thought')
+    assert.deepEqual(reply.usage, { inputTokens: 20, outputTokens: 4, totalTokens: 24 })
   })
 })
 
