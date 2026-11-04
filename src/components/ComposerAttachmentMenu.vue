@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
-    <div v-if="opened&&!native.open.value&&!nativePending" class="ctx-scrim composer-attachment-scrim" @pointerdown.prevent="hide()" />
-    <section v-if="opened&&!native.open.value&&!nativePending" ref="panel" data-browser-chrome-overlay class="sidebar-ctx-panel composer-attachment-menu" :style="{left:`${position.x}px`,top:`${position.y}px`,maxHeight:`${maximumHeight}px`}" role="dialog" aria-label="附加" @keydown="key">
+    <div v-if="opened" class="ctx-scrim composer-attachment-scrim" @pointerdown.prevent="hide()" />
+    <section v-if="opened" ref="panel" data-browser-chrome-overlay class="sidebar-ctx-panel composer-attachment-menu" :style="{left:`${position.x}px`,top:`${position.y}px`,maxHeight:`${maximumHeight}px`}" role="dialog" aria-label="附加" @keydown="key">
       <label class="composer-attachment-search"><AppIcon icon="magnifying-glass" /><input ref="search" v-model="query" placeholder="搜索附加内容或工具" aria-label="搜索附加内容或工具" role="combobox" aria-autocomplete="list" aria-controls="composer-attachment-options" :aria-activedescendant="items[selected]?`composer-attach-${items[selected]!.id}`:undefined" aria-expanded="true" @input="selected=0" /></label>
       <div id="composer-attachment-options" ref="list" class="composer-attachment-options" role="listbox" aria-label="附加来源与工具">
         <template v-for="(item,index) in items" :key="item.id"><div v-if="index===0||items[index-1]?.group!==item.group" class="composer-attachment-label" role="presentation">{{ item.group }}</div><button :id="`composer-attach-${item.id}`" type="button" role="option" :aria-selected="selected===index" :class="{selected:selected===index}" :tabindex="-1" @pointermove="selected=index" @click="choose(item)"><AppIcon :icon="item.icon" /><span><b>{{ item.label }}</b><small>{{ item.detail }}</small></span><AppIcon icon="chevron-right" /></button></template>
@@ -14,8 +14,7 @@
 <script setup lang="ts">
 import {computed,nextTick,onBeforeUnmount,onMounted,ref,watch} from 'vue'
 import {BROWSER_CHROME_OPEN,requestBrowserChromeOpen} from '@shared/browser-chrome-events'
-import {NATIVE_UI_OPEN,type NativePanelContent} from '@shared/native-ui'
-import {useNativePanel} from '@/composables/useNativeUi'
+import {NATIVE_UI_OPEN} from '@shared/native-ui'
 import AppIcon from './icons/AppIcon.vue'
 type MenuItem={id:string;group:string;label:string;detail:string;icon:string;source?:string;creator?:'plugin'|'skill';extra?:boolean}
 const props=defineProps<{contextKey?:string}>()
@@ -34,31 +33,14 @@ const definitions:MenuItem[]=[
   {id:'import',source:'import',group:'更多来源',label:'导入本地文件',detail:'将本地文件加入当前对话',icon:'paperclip',extra:true},
 ]
 const emit=defineEmits<{select:[source:string];creator:[kind:'plugin'|'skill'];closed:[committed:boolean];notify:[message:string]}>()
-const opened=ref(false),query=ref(''),more=ref(false),selected=ref(0),panel=ref<HTMLElement>(),search=ref<HTMLInputElement>(),list=ref<HTMLElement>(),position=ref({x:8,y:8}),maximumHeight=ref(460),nativePending=ref(false)
+const opened=ref(false),query=ref(''),more=ref(false),selected=ref(0),panel=ref<HTMLElement>(),search=ref<HTMLInputElement>(),list=ref<HTMLElement>(),position=ref({x:8,y:8}),maximumHeight=ref(460)
 const items=computed(()=>definitions.filter(item=>(query.value||more.value||!item.extra)&&(!query.value||(item.label+' '+item.detail).toLowerCase().includes(query.value.toLowerCase()))))
 let anchor:HTMLElement|null=null,previous:HTMLElement|null=null,observer:ResizeObserver|undefined
 const chromeId=`composer-attachment-${crypto.randomUUID()}`
 let generation=0
-const native=useNativePanel({key:chromeId,contextKey:()=>props.contextKey||'',onAction(action){
-  if(!opened.value||!native.open.value)return
-  if(action.id==='attachment:search'){
-    if(action.type==='change'&&typeof action.value==='string'){query.value=action.value;selected.value=0}
-    else if(action.type==='submit'){if(typeof action.value==='string')query.value=action.value;const item=items.value[selected.value];if(item)choose(item)}
-    return
-  }
-  if(action.type!=='click')return
-  if(action.id==='attachment:more'){more.value=!more.value;selected.value=0;return}
-  const item=items.value.find(item=>`attachment:${item.id}`===action.id);if(item)choose(item)
-},onDismissed(){hide()},onClosed(){hide()}})
-function nativeContent():NativePanelContent{
-  const choices:NativePanelContent[]=[]
-  items.value.forEach((item,index)=>{if(index===0||items.value[index-1]?.group!==item.group)choices.push({id:`attachment:group:${item.group}`,type:'text',text:item.group,muted:true});choices.push({id:`attachment:${item.id}:row`,type:'row',gap:8,children:[{id:`attachment:${item.id}:icon`,type:'icon',icon:item.icon,width:16,height:16},{id:`attachment:${item.id}:column`,type:'column',flex:1,gap:3,children:[{id:`attachment:${item.id}`,type:'button',text:item.label,tooltip:item.detail},{id:`attachment:${item.id}:detail`,type:'text',text:item.detail,muted:true}]}]})})
-  if(!choices.length)choices.push({id:'attachment:empty',type:'text',text:'没有匹配的来源或工具',muted:true})
-  return {id:'attachment:root',type:'column',width:330,padding:10,gap:8,children:[{id:'attachment:search',type:'input',value:query.value,placeholder:'搜索附加内容或工具',maxLength:512},{id:'attachment:options',type:'list',height:340,gap:8,children:choices},{id:'attachment:separator',type:'separator'},...(!query.value?[{id:'attachment:more',type:'button',text:more.value?'常用来源':'更多来源'} as NativePanelContent]:[]),{id:'attachment:keys',type:'text',text:'↑↓ 选择 · Enter 确认 · Esc 关闭',muted:true}]}
-}
 function resize(){void nextTick(()=>{if(!opened.value||!panel.value)return;const a=anchor?.getBoundingClientRect();if(!a){hide();return}const above=a.top-16;maximumHeight.value=Math.max(44,Math.min(490,Math.max(44,above),innerHeight-16));void nextTick(()=>{if(!panel.value)return;const box=panel.value.getBoundingClientRect();position.value={x:Math.max(8,Math.min(a.left,innerWidth-box.width-8)),y:Math.max(8,a.top-box.height-8)}})})}
-async function show(target:HTMLElement,initialQuery='') {const ticket=++generation;anchor=target;previous=document.activeElement instanceof HTMLElement?document.activeElement:null;query.value=initialQuery;more.value=false;selected.value=0;nativePending.value=true;opened.value=true;let shown=false;try{shown=await native.show(nativeContent(),target,{placement:'top-start',focusMode:'input'})}catch{if(ticket===generation){hide();emit('notify','附加面板暂时无法打开，草稿已保留，请重新打开。')}return}if(ticket!==generation||!opened.value){if(shown)void native.hide();return}nativePending.value=false;if(shown)return;requestBrowserChromeOpen(chromeId);resize();void nextTick(()=>{search.value?.focus({preventScroll:true});if(panel.value){observer ||= new ResizeObserver(resize);observer.observe(panel.value)}})}
-function hide(committed=false){if(!opened.value)return;generation++;opened.value=false;nativePending.value=false;observer?.disconnect();void native.hide();if(!committed&&previous?.isConnected)previous.focus({preventScroll:true});emit('closed',committed)}
+async function show(target:HTMLElement,initialQuery='') {const ticket=++generation;anchor=target;previous=document.activeElement instanceof HTMLElement?document.activeElement:null;query.value=initialQuery;more.value=false;selected.value=0;opened.value=true;requestBrowserChromeOpen(chromeId);resize();await nextTick();if(ticket!==generation||!opened.value)return;search.value?.focus({preventScroll:true});if(panel.value){observer ||= new ResizeObserver(resize);observer.observe(panel.value)}}
+function hide(committed=false){if(!opened.value)return;generation++;opened.value=false;observer?.disconnect();if(!committed&&previous?.isConnected)previous.focus({preventScroll:true});emit('closed',committed)}
 function choose(item:MenuItem){hide(true);if(item.creator)emit('creator',item.creator);else if(item.source)emit('select',item.source)}
 function move(index:number){selected.value=Math.max(0,Math.min(index,items.value.length-1));void nextTick(()=>list.value?.querySelector<HTMLElement>('[aria-selected=true]')?.scrollIntoView({block:'nearest'}))}
 function key(event:KeyboardEvent){
@@ -70,12 +52,11 @@ function key(event:KeyboardEvent){
   if(event.key==='Enter'||event.key==='ArrowRight'&&!(event.target instanceof HTMLInputElement&&query.value)){const item=items.value[selected.value];if(item){event.preventDefault();event.stopPropagation();choose(item)}}
 }
 function otherChrome(event:Event){if((event as CustomEvent<string>).detail!==chromeId)hide()}
-function otherNativeChrome(event:Event){if((event as CustomEvent<{id:string}>).detail?.id!==native.id)hide()}
+function otherNativeChrome(){hide()}
 function scroll(event:Event){if(panel.value?.contains(event.target as Node))return;resize()}
-watch([query,more],()=>{if(opened.value&&native.open.value)void native.update(nativeContent())})
 watch(()=>props.contextKey,()=>hide())
 onMounted(()=>{window.addEventListener('resize',resize);window.addEventListener('scroll',scroll,true);window.addEventListener(BROWSER_CHROME_OPEN,otherChrome);window.addEventListener(NATIVE_UI_OPEN,otherNativeChrome)})
-onBeforeUnmount(()=>{generation++;observer?.disconnect();void native.destroy();window.removeEventListener('resize',resize);window.removeEventListener('scroll',scroll,true);window.removeEventListener(BROWSER_CHROME_OPEN,otherChrome);window.removeEventListener(NATIVE_UI_OPEN,otherNativeChrome)})
+onBeforeUnmount(()=>{generation++;observer?.disconnect();window.removeEventListener('resize',resize);window.removeEventListener('scroll',scroll,true);window.removeEventListener(BROWSER_CHROME_OPEN,otherChrome);window.removeEventListener(NATIVE_UI_OPEN,otherNativeChrome)})
 defineExpose({show,hide,open:opened})
 </script>
 <style>
