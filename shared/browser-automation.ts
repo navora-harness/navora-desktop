@@ -1,7 +1,9 @@
 import type { PointerTrajectoryOptions } from './pointer-trajectory'
 
+// Keep the original three keys so existing style choices survive the redesign.
+export const BROWSER_CURSOR_STYLES = ['windows-glow', 'navora-arrow', 'focus-ring', 'precision-cross', 'ice-arrow', 'diamond', 'laser', 'windows-standard'] as const
+
 export type BrowserAutomationConfig = {
-  auto_mute: boolean
   show_virtual_cursor: boolean
   show_control_feedback: boolean
   protect_input: boolean
@@ -10,14 +12,14 @@ export type BrowserAutomationConfig = {
   speed_multiplier: number
   interval_ms: number
   cursor_fps: number
-  cursor_style: 'navora-arrow' | 'focus-ring' | 'precision-cross'
+  cursor_style: typeof BROWSER_CURSOR_STYLES[number]
+  cursor_scale: number
 }
 
 export function createDefaultBrowserAutomation(): BrowserAutomationConfig {
   return {
-    auto_mute: true,
     show_virtual_cursor: true, show_control_feedback: true, protect_input: true, smooth_pointer: true,
-    pointer_profile: 'natural', speed_multiplier: 1, interval_ms: 1000 / 120, cursor_fps: 60, cursor_style: 'navora-arrow',
+    pointer_profile: 'natural', speed_multiplier: 0.6, interval_ms: 1000 / 120, cursor_fps: 60, cursor_style: 'windows-glow', cursor_scale: 1,
   }
 }
 
@@ -42,10 +44,12 @@ export function normalizeBrowserAutomation(value: unknown): BrowserAutomationCon
   if (value === undefined) return defaults
   const source = record(value, 'browser.automation')
   for (const key of Object.keys(source)) {
+    // Retired setting: discard saved values without losing unrelated preferences.
+    if (key === 'auto_mute') continue
     if (!Object.hasOwn(defaults, key)) throw new TypeError(`Unknown browser.automation setting: ${key}`)
   }
   const result = { ...defaults }
-  for (const key of ['auto_mute', 'show_virtual_cursor', 'show_control_feedback', 'protect_input', 'smooth_pointer'] as const) {
+  for (const key of ['show_virtual_cursor', 'show_control_feedback', 'protect_input', 'smooth_pointer'] as const) {
     if (source[key] === undefined) continue
     if (typeof source[key] !== 'boolean') throw new TypeError(`browser.automation.${key} must be a boolean`)
     result[key] = source[key]
@@ -55,9 +59,10 @@ export function normalizeBrowserAutomation(value: unknown): BrowserAutomationCon
     result.pointer_profile = source.pointer_profile
   }
   if (source.cursor_style !== undefined) {
-    if (typeof source.cursor_style !== 'string' || !['navora-arrow', 'focus-ring', 'precision-cross'].includes(source.cursor_style)) throw new TypeError('Invalid browser.automation.cursor_style')
+    if (typeof source.cursor_style !== 'string' || !(BROWSER_CURSOR_STYLES as readonly string[]).includes(source.cursor_style)) throw new TypeError('Invalid browser.automation.cursor_style')
     result.cursor_style = source.cursor_style as BrowserAutomationConfig['cursor_style']
   }
+  if (source.cursor_scale !== undefined) result.cursor_scale = finite(source.cursor_scale, 'cursor_scale', 0.75, 2)
   if (source.speed_multiplier !== undefined) result.speed_multiplier = finite(source.speed_multiplier, 'speed_multiplier', 0, Number.MAX_VALUE, true)
   if (source.interval_ms !== undefined) result.interval_ms = finite(source.interval_ms, 'interval_ms', 0, 60000, true)
   if (source.cursor_fps !== undefined) {
@@ -97,7 +102,7 @@ function motionPatch(value: unknown): BrowserPointerMotion {
       if (field !== 'minimum-jerk' && field !== 'lognormal') throw new TypeError('Invalid motion.timing')
     } else {
       const range: Record<string, readonly [number, number, boolean]> = {
-        durationMs: [0, 60000, false], speedMultiplier: [0, Number.MAX_VALUE, true],
+        durationMs: [0, 60000, false], speedMultiplier: [0.1, 4, true],
         intervalMs: [0, 60000, true], sampleRateHz: [1, 240, false],
         curvature: [0, 1, false], jitterPx: [0, 10, false],
         targetWidthPx: [0, Number.MAX_VALUE, true], holdMs: [0, 1000, false],
@@ -129,15 +134,36 @@ export function resolvePointerMotion(config: BrowserAutomationConfig, override?:
 
 export type BrowserAutomationOwner = 'ai' | 'paused' | 'user'
 export type BrowserAutomationActivity = 'idle' | 'acting' | 'waiting' | 'handoff' | 'error'
+export type BrowserControlWait = {
+  stage: 'queued' | 'operation' | 'submitted-input' | 'cleanup' | 'navigation' | 'native'
+  startedAt: number
+  elapsedMs: number
+  overdue: boolean
+  committedInputs: number
+  pendingNavigation: number
+}
 export type BrowserAutomationState = {
+  /** Independent host observation; DOM readability does not imply the page is usable. */
+  pageBlocker?: import('./page-blocker').PageBlockerSummaryV1
   owner: BrowserAutomationOwner
   activity: BrowserAutomationActivity
   epoch: number
   activeOperations: number
   cursorEnabled: boolean
   inputProtected: boolean
+  /** Confirmed native focus isolation and long-lived rendering are separate from cursor drawing. */
+  isolateInput?: boolean
+  keepRendering?: boolean
+  rendering?: {
+    viewAvailable: boolean
+    keepAlive: boolean
+    requestedBackgroundThrottling: boolean
+    effectiveBackgroundThrottling: boolean
+  }
   nativeConfirmed: boolean
   nativePending: boolean
+  /** Diagnostic only: an overdue acknowledgement never grants control. */
+  controlWait?: BrowserControlWait
   handoffTarget?: 'paused' | 'user'
   label?: string
   error?: string
@@ -148,6 +174,9 @@ export type BrowserAutomationState = {
   cursorAvailable?: boolean
   cursorImageAvailable?: boolean
   cursorVisible?: boolean
+  /** Display preference and a native pointer receipt are separate from screen visibility. */
+  cursorRequested?: boolean
+  cursorPositionValid?: boolean
   cursorStyle?: BrowserAutomationConfig['cursor_style']
   /** Only the current owner may release a task's page input lease. */
   leaseRunId?: string
@@ -162,6 +191,6 @@ export type BrowserAutomationState = {
 export function createBrowserAutomationState(): BrowserAutomationState {
   return {
     owner: 'ai', activity: 'idle', epoch: 0, activeOperations: 0,
-    cursorEnabled: false, inputProtected: false, nativeConfirmed: true, nativePending: false,
+    cursorEnabled: false, inputProtected: false, isolateInput: false, keepRendering: false, nativeConfirmed: true, nativePending: false,
   }
 }

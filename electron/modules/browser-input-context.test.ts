@@ -9,6 +9,7 @@ import { withBrowserInputOperation, currentBrowserInputOperation, assertBrowserI
 import { dispatchTrustedPointer, dispatchTrustedClick } from './trusted-input'
 import { clickInIframe } from './iframe-click'
 import { BridgeRemoteService } from './bridge-remote'
+import { automationTestApi } from './browser-automation-test-api'
 
 type Event = Record<string, unknown>
 let nextId = 50000
@@ -25,8 +26,8 @@ function fixture(options: { mouse?: (event: Event) => Promise<unknown>; sequence
   const flags = { manual: false }
   const api = Object.assign(emitter, {
     id: nextId++, isDestroyed: () => false, getZoomFactor: () => 2,
-    setVirtualCursorEnabled: async () => {}, setVirtualCursorFrameRate: () => {},
-    dispatchMouseEvent: async (event: Event) => { events.push(event); return options.mouse?.(event) },
+    ...automationTestApi(),
+    dispatchMouseEvent: async (event: Event) => { events.push(event); return await options.mouse?.(event) ?? {status:'dispatched',stage:'event-dispatch'} },
     querySelectorDeep: async () => ({ backendNodeId: 1, tagName: 'IFRAME', x: 20, y: 30, width: 200, height: 100 }),
     executeJavaScript: async () => null,
   }, options.sequence ? { dispatchInputSequence: options.sequence } : {})
@@ -98,7 +99,7 @@ test('takeover waits for owned legacy button cleanup and releases at the latest 
     let handedBack = false
     const handoff = f.controller.takeControl().then(state => { handedBack = true; return state })
     await tick(); assert.equal(handedBack, false)
-    assert.deepEqual(f.events.at(-1), { type: 'mouseReleased', x: 90, y: 100, button: 'left', buttons: 0, clickCount: 1 })
+    assert.deepEqual(f.events.at(-1), { type: 'mouseReleased', position: {x: 90, y: 100}, button: 'left', buttons: 0, clickCount: 1 })
     release.resolve()
     await action; assert.equal((await handoff).owner, 'user')
     assert.equal(f.events.filter(event => event.type === 'mouseReleased').length, 1)
@@ -137,7 +138,7 @@ test('reload forgets an old failed legacy release without replaying it into the 
       await dispatchTrustedPointer(f.wc, { action: 'up', x: 60, y: 70 })
     }))
     assert.equal(releases, 2, 'Only the first failed attempt and the new owned release are sent')
-    assert.equal(f.events.at(-1)!.x, 60)
+    assert.equal((f.events.at(-1)!.position as {x:number}).x, 60)
   } finally { f.controller.dispose() }
 })
 
@@ -166,6 +167,7 @@ test('iframe native partial failure stays one closed batch and never falls back 
     calls++
     assert.deepEqual(steps.map(event => event.type), ['mouseMoved', 'mousePressed', 'mouseReleased'])
     assert.deepEqual(steps.map(event => event.atMs), [0, 0, 10])
+    assert.ok(steps.every(step=>step.position && !('x' in step) && !('offset' in step)))
     return { status: 'failed', reason: 'MAX_LATENESS_EXCEEDED', dispatchedCount: 2, cleanup: { dispatched: 1, failed: 0 } }
   } })
   try {
@@ -176,6 +178,61 @@ test('iframe native partial failure stays one closed batch and never falls back 
     assert.equal(calls, 1)
     assert.deepEqual(f.events, [])
   } finally { f.controller.dispose() }
+})
+
+test('a rejected cross-document native target click preserves the receipt without coordinate fallback',async()=>{
+  const f=fixture()
+  const target={webContentsId:f.wc.id,processId:2,routingId:3,documentId:4,backendNodeId:5}
+  const receipt={status:'failed',stage:'target-resolution',stages:['target-resolution'],reason:'STALE_TARGET'}
+  const calls:unknown[]=[]
+  Object.assign(f.wc,{
+    querySelectorAcrossDocuments:async()=>({backendNodeId:5,tagName:'BUTTON',x:30,y:40,width:20,height:30,target}),
+    clickElement:async(options:unknown)=>{calls.push(options);return receipt},
+  })
+  try{
+    const result=await f.controller.run({},op=>withBrowserInputOperation(f.wc,op,()=>clickInIframe(f.wc,{iframeSelector:'#frame',innerSelector:'#save'})))
+    assert.equal(result.ok,false)
+    assert.equal(result.dispatch,receipt)
+    assert.deepEqual(calls,[{target,button:'left',clickCount:1,scrollIntoView:true}])
+    assert.deepEqual(f.events,[])
+  }finally{f.controller.dispose()}
+})
+
+test('confirmed reset clears trusted pointer bookkeeping without a second native release',async()=>{
+  const f=fixture();let inputActive=false;const entered=deferred<void>();const trace:string[]=[]
+  const read=f.wc.getAutomationState.bind(f.wc),reset=f.wc.resetAutomationOptions.bind(f.wc)
+  const mouse=f.wc.dispatchMouseEvent.bind(f.wc)
+  f.wc.getAutomationState=()=>({...read(),inputActive})
+  f.wc.dispatchMouseEvent=async event=>{trace.push(event.type);inputActive=event.type==='mousePressed';return mouse(event)}
+  f.wc.resetAutomationOptions=async()=>{trace.push('reset');if(inputActive)trace.push('mouseReleased');inputActive=false;await reset()}
+  try{
+    const action=f.controller.run({runId:'owned-native-pointer'},op=>withBrowserInputOperation(f.wc,op,async()=>{
+      await dispatchTrustedPointer(f.wc,{action:'down',x:10,y:20});entered.resolve()
+      await new Promise<void>(resolve=>op.signal.addEventListener('abort',()=>resolve(),{once:true}))
+    })).catch(()=>{})
+    await entered.promise;await f.controller.takeControl();await action
+    assert.deepEqual(trace,['mousePressed','reset','mouseReleased'])
+    await f.controller.resume()
+    await f.controller.run({},op=>withBrowserInputOperation(f.wc,op,()=>dispatchTrustedClick(f.wc,30,40)))
+    assert.equal(trace.filter(item=>item==='mousePressed').length,2,'The reset also forgets the local held-button ledger')
+    assert.equal(trace.filter(item=>item==='mouseReleased').length,2,'The next successful click releases exactly once')
+  }finally{f.controller.dispose()}
+})
+
+test('native reset cannot suppress a release belonging to the sendInputEvent fallback',async()=>{
+  const f=fixture(),entered=deferred<void>(),cancelled=deferred<Record<string,unknown>>()
+  const reset=f.wc.resetAutomationOptions.bind(f.wc)
+  Object.assign(f.wc,{dispatchMouseEvent:undefined,sendInputEvent:(event:Event)=>f.events.push(event),
+    resetAutomationOptions:async()=>{await reset();cancelled.resolve({status:'failed',reason:'AUTOMATION_RESET',dispatchedCount:0})}})
+  try{
+    const action=f.controller.run({runId:'legacy-pointer'},op=>withBrowserInputOperation(f.wc,op,async()=>{
+      await dispatchTrustedPointer(f.wc,{action:'down',x:10,y:20});entered.resolve()
+      await op.commit(()=>cancelled.promise)
+    })).catch(()=>{})
+    await entered.promise;const state=await f.controller.takeControl();await action
+    assert.deepEqual(f.events.map(event=>event.type),['mouseDown','mouseUp'])
+    assert.equal(state.owner,'user');assert.equal(state.error,undefined)
+  }finally{f.controller.dispose()}
 })
 
 test('iframe cancellation reaches the native batch and does not unlock before its cleanup result', async () => {
@@ -208,8 +265,8 @@ test('remote drag owns the page across packets, maps zoom correctly, and release
     assert.equal((await service.handleInput({ windowId: 'page', action: 'up', nx: 0.75, ny: 0.5, buttons: 0 }, client)).ok, true)
     await ai
     assert.deepEqual(f.events.map(event => event.type), ['mousePressed', 'mouseMoved', 'mouseReleased', 'ai'])
-    assert.equal(f.events[0]!.x, 100)
-    assert.equal(f.events[2]!.x, 150)
+    assert.equal((f.events[0]!.position as {x:number}).x, 100)
+    assert.equal((f.events[2]!.position as {x:number}).x, 150)
     assert.equal(f.events[2]!.buttons, 0)
   } finally { service.dropClient(client); f.controller.dispose() }
 })

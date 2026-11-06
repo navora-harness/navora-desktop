@@ -48,12 +48,12 @@ test('snapshots stay within budget at record boundaries', () => {
 })
 
 test('native capabilities reflect callable methods, without version assumptions', () => {
-  const capabilities = browserCapabilities({ querySelectorDeep() {}, clickSelector:'unavailable' })
+  const capabilities = browserCapabilities({ querySelectorDeep() {}, clickElement:'unavailable' })
   assert.equal(capabilities.queryDeep, true)
   assert.equal(capabilities.trustedClick, false)
   assert.equal(capabilities.inputSequence, false)
   assert.equal(capabilities.pointerTrajectory, false)
-  const pointer = browserCapabilities({ dispatchInputSequence() {}, setVirtualCursorEnabled() {} })
+  const pointer = browserCapabilities({ dispatchInputSequence() {}, setAutomationOptions() {} })
   assert.equal(pointer.inputSequence, true)
   assert.equal(pointer.pointerTrajectory, true)
   assert.equal(pointer.virtualCursor, true)

@@ -34,11 +34,13 @@ import SidebarContextMenu from './sidebar/SidebarContextMenu.vue'
 import AppIcon from './icons/AppIcon.vue'
 import BrowserTabAudioIcon from './BrowserTabAudioIcon.vue'
 import type {NativeMenuItem} from '@shared/native-ui'
+import {useSafeBrowserPopup} from '@/utils/browser-popup-placement'
 
 const props=defineProps<{items:BrowserTabMenuItem[]}>()
 const emit=defineEmits<{action:[id:string];closed:[]}>()
 const shell=ref<InstanceType<typeof SidebarContextMenu>>(),submenuPanel=ref<HTMLElement>()
 const open=ref(false),submenu=ref<BrowserTabMenuItem|null>(null),position=ref({x:0,y:0})
+useSafeBrowserPopup(()=>open.value&&submenu.value?submenuPanel.value:null,hide)
 function mapNative(items:BrowserTabMenuItem[]):NativeMenuItem[]{return items.flatMap(item=>[...(item.separatorBefore?[{id:`separator-${item.id}`,label:'',type:'separator' as const}]:[]),{id:item.id,label:item.label,icon:item.icon,enabled:!item.disabled,reason:item.reason,shortcut:item.shortcut,...(item.children?{children:mapNative(item.children)}:{})}])}
 const nativeItems=computed(()=>mapNative(props.items))
 function nativeAction(id:string){function find(items:BrowserTabMenuItem[]):BrowserTabMenuItem|undefined{for(const item of items){if(item.id===id)return item;const child=item.children&&find(item.children);if(child)return child}}const item=find(props.items);if(item&&!item.disabled&&!item.children)activate(item)}

@@ -1,16 +1,17 @@
 <template>
-  <button v-if="native.menusSupported.value&&!nativeFailed" ref="nativeTrigger" type="button" class="ui-icon-button" :aria-label="label" :title="label" :disabled="disabled" aria-haspopup="menu" :aria-expanded="nativeOpen" @click="showNative"><AppIcon :icon="icon" /></button>
-  <v-menu v-else v-model="open" :location="location" :offset="6" :content-class="['ui-action-menu-overlay',{'browser-default-cursor':defaultCursor,'action-menu-navigation-closing':navigationClosing}]">
+  <button v-if="native.menusSupported.value&&!nativeFailed" v-bind="$attrs" ref="nativeTrigger" type="button" class="ui-icon-button" :aria-label="label" :title="nativeError||label" :disabled="disabled" aria-haspopup="menu" :aria-expanded="nativeOpen" @click="showNative"><AppIcon :icon="icon" /></button>
+  <v-menu v-else v-bind="$attrs" v-model="open" :location="location" :offset="6" :content-class="['ui-action-menu-overlay',{'browser-default-cursor':defaultCursor,'action-menu-navigation-closing':navigationClosing}]">
     <template #activator="{ props: trigger }">
       <button v-bind="trigger" type="button" class="ui-icon-button" :aria-label="label" :title="label" :disabled="disabled"><AppIcon :icon="icon" /></button>
     </template>
-    <div class="ui-action-menu" role="menu" :aria-label="label" :inert="navigationClosing" :aria-hidden="navigationClosing||undefined" @keydown="onKey">
+    <div ref="domPanel" class="ui-action-menu" role="menu" :aria-label="label" :inert="navigationClosing" :aria-hidden="navigationClosing||undefined" @keydown="onKey">
       <template v-for="item in items" :key="item.id">
         <div v-if="item.divider" class="ui-menu-divider" role="separator" />
-        <button type="button" role="menuitem" :class="{danger:item.danger}" :disabled="item.disabled" :title="item.reason" @click="emit('select',item.id)"><AppIcon v-if="item.icon" :icon="item.icon" /><span>{{ item.label }}</span></button>
+        <button type="button" :role="item.checked!==undefined?'menuitemcheckbox':'menuitem'" :aria-checked="item.checked" :class="{danger:item.danger}" :disabled="item.disabled" :title="item.reason" @click="emit('select',item.id)"><AppIcon v-if="item.icon" :icon="item.icon" /><span>{{ item.label }}</span><kbd v-if="item.shortcut">{{ item.shortcut.replace('CommandOrControl','Ctrl/⌘') }}</kbd><AppIcon v-if="item.checked" icon="check" /></button>
       </template>
     </div>
   </v-menu>
+  <span v-if="nativeError" class="action-menu-error" role="alert">{{ nativeError }}</span>
 </template>
 <script setup lang="ts">
 import {nextTick,onBeforeUnmount,onMounted,ref,watch} from 'vue'
@@ -18,10 +19,14 @@ import AppIcon from './icons/AppIcon.vue'
 import {BROWSER_CHROME_OPEN,requestBrowserChromeOpen} from '@shared/browser-chrome-events'
 import {useNativeUi} from '@/composables/useNativeUi'
 import {NATIVE_UI_OPEN,type NativeMenuItem} from '@shared/native-ui'
-export type ActionMenuItem={id:string;label:string;icon?:string;disabled?:boolean;reason?:string;danger?:boolean;divider?:boolean}
-const props=withDefaults(defineProps<{label:string;items:ActionMenuItem[];disabled?:boolean;icon?:string;location?:'bottom end'|'bottom start'|'top start';defaultCursor?:boolean}>(),{icon:'ellipsis',location:'bottom end',defaultCursor:false})
+import {BROWSER_POPUP_NO_SPACE,useSafeBrowserPopup} from '@/utils/browser-popup-placement'
+defineOptions({inheritAttrs:false})
+export type ActionMenuItem={id:string;label:string;icon?:string;disabled?:boolean;reason?:string;danger?:boolean;divider?:boolean;checked?:boolean;shortcut?:string}
+const props=withDefaults(defineProps<{label:string;items:ActionMenuItem[];disabled?:boolean;icon?:string;location?:'bottom end'|'bottom start'|'top start';defaultCursor?:boolean;contextKey?:string}>(),{icon:'ellipsis',location:'bottom end',defaultCursor:false})
 const emit=defineEmits<{select:[id:string];open:[value:boolean];'dom-open':[value:boolean]}>(),open=ref(false),navigationClosing=ref(false)
-const native=useNativeUi(),nativeTrigger=ref<HTMLElement>(),nativeOpen=ref(false),nativeFailed=ref(false)
+const native=useNativeUi(),nativeTrigger=ref<HTMLElement>(),nativeOpen=ref(false),nativeFailed=ref(false),nativeError=ref('')
+const domPanel=ref<HTMLElement>()
+useSafeBrowserPopup(()=>open.value?domPanel.value?.closest<HTMLElement>('.v-overlay__content'):null,()=>{open.value=false;nativeError.value=BROWSER_POPUP_NO_SPACE})
 let nativeGeneration=0,disposed=false
 const chromeId=`actions-${crypto.randomUUID()}`
 // A navigation handoff waits for the actual inactive/inert DOM, not a decorative
@@ -34,25 +39,27 @@ async function hideNative(){nativeGeneration++;if(!nativeOpen.value)return;nativ
 async function fallback(){nativeOpen.value=false;nativeFailed.value=true;emit('open',false);await nextTick();open.value=true}
 async function showNative(){
   if(props.disabled||!nativeTrigger.value)return
+  nativeError.value=''
   if(nativeOpen.value){await hideNative();return}
   const generation=++nativeGeneration
   await native.ready();if(disposed||generation!==nativeGeneration)return
   if(!native.menusSupported.value){await fallback();return}
-  const snapshot=JSON.stringify(props.items),items:NativeMenuItem[]=[]
-  for(const item of props.items){if(item.divider&&items.length)items.push({id:`separator-${item.id}`,label:'',type:'separator'});items.push({id:item.id,label:item.label,icon:item.icon,enabled:!item.disabled,reason:item.reason})}
+  const snapshot=JSON.stringify(props.items),context=props.contextKey,items:NativeMenuItem[]=[]
+  for(const item of props.items){if(item.divider&&items.length)items.push({id:`separator-${item.id}`,label:'',type:'separator'});items.push({id:item.id,label:item.label,icon:item.icon,enabled:!item.disabled,reason:item.reason,shortcut:item.shortcut,...(item.checked!==undefined?{type:'checkbox' as const,checked:item.checked}:{})})}
   nativeOpen.value=true;emit('open',true)
   try{
-    const result=await native.popupMenu(items,nativeTrigger.value,{placement:props.location.replace(' ','-') as 'bottom-end'|'bottom-start'|'top-start',contextKey:chromeId})
+    const result=await native.popupMenu(items,nativeTrigger.value,{placement:props.location.replace(' ','-') as 'bottom-end'|'bottom-start'|'top-start',contextKey:`${chromeId}:${context||''}`})
     if(disposed||generation!==nativeGeneration)return
     nativeOpen.value=false;emit('open',false)
     if(!result.supported){await fallback();return}
     const selected=props.items.find(item=>item.id===result.selectedId)
-    if(selected&&!selected.disabled&&!props.disabled&&JSON.stringify(props.items)===snapshot)emit('select',selected.id)
-  }catch{if(!disposed&&generation===nativeGeneration)await fallback()}
+    if(selected&&!selected.disabled&&!props.disabled&&props.contextKey===context&&JSON.stringify(props.items)===snapshot)emit('select',selected.id)
+  }catch(error){if(!disposed&&generation===nativeGeneration){nativeOpen.value=false;emit('open',false);nativeError.value='菜单暂时无法打开，请重试';console.warn('[action-menu] Could not open native menu',error)}}
   finally{if(generation===nativeGeneration&&nativeOpen.value){nativeOpen.value=false;emit('open',false)}}
 }
 watch(()=>JSON.stringify(props.items),()=>{if(nativeOpen.value)void hideNative()})
 watch(()=>props.disabled,value=>{if(value)void hideNative()})
+watch(()=>props.contextKey,()=>{open.value=false;void hideNative()})
 onMounted(()=>{window.addEventListener(BROWSER_CHROME_OPEN,otherChrome);window.addEventListener(NATIVE_UI_OPEN,otherNative);void native.ready()})
 onBeforeUnmount(()=>{disposed=true;void hideNative();window.removeEventListener(BROWSER_CHROME_OPEN,otherChrome);window.removeEventListener(NATIVE_UI_OPEN,otherNative)})
 defineExpose({hide:()=>{open.value=false;void hideNative()},hideAndWait})
@@ -68,4 +75,5 @@ function onKey(event:KeyboardEvent){
 </script>
 <style>
 .v-menu.v-overlay>.v-overlay__content.action-menu-navigation-closing{visibility:hidden!important;pointer-events:none!important}
+.action-menu-error{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
 </style>

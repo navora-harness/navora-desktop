@@ -10,13 +10,13 @@
       </template>
     </section>
   </Teleport>
-  <v-dialog v-model="localDialog" :max-width="localHelp==='help.shortcuts'?780:620" :content-class="localHelp==='help.shortcuts'?'application-help-dialog application-shortcuts-dialog':'application-help-dialog'" @after-leave="restoreFocus">
+  <BrowserContentDialog v-model="localDialog" :max-width="localHelp==='help.shortcuts'?780:620" :content-class="localHelp==='help.shortcuts'?'application-help-dialog application-shortcuts-dialog':'application-help-dialog'" @after-leave="restoreFocus">
     <KeyboardShortcutsPanel v-if="localHelp==='help.shortcuts'" :platform="platform" @close="localDialog=false" />
     <section v-else class="application-help-content" role="document"><header><h2>{{ localTitle }}</h2><button type="button" class="ui-icon-button" aria-label="关闭帮助" @click="localDialog=false"><AppIcon icon="xmark" /></button></header>
       <template v-if="localHelp==='help.guide'"><ol><li>在左侧切换对话、对话文件、浏览器资源与插件。</li><li>在消息编辑器中描述任务，通过附加加入相关资料；在段首或空白后输入 / 也可以打开附加菜单。</li><li>选中文字可打开悬浮格式面板，也可使用快捷键设置加粗等格式。完整说明见「帮助 → 键盘快捷键」中的「富文本编辑」。</li><li>使用工作区查看文件和网页；数量按钮可以显示或隐藏工作区。</li><li>文件、编辑、视图和帮助菜单提供相应操作。不可用命令会显示原因。</li></ol></template>
       <footer><button type="button" class="ui-button" @click="localDialog=false">关闭</button></footer>
     </section>
-  </v-dialog>
+  </BrowserContentDialog>
 </template>
 <script setup lang="ts">
 import {computed,getCurrentInstance,nextTick,onBeforeUnmount,onMounted,ref,useId,watch,type ComponentPublicInstance} from 'vue'
@@ -24,10 +24,13 @@ import {appCommands,appMenus,commandShortcutLabel,type AppCommandContext,type Ap
 import {appShortcutCommand,isConfigurableAppShortcut} from '@shared/app-shortcuts'
 import {useAppShortcuts} from '@/composables/useAppShortcuts'
 import KeyboardShortcutsPanel from './KeyboardShortcutsPanel.vue'
+import BrowserContentDialog from './BrowserContentDialog.vue'
+import {hasVisibleUi} from '@/utils/visible-ui'
 import {BROWSER_CHROME_OPEN,requestBrowserChromeOpen} from '@shared/browser-chrome-events'
 import AppIcon from './icons/AppIcon.vue'
 import {useNativeUi} from '@/composables/useNativeUi'
 import {NATIVE_UI_OPEN,type NativeMenuItem} from '@shared/native-ui'
+import {useSafeBrowserPopup} from '@/utils/browser-popup-placement'
 
 const props=withDefaults(defineProps<{commandState:AppCommandStateMap;handlers?:AppCommandHandlers;contextKey?:string;appVersion?:string;mode?:AppMenuMode;platform?:string;nativeMenu?:boolean;collapsed?:boolean;shortcutsActive?:boolean;captureTarget?:(nativePageId?:string)=>unknown;restoreTarget?:(bookmark:unknown)=>void|boolean}>(),{mode:'main',platform:window.navora?.app.platform||'win32',appVersion:'',nativeMenu:false,collapsed:false,shortcutsActive:true})
 const emit=defineEmits<{command:[id:AppCommandId,context:AppCommandContext];beforeopen:[nativePageId?:string];open:[value:boolean];error:[message:string]}>()
@@ -35,6 +38,7 @@ const uid=`application-menu-${useId()}`,chromeId=`application-menu-${crypto.rand
 const bar=ref<HTMLElement>(),panel=ref<HTMLElement>(),triggers:HTMLButtonElement[]=[],opened=ref<AppMenuId|null>(null),focused=ref(0),keyboardMode=ref(false),busy=ref(false),position=ref({x:8,y:40})
 const localDialog=ref(false),localHelp=ref<AppCommandId>('help.guide')
 const native=useNativeUi(),nativeOpen=ref(false)
+useSafeBrowserPopup(()=>opened.value&&!nativeOpen.value?panel.value:null,()=>close())
 let nativeGeneration=0
 const shortcutPreferences=useAppShortcuts()
 const builtins=new Set<AppCommandId>(['help.shortcuts','help.guide','help.about'])
@@ -80,7 +84,7 @@ function clamp(){
   position.value={x:Math.max(pad,Math.min(x,window.innerWidth-pad-bounds.width)),y:Math.max(pad,Math.min(y+3,window.innerHeight-pad-bounds.height))}
 }
 function enabledButtons(){return [...panel.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')||[]]}
-function modalActive(){return !!document.querySelector('.v-dialog.v-overlay--active')}
+function modalActive(){return hasVisibleUi('.v-dialog.v-overlay--active')}
 async function openMenu(id:AppMenuId,focus=true){
   if(props.nativeMenu||modalActive()||!menus.value.some(menu=>menu.id===id))return
   const generation=++nativeGeneration
@@ -143,7 +147,7 @@ function toggleShortcuts(){
 }
 async function runShortcut(id:AppCommandId,pageId?:string){
   if(id==='help.shortcuts'){if(!localDialog.value&&modalActive())return;if(!localDialog.value)nativePageId=pageId;toggleShortcuts();return}
-  if(!isConfigurableAppShortcut(id)||!props.shortcutsActive||modalActive()||document.querySelector('.v-menu.v-overlay--active,.sidebar-ctx-panel:not([data-browser-tab-preview])'))return
+  if(!isConfigurableAppShortcut(id)||!props.shortcutsActive||modalActive()||hasVisibleUi('.v-menu.v-overlay--active,.sidebar-ctx-panel:not([data-browser-tab-preview])'))return
   if(!shortcutPreferences.available.value||!shortcutPreferences.enabled(id))return
   const command=commands.value.find(command=>command.id===id)
   if(!command?.state.enabled||busy.value)return
@@ -189,7 +193,12 @@ function otherNative(){if(!nativeOpen.value){nativeGeneration++;opened.value=nul
 function outside(event:PointerEvent){if(!opened.value||bar.value?.contains(event.target as Node)||panel.value?.contains(event.target as Node))return;event.preventDefault();event.stopImmediatePropagation();close()}
 watch(opened,async value=>{emit('open',!!value);if(value){await nextTick();if(disposed)return;resizeObserver||=new ResizeObserver(clamp);if(panel.value)resizeObserver.observe(panel.value)}else resizeObserver?.disconnect()})
 watch(()=>props.contextKey,()=>{close(false);bookmark=null;targetBookmark=undefined;nativePageId=undefined})
-watch(()=>JSON.stringify(commands.value.map(command=>({id:command.id,state:command.state}))),()=>{if(nativeOpen.value){close(false);bookmark=null;targetBookmark=undefined;nativePageId=undefined}})
+// Capturing a page's edit state is asynchronous. An edit-menu update must not
+// dismiss a different menu that the user has just opened.
+watch(()=>Object.fromEntries(appMenus.map(menu=>[menu.id,JSON.stringify(commands.value.filter(command=>command.menu===menu.id).map(command=>({id:command.id,state:command.state})))])),(next,previous)=>{
+  const id=opened.value
+  if(nativeOpen.value&&id&&next[id]!==previous[id]){close(false);bookmark=null;targetBookmark=undefined;nativePageId=undefined}
+})
 async function nativeMenu(payload:{menu?:AppMenuId;pageId:string;command?:AppCommandId}){
   if(payload.command){
     const state=await window.navora?.browser.workspace.state().catch(()=>null)

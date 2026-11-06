@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "checks": [
+    "unknown host capability disables the actual setting without rewriting its preference",
+    "supported but switched-off host leaves the setting available",
+    "supported off to on persists through the real automatic-save flow",
+    "temporary accessibility fallback does not masquerade as unsupported platform",
+    "temporary tone fallback still allows preference changes",
+    "windows_version disables input, preserves the saved choice, and sends no save",
+    "platform disables input, preserves the saved choice, and sends no save",
+    "api_unavailable disables input, preserves the saved choice, and sends no save",
+    "system_unknown disables input, preserves the saved choice, and sends no save",
+    "remote settings stay disabled without rewriting the host preference"
+  ],
+  "boundary": "Hidden Electron renderer loads actual SettingsPage/Vuetify source through isolated Vite. Host state and config persistence are controlled bridges; native policy/IPC ownership have separate tests. No desktop capture or installed profile read."
+}

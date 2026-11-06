@@ -1,35 +1,118 @@
-<template>
-  <Teleport to="body">
-    <div class="annotation-floating-mark" aria-hidden="true" :style="markStyle" />
-    <section ref="panel" class="annotation-floating-editor" data-browser-chrome-overlay role="dialog" aria-label="编辑网页批注" :style="panelStyle" @keydown="shortcut">
-      <header><strong><AppIcon icon="comments" />{{ saved?'编辑批注':'添加批注' }}</strong><button type="button" class="ui-icon-button" aria-label="收起并保留批注草稿" title="收起并保留草稿" :disabled="busy" @click="emit('keep')"><AppIcon icon="xmark" /></button></header>
-      <p class="annotation-preview-label">创建时静态预览<span v-if="stale"> · 当前网页已变化</span></p>
-      <div class="annotation-floating-body"><textarea ref="input" :value="modelValue" aria-label="悬浮批注意见" placeholder="写下对此位置的意见…" maxlength="4000" :readonly="busy" @input="emit('update:modelValue',($event.target as HTMLTextAreaElement).value)" /><p v-if="error" class="annotation-floating-error" role="alert">{{ error }}<button type="button" class="ui-button" @click="emit('recover')">查看保留的草稿</button></p></div>
-      <footer><span role="status" aria-live="polite">{{ pending?'正在保留草稿…':error?'草稿需要处理':modelValue?'草稿已保留':'点击或拖动选择位置' }}</span><div><button v-if="!saved" type="button" class="ui-button" :disabled="busy" @click="emit('discard')">放弃目标</button><button type="button" class="ui-button primary" :disabled="busy || pending || !modelValue.trim() || !!error" @click="emit('save')">{{ busy?'保存中…':'保存批注' }}</button></div><small>Ctrl / ⌘ + Enter 保存，Enter 换行</small></footer>
-    </section>
-  </Teleport>
-</template>
+<template><!-- Comment input is hosted exclusively by NativePanel. --></template>
 <script setup lang="ts">
-import {computed,nextTick,onBeforeUnmount,onMounted,ref,watch} from 'vue'
-import AppIcon from './icons/AppIcon.vue'
+import {computed,nextTick,onActivated,onBeforeUnmount,onDeactivated,onMounted,ref,watch} from 'vue'
 import {annotationEditorPlacement,type AnnotationBox} from '@shared/browser-annotation-position'
-const props=defineProps<{modelValue:string;anchor:AnnotationBox;bounds:AnnotationBox;saved?:boolean;stale?:boolean;busy?:boolean;pending?:boolean;error?:string}>()
-const emit=defineEmits<{'update:modelValue':[text:string];save:[];keep:[];discard:[];recover:[]}>()
-const panel=ref<HTMLElement>(),input=ref<HTMLTextAreaElement>(),height=ref(240)
-let observer:ResizeObserver|undefined
-const placement=computed(()=>annotationEditorPlacement(props.anchor,props.bounds,{width:344,height:height.value}))
-const panelStyle=computed(()=>({left:placement.value.x+'px',top:placement.value.y+'px',width:placement.value.width+'px',maxHeight:placement.value.maxHeight+'px'}))
-const markStyle=computed(()=>{const a=props.anchor,b=props.bounds,left=Math.max(a.x,b.x),top=Math.max(a.y,b.y),width=Math.max(0,Math.min(a.x+a.width,b.x+b.width)-left),height=Math.max(0,Math.min(a.y+a.height,b.y+b.height)-top);return {left:left+'px',top:top+'px',width:width+'px',height:height+'px',display:width&&height?'':'none'}})
-function shortcut(e:KeyboardEvent){if(e.isComposing||e.keyCode===229||e.repeat)return;if(e.key==='Escape'){e.preventDefault();e.stopPropagation();if(!props.busy)emit('keep')}else if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)&&!e.altKey){e.preventDefault();e.stopPropagation();if(!props.busy&&!props.pending&&!props.error&&props.modelValue.trim())emit('save')}}
-onMounted(()=>{observer=new ResizeObserver(()=>{if(panel.value)height.value=panel.value.getBoundingClientRect().height});if(panel.value)observer.observe(panel.value);void nextTick(()=>input.value?.focus({preventScroll:true}))})
-watch(()=>props.saved,()=>void nextTick(()=>input.value?.focus({preventScroll:true})))
-onBeforeUnmount(()=>observer?.disconnect())
+import {ANNOTATION_DRAFT_LIMIT} from '@shared/browser-annotation-limits'
+import {ANNOTATION_EDITOR_ID,ANNOTATION_EDITOR_FONT,annotationCommentProblem,annotationPanelLayout,browserAnnotationPanel} from '@shared/browser-annotation-panel'
+import type {NativePanelAction} from '@shared/native-ui'
+import {useNativePanel} from '@/composables/useNativeUi'
+
+const props=withDefaults(defineProps<{modelValue:string;anchor:AnnotationBox;bounds:AnnotationBox;saved?:boolean;stale?:boolean;busy?:boolean;pending?:boolean;error?:string;sourcePageId?:string;contextKey?:string;active?:boolean}>(),{active:true})
+const emit=defineEmits<{'update:modelValue':[text:string];save:[];keep:[settled?:(closed:boolean)=>void];discard:[];recover:[];unavailable:[message:string];error:[message:string]}>()
+const identity=crypto.randomUUID(),draft=ref(props.modelValue),overflow=ref(false),localError=ref(''),fontRevision=ref(0)
+let disposed=false,suspended=false,generation=0,state:'closed'|'opening'|'shown'='closed',submitted=false,closing=false,nativeLost=false,lastEmitted:string|undefined
+let canvas:CanvasRenderingContext2D|null=null,resizeObserver:ResizeObserver|undefined,refreshFrame:number|undefined
+const context=computed(()=>JSON.stringify([props.sourcePageId||'',props.contextKey||identity]))
+const status=computed(()=>localError.value||props.error||annotationCommentProblem(draft.value)||(props.stale?'页面已变化，意见仍关联原位置。':''))
+function measure(text:string){
+  if(!canvas)canvas=document.createElement('canvas').getContext('2d')
+  if(!canvas)throw Error('annotation_text_measure_unavailable')
+  canvas.font=`${ANNOTATION_EDITOR_FONT.size}px "${ANNOTATION_EDITOR_FONT.family}"`
+  return canvas.measureText(text).width
+}
+function lineHeight(){measure('');const metrics=canvas!.measureText('国Ag🙂');return Math.max(20,Math.ceil(metrics.actualBoundingBoxAscent+metrics.actualBoundingBoxDescent+6))}
+const layout=computed(()=>{void fontRevision.value;return annotationPanelLayout({text:draft.value,bounds:props.bounds,measure,lineHeight:lineHeight(),status:status.value})})
+const placement=computed(()=>annotationEditorPlacement(props.anchor,props.bounds,layout.value))
+function anchor(){return{x:placement.value.x,y:placement.value.y-5,width:1,height:1}}
+function content(includeValue=false){return browserAnnotationPanel({text:draft.value,layout:layout.value,includeValue,saved:props.saved,busy:props.busy||submitted,pending:props.pending,error:localError.value||props.error,stale:props.stale,overflow:overflow.value})}
+const native=useNativePanel({key:'annotation-editor',role:'editor',sourcePageId:()=>props.sourcePageId,contextKey:()=>context.value,onAction:action,onDismissed:()=>close('keep',true),onClosed:()=>{nativeLost=true;close('keep')},onInputOverflow:details=>{
+  if(details.controlId!==ANNOTATION_EDITOR_ID||state==='closed')return
+  overflow.value=true;submitted=false
+  localError.value='内容过长，当前输入尚未完整保留；请缩短后继续。'
+  emit('error',localError.value)
+  queueRefresh()
+}})
+function updateText(text:string){
+  const previousError=localError.value
+  draft.value=text
+  if(text.length<=ANNOTATION_DRAFT_LIMIT){overflow.value=false;localError.value=''}
+  else{overflow.value=true;localError.value=annotationCommentProblem(text)}
+  if(!overflow.value&&text!==lastEmitted){lastEmitted=text;emit('update:modelValue',text)}
+  if(previousError&&!localError.value&&props.error===previousError)emit('error','')
+}
+async function confirm(text?:string){
+  if(state!=='shown'||!props.active||suspended||disposed||props.busy||submitted||overflow.value)return
+  if(text!==undefined)updateText(text)
+  if(overflow.value||!draft.value.trim()||annotationCommentProblem(draft.value)||props.error||localError.value)return
+  submitted=true
+  await nextTick()
+  if(disposed||state!=='shown'||!props.active||suspended){submitted=false;return}
+  emit('save')
+  await nextTick()
+  if(!props.busy)submitted=false
+}
+function action(event:NativePanelAction){
+  if(state!=='shown'||!props.active||suspended||disposed)return
+  if(event.id===ANNOTATION_EDITOR_ID&&typeof event.value==='string'){
+    if(event.type==='change'){if(!props.busy&&!submitted)updateText(event.value)}
+    else if(event.type==='submit')void confirm(event.value)
+    return
+  }
+  if(event.type!=='click'||props.busy||submitted)return
+  if(event.id==='annotation-save')void confirm()
+  else if(event.id==='annotation-keep')close('keep')
+  else if(event.id==='annotation-discard')emit('discard')
+  else if(event.id==='annotation-recover'&&!overflow.value)emit('recover')
+}
+function close(kind:'keep',restoreOverflow=false){
+  if(state==='closed'||closing||disposed)return
+  if(overflow.value){
+    emit('error',localError.value||'当前输入尚未完整保留，请返回原输入缩短内容。')
+    if(restoreOverflow&&props.active&&!suspended&&!nativeLost){state='closed';generation++;void show(false)}
+    else if(native.open.value){state='shown';void refresh()}
+    else{state='closed';generation++;if(nativeLost)emit('unavailable','原生编辑器已关闭，超长输入未完整保留。')}
+    return
+  }
+  state='closed';generation++
+  closing=true
+  const ticket=generation
+  emit(kind,closed=>{if(disposed||ticket!==generation||closed)return;closing=false;void show(nativeLost)})
+}
+async function refresh(){
+  if(state==='closed'||!props.active||suspended||disposed)return
+  try{await native.update(content(),anchor(),true)}catch{emit('error','批注面板暂时无法更新，草稿仍保留。')}
+}
+function queueRefresh(){if(refreshFrame===undefined)refreshFrame=requestAnimationFrame(()=>{refreshFrame=undefined;void refresh()})}
+async function show(includeValue=true){
+  const ticket=++generation
+  if(!props.active||suspended||disposed)return
+  try{
+    await native.ready()
+    if(disposed||ticket!==generation||!props.active||suspended)return
+    if(!native.supported.value||!native.textareaSupported.value){state='closed';emit('unavailable','当前运行环境无法打开原生批注编辑器。');return}
+    state='opening';closing=false
+    const shown=await native.show(content(includeValue),anchor(),{focusMode:'input',role:'editor',radius:14,contentInset:12,scrollbarPlacement:'gutter',placement:'bottom-start',dismissOnEscape:true,dismissOnOutsideClick:true})
+    if(disposed||ticket!==generation||!props.active||suspended)return
+    if(!shown){state='closed';emit('unavailable','批注编辑器暂时无法打开，请重试。');return}
+    state='shown';nativeLost=false;void refresh()
+  }catch{if(!disposed&&ticket===generation){state='closed';emit('unavailable','批注编辑器暂时无法打开，请重试。')}}
+}
+watch(()=>props.modelValue,text=>{
+  if(text===draft.value||text===lastEmitted)return
+  draft.value=text;lastEmitted=undefined;overflow.value=false;localError.value=''
+  if(state==='shown')void native.update(content(true),anchor())
+})
+watch(()=>[props.busy,props.error],()=>{if(!props.busy)submitted=false})
+watch(()=>[props.pending,props.busy,props.error,props.stale,draft.value,overflow.value,fontRevision.value,props.anchor,props.bounds],queueRefresh,{deep:true})
+watch(()=>[props.active,context.value],()=>{
+  generation++
+  if(!props.active){close('keep');void native.hide()}
+  else{state='closed';submitted=false;void native.destroy().then(()=>show())}
+})
+watch([native.open,native.pending],([open,pending])=>{if(state==='shown'&&!open&&!pending)close('keep')})
+function resize(){fontRevision.value++;queueRefresh()}
+onMounted(()=>{window.addEventListener('resize',resize);resizeObserver=new ResizeObserver(resize);resizeObserver.observe(document.documentElement);void document.fonts?.ready.then(()=>{if(!disposed)resize()});void show()})
+onDeactivated(()=>{suspended=true;close('keep');void native.hide()})
+onActivated(()=>{if(suspended){suspended=false;void show()}})
+onBeforeUnmount(()=>{disposed=true;state='closed';generation++;window.removeEventListener('resize',resize);resizeObserver?.disconnect();if(refreshFrame!==undefined)cancelAnimationFrame(refreshFrame)})
 </script>
-<style scoped>
-.annotation-floating-mark{position:fixed;box-sizing:border-box;border:2px solid #397dd0;background:#397dd014;pointer-events:none;z-index:2200;border-radius:3px}
-.annotation-floating-editor{position:fixed;box-sizing:border-box;display:flex;flex-direction:column;min-height:0;overflow:hidden;z-index:2201;border:1px solid var(--navora-stroke,#d5dfeb);border-radius:15px;background:var(--navora-surface,#fff);color:var(--navora-ink,#23384e);box-shadow:0 12px 40px #10283f24;text-align:left;font-size:13px}
-.annotation-floating-editor header{display:flex;align-items:center;justify-content:space-between;flex-shrink:0;padding:9px 10px 0 14px;gap:8px}.annotation-floating-editor strong{display:flex;align-items:center;gap:8px;font-size:14px}.annotation-floating-editor .app-icon{width:16px;height:16px}
-.annotation-preview-label{margin:3px 14px 8px;color:var(--navora-muted,#6b7b8c);font-size:11px}.annotation-floating-body{padding:0 12px;min-height:36px;overflow:auto;overscroll-behavior:contain}.annotation-floating-body textarea{width:100%;min-height:72px;max-height:160px;resize:vertical;border:1px solid var(--navora-stroke,#d5dfeb);border-radius:9px;padding:10px;color:inherit;background:var(--navora-background,#f7f9fc);font:inherit;line-height:1.6;box-sizing:border-box}.annotation-floating-body textarea:focus-visible{outline:2px solid var(--navora-accent,#397dd0);outline-offset:1px}
-.annotation-floating-editor footer{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0;padding:9px 12px 11px}.annotation-floating-editor footer>div{display:flex;gap:6px;flex-wrap:wrap}.annotation-floating-editor footer>span,.annotation-floating-editor small{font-size:11px;color:var(--navora-muted,#6b7b8c)}.annotation-floating-editor small{width:100%}.annotation-floating-error{color:var(--navora-danger,#b42338);font-size:12px;line-height:1.5;margin:6px 0}.annotation-floating-error button{margin-top:5px}.annotation-floating-editor .ui-button{min-height:31px;font-size:12px;padding:4px 10px}
-@media(prefers-reduced-motion:reduce){.annotation-floating-editor{scroll-behavior:auto}}
-</style>

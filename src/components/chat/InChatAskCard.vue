@@ -1,5 +1,5 @@
 <template>
-  <div class="msg inchat-card ask" role="group" :aria-label="eyebrow">
+  <div class="msg inchat-card ask" data-decision-card="question" :data-decision-state="expired?'expired':busy?'submitting':submissionError?'error':'pending'" :aria-busy="busy" role="group" :aria-label="eyebrow">
     <div class="msg-row">
       <div class="msg-avatar pending-ask" aria-hidden="true">
         <StatusIcon kind="ask" />
@@ -13,39 +13,16 @@
         <p v-if="questionBody" class="inchat-body">{{ questionBody }}</p>
         <p v-if="headMeta" class="inchat-meta">{{ headMeta }}</p>
 
-        <div
-          v-if="req.kind === 'user_choice' && forkTotal"
-          class="ask-fork-steps"
-          role="progressbar"
-          :aria-valuenow="forkStep"
-          :aria-valuemin="1"
-          :aria-valuemax="forkTotal"
-        >
-          <span
-            v-for="n in forkTotal"
-            :key="n"
-            class="ask-fork-step-dot"
-            :class="{ done: n < forkStep, current: n === forkStep }"
-          />
-        </div>
-
-        <p v-if="remainingLabel" class="ask-timeout" :class="{ urgent: remainingUrgent }">
+        <p v-if="remainingLabel && !expired" class="ask-timeout" :class="{ urgent: remainingUrgent }">
           {{ remainingLabel }}
         </p>
-        <div
-          v-if="remainingLabel"
-          class="ask-countdown-bar"
-          :class="{ urgent: remainingUrgent }"
-        >
-          <div class="ask-countdown-bar-fill" :style="{ width: `${remainingPct}%` }" />
-        </div>
 
-        <ul v-if="priorAnswers.length" class="ask-prior">
+        <details v-if="priorAnswers.length" class="ask-prior-details"><summary>已回答 {{ priorAnswers.length }} 项</summary><ul class="ask-prior">
           <li v-for="(p, i) in priorAnswers" :key="i">
             <span class="ask-prior-q">{{ p.question }}</span>
             <span class="ask-prior-a">{{ p.answer }}</span>
           </li>
-        </ul>
+        </ul></details>
 
         <div v-if="downloadDetail" class="ask-dl-detail">
           <div class="ask-dl-row">
@@ -67,6 +44,9 @@
           <div class="ask-evidence-url">{{ req.evidence.url }}</div>
         </div>
 
+        <p v-if="expired" class="decision-status" role="status">请求已失效，请等待新的请求。</p>
+        <p v-else-if="busy" class="decision-status" role="status">正在提交…</p>
+        <p v-else-if="submissionError" class="decision-error" role="alert">{{ submissionError }}</p>
         <div class="ask-options">
           <button
             v-for="opt in optionItems"
@@ -78,8 +58,8 @@
               recommended: opt.recommended,
               danger: req.kind === 'download_confirm' && opt.label === '拒绝',
             }"
-            :disabled="busy"
-            @click="emit('option', opt.label)"
+            :disabled="unavailable"
+            @click="chooseOption(opt.label)"
           >
             <span class="ask-opt-main">
               <span class="ask-opt-label">{{ opt.label }}</span>
@@ -93,26 +73,28 @@
               class="ask-opt-custom-input"
               type="text"
               placeholder="输入你的决定…"
-              :disabled="busy"
+              aria-label="自行填写决定"
+              :disabled="unavailable"
               @keydown.enter.prevent="submitCustom"
             />
             <button
               type="button"
               class="ask-opt-custom-submit"
-              :disabled="busy || !custom.trim()"
+              :disabled="unavailable || !custom.trim()"
               @click.prevent="submitCustom"
             >
-              提交
+              确认
             </button>
           </label>
         </div>
-        <div v-if="req.kind !== 'download_confirm'" class="ask-footer">
+        <div v-if="expired || req.kind === 'user_choice'" class="ask-footer">
+          <button v-if="expired" type="button" class="decision-dismiss" data-decision-dismiss @click="emit('dismiss')">关闭</button>
           <button
-            v-if="req.kind === 'user_choice'"
+            v-else-if="req.kind === 'user_choice'"
             type="button"
             class="ask-deny"
-            :disabled="busy"
-            @click="emit('deny')"
+            :disabled="unavailable"
+            @click="deny()"
           >
             拒绝回答
           </button>
@@ -124,7 +106,8 @@
 
 <script setup lang="ts">
 import StatusIcon from '@/components/StatusIcon.vue'
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
+import {useDecisionDraft} from '@/composables/useDecisionDraft'
 import type { AgentAskOption, AgentAskRequest } from '@shared/types'
 
 const props = defineProps<{
@@ -133,21 +116,19 @@ const props = defineProps<{
   remainingUrgent?: boolean
   remainingPct?: number
   busy?: boolean
+  submissionError?: string
+  expired?: boolean
 }>()
 
 const emit = defineEmits<{
   option: [label: string]
   custom: [text: string]
   deny: []
+  dismiss: []
 }>()
 
-const custom = ref('')
-watch(
-  () => props.req.id,
-  () => {
-    custom.value = ''
-  },
-)
+const custom = useDecisionDraft(() => props.req.id)
+const unavailable = computed(() => !!props.busy || !!props.expired)
 
 const optionItems = computed((): AgentAskOption[] => {
   if (props.req.optionItems?.length) return props.req.optionItems
@@ -160,7 +141,7 @@ const eyebrow = computed(() => {
       ? '推理轮数'
       : props.req.kind === 'download_confirm'
         ? '文件下载'
-        : '询问/决策'
+        : '需要你决定'
   if (props.req.parentChatId && props.req.subChatTitle) {
     return `${kind} · 子任务「${props.req.subChatTitle}」`
   }
@@ -210,18 +191,7 @@ const progress = computed(() => {
     return `${Math.floor(step)}/${Math.floor(total)}`
   }
   if (typeof step === 'number' && step >= 1) return `第 ${Math.floor(step)} 步`
-  if (props.req.kind === 'continue_rounds') return '推理轮数'
-  if (props.req.kind === 'download_confirm') return '被动文件下载'
   return ''
-})
-
-const forkStep = computed(() => {
-  const s = props.req.meta?.step
-  return typeof s === 'number' && s >= 1 ? Math.floor(s) : 0
-})
-const forkTotal = computed(() => {
-  const t = props.req.meta?.totalSteps
-  return typeof t === 'number' && t >= 1 ? Math.floor(t) : 0
 })
 const priorAnswers = computed(() =>
   Array.isArray(props.req.meta?.priorAnswers) ? props.req.meta!.priorAnswers! : [],
@@ -240,7 +210,14 @@ const downloadDetail = computed(() => {
   }
 })
 
-function submitCustom() {
+function chooseOption(label:string) {
+  if (!unavailable.value) emit('option', label)
+}
+function deny() {
+  if (!unavailable.value) emit('deny')
+}
+function submitCustom(event?:Event) {
+  if (unavailable.value || event instanceof KeyboardEvent && event.isComposing) return
   const text = custom.value.trim()
   if (!text) return
   emit('custom', text)
@@ -248,283 +225,57 @@ function submitCustom() {
 </script>
 
 <style scoped>
-.inchat-card {
-  width: 100%;
-  max-width: 100%;
-  margin: 4px 0 8px;
-  box-sizing: border-box;
-}
-.msg-row {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  width: 100%;
-  min-width: 0;
-}
-.msg-avatar {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  background: #eaf3fa;
-  color: #1b4f72;
-  font-size: 0.9rem;
-}
-.msg-main {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: 100%;
-  padding: 16px 18px 18px;
-  border-radius: 14px;
-  background: #fff;
-  border: 1px solid #cfe0ec;
-  box-shadow: 0 4px 16px rgba(21, 32, 43, 0.06);
-  box-sizing: border-box;
-}
-.msg-role {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 0.78rem;
-  font-weight: 650;
-  color: #1b4f72;
-  margin-bottom: 6px;
-}
-.pending-ask-step {
-  font-weight: 600;
-  color: #7f8c8d;
-}
-.inchat-title {
-  margin: 0;
-  font-size: 0.98rem;
-  font-weight: 700;
-  color: #15202b;
-  line-height: 1.35;
-}
-.inchat-body,
-.inchat-meta {
-  margin: 6px 0 0;
-  font-size: 0.84rem;
-  color: #5d6d7e;
-  line-height: 1.45;
-  white-space: pre-wrap;
-}
-.inchat-meta {
-  font-size: 0.78rem;
-}
-.ask-timeout {
-  margin: 8px 0 0;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: #7f8c8d;
-}
-.ask-timeout.urgent {
-  color: #b9770e;
-}
-.ask-countdown-bar {
-  margin-top: 6px;
-  width: 100%;
-  height: 4px;
-  border-radius: 999px;
-  background: #e4ecf2;
-  overflow: hidden;
-}
-.ask-countdown-bar-fill {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: #5d8aa8;
-  transition: width 0.45s linear, background-color 0.2s ease;
-}
-.ask-countdown-bar.urgent .ask-countdown-bar-fill {
-  background: #c0392b;
-}
-.ask-fork-steps {
-  margin-top: 10px;
-  display: flex;
-  gap: 6px;
-}
-.ask-fork-step-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: #d5e2ec;
-}
-.ask-fork-step-dot.done {
-  background: #7f9bb0;
-}
-.ask-fork-step-dot.current {
-  width: 18px;
-  background: #1b4f72;
-}
-.ask-prior {
-  margin: 10px 0 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 4px;
-  font-size: 0.78rem;
-}
-.ask-prior-q {
-  color: #7f8c8d;
-  margin-right: 8px;
-}
-.ask-prior-a {
-  color: #1b4f72;
-  font-weight: 600;
-}
-.ask-dl-detail,
-.ask-evidence {
-  margin-top: 10px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(27, 79, 114, 0.06);
-  border: 1px solid #d5e2ec;
-}
-.ask-dl-row {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
-  gap: 8px;
-  font-size: 0.82rem;
-}
-.ask-dl-k {
-  color: #7f8c8d;
-  font-weight: 700;
-}
-.ask-dl-v {
-  color: #1b4f72;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ask-evidence-label {
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #5d6d7e;
-  margin-bottom: 4px;
-}
-.ask-evidence-title,
-.ask-evidence-url {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ask-evidence-title {
-  font-size: 0.84rem;
-  font-weight: 650;
-  color: #15202b;
-}
-.ask-evidence-url {
-  font-size: 0.72rem;
-  color: #7f8c8d;
-}
-.ask-options {
-  margin-top: 12px;
-  display: grid;
-  gap: 8px;
-}
-.ask-opt {
-  border: 1px solid #d5dde5;
-  border-radius: 9px;
-  padding: 11px 14px;
-  font: inherit;
-  font-size: 0.88rem;
-  font-weight: 600;
-  cursor: pointer;
-  line-height: 1.25;
-  text-align: left;
-  background: #f7fafc;
-  color: #1b4f72;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.ask-opt:hover:not(:disabled) {
-  background: #eaf3fa;
-  border-color: #9fc0d8;
-}
-.ask-opt.recommended {
-  border-color: #7eaccc;
-  background: #eef6fb;
-}
-.ask-opt.primary {
-  background: #1b4f72;
-  border-color: #1b4f72;
-  color: #fff;
-}
-.ask-opt.primary:hover:not(:disabled) {
-  background: #163f5b;
-}
-.ask-opt.danger:hover:not(:disabled) {
-  background: #fdf6f5;
-}
-.ask-opt:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.ask-opt-main {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.ask-opt-badge {
-  font-size: 0.68rem;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: rgba(27, 79, 114, 0.12);
-}
-.ask-opt-hint {
-  font-size: 0.76rem;
-  font-weight: 500;
-  color: #7f8c8d;
-}
-.ask-opt.primary .ask-opt-hint {
-  color: rgba(255, 255, 255, 0.78);
-}
-.ask-opt-custom {
-  flex-direction: row;
-  align-items: center;
-  cursor: text;
-}
-.ask-opt-custom-input {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  font: inherit;
-  font-weight: 600;
-  outline: none;
-}
-.ask-opt-custom-submit {
-  border: 0;
-  border-radius: 7px;
-  padding: 6px 10px;
-  font-weight: 700;
-  cursor: pointer;
-  background: #1b4f72;
-  color: #fff;
-}
-.ask-opt-custom-submit:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.ask-footer {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 8px;
-}
-.ask-deny {
-  border: 0;
-  background: transparent;
-  font-size: 0.8rem;
-  color: #c0392b;
-  cursor: pointer;
-  padding: 4px 0;
-}
+.inchat-card{width:100%;max-width:100%;margin:4px 0 8px;box-sizing:border-box;color:var(--navora-ink)}
+.msg-row{display:flex;gap:8px;align-items:flex-start;width:100%;min-width:0}
+.msg-avatar{flex-shrink:0;width:26px;height:26px;display:grid;place-items:center;background:transparent;color:var(--navora-accent);font-size:14px}
+.msg-main{flex:1 1 auto;min-width:0;width:100%;padding:12px 14px;border-radius:9px;background:var(--navora-surface);border:1px solid var(--navora-stroke);box-shadow:none;box-sizing:border-box}
+.msg-role{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px;font-size:11px;font-weight:500;color:var(--navora-muted);margin-bottom:4px}
+.inchat-title{margin:0;font-size:14px;font-weight:600;color:var(--navora-ink);line-height:1.5;overflow-wrap:anywhere}
+.ask-timeout{margin:5px 0 0;font-size:11px;color:var(--navora-muted)}
+.ask-timeout.urgent{color:var(--appearance-warning,var(--control-danger))}
+.decision-status,.decision-error{margin:9px 0 0;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.decision-status{color:var(--navora-muted)}
+.decision-error{color:var(--control-danger)}
+.decision-dismiss{margin-left:auto;border:0;border-radius:5px;background:transparent;padding:5px 8px;color:var(--navora-muted);font:inherit;font-size:12px;cursor:default}
+.decision-dismiss:hover{background:var(--control-hover);color:var(--navora-ink)}
+button:focus-visible,summary:focus-visible,input:focus-visible{outline:2px solid var(--control-focus,var(--navora-accent));outline-offset:2px}
+button:disabled{opacity:.5;cursor:default}
+
+.pending-ask-step{font-weight:400;color:var(--navora-muted)}
+.inchat-body,.inchat-meta{margin:5px 0 0;font-size:12px;color:var(--navora-muted);line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.inchat-meta{font-size:11px}
+.ask-prior-details{margin-top:7px;font-size:11px;color:var(--navora-muted)}
+.ask-prior-details summary{width:fit-content;cursor:default;border-radius:3px}
+.ask-prior{margin:6px 0 0;padding:0;list-style:none;display:grid;gap:5px;font-size:11px}
+.ask-prior li{display:flex;flex-wrap:wrap;gap:4px 8px;overflow-wrap:anywhere}
+.ask-prior-q{color:var(--navora-muted)}
+.ask-prior-a{color:var(--navora-ink);font-weight:500}
+.ask-dl-detail,.ask-evidence{margin-top:8px;padding:8px 10px;border-radius:6px;background:var(--control-hover);font-size:12px}
+.ask-dl-row{display:grid;grid-template-columns:42px minmax(0,1fr);gap:8px;line-height:1.6}
+.ask-dl-k{color:var(--navora-muted)}
+.ask-dl-v{color:var(--navora-ink);overflow-wrap:anywhere}
+.ask-evidence-label{font-size:10px;color:var(--navora-muted);margin-bottom:3px}
+.ask-evidence-title,.ask-evidence-url{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ask-evidence-title{font-size:12px;font-weight:500;color:var(--navora-ink)}
+.ask-evidence-url{font-size:11px;color:var(--navora-muted)}
+.ask-options{margin-top:9px;display:grid;gap:6px}
+.ask-opt{min-height:36px;border:1px solid var(--navora-stroke);border-radius:6px;padding:8px 10px;font:inherit;font-size:12px;font-weight:500;cursor:default;line-height:1.5;text-align:left;background:transparent;color:var(--navora-ink);display:flex;flex-direction:column;gap:2px;min-width:0;overflow-wrap:anywhere}
+.ask-opt:hover:not(:disabled){background:var(--control-hover);border-color:color-mix(in srgb,var(--navora-accent) 45%,var(--navora-stroke))}
+.ask-opt.recommended,.ask-opt.primary{box-shadow:inset 2px 0 0 var(--navora-accent)}
+.ask-opt.danger{color:var(--control-danger)}
+.ask-opt.danger:hover:not(:disabled){background:color-mix(in srgb,var(--control-danger) 7%,var(--navora-surface))}
+.ask-opt-main{display:flex;align-items:center;flex-wrap:wrap;gap:7px;min-width:0}
+.ask-opt-badge{font-size:10px;font-weight:400;padding:0 5px;border-radius:4px;color:var(--navora-accent);background:var(--control-selected);white-space:nowrap}
+.ask-opt-hint{font-size:11px;font-weight:400;color:var(--navora-muted)}
+.ask-opt-custom{flex-direction:row;align-items:center;gap:6px;cursor:text}
+.ask-opt-custom:focus-within{outline:2px solid var(--control-focus,var(--navora-accent));outline-offset:1px}
+.ask-opt-custom-input{flex:1;min-width:0;border:0;background:transparent;color:var(--navora-ink);font:inherit;font-weight:400;outline:none}
+.ask-opt-custom-input:focus-visible{outline:none}
+.ask-opt-custom-input::placeholder{color:var(--navora-muted)}
+.ask-opt-custom-submit{min-height:26px;border:0;border-radius:5px;padding:3px 8px;font:inherit;font-size:11px;font-weight:500;cursor:default;background:var(--control-selected);color:var(--navora-accent)}
+.ask-opt-custom-submit:hover:not(:disabled){background:var(--control-hover)}
+.ask-footer{display:flex;justify-content:flex-end;margin-top:6px}
+.ask-deny{min-height:26px;border:0;border-radius:5px;background:transparent;font:inherit;font-size:11px;color:var(--navora-muted);cursor:default;padding:4px 6px}
+.ask-deny:hover:not(:disabled){background:var(--control-hover);color:var(--control-danger)}
+@media(pointer:coarse){.ask-opt,.ask-opt-custom-submit,.ask-deny,.decision-dismiss{min-height:44px}}
 </style>

@@ -33,7 +33,7 @@
       <div v-if="rootLabel && !navigationOnly" class="ws-root" :title="absoluteRoot">{{ rootLabel }}</div>
       <div v-if="!chatId" class="res-empty">选择对话后查看文件</div>
       <div v-else-if="loadError" class="res-empty res-error">{{ loadError }}</div>
-      <div v-else-if="!visibleRootEntries.length" class="res-empty">暂无文件</div>
+      <div v-else-if="!visibleRootEntries.length" class="res-empty">{{ navigationOnly?'暂无文件夹':'暂无文件' }}</div>
       <div v-else class="res-tree">
         <WorkspaceTreeNode
           :entries="visibleRootEntries"
@@ -42,6 +42,7 @@
           :children="visibleChildren"
           :loading="loadingDirs"
           :selected="selectedPath"
+          :folders-only="navigationOnly"
           @toggle="toggleDir"
           @open="openFile"
           @select="selectEntry"
@@ -88,7 +89,7 @@
       </template>
     </SidebarContextMenu>
 
-    <v-dialog v-model="deleteOpen" max-width="400" persistent>
+    <BrowserConfirmationDialog v-model="deleteOpen" confirmation="delete-file" :context-key="`${chatId}:${deleteTarget?.path||''}`" max-width="400" persistent>
       <v-card>
         <v-card-title>删除</v-card-title>
         <v-card-text>
@@ -100,14 +101,16 @@
           <v-btn color="error" :loading="deleting" @click="confirmDelete">删除</v-btn>
         </v-card-actions>
       </v-card>
-    </v-dialog>
+    </BrowserConfirmationDialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import SidebarContextMenu from './SidebarContextMenu.vue'
+import BrowserConfirmationDialog from '../BrowserConfirmationDialog.vue'
 import WorkspaceTreeNode, { type WsEntry } from './WorkspaceTreeNode.vue'
+import {useWorkspaceFileActions} from '@/composables/useWorkspaceFileActions'
 import type { BrowserDownloadEntry } from '@shared/types'
 import { activeDownload, downloadRelativePath, mergeWorkspaceDownloads } from '@shared/workspace-downloads'
 
@@ -117,6 +120,7 @@ const emit = defineEmits<{
   preview: [entry: WsEntry]
   browse: [path:string]
 }>()
+const fileActions=useWorkspaceFileActions({open:(path,chatId)=>{if(chatId!==props.chatId){emit('notify','来源对话已切换，请重新打开文件。');return}emit('preview',{path,name:path.split(/[\\/]/).at(-1)||path,type:'file'})},notify:text=>emit('notify',text),isCurrent:target=>!disposed&&props.chatId===target.chatId})
 
 const collapsed = ref(false)
 const busy = ref(false)
@@ -127,23 +131,24 @@ const loadingDirs = ref<Set<string>>(new Set())
 const truncated = ref(false)
 const loadError = ref('')
 const absoluteRoot = ref('')
-const menu = ref<{ show: (e: MouseEvent) => void; hide: () => void } | null>(null)
+const menu = ref<{ show: (e: MouseEvent|KeyboardEvent) => void; hide: () => void } | null>(null)
 const menuEntry = ref<WsEntry | null>(null)
 const deleteOpen = ref(false)
 const deleteTarget = ref<WsEntry | null>(null)
+let deleteOwner='',deleteRevision:string|undefined
 const deleting = ref(false)
 const selectedPath = ref('')
 const downloads = ref<BrowserDownloadEntry[]>([])
 const awaitingDisk = ref(new Set<string>())
 const seenDownloads = new Set<string>()
-const visibleRootEntries = computed(() => mergeWorkspaceDownloads(rootEntries.value, '', props.chatId, downloads.value, awaitingDisk.value))
+const visibleRootEntries = computed(() => mergeWorkspaceDownloads(rootEntries.value, '', props.chatId, downloads.value, awaitingDisk.value).filter(entry=>!props.navigationOnly||entry.type==='dir'))
 const visibleChildren = computed(() => {
   const paths = new Set(Object.keys(childrenByPath.value))
   for (const item of downloads.value) {
     const parts = downloadRelativePath(item)?.split('/') || []
     for (let i = 1; i < parts.length; i++) paths.add(parts.slice(0, i).join('/'))
   }
-  return Object.fromEntries([...paths].map(path => [path, mergeWorkspaceDownloads(childrenByPath.value[path] || [], path, props.chatId, downloads.value, awaitingDisk.value)]))
+  return Object.fromEntries([...paths].map(path => [path, mergeWorkspaceDownloads(childrenByPath.value[path] || [], path, props.chatId, downloads.value, awaitingDisk.value).filter(entry=>!props.navigationOnly||entry.type==='dir')]))
 })
 const menuDownload = computed(() => downloads.value.find(item => item.id === menuEntry.value?.download?.id))
 
@@ -197,8 +202,8 @@ function withLoading(path: string, on: boolean) {
   loadingDirs.value = next
 }
 
-async function listDir(rel: string): Promise<{ entries: WsEntry[]; truncated: boolean; absoluteRoot: string }> {
-  const res = await window.navora!.workspace.list(props.chatId, rel || '.')
+async function listDir(rel: string, chatId=props.chatId): Promise<{ entries: WsEntry[]; truncated: boolean; absoluteRoot: string }> {
+  const res = await window.navora!.workspace.list(chatId, rel || '.')
   if (!res.ok) throw new Error(res.error || 'list_failed')
   return {
     entries: sortEntries(res.entries || []),
@@ -211,7 +216,7 @@ async function loadDir(rel: string) {
   const chatId=props.chatId
   withLoading(rel, true)
   try {
-    const got = await listDir(rel)
+    const got = await listDir(rel,chatId)
     if(disposed || props.chatId!==chatId)return
     if (rel) {
       childrenByPath.value = { ...childrenByPath.value, [rel]: got.entries }
@@ -220,9 +225,26 @@ async function loadDir(rel: string) {
       truncated.value = got.truncated
       absoluteRoot.value = got.absoluteRoot
     }
+    if(props.navigationOnly)await probeChildFolders(got.entries,chatId)
   } finally {
     if(props.chatId===chatId)withLoading(rel, false)
   }
+}
+
+// Inspect one level ahead; leaf folders have no expansion control.
+async function probeChildFolders(entries:WsEntry[],chatId:string){
+  const folders=entries.filter(entry=>entry.type==='dir'&&!entry.virtual)
+  let cursor=0
+  await Promise.all(Array.from({length:Math.min(4,folders.length)},async()=>{
+    while(!disposed&&props.chatId===chatId&&cursor<folders.length){
+      const folder=folders[cursor++]!
+      try{
+        const result=await listDir(folder.path,chatId)
+        if(disposed||props.chatId!==chatId)return
+        childrenByPath.value={...childrenByPath.value,[folder.path]:result.entries}
+      }catch{ /* A later refresh retries unavailable child directories. */ }
+    }
+  }))
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -273,6 +295,7 @@ async function reload() {
 
 function toggleDir(ent: WsEntry) {
   if (props.navigationOnly) emit('browse',ent.path)
+  if(props.navigationOnly&&!visibleChildren.value[ent.path]?.length)return
   const next = new Set(expanded.value)
   if (next.has(ent.path)) {
     next.delete(ent.path)
@@ -281,7 +304,7 @@ function toggleDir(ent: WsEntry) {
   }
   next.add(ent.path)
   expanded.value = next
-  if (!ent.virtual && !childrenByPath.value[ent.path]) void loadDir(ent.path).catch(()=>emit('notify','无法读取此文件夹'))
+  if (!ent.virtual && (props.navigationOnly||!childrenByPath.value[ent.path])) void loadDir(ent.path).catch(()=>emit('notify','无法读取此文件夹'))
 }
 
 function canOpen(ent:WsEntry):boolean {
@@ -301,9 +324,17 @@ function openFile(ent: WsEntry) {
   if(canOpen(ent))emit('preview', ent)
 }
 
-function onEntryMenu(e: MouseEvent, ent: WsEntry) {
+function onEntryMenu(e: MouseEvent|KeyboardEvent, ent: WsEntry) {
   selectedPath.value = ent.path
   menuEntry.value = ent
+  const download=menuDownload.value
+  if(!ent.virtual&&(!download||!activeDownload(download))){
+    const chatId=props.chatId,captured={...ent},downloadId=download?.id
+    void fileActions.show({chatId,path:ent.path},e,'context',{items:[...(downloadId?[{id:'download-remove',label:'移除下载状态',icon:'xmark'}]:[]),{id:'file-delete',label:'删除',icon:'trash'}],run:async(id,target)=>{
+      if(id==='download-remove'&&downloadId){const result=await window.navora?.downloads.remove(downloadId,chatId);if(!result?.ok)throw Error('无法移除下载状态');if(props.chatId===chatId)updateDownloads(await window.navora!.downloads.list(chatId));return}
+      if(id==='file-delete'){if(props.chatId!==chatId)throw Error('来源对话已切换，请重新打开菜单。');deleteTarget.value=captured;deleteOwner=chatId;deleteRevision=target.revision;deleteOpen.value=true}
+    }});return
+  }
   menu.value?.show(e)
 }
 
@@ -371,6 +402,7 @@ async function copyPath() {
 
 function askDelete() {
   deleteTarget.value = menuEntry.value
+  deleteOwner=props.chatId;deleteRevision=undefined
   deleteOpen.value = Boolean(deleteTarget.value)
 }
 
@@ -378,7 +410,9 @@ async function confirmDelete() {
   if (!props.chatId || !deleteTarget.value || !window.navora?.workspace.delete) return
   deleting.value = true
   try {
-    const res = await window.navora.workspace.delete(props.chatId, deleteTarget.value.path)
+    const chatId=deleteOwner||props.chatId,path=deleteTarget.value.path
+    if(deleteRevision){const current=await window.navora.workspace.fileAction(chatId,path,'inspect',{revision:deleteRevision});if(!current.ok)throw Error('文件已更新，请关闭确认框后重新选择。')}
+    const res = await window.navora.workspace.delete(chatId,path)
     if (!res.ok) {
       emit('notify', res.error || '删除失败')
       return
@@ -418,6 +452,7 @@ watch(
     rootEntries.value=[]
     childrenByPath.value = {}
     selectedPath.value = ''
+    deleteOpen.value=false;deleteTarget.value=null;deleteOwner='';deleteRevision=undefined
     seenDownloads.clear()
     awaitingDisk.value=new Set()
     updateDownloads(props.downloads||[])

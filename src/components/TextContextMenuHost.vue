@@ -88,14 +88,21 @@ type MenuState =
       text: string
       range?: Range
     }
-  | { kind: 'selection'; selected: string }
+  | { kind: 'selection'; selected: string;range:Range }
 
-const menu = ref<{ show: (e: MouseEvent) => void; hide: () => void } | null>(null)
+const menu = ref<{ show: (e: MouseEvent|KeyboardEvent) => void; hide: () => void } | null>(null)
 const state = ref<MenuState | null>(null)
 
 function onContextMenu(e: MouseEvent) {
-  if (e.button !== 2) return
-  const target = e.target
+  if(e.defaultPrevented||e.button!==2)return
+  openContextMenu(e,e.target)
+}
+function onContextKey(e:KeyboardEvent){
+  if(e.defaultPrevented||e.isComposing||e.repeat||!(e.key==='ContextMenu'||e.key==='F10'&&e.shiftKey))return
+  openContextMenu(e,document.activeElement)
+}
+function openContextMenu(e:MouseEvent|KeyboardEvent,target:EventTarget|null){
+  if(target instanceof Element&&target.closest('[role="menu"],.sidebar-ctx-panel'))return
   // Structured editors own their document selection, link commands and undo.
   // Native title inputs inside a source block still use the ordinary menu.
   if(target instanceof Element&&target.closest('[data-composer-editor]')&&!target.closest('input,textarea'))return
@@ -139,7 +146,9 @@ function onContextMenu(e: MouseEvent) {
 
   e.preventDefault()
   e.stopPropagation()
-  state.value = { kind: 'selection', selected }
+  const selection=window.getSelection()
+  if(!selection?.rangeCount)return
+  state.value = { kind: 'selection', selected,range:selection.getRangeAt(0).cloneRange() }
   menu.value?.show(e)
 }
 
@@ -147,6 +156,8 @@ async function onCopy() {
   const s = state.value
   if (!s?.selected) return
   if (s.kind === 'edit' && s.password) return
+  if(s.kind==='edit'&&(!s.target.el.isConnected||(s.target.kind==='contenteditable'?s.target.el.textContent||'':s.target.el.value)!==s.text))return
+  if(s.kind==='selection'&&(!s.range.startContainer.isConnected||!s.range.endContainer.isConnected||s.range.toString().trim()!==s.selected))return
   await copyTextToClipboard(s.selected)
 }
 
@@ -159,7 +170,7 @@ function onCut() {
 async function onPaste() {
   const s = state.value
   if (!s || s.kind !== 'edit' || s.readonly||!restoreEditable(s)) return
-  await editablePaste(s.target, s.start, s.end)
+  await editablePaste(s.target, s.start, s.end,()=>state.value===s&&restoreEditable(s))
 }
 
 function onDelete() {
@@ -170,7 +181,7 @@ function onDelete() {
 
 function onSelectAll() {
   const s = state.value
-  if (!s || s.kind !== 'edit'||!s.target.el.isConnected) return
+  if (!s || s.kind !== 'edit'||!restoreEditable(s)) return
   editableSelectAll(s.target)
 }
 
@@ -187,8 +198,10 @@ function restoreEditable(s:Extract<MenuState,{kind:'edit'}>){
 
 onMounted(() => {
   document.addEventListener('contextmenu', onContextMenu, true)
+  document.addEventListener('keydown',onContextKey,true)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('contextmenu', onContextMenu, true)
+  document.removeEventListener('keydown',onContextKey,true)
 })
 </script>

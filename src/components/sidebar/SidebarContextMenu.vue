@@ -36,6 +36,7 @@ import {useNativeUi} from '@/composables/useNativeUi'
 import {nativeMenuAnchor,nativeMenuSource} from '@/utils/native-menu-source'
 import type {NativeMenuItem} from '@shared/native-ui'
 import {NATIVE_UI_OPEN} from '@shared/native-ui'
+import {useSafeBrowserPopup} from '@/utils/browser-popup-placement'
 
 const props=defineProps<{nativeItems?:NativeMenuItem[]}>()
 const emit=defineEmits<{'native-action':[id:string]}>()
@@ -45,6 +46,7 @@ const x = ref(0)
 const y = ref(0)
 const origin = ref('top left')
 const panelEl = ref<HTMLElement | null>(null)
+useSafeBrowserPopup(()=>domOpen.value?panelEl.value:null,()=>hide())
 let clickX = 0
 let clickY = 0
 let trigger:HTMLElement|null=null

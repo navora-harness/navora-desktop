@@ -1,11 +1,14 @@
 import {computed,reactive,watch,type Ref} from 'vue'
 import type {WorkspaceResource} from '@shared/workspace-resources'
 import type {AgentAskRequest,AgentEvent,AgentPhase,ChatSession,PermissionDecision,PermissionRequest,SubchatIndexItem} from '@shared/types'
+import {clearDecisionDraft} from './useDecisionDraft'
+import {submitDecision,deferDecisionCancellation,isDecisionSubmitting,type DecisionSubmissionStates} from '@shared/decision-submission'
 import {replayConversationEvents,upsertConversationMessage,type ConversationFindViewState} from '@shared/conversation-session'
 
 type SessionState={chat:ChatSession|null;loading:boolean;error:string;deleted:boolean;running:boolean;phase:AgentPhase;phaseDetail:string;liveText:string;reasoning:string;revision:number;readRevision:number;scrollTop:number;followBottom:boolean;request:number;statusRevision:number;events:AgentEvent[];expanded:string[];findState?:ConversationFindViewState;resources?:WorkspaceResource[];resourcesError?:string;resourceRequest?:number}
 type IndexState={items:SubchatIndexItem[];loading:boolean;error:string;request:number}
 const sessions=reactive(new Map<string,SessionState>()),indexes=reactive(new Map<string,IndexState>()),asks=reactive(new Map<string,AgentAskRequest>()),permissions=reactive(new Map<string,PermissionRequest>()),responses=reactive(new Set<string>())
+const decisionStates=reactive<DecisionSubmissionStates>({})
 const sessionUsers=new Map<string,number>(),viewArchive=new Map<string,Pick<SessionState,'readRevision'|'revision'|'scrollTop'|'followBottom'|'expanded'|'findState'>>()
 const requestChanges=new Map<string,number>(),indexTimers=new Map<string,ReturnType<typeof setTimeout>>()
 let bound:typeof window.navora,requestRevision=0
@@ -46,12 +49,12 @@ export function ensureConversationSessionEvents(){
   off.push(api.agent.onEvent(onEvent),api.chats.onChanged(event=>{
     if(event.type==='removed'){
       const state=sessions.get(event.chatId);if(state){state.request++;state.chat=null;state.loading=false;state.deleted=true;state.running=false}
-      for(const [id,req]of asks)if(req.chatId===event.chatId)asks.delete(id)
+      for(const [id,req]of asks)if(req.chatId===event.chatId){asks.delete(id);clearDecisionDraft(id);delete decisionStates[id]}
       for(const [id,req]of permissions)if(req.chatId===event.chatId)permissions.delete(id)
       invalidateIndexes(event.chatId)
     }else if(event.type==='upsert'){if(sessions.has(event.chatId))void loadConversationSession(event.chatId);invalidateIndexes(event.chatId)}
     else{for(const id of indexes.keys())void refreshSubchatIndex(id)}
-  }),api.agent.onAsk(req=>{rememberRequest(req.id);asks.set(req.id,req);invalidateIndexes(req.chatId,req.parentChatId)}),api.agent.onAskCancel(({id})=>{const req=asks.get(id);rememberRequest(id);asks.delete(id);if(req)invalidateIndexes(req.chatId,req.parentChatId)}),api.permission.onRequest(req=>{rememberRequest(req.id);permissions.set(req.id,req);invalidateIndexes(req.chatId)}),api.permission.onCancel(id=>{const req=permissions.get(id);rememberRequest(id);permissions.delete(id);if(req)invalidateIndexes(req.chatId)}))
+  }),api.agent.onAsk(req=>{rememberRequest(req.id);asks.set(req.id,req);invalidateIndexes(req.chatId,req.parentChatId)}),api.agent.onAskCancel(({id})=>{const req=asks.get(id);if(deferDecisionCancellation(decisionStates,id))return;rememberRequest(id);asks.delete(id);if(!isDecisionSubmitting(id))clearDecisionDraft(id);delete decisionStates[id];if(req)invalidateIndexes(req.chatId,req.parentChatId)}),api.permission.onRequest(req=>{rememberRequest(req.id);permissions.set(req.id,req);invalidateIndexes(req.chatId)}),api.permission.onCancel(id=>{const req=permissions.get(id);if(deferDecisionCancellation(decisionStates,id))return;rememberRequest(id);permissions.delete(id);delete decisionStates[id];if(req)invalidateIndexes(req.chatId)}))
 }
 export async function loadConversationSession(id:string){
   ensureConversationSessionEvents();if(!id||!window.navora)return
@@ -93,11 +96,11 @@ export function useConversationSession(chatId:Ref<string>){
   const state=computed(()=>session(chatId.value)),ownAsks=computed(()=>[...asks.values()].filter(req=>req.chatId===chatId.value)),ownPermissions=computed(()=>[...permissions.values()].filter(req=>req.chatId===chatId.value))
   async function respondAsk(id:string,answer:string,source:'option'|'custom'|'deny'){
     const req=asks.get(id);if(!req||req.chatId!==chatId.value||responses.has(id))return
-    responses.add(id);try{await window.navora!.agent.respondAsk(id,{answer,source});rememberRequest(id);asks.delete(id)}finally{responses.delete(id)}
+    responses.add(id);try{await submitDecision(decisionStates,id,()=>window.navora!.agent.respondAsk(id,{answer,source}),()=>{rememberRequest(id);asks.delete(id);clearDecisionDraft(id);delete decisionStates[id]})}finally{responses.delete(id)}
   }
   async function respondPermission(id:string,decision:PermissionDecision){
     const req=permissions.get(id);if(!req||req.chatId!==chatId.value||responses.has(id))return
-    responses.add(id);try{await window.navora!.permission.respond(id,decision);rememberRequest(id);permissions.delete(id)}finally{responses.delete(id)}
+    responses.add(id);try{await submitDecision(decisionStates,id,()=>window.navora!.permission.respond(id,decision),()=>{rememberRequest(id);permissions.delete(id);delete decisionStates[id]})}finally{responses.delete(id)}
   }
-  return {state,asks:ownAsks,permissions:ownPermissions,responses,respondAsk,respondPermission,reload:()=>loadConversationSession(chatId.value),markRead:()=>{state.value.readRevision=state.value.revision}}
+  return {state,asks:ownAsks,permissions:ownPermissions,responses,decisionStates,dismissAsk:(id:string)=>{if(asks.get(id)?.chatId!==chatId.value)return;rememberRequest(id);asks.delete(id);clearDecisionDraft(id);delete decisionStates[id]},dismissPermission:(id:string)=>{if(permissions.get(id)?.chatId!==chatId.value)return;rememberRequest(id);permissions.delete(id);delete decisionStates[id]},respondAsk,respondPermission,reload:()=>loadConversationSession(chatId.value),markRead:()=>{state.value.readRevision=state.value.revision}}
 }

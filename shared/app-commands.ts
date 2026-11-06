@@ -3,9 +3,9 @@ export type AppMenuMode='main'|'detached'|'file'|'compact'
 export type AppCommandId=
   |'conversation.new'|'browser.new'|'browser.reopen'|'conversation.openFile'|'conversation.openFolder'|'conversation.export'|'content.close'|'app.settings'|'app.quit'
   |'edit.undo'|'edit.redo'|'edit.cut'|'edit.copy'|'edit.paste'|'edit.pastePlain'|'edit.delete'|'edit.selectAll'|'editor.link'|'editor.unlink'|'editor.attach'|'conversation.search'|'conversation.find'
-  |'view.sidebar'|'view.sidebarPinned'|'view.workspace'|'view.workspaceExpand'|'view.summary'|'editor.focus'
+  |'view.sidebar'|'view.sidebarPinned'|'view.workspace'|'view.workspaceExpand'|'view.summary'|'view.windowPinned'|'view.fullscreen'|'editor.focus'
   |'help.docs'|'help.shortcuts'|'help.guide'|'help.about'
-  |'browser.reload'|'browser.reloadIgnoringCache'|'browser.mute'|'workspace.attach'|'file.reveal'|'file.openExternal'
+  |'browser.reload'|'browser.reloadIgnoringCache'|'browser.mute'|'browser.openExternal'|'browser.copyUrl'|'workspace.attach'|'file.reveal'|'file.openExternal'
 export type AppCommandState={enabled?:boolean;visible?:boolean;label?:string;checked?:boolean;reason?:string}
 export type AppCommandStateMap=Partial<Record<AppCommandId,AppCommandState|boolean>>
 export type AppCommandContext={contextKey?:string;target:unknown;menu:AppMenuId;source:'menu'|'shortcut';nativePageId?:string}
@@ -16,11 +16,13 @@ export const appCommands:AppCommandDefinition[]=[
   {id:'conversation.new',menu:'file',group:0,label:'新对话',shortcut:'Mod+N',scope:'conversation',modes:['main','compact']},
   {id:'browser.new',menu:'file',group:0,label:'新建浏览器标签页',shortcut:'Mod+T',scope:'content',modes:['main','detached','compact']},
   {id:'browser.reopen',menu:'file',group:0,label:'重新打开关闭的浏览器标签页',shortcut:'Mod+Shift+T',scope:'content',modes:['main','detached','compact']},
+  {id:'browser.copyUrl',menu:'file',group:1,label:'复制网址',scope:'content',modes:['main','detached','compact']},
+  {id:'browser.openExternal',menu:'file',group:1,label:'在外部浏览器中打开',scope:'content',modes:['main','detached','compact']},
   {id:'conversation.openFile',menu:'file',group:1,label:'打开对话文件…',shortcut:'Mod+O',scope:'conversation',modes:['main','compact']},
   {id:'conversation.openFolder',menu:'file',group:1,label:'打开当前对话文件夹',scope:'conversation',modes:['main','compact']},
   {id:'conversation.export',menu:'file',group:1,label:'导出当前对话…',scope:'conversation',modes:['main','compact']},
-  {id:'file.reveal',menu:'file',group:1,label:'在系统中显示文件',scope:'content',modes:['file']},
-  {id:'file.openExternal',menu:'file',group:1,label:'使用默认应用打开',scope:'content',modes:['file']},
+  {id:'file.reveal',menu:'file',group:1,label:'在系统中显示文件',scope:'content',modes:['file','detached']},
+  {id:'file.openExternal',menu:'file',group:1,label:'使用默认应用打开',scope:'content',modes:['file','detached']},
   {id:'workspace.attach',menu:'file',group:2,label:'移回工作区',scope:'workspace',modes:['detached','file']},
   {id:'content.close',menu:'file',group:2,label:'关闭当前内容标签页',shortcut:'Mod+W',scope:'content'},
   {id:'app.settings',menu:'file',group:3,label:'设置…',scope:'application',modes:['main','compact']},
@@ -36,7 +38,7 @@ export const appCommands:AppCommandDefinition[]=[
   {id:'editor.link',menu:'edit',group:2,label:'添加链接…',shortcut:'Mod+Shift+K',scope:'editor',modes:['main','compact']},
   {id:'editor.unlink',menu:'edit',group:2,label:'移除链接',scope:'editor',modes:['main','compact']},
   {id:'editor.attach',menu:'edit',group:2,label:'附加…',scope:'editor',modes:['main','compact']},
-  {id:'conversation.find',menu:'edit',group:3,label:'在当前聊天中查找…',shortcut:'Mod+F',scope:'conversation',modes:['main','compact']},
+  {id:'conversation.find',menu:'edit',group:3,label:'在当前聊天中查找…',shortcut:'Mod+F',scope:'conversation',modes:['main','compact','detached','file']},
   {id:'conversation.search',menu:'edit',group:3,label:'搜索对话',shortcut:'Mod+K',scope:'conversation',modes:['main','compact']},
   {id:'view.sidebar',menu:'view',group:0,label:'显示侧栏',scope:'workspace',modes:['main','compact']},
   {id:'view.sidebarPinned',menu:'view',group:0,label:'固定侧栏',scope:'workspace',modes:['main','compact']},
@@ -44,9 +46,11 @@ export const appCommands:AppCommandDefinition[]=[
   {id:'view.workspaceExpand',menu:'view',group:0,label:'展开工作区',scope:'workspace',modes:['main','compact']},
   {id:'view.summary',menu:'view',group:0,label:'显示对话摘要',scope:'conversation',modes:['main','compact']},
   {id:'editor.focus',menu:'view',group:1,label:'定位到消息编辑器',scope:'editor',modes:['main','compact']},
-  {id:'browser.reload',menu:'view',group:0,label:'重新加载页面',shortcut:'Mod+R',scope:'content',modes:['detached']},
-  {id:'browser.reloadIgnoringCache',menu:'view',group:0,label:'忽略缓存重新加载',shortcut:'Mod+Shift+R',scope:'content',modes:['detached']},
-  {id:'browser.mute',menu:'view',group:1,label:'静音当前页面',shortcut:'Mod+M',scope:'content',modes:['detached']},
+  {id:'browser.reload',menu:'view',group:0,label:'重新加载页面',shortcut:'Mod+R',scope:'content',modes:['main','detached','compact']},
+  {id:'browser.reloadIgnoringCache',menu:'view',group:0,label:'忽略缓存重新加载',shortcut:'Mod+Shift+R',scope:'content',modes:['main','detached','compact']},
+  {id:'browser.mute',menu:'view',group:1,label:'静音当前页面',shortcut:'Mod+M',scope:'content',modes:['main','detached','compact']},
+  {id:'view.windowPinned',menu:'view',group:2,label:'置顶窗口',scope:'workspace',modes:['detached']},
+  {id:'view.fullscreen',menu:'view',group:3,label:'进入全屏',shortcut:'F11',scope:'application'},
   {id:'help.docs',menu:'help',group:0,label:'使用文档',scope:'application'},
   {id:'help.shortcuts',menu:'help',group:0,label:'键盘快捷键',shortcut:'Mod+/',scope:'application'},
   {id:'help.guide',menu:'help',group:0,label:'使用引导',scope:'application'},

@@ -49,11 +49,19 @@ export class BrowserStartStore{
     if(!value.chatId)return
     let link:ReturnType<BrowserStartStore['link']>
     try{link=this.link({...value,title:value.title.slice(0,160)})}catch{return}
-    this.history=[{...link,chatId:value.chatId,visitedAt:Date.now()},...this.history.filter(row=>row.chatId!==value.chatId||row.url!==link.url)].slice(0,200)
+    const previous=this.history.find(row=>row.chatId===value.chatId&&row.url===link.url)
+    // A new visit has a different identity even when recorded in the same millisecond.
+    const visitedAt=Math.max(Date.now(),(previous?.visitedAt??0)+1)
+    this.history=[{...link,chatId:value.chatId,visitedAt},...this.history.filter(row=>row.chatId!==value.chatId||row.url!==link.url)].slice(0,200)
     clearTimeout(this.timer);this.timer=setTimeout(()=>{try{this.flush()}catch(error){console.warn('[browser-start] history save failed',error)}},250);this.timer.unref?.()
     this.onChanged?.(value.chatId)
   }
-  clearHistory(chatId:string,url?:string){
+  clearHistory(chatId:string,url?:string,visitedAt?:number){
+    if(visitedAt!==undefined){
+      if(typeof url!=='string'||!url||!Number.isSafeInteger(visitedAt))throw Error('invalid_browser_history_entry')
+      const current=this.history.find(row=>row.chatId===chatId&&row.url===url)
+      if(current&&current.visitedAt!==visitedAt)throw Error('browser_history_changed')
+    }
     const previous=this.history;this.history=this.history.filter(row=>row.chatId!==chatId||url!==undefined&&row.url!==url)
     try{this.flush()}catch(error){this.history=previous;throw error}
     this.onChanged?.(chatId)

@@ -21,3 +21,16 @@ export function workspaceTabStripWidth(count: number, pinnedCount = 0): number {
   const pinned = Math.min(total, Math.max(0, Math.floor(Number.isFinite(pinnedCount) ? pinnedCount : 0)))
   return (total - pinned) * WORKSPACE_TAB_GEOMETRY.idealWidth + pinned * WORKSPACE_TAB_GEOMETRY.pinnedWidth + Math.max(0, total - 1) * WORKSPACE_TAB_GEOMETRY.gap
 }
+
+/** Allocate ordinary slots on a host resize or a change in tab structure.
+ * Selecting another tab may replace the adjacent tools; that only changes the
+ * scroll viewport, rather than reflowing every tab under the pointer.
+ */
+export function workspaceTabSlotWidth(count: number, pinnedCount: number, availableWidth: number): number {
+  const total = Math.max(0, Math.floor(Number.isFinite(count) ? count : 0))
+  const pinned = Math.min(total, Math.max(0, Math.floor(Number.isFinite(pinnedCount) ? pinnedCount : 0)))
+  const ordinary = total - pinned
+  if (!ordinary || !Number.isFinite(availableWidth)) return WORKSPACE_TAB_GEOMETRY.idealWidth
+  const room = (availableWidth - pinned * WORKSPACE_TAB_GEOMETRY.pinnedWidth - Math.max(0, total - 1) * WORKSPACE_TAB_GEOMETRY.gap) / ordinary
+  return Math.min(WORKSPACE_TAB_GEOMETRY.idealWidth, Math.max(WORKSPACE_TAB_GEOMETRY.minimumWidth, room))
+}

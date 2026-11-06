@@ -1,6 +1,7 @@
 <template>
   <div class="chat-resource-buttons">
-    <v-menu v-model="moreOpen" location="bottom end" origin="auto" :offset="6" :close-on-content-click="true">
+    <ActionMenu v-if="native.menusSupported.value" class="chat-resource-button chat-more-trigger" :label="`${contextLabel}更多操作`" :context-key="`${context}:${chatId}`" :items="actions" :disabled="context==='chat'&&!chatId" @select="selectAction" />
+    <v-menu v-else v-model="moreOpen" location="bottom end" origin="auto" :offset="6" :close-on-content-click="true">
       <template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" class="chat-resource-button chat-more-trigger" :class="{selected:moreOpen}" :title="`${contextLabel}更多操作`" :aria-label="`${contextLabel}更多操作`" :disabled="context==='chat' && !chatId"><AppIcon icon="ellipsis" /></button></template>
       <div class="conversation-actions-menu" role="menu" :aria-label="`${contextLabel}操作菜单`" @keydown="onMenuKey" @keydown.esc.stop="moreOpen=false">
         <template v-if="context==='chat'">
@@ -15,9 +16,10 @@
         <button v-if="running" type="button" role="menuitem" @click="emit('stop')"><AppIcon icon="stop" /><span>停止当前任务</span></button>
         <button type="button" role="menuitem" class="conversation-action-danger" @click="emit('delete')"><AppIcon icon="trash" /><span>删除当前对话…</span></button>
         </template>
-        <template v-else><div class="conversation-actions-heading">{{ contextLabel }}</div><button v-for="action in pageActions" :key="action.id" type="button" role="menuitem" @click="emit('contextAction',action.id)"><AppIcon :icon="action.icon" /><span>{{ action.label }}</span></button><div class="conversation-actions-heading conversation-actions-section">导航</div><button type="button" role="menuitem" @click="emit('contextAction','back')"><AppIcon icon="comments" /><span>返回对话</span></button></template>
+        <template v-else><div class="conversation-actions-heading">{{ contextLabel }}</div><button v-for="action in pageActions" :key="action.id" type="button" role="menuitem" :disabled="action.disabled" :title="action.reason" @click="emit('contextAction',action.id)"><AppIcon :icon="action.icon" /><span>{{ action.label }}</span></button><div class="conversation-actions-heading conversation-actions-section">导航</div><button type="button" role="menuitem" @click="emit('contextAction','back')"><AppIcon icon="comments" /><span>返回对话</span></button></template>
       </div>
     </v-menu>
+    <ConversationAnnotationsMenu v-if="context==='chat'" :chat-id="chatId" :entries="annotationEntries" :busy-key="annotationBusyKey" :error="annotationError" @action="(entry,action,copyId)=>emit('annotationAction',entry,action,copyId)" @refresh="emit('refreshAnnotations')"/>
     <button v-if="context==='chat'" type="button" class="chat-resource-button" :class="{selected:open,'has-updates':updated&&!open}" data-chat-resource="resources" :title="summaryLabel" aria-label="当前对话摘要" :aria-description="updated&&!open?`${updateCount||1} 项新资源或更新，打开查看后清除提示`:undefined" aria-controls="conversation-summary" :aria-expanded="open" :disabled="!chatId" @click="emit('toggleResources')"><AppIcon icon="file-lines" /></button>
   </div>
 </template>
@@ -25,16 +27,35 @@
 import AppIcon from './icons/AppIcon.vue'
 import {computed,ref,watch} from 'vue'
 import type {BrowserTreeSession} from '@shared/types'
-const props=defineProps<{chatId:string;tree:BrowserTreeSession[];isRemote:boolean;open?:boolean;updated?:boolean;updateCount?:number;pinned?:boolean;canExport?:boolean;exporting?:boolean;context:'chat'|'files'|'plugins'|'settings'|'creator'|'browser';running?:boolean}>()
-const emit=defineEmits<{notify:[text:string,color?:string];toggleResources:[];showBrowser:[];rename:[];pin:[];export:[];newChat:[];search:[];delete:[];stop:[];newBrowserTab:[];contextAction:[action:string]}>()
-const openingFolder=ref(false),openingBrowser=ref(false),moreOpen=ref(false)
+import ActionMenu,{type ActionMenuItem} from './ActionMenu.vue'
+import {useNativeUi} from '@/composables/useNativeUi'
+import ConversationAnnotationsMenu from './ConversationAnnotationsMenu.vue'
+import type {AnnotationChatAction,AnnotationChatEntry} from '@shared/browser-annotation-chat'
+const props=withDefaults(defineProps<{chatId:string;tree:BrowserTreeSession[];isRemote:boolean;open?:boolean;updated?:boolean;updateCount?:number;pinned?:boolean;canExport?:boolean;exporting?:boolean;context:'chat'|'files'|'plugins'|'settings'|'creator'|'browser';running?:boolean;annotationEntries?:AnnotationChatEntry[];annotationBusyKey?:string;annotationError?:string}>(),{annotationEntries:()=>[]})
+const emit=defineEmits<{notify:[text:string,color?:string];toggleResources:[];showBrowser:[];rename:[];pin:[];export:[];newChat:[];search:[];delete:[];stop:[];newBrowserTab:[];contextAction:[action:string];annotationAction:[entry:AnnotationChatEntry,action:AnnotationChatAction,copyId?:string];refreshAnnotations:[]}>()
+const native=useNativeUi(),openingFolder=ref(false),openingBrowser=ref(false),moreOpen=ref(false)
 const summaryLabel=computed(()=>`当前对话摘要${props.updated&&!props.open?` · ${props.updateCount||1} 项新资源或更新`:''}`)
 const contextLabel=computed(()=>({chat:'当前对话',files:'文件管理',plugins:'插件',settings:'设置',creator:'创建器',browser:'浏览器'})[props.context])
-const pageActions=computed(()=>({files:[],plugins:[{id:'create',icon:'plus',label:'创建插件'}],settings:[{id:'models',icon:'microchip',label:'模型配置'},{id:'plugins',icon:'puzzle-piece',label:'打开插件管理'},{id:'create-skill',icon:'book',label:'技能创建器'}],creator:[],browser:[{id:'new-browser',icon:'plus',label:'新建浏览器标签页'}],chat:[]})[props.context])
-watch(()=>props.context,()=>{moreOpen.value=false})
+const pageActions=computed<ActionMenuItem[]>(()=>({files:[{id:'refresh',label:'刷新文件列表',icon:'arrow-rotate-right'},{id:'folder',label:'打开当前文件夹',icon:'folder-open',disabled:props.isRemote,reason:props.isRemote?'请在桌面端打开文件夹':undefined}],plugins:[{id:'create',icon:'plus',label:'创建插件'}],settings:[{id:'models',icon:'microchip',label:'模型配置'},{id:'plugins',icon:'puzzle-piece',label:'打开插件管理'},{id:'create-skill',icon:'book',label:'技能创建器'}],creator:[],browser:[{id:'new-browser',icon:'plus',label:'新建浏览器标签页'}],chat:[]})[props.context])
 const currentSessions=computed(()=>props.tree.filter(session=>session.chatId===props.chatId))
 const windowCount=computed(()=>currentSessions.value.reduce((sum,session)=>sum+session.windows.length,0))
-watch(()=>props.chatId,()=>{moreOpen.value=false})
+watch(()=>[props.context,props.chatId],()=>{moreOpen.value=false})
+const actions=computed<ActionMenuItem[]>(()=>props.context==='chat'?[
+  {id:'browser',label:'打开浏览器标签页',icon:'browser',shortcut:'CommandOrControl+Shift+B',disabled:!props.chatId||openingBrowser.value},
+  {id:'folder',label:'打开对话文件夹',icon:'folder-open',disabled:props.isRemote||openingFolder.value},
+  {id:'rename',label:'修改标题',icon:'pen-to-square',divider:true},
+  {id:'search',label:'在当前聊天中查找',icon:'magnifying-glass',shortcut:'CommandOrControl+F'},
+  {id:'pin',label:props.pinned?'取消置顶':'置顶对话',icon:'thumbtack',checked:!!props.pinned},
+  {id:'export',label:props.exporting?'正在导出…':'导出对话',icon:'file-export',disabled:!props.canExport||props.exporting},
+  ...(props.running?[{id:'stop',label:'停止当前任务',icon:'stop'}]:[]),
+  {id:'delete',label:'删除当前对话…',icon:'trash',danger:true,divider:true}
+]:[...pageActions.value,{id:'back',icon:'comments',label:'返回对话',divider:!!pageActions.value.length}])
+function selectAction(id:string){
+  if(props.context!=='chat'){emit('contextAction',id);return}
+  if(id==='browser'){void quickOpen();return}
+  if(id==='folder'){void openFolder();return}
+  switch(id){case 'rename':emit('rename');break;case 'search':emit('search');break;case 'pin':emit('pin');break;case 'export':emit('export');break;case 'stop':emit('stop');break;case 'delete':emit('delete');break}
+}
 function onMenuKey(event:KeyboardEvent){
   if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return
   event.preventDefault();event.stopPropagation()

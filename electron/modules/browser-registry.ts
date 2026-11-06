@@ -1,6 +1,5 @@
 import {browserTabShortcut,type BrowserClosedTab} from '../../shared/browser-workspace'
 import {appShortcutCommand,isAppShortcutEnabled} from '../../shared/app-shortcuts'
-import {BrowserAgentAudio} from './browser-agent-audio'
 import {BrowserHostManager,type BrowserPage} from './browser-host'
 import {
   session as electronSession,
@@ -13,8 +12,8 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { BrowserSessionManageAction, BrowserSessionManageResult, BrowserSessionUpdate, BrowserTreeSession, BrowserTreeWindow } from '../../shared/types'
-import { normalizeBrowserSessionUpdate } from '../../shared/browser-session'
+import type { BrowserSessionCreateOptions, BrowserSessionManageAction, BrowserSessionManageOptions, BrowserSessionManageResult, BrowserSessionScope, BrowserSessionUpdate, BrowserTreeSession, BrowserTreeWindow } from '../../shared/types'
+import { browserSessionScope, DEFAULT_BROWSER_PARTITION, DEFAULT_BROWSER_SESSION_ID, DEFAULT_BROWSER_SESSION_LABEL, normalizeBrowserSessionUpdate, publicBrowserSession } from '../../shared/browser-session'
 import { applyUserAgentOverride } from '../../shared/user-agent'
 import type { AppConfig } from '../../shared/config'
 import { resolveAcceptLanguageList, resolveUserAgent } from '../../shared/config'
@@ -23,6 +22,9 @@ import type { BrowserNetworkManager } from './browser-network'
 import type { PermissionGate } from './permission-gate'
 import type { WorkspaceFiles } from './workspace-files'
 import { jsDialogHost } from './js-dialog-host'
+import {loadBrowserWorkspace,saveBrowserWorkspace} from './browser-session-persistence'
+import {foregroundFullscreenPage,fullscreenShortcut,windowFullscreen} from './window-fullscreen'
+import {detachedBrowserTabKey} from '../../shared/detached-workspace'
 
 const WINDOW_MIN_W = 320
 const WINDOW_MIN_H = 240
@@ -85,9 +87,11 @@ type AgentWindowRecord = {
 }
 
 type AgentSessionRecord = {
+  scope: BrowserSessionScope
   sessionId: string
   chatId: string
   sessionIndex: number
+  displayIndex?: number
   partition: string
   persist: boolean
   name?: string
@@ -164,17 +168,17 @@ export class BrowserRegistry {
   private sessions = new Map<string, AgentSessionRecord>()
   private sessionManagement = new Set<string>()
   private windows = new Map<string, AgentWindowRecord>()
-  private audioPolicies=new WeakMap<BrowserPage,BrowserAgentAudio>()
-  private audioPreference(page:BrowserPage){return this.audioPolicies.get(page)?.preference??page.webContents.isAudioMuted()}
   setPageMuted(page:BrowserPage,muted:boolean){
-    const policy=this.audioPolicies.get(page)
-    if(policy)policy.setManual(muted)
-    else page.webContents.setAudioMuted(muted)
+    page.webContents.setAudioMuted(muted)
   }
   private persistenceFile:string|null=null
   private restoring=false
   private restored=false
+  private persistenceHealthy=true
+  private publicPersistencePending=false
   private nextIndex = new Map<string, number>()
+  private nextDisplayIndex = 0
+  private knownChats = new Set<string>()
   private getConfig: () => AppConfig
   private events: RegistryEvents
   private debounceTimers = new Map<string, NodeJS.Timeout>()
@@ -199,16 +203,14 @@ export class BrowserRegistry {
     this.getConfig = getConfig
     this.events = events
     this.hosts.onChanged = () => {
-      for(const {win} of this.windows.values())if(!win.isDestroyed())this.audioPolicies.get(win)?.sync(win.automation.snapshot(),this.getConfig().browser.automation.auto_mute!==false)
-      for (const id of this.nextIndex.keys()) this.emitTree(id)
+      for (const id of this.knownChats) this.emitTree(id)
     }
     this.hosts.onWillClose=page=>{const snapshot=this.snapshotTab(page.id);if(snapshot)this.pendingUserClose.set(page.id,snapshot)}
-    this.hosts.onCloseHost=hostId=>{
-      if(this.closingHosts.has(hostId))return
+    this.hosts.onCloseHost=async hostId=>{
+      if(this.closingHosts.has(hostId))return false
       this.closingHosts.add(hostId)
-      void (async()=>{for(const id of this.hosts.hostPages(hostId))if(!await this.closeUserTab(id,hostId))break})()
-        .catch(error=>console.warn('[browser] window close interrupted',error))
-        .finally(()=>this.closingHosts.delete(hostId))
+      try{for(const id of this.hosts.hostPages(hostId))if(!await this.closeUserTab(id,hostId))return false;return true}
+      finally{this.closingHosts.delete(hostId)}
     }
     this.hosts.onActivate = page => {
       if(this.restoring)return
@@ -311,6 +313,8 @@ export class BrowserRegistry {
   }
 
   private emitTree(chatId: string): void {
+    if(!chatId){for(const id of this.knownChats)this.emitTree(id);return}
+    this.knownChats.add(chatId)
     this.tabRevision++
     const ms = this.getConfig().browser.tree_update_debounce_ms || 100
     const prev = this.debounceTimers.get(chatId)
@@ -333,18 +337,20 @@ export class BrowserRegistry {
   getTree(chatId: string): BrowserTreeSession[] {
     const list: BrowserTreeSession[] = []
     for (const s of this.sessions.values()) {
-      if (s.chatId !== chatId) continue
+      if (s.scope !== 'default' && s.chatId !== chatId) continue
       const windows: BrowserTreeWindow[] = []
       for (const w of s.windows.values()) {
+        if(w.chatId!==chatId)continue
         if(w.win.isDestroyed())continue
         const bounds =
           w.win.isDestroyed() ? undefined : windowBoundsSnapshot(w.win)
         windows.push({
+          chatId:w.chatId,
           desiredUrl:w.desiredUrl||w.restoreUrl,
           pinned:w.win.pinned,
           muted:w.win.webContents.isAudioMuted(),
-          manualMuted:this.audioPolicies.get(w.win)?.snapshot().manualMuted,
-          muteReason:this.audioPolicies.get(w.win)?.snapshot().muteReason,
+          manualMuted:w.win.webContents.isAudioMuted(),
+          muteReason:w.win.webContents.isAudioMuted()?'manual':undefined,
           audible:w.win.webContents.isCurrentlyAudible(),
           order:this.hosts.hostPages(w.win.hostId||'').indexOf(w.windowId),
           hostActive:this.hosts.getHost(w.win.hostId||'')?.active===w.windowId,
@@ -375,9 +381,12 @@ export class BrowserRegistry {
         })
       }
       list.push({
+        scope:s.scope,
+        initialized:true,
         sessionId: s.sessionId,
         chatId: s.chatId,
         sessionIndex: s.sessionIndex,
+        displayIndex: s.displayIndex,
         partition: s.partition,
         persist: s.persist,
         name: s.name,
@@ -385,14 +394,33 @@ export class BrowserRegistry {
         windows,
       })
     }
+    if(!list.some(item=>item.scope==='default'))list.unshift(publicBrowserSession())
     return list.sort((a, b) => a.sessionIndex - b.sessionIndex)
+  }
+
+  getAllTree(chatIds: readonly string[]): BrowserTreeSession[] {
+    const result:BrowserTreeSession[]=[],publicSession=publicBrowserSession(this.sessions.has(DEFAULT_BROWSER_SESSION_ID))
+    for(const chatId of new Set(chatIds))for(const session of this.getTree(chatId)){
+      if(session.scope==='default')publicSession.windows.push(...session.windows)
+      else result.push(session)
+    }
+    return [publicSession,...result]
+  }
+
+  isPublicSession(sessionId:string):boolean{return sessionId===DEFAULT_BROWSER_SESSION_ID}
+  networkRequestOwner(sessionId:string,webContentsId?:number):{chatId:string;pageId?:string;source?:'page'|'session-principal'}|null{
+    if(webContentsId===undefined||typeof webContentsId==='number'&&Number.isInteger(webContentsId)&&webContentsId<0){
+      const session=this.sessions.get(sessionId)
+      return session&&session.scope!=='default'?{chatId:session.chatId,source:'session-principal'}:null
+    }
+    if(!Number.isInteger(webContentsId)||!webContentsId)return null
+    for(const record of this.windows.values())if(record.sessionId===sessionId&&!record.win.isDestroyed()&&record.win.webContents.id===webContentsId)return{chatId:record.chatId,pageId:record.windowId}
+    return null
   }
 
   snapshotCounts(): Record<string, number> {
     const out: Record<string, number> = {}
-    for (const s of this.sessions.values()) {
-      out[s.chatId] = (out[s.chatId] || 0) + s.windows.size
-    }
+    for (const page of this.windows.values())if(!page.win.isDestroyed())out[page.chatId]=(out[page.chatId]||0)+1
     return out
   }
 
@@ -407,6 +435,7 @@ export class BrowserRegistry {
   updateSession(sessionId: string, patch: BrowserSessionUpdate): BrowserTreeSession {
     const session = this.sessions.get(sessionId)
     if (!session) throw Error('session_not_found')
+    if(session.scope==='default')throw Error('public_session_identity_is_fixed')
     if (this.sessionManagement.has(sessionId)) throw Error('browser_session_busy')
     const normalized = normalizeBrowserSessionUpdate(patch)
     const previous = [...this.sessions.values()].filter(candidate=>candidate.chatId===session.chatId).map(candidate=>({candidate,name:candidate.name,isDefault:candidate.isDefault}))
@@ -422,17 +451,22 @@ export class BrowserRegistry {
   }
 
   /** Destructive UI operations coordinate every page before touching site data. */
-  async manageSession(sessionId: string, action: BrowserSessionManageAction): Promise<BrowserSessionManageResult> {
+  async manageSession(sessionId: string, action: BrowserSessionManageAction, options:BrowserSessionManageOptions={},sharedAuthorized=false): Promise<BrowserSessionManageResult> {
     if (!['close-pages', 'clear-data', 'delete'].includes(action)) throw Error('invalid_browser_session_action')
     const session = this.sessions.get(sessionId)
     if (!session) throw Error('session_not_found')
-    if (this.sessionManagement.has(sessionId)) throw Error('browser_session_busy')
-    this.sessionManagement.add(sessionId)
+    if(session.scope==='default'&&action==='delete')throw Error('public_session_cannot_be_deleted')
+    if(session.scope==='default'&&action==='close-pages'&&!options.chatId)throw Error('public_session_page_owner_required')
+    if(session.scope==='default'&&action==='clear-data'&&!options.confirmedSharedImpact)throw Error('public_session_management_confirmation_required')
+    if(session.scope==='default'&&action==='clear-data'&&!sharedAuthorized)return this.withSharedSessionManagement(sessionId,undefined,()=>this.manageSession(sessionId,action,options,true))
+    if (this.sessionManagement.has(sessionId)&&!sharedAuthorized) throw Error('browser_session_busy')
+    if(!sharedAuthorized)this.sessionManagement.add(sessionId)
     let closedPages = 0
     try {
       for (const record of [...session.windows.values()]) {
+        if(session.scope==='default'&&action==='close-pages'&&record.chatId!==options.chatId)continue
         if (record.win.annotationSelecting) throw Error('browser_busy_finish_action_first')
-        if (await this.closeUserTab(record.windowId)) closedPages++
+        if (await this.closeUserTab(record.windowId,undefined,sharedAuthorized)) closedPages++
         else break
       }
       const remainingPages = [...session.windows.values()].filter(record => !record.win.isDestroyed()).length
@@ -443,14 +477,14 @@ export class BrowserRegistry {
         await session.ses.clearData()
         await session.ses.clearStorageData()
         await session.ses.clearCache()
-        this.closedTabs.set(session.chatId, (this.closedTabs.get(session.chatId) || []).filter(entry => entry.sessionId !== sessionId))
+        for(const [owner,entries] of this.closedTabs)if(session.scope==='default'||owner===session.chatId)this.closedTabs.set(owner,entries.filter(entry=>entry.sessionId!==sessionId))
       }
       if (action === 'delete') this.sessions.delete(sessionId)
       try { this.savePersistent(true) }
       catch (error) { if(action==='delete')this.sessions.set(sessionId,session);this.emitTree(session.chatId);throw error }
       this.emitTree(session.chatId)
       return { action, closedPages, remainingPages, deleted: action === 'delete' }
-    } finally { this.sessionManagement.delete(sessionId) }
+    } finally { if(!sharedAuthorized)this.sessionManagement.delete(sessionId) }
   }
 
   markNavigationStopped(windowId:string){
@@ -500,6 +534,71 @@ export class BrowserRegistry {
     if (!s) throw new Error(`session_not_found:${sessionId}`)
     if (s.chatId !== chatId) throw new Error(`session_wrong_chat:${sessionId}`)
     return s
+  }
+
+  /** Shared storage usage never grants ownership of another conversation's pages. */
+  assertSessionUsable(chatId:string,sessionId:string):AgentSessionRecord{
+    if(!chatId)throw Error('browser_wrong_chat')
+    const session=this.sessions.get(sessionId)
+    if(!session)throw Error(`session_not_found:${sessionId}`)
+    if(session.scope!=='default'&&session.chatId!==chatId)throw Error(`session_wrong_chat:${sessionId}`)
+    if(session.scope==='default'&&this.publicPersistencePending)throw Error('browser_session_save_failed')
+    if(this.sessionManagement.has(sessionId))throw Error('browser_session_busy')
+    return session
+  }
+
+  async withSharedSessionManagement<T>(sessionId:string,signal:AbortSignal|undefined,action:()=>Promise<T>):Promise<T>{
+    const session=this.sessions.get(sessionId)
+    if(!session)throw Error('session_not_found')
+    if(session.scope!=='default')return action()
+    if(this.sessionManagement.has(sessionId))throw Error('browser_session_busy')
+    this.sessionManagement.add(sessionId)
+    try{
+      const execute=async()=>{
+        const pages=[...session.windows.values()].filter(record=>!record.win.isDestroyed()).sort((a,b)=>a.windowId.localeCompare(b.windowId))
+        if(pages.some(record=>record.win.annotationSelecting))throw Error('browser_busy_finish_action_first')
+        const enter=async(index:number):Promise<T>=>{
+          if(signal?.aborted)throw Error('aborted')
+          return pages[index]?pages[index]!.win.automation.withTransfer(()=>enter(index+1)):action()
+        }
+        return enter(0)
+      }
+      return this.network?await this.network.withSharedManagement(sessionId,signal,execute):await execute()
+    }finally{this.sessionManagement.delete(sessionId)}
+  }
+
+  async resolveSession(chatId:string,options:BrowserSessionCreateOptions={},authorizePersistent?:(detail:string)=>Promise<{ok:boolean;reason?:string}>,signal?:AbortSignal):Promise<BrowserTreeSession>{
+    if(!chatId)throw Error('chatId_required')
+    const scope=browserSessionScope(options)
+    if(!this.persistenceHealthy)throw Error('browser_workspace_restore_failed')
+    if(signal?.aborted)throw Error('aborted')
+    if(scope==='default'&&this.sessions.has(DEFAULT_BROWSER_SESSION_ID)){
+      if(this.publicPersistencePending){this.savePersistent(true);this.publicPersistencePending=false}
+      return this.getTree(chatId).find(session=>session.scope==='default')!
+    }
+    if(scope!=='temporary'&&authorizePersistent){
+      const approval=await authorizePersistent(scope==='default'?'首次创建公共默认浏览器会话：登录、Cookie 和网站存储由各对话共同使用并跨重启保留。':'创建独立持久浏览器会话，网站数据跨重启保留。')
+      if(!approval.ok)throw Error(approval.reason||'session_persist_denied')
+    }
+    if(signal?.aborted)throw Error('aborted')
+    this.knownChats.add(chatId)
+    if(scope!=='default')return this.createSession(chatId,{persist:scope==='persistent',ua:options.ua})
+    // Creation is synchronous after authorization, making concurrent first uses idempotent.
+    if(!this.sessions.has(DEFAULT_BROWSER_SESSION_ID)){
+      this.createPublicSession()
+      this.publicPersistencePending=true
+      this.savePersistent(true);this.publicPersistencePending=false;this.emitTree('')
+    }
+    return this.getTree(chatId).find(session=>session.scope==='default')!
+  }
+
+  private createPublicSession(storagePath?:string):AgentSessionRecord{
+    const existing=this.sessions.get(DEFAULT_BROWSER_SESSION_ID);if(existing)return existing
+    const record:AgentSessionRecord={scope:'default',sessionId:DEFAULT_BROWSER_SESSION_ID,chatId:'',sessionIndex:0,partition:DEFAULT_BROWSER_PARTITION,persist:true,name:DEFAULT_BROWSER_SESSION_LABEL,isDefault:true,ses:storagePath?electronSession.fromPath(storagePath):electronSession.fromPartition(DEFAULT_BROWSER_PARTITION),userAgent:resolveUserAgent(this.getConfig()),windows:new Map()}
+    if(record.ses.storagePath)fs.mkdirSync(record.ses.storagePath,{recursive:true})
+    this.sessions.set(record.sessionId,record);this.applySessionUserAgent(record,record.userAgent)
+    this.installSessionPermissionHandlers(record);this.installSessionDownloadHandler(record);this.network?.touch(record.sessionId)
+    return record
   }
 
   assertWindowOwned(chatId: string, windowId: string): AgentWindowRecord {
@@ -588,20 +687,24 @@ export class BrowserRegistry {
     }
   }
 
-  createSession(chatId: string, opts: { persist?: boolean; ua?: string; restoreId?:string } = {}): BrowserTreeSession {
+  createSession(chatId: string, opts: { persist?: boolean; ua?: string; restoreId?:string;restoreDisplayIndex?:number;restoreStoragePath?:string } = {}): BrowserTreeSession {
     const persist = opts.persist === true
     const index = (this.nextIndex.get(chatId) || 0) + 1
     this.nextIndex.set(chatId, index)
     const partition = this.partitionOf(chatId, index, persist)
-    const ses = electronSession.fromPartition(partition)
+    const ses = opts.restoreStoragePath ? electronSession.fromPath(opts.restoreStoragePath) : electronSession.fromPartition(partition)
     const cfg = this.getConfig()
     const ua = opts.ua?.trim() || resolveUserAgent(cfg)
 
     const sessionId = opts.restoreId || `sess_${randomUUID().replace(/-/g, '').slice(0, 10)}`
+    const restoredIndex=opts.restoreDisplayIndex
+    const displayIndex=Number.isSafeInteger(restoredIndex)&&restoredIndex!>0&&![...this.sessions.values()].some(session=>session.displayIndex===restoredIndex)?restoredIndex!:++this.nextDisplayIndex
     const rec: AgentSessionRecord = {
+      scope:persist?'persistent':'temporary',
       sessionId,
       chatId,
       sessionIndex: index,
+      displayIndex,
       partition,
       persist,
       ses,
@@ -609,6 +712,7 @@ export class BrowserRegistry {
       windows: new Map(),
     }
     this.sessions.set(sessionId, rec)
+    this.knownChats.add(chatId)
     this.applySessionUserAgent(rec, ua)
     this.installSessionPermissionHandlers(rec)
     this.installSessionDownloadHandler(rec)
@@ -625,6 +729,7 @@ export class BrowserRegistry {
   private installSessionDownloadHandler(s: AgentSessionRecord): void {
     s.ses.on('will-download', (_event, item, wc) => {
       const winRec = [...s.windows.values()].find((w) => w.win.webContents === wc)
+      const chatId=winRec?.chatId
       const url = String(item.getURL() || '').trim() || 'about:blank'
       const filename = sanitizeDownloadFilename(item.getFilename() || 'download')
       const totalBytes = item.getTotalBytes() || undefined
@@ -640,8 +745,8 @@ export class BrowserRegistry {
         } catch {
           /* ignore */
         }
-        this.events.onBrowserDownload?.({
-          chatId: s.chatId,
+        if(chatId)this.events.onBrowserDownload?.({
+          chatId,
           sessionId: s.sessionId,
           windowId: winRec?.windowId,
           state: 'cancelled',
@@ -652,6 +757,9 @@ export class BrowserRegistry {
         })
       }
 
+      // A worker or missing source must never be assigned to an arbitrary conversation.
+      if(!chatId){blockToTempAndCancel('download_source_unknown');return}
+
       if (!this.files) {
         blockToTempAndCancel('workspace_unavailable')
         return
@@ -660,10 +768,10 @@ export class BrowserRegistry {
       let abs: string
       let relPath: string
       try {
-        const dirAbs = this.files.resolve(s.chatId, 'downloads')
+        const dirAbs = this.files.resolve(chatId, 'downloads')
         fs.mkdirSync(dirAbs, { recursive: true })
         abs = uniqueDownloadPath(dirAbs, filename)
-        relPath = this.files.toRel(s.chatId, abs)
+        relPath = this.files.toRel(chatId, abs)
       } catch (e) {
         blockToTempAndCancel(e instanceof Error ? e.message : String(e))
         return
@@ -678,7 +786,7 @@ export class BrowserRegistry {
       }
 
       const baseInfo = {
-        chatId: s.chatId,
+        chatId,
         sessionId: s.sessionId,
         windowId: winRec?.windowId,
         url,
@@ -696,7 +804,7 @@ export class BrowserRegistry {
 
       const cap = 'file.download.passive' as const
       const detail = `被动下载 ${filename} → ${relPath}`
-      const peek = this.gate?.peek(s.chatId, cap) || 'ask'
+      const peek = this.gate?.peek(chatId, cap) || 'ask'
       if (peek === 'deny') {
         try {
           item.cancel()
@@ -824,12 +932,12 @@ export class BrowserRegistry {
         return
       }
 
-      const mode = this.gate?.getMode(s.chatId, cap) || 'ask'
+      const mode = this.gate?.getMode(chatId, cap) || 'ask'
       // allow_notify: auto-accept + notify log (via gate.check).
       if (mode === 'allow_notify' && this.gate) {
         void (async () => {
           try {
-            const res = await this.gate!.check(s.chatId, cap, detail)
+            const res = await this.gate!.check(chatId, cap, detail)
             if (res.ok) acceptDownload()
             else rejectDownload(res.reason || 'permission_denied')
           } catch (e) {
@@ -844,7 +952,7 @@ export class BrowserRegistry {
         try {
           const decision = this.events.confirmBrowserDownload
             ? await this.events.confirmBrowserDownload({
-                chatId: s.chatId,
+                chatId,
                 sessionId: s.sessionId,
                 windowId: winRec?.windowId,
                 url,
@@ -854,7 +962,7 @@ export class BrowserRegistry {
               })
             : 'reject'
           if (decision === 'confirm') {
-            if (mode === 'ask_chat') this.gate?.rememberChatAllow(s.chatId, cap)
+            if (mode === 'ask_chat') this.gate?.rememberChatAllow(chatId, cap)
             acceptDownload()
           } else {
             rejectDownload('user_rejected_or_timeout')
@@ -871,13 +979,16 @@ export class BrowserRegistry {
    * decide every permission — deny unknowns; route geolocation through PermissionGate.
    */
   private installSessionPermissionHandlers(s: AgentSessionRecord): void {
-    s.ses.setPermissionCheckHandler((_wc, permission, _requestingOrigin, _details) => {
+    s.ses.setPermissionCheckHandler((wc, permission, _requestingOrigin, _details) => {
+      if(permission==='fullscreen')return !!wc&&this.fullscreenPermission(s,wc)
       if (permission !== 'geolocation') return false
       if (!this.gate) return false
-      return this.gate.peek(s.chatId, 'browser.geolocation') === 'allow'
+      const owner=wc?this.networkRequestOwner(s.sessionId,wc.id):null
+      return !!owner&&this.gate.peek(owner.chatId, 'browser.geolocation') === 'allow'
     })
 
     s.ses.setPermissionRequestHandler((wc, permission, callback, details) => {
+      if(permission==='fullscreen'){callback(this.fullscreenPermission(s,wc));return}
       if (permission !== 'geolocation') {
         callback(false)
         return
@@ -893,6 +1004,7 @@ export class BrowserRegistry {
   ): Promise<boolean> {
     if (!this.gate) return false
     const winRec = [...s.windows.values()].find((w) => w.win.webContents === wc)
+    if(!winRec)return false
     const origin =
       String(details?.requestingUrl || winRec?.url || wc.getURL() || '').trim() || 'unknown'
     const detail = [
@@ -904,7 +1016,7 @@ export class BrowserRegistry {
       .filter(Boolean)
       .join('\n')
     try {
-      const res = await this.gate.check(s.chatId, 'browser.geolocation', detail)
+      const res = await this.gate.check(winRec.chatId, 'browser.geolocation', detail)
       return res.ok
     } catch (e) {
       console.warn('[browser] geolocation permission failed', e)
@@ -919,6 +1031,7 @@ export class BrowserRegistry {
   createWindow(
     sessionId: string,
     opts: {
+      chatId?:string
       url?: string
       show?: boolean
       width?: number
@@ -930,6 +1043,10 @@ export class BrowserRegistry {
   ): BrowserTreeWindow {
     const s = this.sessions.get(sessionId)
     if (!s) throw new Error(`session_not_found:${sessionId}`)
+    if(s.scope==='default'&&this.publicPersistencePending)throw Error('browser_session_save_failed')
+    const chatId=s.scope==='default'?opts.chatId:s.chatId
+    if(!chatId||s.scope!=='default'&&opts.chatId!==undefined&&opts.chatId!==s.chatId)throw Error('browser_page_owner_required')
+    this.knownChats.add(chatId)
     if (this.sessionManagement.has(sessionId)) throw Error('browser_session_busy')
 
     const cfg = this.getConfig()
@@ -942,17 +1059,15 @@ export class BrowserRegistry {
     const { width, height } = resolveWindowSize(cfg, opts)
     const windowId = opts.restoreId || `win_${randomUUID().replace(/-/g, '').slice(0, 10)}`
 
-    const win = this.hosts.create(windowId, s.chatId, {
-      partition: s.partition, contextIsolation: true, nodeIntegration: false,
-      sandbox: false, autoplayPolicy: 'document-user-activation-required',
+    const win = this.hosts.create(windowId, chatId, {
+      session: s.ses, contextIsolation: true, nodeIntegration: false,
+      sandbox: false, autoplayPolicy: 'document-user-activation-required',disableHtmlFullscreenWindowResize:true,
     }, {width,height}, show)
-    // Manual pages retain sound; only an actual Agent lease/operation mutes.
-    this.audioPolicies.set(win,new BrowserAgentAudio(win.webContents))
 
     const rec: AgentWindowRecord = {
       windowId,
       sessionId,
-      chatId: s.chatId,
+      chatId,
       win,
       title: '新窗口',
       url: opts.url || 'about:blank',
@@ -975,10 +1090,10 @@ export class BrowserRegistry {
     // again races the first real navigation (and may report a spurious failure).
     if(url!=='about:blank'&&!opts.deferLoad)void win.loadURL(url).catch((e) => console.warn('[browser] loadURL', e))
 
-    this.emitTree(s.chatId)
+    this.emitTree(chatId)
     if (opts.openerWindowId) {
       this.events.onWindowOpened?.({
-        chatId: s.chatId,
+        chatId,
         sessionId,
         windowId,
         url,
@@ -987,6 +1102,7 @@ export class BrowserRegistry {
     }
     const bounds = windowBoundsSnapshot(win)
     return {
+      chatId,
       windowId,
       sessionId,
       title: rec.title,
@@ -1000,10 +1116,30 @@ export class BrowserRegistry {
   private attachWindowListeners(rec: AgentWindowRecord): void {
     const { win } = rec
     const wc = win.webContents
+    let fullscreenHost:ReturnType<typeof this.hosts.getHost>
+    const exitDocumentFullscreen=()=>wc.isDestroyed()?Promise.resolve():wc.executeJavaScript('document.fullscreenElement ? document.exitFullscreen() : undefined').then(()=>{})
+    const clearDocumentFullscreen=()=>{const previous=fullscreenHost;fullscreenHost=undefined;if(previous&&!previous.window.isDestroyed())windowFullscreen(previous.window).revokeHtml(win.id)}
+    wc.on('enter-html-full-screen',()=>{
+      const host=this.hosts.getHost(win.hostId||'')
+      if(!foregroundFullscreenPage(win,host)){void exitDocumentFullscreen().catch(()=>{});return}
+      fullscreenHost=host
+      windowFullscreen(host!.window).enterHtml({pageId:win.id,exit:exitDocumentFullscreen,changed:()=>{this.hosts.flushLayout(win)}})
+    })
+    wc.on('leave-html-full-screen',()=>{const previous=fullscreenHost;fullscreenHost=undefined;if(previous&&!previous.window.isDestroyed())windowFullscreen(previous.window).leaveHtml(win.id)})
+    wc.on('did-start-navigation',(_event,_url,inPlace,mainFrame)=>{if(mainFrame&&!inPlace)clearDocumentFullscreen()})
+    wc.once('destroyed',clearDocumentFullscreen)
+    win.on('hide',clearDocumentFullscreen)
+    win.on('presentation-invalidated',()=>queueMicrotask(()=>{if(fullscreenHost&&(win.hostId!==fullscreenHost.id||fullscreenHost.active!==win.id||fullscreenHost.suspended))clearDocumentFullscreen()}))
     let menuAltOnly=false
 
     wc.on('before-input-event',(event,input)=>{
       const menuHost=this.hosts.getHost(win.hostId||''),menuKey=input.key.toLowerCase(),ownsMenu=!!menuHost&&menuHost.ready&&!menuHost.suspended&&menuHost.active===rec.windowId
+      // A hidden native page can still have an already queued keyboard event.
+      // It cannot close/create/select tabs or regain focus over DOM file content.
+      if(menuHost&&!menuHost.embedded&&menuHost.activeTab&&menuHost.activeTab!==detachedBrowserTabKey(rec.windowId)){menuAltOnly=false;event.preventDefault();return}
+      if(fullscreenShortcut(input)&&foregroundFullscreenPage(win,menuHost)){
+        event.preventDefault();void windowFullscreen(menuHost!.window).toggle().catch(error=>console.warn('[browser] fullscreen failed',error));return
+      }
       const focusMenu=(menu?:'file'|'edit'|'view'|'help')=>{event.preventDefault();menuHost!.window.webContents.focus();menuHost!.window.webContents.send('navora:app.menu-focus',{menu,pageId:rec.windowId})}
       // Guest key events never bubble into the host renderer. Route application
       // shortcuts through the same host menu boundary; do not intercept them on
@@ -1041,7 +1177,7 @@ export class BrowserRegistry {
       else if(key==='f'&&!input.shift&&host.ready&&!host.suspended&&host.active===rec.windowId){event.preventDefault();host.window.webContents.focus();host.window.webContents.send('navora:browser.find-shortcut',{pageId:rec.windowId,action:'open'})}
       else if(action==='close'){event.preventDefault();win.close()}
       else if(action==='new'){
-        event.preventDefault();const created=this.createWindow(rec.sessionId,{show:false}),page=this.windows.get(created.windowId)!.win
+        event.preventDefault();const created=this.createWindow(rec.sessionId,{chatId:rec.chatId,show:false}),page=this.windows.get(created.windowId)!.win
         this.hosts.transfer(page,host.id);this.hosts.present(page)
       }else if(action==='next'||action==='previous'){
         event.preventDefault();const ids=[...host.pages],at=ids.indexOf(rec.windowId),next=ids[(at+(input.shift?-1:1)+ids.length)%ids.length]
@@ -1171,7 +1307,7 @@ export class BrowserRegistry {
       // WebContentsView instead, so route popups through our tab registry and
       // deny Chromium's incompatible native popup creation.
       try {
-        const child=this.createWindow(rec.sessionId,{url:openUrl,show:false,deferLoad:true,openerWindowId:rec.windowId})
+        const child=this.createWindow(rec.sessionId,{chatId:rec.chatId,url:openUrl,show:false,deferLoad:true,openerWindowId:rec.windowId})
         const childRecord=this.windows.get(child.windowId),page=childRecord?.win
         if(!page)return {action:'deny'}
         childRecord.tabKey=`browser:${randomUUID()}`
@@ -1184,6 +1320,12 @@ export class BrowserRegistry {
       }
       return {action:'deny'}
     })
+  }
+
+  private fullscreenPermission(session:AgentSessionRecord,wc:WebContents){
+    const record=[...session.windows.values()].find(record=>record.win.webContents===wc)
+    return !!record&&foregroundFullscreenPage(record.win,this.hosts.getHost(record.win.hostId||''))
+    // automatic-fullscreen and every other unhandled permission remain denied.
   }
 
   setVisible(windowId: string, visible: boolean): void {
@@ -1239,7 +1381,7 @@ export class BrowserRegistry {
     const url=rec.desiredUrl||rec.restoreUrl||wc.getURL()||rec.url
     if(allowed(url)&&entries[historyIndex]?.url!==url){entries.splice(Math.max(0,historyIndex+1));entries.push({url,title:rec.title});historyIndex=entries.length-1}
     return {chatId:rec.chatId,sessionId:rec.sessionId,title:displayBrowserTabTitle(url,rec.title),url,
-      entries,historyIndex:Math.max(0,historyIndex),index:this.hosts.hostPages(rec.win.hostId||'').indexOf(windowId),hostId:rec.win.hostId||'',pinned:rec.win.pinned,muted:this.audioPreference(rec.win),viewport:rec.win.fixedViewport?{...rec.win.fixedViewport}:null}
+      entries,historyIndex:Math.max(0,historyIndex),index:this.hosts.hostPages(rec.win.hostId||'').indexOf(windowId),hostId:rec.win.hostId||'',pinned:rec.win.pinned,muted:rec.win.webContents.isAudioMuted(),viewport:rec.win.fixedViewport?{...rec.win.fixedViewport}:null}
   }
   recentlyClosed(chatId:string):BrowserClosedTab[]{return (this.closedTabs.get(chatId)||[]).map(entry=>({id:entry.id,title:entry.title,url:entry.url,closedAt:entry.closedAt,hostId:entry.hostId}))}
   closedTab(chatId:string,id?:string){const list=this.closedTabs.get(chatId)||[];return id?list.find(entry=>entry.id===id):list[0]}
@@ -1250,8 +1392,8 @@ export class BrowserRegistry {
     const url=snapshot.url
     if(url!=='about:blank'&&(!/^https?:\/\//i.test(url)||!isUrlAllowed(url,this.getConfig().browser.url_allowlist)))throw Error('url_not_allowed')
     const session=this.sessions.get(snapshot.sessionId)||this.sessions.get(this.createSession(snapshot.chatId,{persist:true}).sessionId)!
-    if(session.chatId!==snapshot.chatId)throw Error('browser_wrong_chat')
-    const created=this.createWindow(session.sessionId,{url:'about:blank',show:false}),rec=this.windows.get(created.windowId)!,page=rec.win
+    if(session.scope!=='default'&&session.chatId!==snapshot.chatId)throw Error('browser_wrong_chat')
+    const created=this.createWindow(session.sessionId,{chatId:snapshot.chatId,url:'about:blank',show:false}),rec=this.windows.get(created.windowId)!,page=rec.win
     rec.tabKey=`browser:${randomUUID()}`;rec.title=snapshot.title;rec.desiredUrl=url;rec.url=url
     page.pinned=pinned;page.fixedViewport=snapshot.viewport?{...snapshot.viewport}:null;this.setPageMuted(page,snapshot.muted)
     try{
@@ -1269,7 +1411,7 @@ export class BrowserRegistry {
     }catch(error){this.closeWindow(page.id);throw error}
   }
 
-  closeUserTab(windowId:string,expectedHostId?:string):Promise<boolean>{
+  closeUserTab(windowId:string,expectedHostId?:string,transferHeld=false):Promise<boolean>{
     const rec=this.windows.get(windowId);if(!rec||rec.win.isDestroyed())return Promise.resolve(true)
     const pending=this.closingTabs.get(windowId);if(pending)return pending
     const page=rec.win
@@ -1282,13 +1424,16 @@ export class BrowserRegistry {
       // close begins, an unload confirmation may legitimately outlive it.
       const timer=setTimeout(()=>{this.pendingUserClose.delete(windowId);finish(false)},30000)
       page.once('closed',onClosed);page.once('close-cancelled',onCancelled)
-      void page.automation.withTransfer(()=>{
+      const close=()=>{
         if(settled)return
         clearTimeout(timer)
         if(page.isDestroyed()){finish(true);return}
         if(expectedHostId&&page.hostId!==expectedHostId)throw Error('browser_page_wrong_host')
         page.close()
-      }).catch(error=>{if(settled)return;this.pendingUserClose.delete(windowId);finish(false,error)})
+      }
+      // A shared-data operation already holds every page's transfer barrier.
+      // Re-entering that serialized barrier here would wait on itself forever.
+      void (transferHeld?Promise.resolve().then(close):page.automation.withTransfer(close)).catch(error=>{if(settled)return;this.pendingUserClose.delete(windowId);finish(false,error)})
     })
     if(!settled)this.closingTabs.set(windowId,closing)
     return closing
@@ -1327,9 +1472,15 @@ export class BrowserRegistry {
     this.emitTree(rec.chatId)
   }
 
-  async closeSession(sessionId: string, purge = false): Promise<void> {
+  async closeSession(sessionId: string, purge = false, chatId?:string): Promise<void> {
     const s = this.sessions.get(sessionId)
     if (!s) return
+    if(s.scope==='default'){
+      if(!chatId)throw Error('public_session_cannot_be_deleted')
+      for(const record of [...s.windows.values()])if(record.chatId===chatId)this.closeWindow(record.windowId)
+      this.closedTabs.set(chatId,(this.closedTabs.get(chatId)||[]).filter(entry=>entry.sessionId!==sessionId));this.emitTree(chatId)
+      return
+    }
     if (this.sessionManagement.has(sessionId)) throw Error('browser_session_busy')
     this.closedTabs.set(s.chatId,(this.closedTabs.get(s.chatId)||[]).filter(entry=>entry.sessionId!==sessionId))
     for (const w of [...s.windows.values()]) {
@@ -1359,49 +1510,72 @@ export class BrowserRegistry {
     if(this.restored)return
     this.restored=true;this.persistenceFile=file;this.restoring=true
     try{
-      if(!fs.existsSync(file))return
-      const records=JSON.parse(fs.readFileSync(file,'utf8'))
-      if(!Array.isArray(records))return
+      const {records,nextDisplayIndex}=loadBrowserWorkspace(file)
+      this.nextDisplayIndex=Math.max(this.nextDisplayIndex,nextDisplayIndex||0,...records.map(record=>Number.isSafeInteger(record.displayIndex)&&record.displayIndex>0?record.displayIndex:0))
       const detachedGroups=new Map<string,string>()
       const restoredOrders=new Map<string,{id:string;order:number}[]>()
-      for(const saved of records.slice(0,100).sort((a,b)=>a.sessionIndex-b.sessionIndex)){
-        if(!chatExists(saved.chatId)||!Number.isSafeInteger(saved.sessionIndex)||saved.sessionIndex<1)continue
-        this.nextIndex.set(saved.chatId,saved.sessionIndex-1)
-        const session=this.createSession(saved.chatId,{persist:true,restoreId:/^sess_[a-f0-9]{10}$/.test(saved.sessionId)?saved.sessionId:undefined})
-        const restored=this.sessions.get(session.sessionId)!
-        if(typeof saved.name==='string'&&saved.name.trim().length<=80&&!/[\u0000-\u001f\u007f]/.test(saved.name))restored.name=saved.name.trim()||undefined
-        if(saved.isDefault===true&&!this.getTree(saved.chatId).some(item=>item.isDefault))restored.isDefault=true
-        this.nextIndex.set(saved.chatId,Math.max(saved.sessionIndex,this.nextIndex.get(saved.chatId)||0))
-        for(const item of Array.isArray(saved.pages)?saved.pages.filter((item:any)=>typeof item?.url==='string'&&/^https?:\/\//i.test(item.url)).slice(0,32):[]){
+      let privateCount=0
+      for(const saved of records.sort((a,b)=>Number(a.sessionIndex)-Number(b.sessionIndex))){
+        const shared=saved.scope==='default'
+        let restored:AgentSessionRecord
+        if(shared){
+          if(saved.sessionId!==DEFAULT_BROWSER_SESSION_ID||saved.partition!==DEFAULT_BROWSER_PARTITION||this.sessions.has(DEFAULT_BROWSER_SESSION_ID))throw Error('public_session_restore_identity_invalid')
+          if(typeof saved.storagePath!=='string'||!path.isAbsolute(saved.storagePath)||!fs.statSync(saved.storagePath,{throwIfNoEntry:false})?.isDirectory())throw Error('public_session_storage_missing')
+          // Electron's current sessionData root may differ from the root used to
+          // save this workspace. Open the recorded store without replacing it.
+          restored=this.createPublicSession(saved.storagePath)
+          if(path.resolve(restored.ses.storagePath||'')!==path.resolve(saved.storagePath))throw Error('public_session_storage_path_changed')
+        }else{
+          if(privateCount>=100||!chatExists(saved.chatId)||!Number.isSafeInteger(saved.sessionIndex)||saved.sessionIndex<1)continue
+          if(saved.partition!==undefined&&saved.partition!==this.partitionOf(saved.chatId,saved.sessionIndex,true))throw Error('browser_session_partition_changed')
+          privateCount++;this.nextIndex.set(saved.chatId,saved.sessionIndex-1)
+          if(saved.storagePath!==undefined&&(typeof saved.storagePath!=='string'||!path.isAbsolute(saved.storagePath)||!fs.statSync(saved.storagePath,{throwIfNoEntry:false})?.isDirectory()))throw Error('browser_session_storage_missing')
+          const session=this.createSession(saved.chatId,{persist:true,restoreId:/^sess_[a-f0-9]{10}$/.test(saved.sessionId)?saved.sessionId:undefined,restoreDisplayIndex:saved.displayIndex,restoreStoragePath:saved.storagePath})
+          restored=this.sessions.get(session.sessionId)!
+        }
+        if(!shared&&typeof saved.name==='string'&&saved.name.trim().length<=80&&!/[\u0000-\u001f\u007f]/.test(saved.name))restored.name=saved.name.trim()||undefined
+        if(!shared&&saved.isDefault===true&&!this.getTree(saved.chatId).some(item=>item.scope!=='default'&&item.isDefault))restored.isDefault=true
+        if(!shared)this.nextIndex.set(saved.chatId,Math.max(saved.sessionIndex,this.nextIndex.get(saved.chatId)||0))
+        const savedPages=Array.isArray(saved.pages)?saved.pages.filter((item:any)=>typeof item?.url==='string'&&/^https?:\/\//i.test(item.url)):[]
+        for(const item of shared?savedPages:savedPages.slice(0,32)){
+          if(this.windows.size>=this.getConfig().browser.max_windows_total)break
+          const chatId=shared?item.chatId:saved.chatId
+          if(typeof chatId!=='string'||!chatExists(chatId))continue
           if(!/^win_[a-f0-9]{10}$/.test(item.id)||this.windows.has(item.id))continue
           if(!isUrlAllowed(item.url,this.getConfig().browser.url_allowlist))continue
-          const created=this.createWindow(session.sessionId,{url:'about:blank',show:false,restoreId:item.id})
+          const created=this.createWindow(restored.sessionId,{chatId,url:'about:blank',show:false,restoreId:item.id})
           const rec=this.windows.get(created.windowId)!
           rec.url=item.url;rec.restoreUrl=item.url;rec.desiredUrl=item.url
           rec.tabKey=typeof item.tabKey==='string'?item.tabKey:undefined
           rec.win.pinned=item.pinned===true
           this.setPageMuted(rec.win,item.muted===true)
           if(item.viewport&&Number.isFinite(item.viewport.width)&&Number.isFinite(item.viewport.height))rec.win.fixedViewport={width:clampDim(item.viewport.width,1,WINDOW_MAX_W),height:clampDim(item.viewport.height,1,WINDOW_MAX_H)}
-          if(item.detached){const group=detachedGroups.get(item.host);if(group)this.hosts.transfer(rec.win,group);else detachedGroups.set(item.host,this.hosts.detach(rec.win))}
+          const groupKey=chatId+':'+item.host
+          if(item.detached){const group=detachedGroups.get(groupKey);if(group)this.hosts.transfer(rec.win,group);else detachedGroups.set(groupKey,this.hosts.detach(rec.win))}
           const hostId=rec.win.hostId!,order=restoredOrders.get(hostId)||[];order.push({id:rec.windowId,order:Number.isFinite(item.order)?item.order:order.length});restoredOrders.set(hostId,order)
         }
       }
       for(const [hostId,order] of restoredOrders)this.hosts.setOrder(hostId,order.sort((a,b)=>a.order-b.order).map(item=>item.id))
-    }catch(error){console.warn('[browser] persistent workspace could not be restored',error)}finally{this.restoring=false}
+    }catch(error){this.persistenceHealthy=false;console.warn('[browser] persistent workspace could not be restored; saved state retained',error)}finally{this.restoring=false}
   }
   savePersistent(strict=false){
     if(!this.persistenceFile||this.restoring)return
-    const records=[...this.sessions.values()].filter(s=>s.persist).map(s=>({sessionId:s.sessionId,chatId:s.chatId,sessionIndex:s.sessionIndex,name:s.name,isDefault:s.isDefault,pages:[...s.windows.values()].filter(w=>!w.win.isDestroyed()).map(w=>({id:w.windowId,url:w.desiredUrl||w.restoreUrl||w.win.webContents.getURL()||w.url,tabKey:w.tabKey,viewport:w.win.fixedViewport,detached:this.hosts.presentation(w.win)==='detached',host:w.win.hostId,pinned:w.win.pinned,muted:this.audioPreference(w.win),order:this.hosts.hostPages(w.win.hostId||'').indexOf(w.windowId)})).filter(w=>/^https?:\/\//i.test(w.url))}))
-    try{const temp=this.persistenceFile+'.tmp';fs.writeFileSync(temp,JSON.stringify(records));fs.renameSync(temp,this.persistenceFile)}catch(error){console.warn('[browser] workspace save failed',error);if(strict)throw Error('browser_session_save_failed')}
+    if(!this.persistenceHealthy){if(strict)throw Error('browser_workspace_restore_failed');return}
+    const records=[...this.sessions.values()].filter(s=>s.persist).map(s=>({scope:s.scope,partition:s.partition,storagePath:s.ses.storagePath,sessionId:s.sessionId,chatId:s.chatId,sessionIndex:s.sessionIndex,displayIndex:s.displayIndex,name:s.name,isDefault:s.isDefault,pages:[...s.windows.values()].filter(w=>!w.win.isDestroyed()).map(w=>({id:w.windowId,chatId:w.chatId,url:w.desiredUrl||w.restoreUrl||w.win.webContents.getURL()||w.url,tabKey:w.tabKey,viewport:w.win.fixedViewport,detached:this.hosts.presentation(w.win)==='detached',host:w.win.hostId,pinned:w.win.pinned,muted:w.win.webContents.isAudioMuted(),order:this.hosts.hostPages(w.win.hostId||'').indexOf(w.windowId)})).filter(w=>/^https?:\/\//i.test(w.url))}))
+    try{saveBrowserWorkspace(this.persistenceFile,records,this.nextDisplayIndex)}catch(error){console.warn('[browser] workspace save failed',error);if(strict)throw Error('browser_session_save_failed')}
   }
   shutdown(){this.savePersistent();this.persistenceFile=null;this.hosts.dispose()}
 
   async clearChat(chatId: string): Promise<void> {
+    const shared=this.sessions.get(DEFAULT_BROWSER_SESSION_ID)
+    if(shared){this.network?.removeChatScope(shared.sessionId,chatId);await this.closeSession(shared.sessionId,false,chatId)}
     const ids = [...this.sessions.values()].filter((s) => s.chatId === chatId).map((s) => s.sessionId)
     for (const id of ids) {
+      this.network?.disposeSession(id)
       await this.closeSession(id, true)
     }
     this.nextIndex.delete(chatId)
+    this.knownChats.delete(chatId)
     this.closedTabs.delete(chatId)
   }
 }

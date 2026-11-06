@@ -8,7 +8,9 @@
 | 插件契约 / CLI | [navora-plugin-sdk](https://github.com/navora-harness/navora-plugin-sdk) |
 | 官方插件 | [navora-plugins](https://github.com/navora-harness/navora-plugins) |
 
-文档入口：[`docs/README.md`](docs/README.md) · 当前功能：[`docs/current-state.md`](docs/current-state.md) · 开发说明：[`docs/project-and-plugin-guide.md`](docs/project-and-plugin-guide.md) · [插件商店](docs/plugin-store-guide.md)
+文档入口：[`docs/README.md`](docs/README.md) · 当前功能：[`docs/current-state.md`](docs/current-state.md) · 开发说明：[`docs/project-and-plugin-guide.md`](docs/project-and-plugin-guide.md) · [插件商店](docs/plugin-store-guide.md) · [规划状态总览](docs/planning-status-and-next-work-2026-11-04.md) · [已完成规划](docs/已完成/README.md)
+
+0.4.14 Windows x64 [安装版](release/v0.4.14/Navora-0.4.14-Setup.exe)与[便携版](release/v0.4.14/Navora-0.4.14-Portable.exe)已生成：条件分支、文件/图片附件、日期范围、提交后修改与差异、模板复用；内核升级为 `45.0.0-cloudbypass.10`。968 项单测、类型/构建、问卷组件与主应用检查、两包核对及成品自然退出通过。综合浏览器测试保留退出超时问题，详见[发行说明](release/v0.4.14/RELEASE-NOTES.zh-CN.md)和[扩展记录](docs/agent-questionnaire-extensions-implementation-2026-11-06.md)。旧制品保留原范围。
 
 整体重构规划与阶段验收：[`docs/renovation-plan-2026-10.md`](docs/renovation-plan-2026-10.md)。
 
@@ -45,21 +47,14 @@ npm run build:plugins
 
 ## 开发
 
-当前运行时使用 Electron `45.0.0-cloudbypass.5`。此 Windows x64 定制版提供原生 DOM/无障碍快照、跨域 iframe 与封闭 Shadow DOM 查找，以及不激活隐藏窗口的可信点击、键盘和触摸输入；本轮新增原生菜单、NativePanel 与网站信息接口接入，常用面板覆盖网页时保持实时画面。接入范围与兼容边界见[原生界面实施记录](docs/native-ui-integration-2026-11-04.md)，自动化说明见[浏览器 Agent 自动化](docs/browser-agent-automation.md)。本版本发布包只覆盖 Windows x64。
+当前源码为 0.4.9，使用 Electron `45.0.0-cloudbypass.9`，包含新版原生跨 frame 输入路由修复，公开接口保持 `.8` 兼容。Agent 控制页面期间统一启用后台输入隔离、真实键鼠屏蔽与渲染保活，光标显示独立控制；原生整行列表、多行批注、菜单横排缩放和更多搜索与选择界面继续保留。NativePanel Acrylic 继续搁置。完整跨 frame 连续性已由 `.9` 内核实现，发行方专项 7/7 通过；当前替换修订未重跑项目层完整专项，首次位置与系统可见性仍待完成。当前打包和验证范围见[当前状态](docs/current-state.md)，此前自动化适配见[.8 实施记录](docs/electron-8-automation-implementation-2026-11-05.md)。此前发行记录保留各自运行时及原交付范围；当前定制版和发行制品范围为 Windows x64。
 
-在匹配的 Electron 源码中应用补丁并增量编译后，可安装本机产物：
-
-```bash
-npm run electron:use-build -- <Electron-out/Release目录>
-npm run test:browser
-```
-
-此命令只将同主版本的可执行文件复制进当前项目的 Electron 分发目录，并保存校验信息，不修改 Postpile 或其它项目的内核。安装新的原始 Electron 包后，应重新应用此步骤。打包会先运行浏览器回归，并通过 `electronDist` 使用当前项目实际验证的分发目录。
+安装器校验公开 npm 类型包、运行时 ZIP 及可执行文件身份。运行时按分发版本存放，升级期间保留正在使用的旧运行时；打包通过 `electronDist` 使用本项目实际验证的新分发目录。
 
 ```bash
 cd navora-desktop
 npm install
-npm run electron:install   # 下载并校验 cloudbypass.3 Windows x64 运行时
+npm run electron:install   # 下载并校验 cloudbypass.9 Windows x64 运行时
 npm run electron:dev
 ```
 

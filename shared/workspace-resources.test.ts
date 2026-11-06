@@ -57,3 +57,27 @@ test('late native download artifacts attach to their original completed reply ac
   assert.equal(replyArtifactGroups(entries,messages).has('a2'),false)
   assert.equal(replyArtifactGroups(entries,messages.map(m=>m.id==='complete'?{...m,meta:{...m.meta,download:{state:'started',path:'downloads/setup.exe'}}}:m)).size,0)
 })
+
+test('explicit process and example uses stay out of final cards while legacy associations remain',()=>{
+  const entries=['report.md','scratch.json','example.ts','legacy.txt'].map(path=>({id:path,ownerChatId:'chat',path,name:path})) as WorkspaceResource[]
+  const messages=[{id:'u',role:'user',content:'Report',createdAt:1},...entries.map((entry,index)=>({id:`tool-${index}`,role:'tool',content:JSON.stringify({ok:true,path:entry.path,...(index===1?{purpose:'process'}:index===2?{purpose:'example'}:{})}),createdAt:2,meta:{toolName:'file_write',status:'done'}})),{id:'final',role:'assistant',content:'Report ready',createdAt:3,meta:{phase:'final',fileOutputs:[{path:'report.md',purpose:'delivery'}]}}] as import('./types').ChatMessage[]
+  const original=JSON.stringify(messages)
+  assert.deepEqual(replyArtifactGroups(entries,messages).get('final')?.map(entry=>entry.path),['report.md','legacy.txt'])
+  assert.equal(associateResourceEvidence(entries,messages).find(entry=>entry.path==='scratch.json')?.evidence?.purpose,'process')
+  assert.equal(JSON.stringify(messages),original,'Presentation classification does not mutate original history')
+})
+
+test('an explicit final purpose can promote real evidence but cannot invent nonexistent delivery files',()=>{
+  const entries=[{id:'shot',ownerChatId:'chat',path:'shot.png',name:'shot.png'}] as WorkspaceResource[]
+  const messages=[{id:'tool',role:'tool',content:'{"ok":true,"path":"shot.png","purpose":"evidence"}',createdAt:1,meta:{toolName:'browser_screenshot',status:'done',runId:'one'}},{id:'answer',role:'assistant',content:'Screenshot',createdAt:2,meta:{phase:'final',runId:'one',fileOutputs:[{path:'shot.png',purpose:'delivery'},{path:'missing.txt',purpose:'delivery'}]}}] as import('./types').ChatMessage[]
+  assert.deepEqual(replyArtifactGroups(entries,messages).get('answer')?.map(entry=>entry.path),['shot.png'])
+  assert.equal(replyArtifactGroups(entries,messages.slice(1)).size,0)
+})
+
+test('composed downloads retain the explicit tool-argument purpose through answer grouping',()=>{
+  const entries=[{id:'download',ownerChatId:'chat',path:'bundle.txt',name:'bundle.txt'}] as WorkspaceResource[]
+  const messages=[{id:'tool',role:'tool',content:'{"ok":true,"path":"bundle.txt"}',createdAt:1,meta:{toolName:'file_download_compose',status:'done',args:{purpose:'evidence'}}},{id:'answer',role:'assistant',content:'Checked',createdAt:2,meta:{phase:'final'}}] as import('./types').ChatMessage[]
+  assert.equal(associateResourceEvidence(entries,messages)[0]?.evidence?.purpose,'evidence')
+  assert.equal(replyArtifactGroups(entries,messages).size,0)
+  assert.equal(replyArtifactGroups(entries,messages.map(message=>message.role==='tool'?{...message,meta:{...message.meta,args:{purpose:'delivery'}}}:message)).get('answer')?.length,1)
+})

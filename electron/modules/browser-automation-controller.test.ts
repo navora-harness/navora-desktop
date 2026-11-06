@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events'
 import type { WebContents } from 'electron'
 import { createDefaultBrowserAutomation } from '../../shared/browser-automation'
 import { getBrowserAutomationController, type BrowserAutomationOperation } from './browser-automation-controller'
+import {setBrowserPageZoom} from './browser-page-zoom'
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void
@@ -13,15 +14,40 @@ function deferred<T = void>() {
 function mock(t: { after(fn: () => void): void }, native?: (enabled: boolean, protect: boolean) => Promise<void>) {
   const events = new EventEmitter()
   const calls: { enabled: boolean; protect: boolean }[] = []
+  const configurations: Electron.AutomationOptions[] = []
+  const nativeState = {
+    isolateInput: false, blockRealPointer: false, blockRealKeyboard: false, keepRendering: false,
+    virtualCursor: { enabled: false, frameRate: 0, hotspot: { x: 0, y: 0 }, customImage: false },
+    rendering: { viewAvailable: true, keepAlive: false, requestedBackgroundThrottling: true, effectiveBackgroundThrottling: true },
+    inputActive: false,
+  }
+  let resets = 0
   let destroyed = false
   const wc = Object.assign(events, {
     isDestroyed: () => destroyed,
-    setVirtualCursorEnabled: async (enabled: boolean, options: { blockRealPointer: boolean; blockRealKeyboard: boolean }) => {
+    setAutomationOptions: async (options: Electron.AutomationOptions) => {
       assert.equal(options.blockRealPointer, options.blockRealKeyboard)
-      calls.push({ enabled, protect: options.blockRealPointer })
-      await native?.(enabled, options.blockRealPointer)
+      const enabled = options.virtualCursor?.enabled ?? nativeState.virtualCursor.enabled
+      const protect = options.blockRealPointer ?? nativeState.blockRealPointer
+      configurations.push(options)
+      calls.push({ enabled, protect })
+      await native?.(enabled, protect)
+      for (const field of ['isolateInput', 'blockRealPointer', 'blockRealKeyboard', 'keepRendering'] as const) {
+        if (options[field] !== undefined) nativeState[field] = options[field]!
+      }
+      Object.assign(nativeState.virtualCursor, options.virtualCursor)
+      nativeState.rendering.keepAlive = nativeState.keepRendering
+      nativeState.rendering.effectiveBackgroundThrottling = !nativeState.keepRendering
     },
-    setVirtualCursorFrameRate: (_fps: number) => {},
+    getAutomationState: () => structuredClone(nativeState),
+    resetAutomationOptions: async () => {
+      resets++; calls.push({ enabled: false, protect: false })
+      await native?.(false, false)
+      Object.assign(nativeState, { isolateInput: false, blockRealPointer: false, blockRealKeyboard: false, keepRendering: false, inputActive: false })
+      Object.assign(nativeState.virtualCursor, { enabled: false, frameRate: 0, hotspot: { x: 0, y: 0 }, customImage: false })
+      Object.assign(nativeState.rendering, { keepAlive: false, effectiveBackgroundThrottling: true })
+    },
+    setVirtualCursorFrameRate: (fps: number) => { nativeState.virtualCursor.frameRate = fps },
     setVirtualCursorImage: (_image: import('electron').NativeImage | null) => {},
   })
   let manual = false
@@ -31,9 +57,39 @@ function mock(t: { after(fn: () => void): void }, native?: (enabled: boolean, pr
     getCursorImage: async () => ({ image: {} as import('electron').NativeImage, hotspot: { x: 4, y: 3 } }),
   })
   t.after(() => controller.dispose())
-  return { controller, calls, events, wc, destroy() { destroyed = true; events.emit('destroyed') } }
+  return { controller, calls, configurations, nativeState, events, wc, get resets() { return resets }, destroy() { destroyed = true; events.emit('destroyed') } }
 }
 const tick = () => new Promise<void>(resolve => setImmediate(resolve))
+
+test('menu zoom preserves a waiting AI lease and input protection while invalidating old coordinates',async t=>{
+  const {controller,calls,wc}=mock(t)
+  await controller.claimRun('zoom-lease')
+  let zoom=1,layouts=0
+  const page={webContents:Object.assign(wc,{getZoomFactor:()=>zoom,setZoomFactor:(value:number)=>{zoom=value}}) as unknown as WebContents,automation:controller,annotationSelecting:false,activeOperations:0}
+  const before=controller.snapshot(),nativeCalls=calls.length
+  setBrowserPageZoom(page,1.25,()=>layouts++)
+  const after=controller.snapshot()
+  assert.equal(zoom,1.25);assert.equal(layouts,1)
+  assert.equal(after.owner,before.owner);assert.equal(after.leaseRunId,before.leaseRunId);assert.equal(after.inputProtected,true)
+  assert.equal(calls.length,nativeCalls,'Zoom does not release or reacquire input protection')
+  assert.ok(after.epoch>before.epoch);assert.equal(after.needsObservation,true)
+  assert.throws(()=>setBrowserPageZoom(page,NaN,()=>layouts++),/invalid_zoom/)
+  assert.throws(()=>setBrowserPageZoom(page,3.01,()=>layouts++),/invalid_zoom/)
+  assert.equal(zoom,1.25);assert.equal(layouts,1)
+})
+
+test('menu zoom rejects submitted input without cancelling, taking control or changing geometry',async t=>{
+  const {controller,calls,wc}=mock(t),entered=deferred(),held=deferred()
+  let zoom=1,layouts=0
+  const page={webContents:Object.assign(wc,{getZoomFactor:()=>zoom,setZoomFactor:(value:number)=>{zoom=value}}) as unknown as WebContents,automation:controller,annotationSelecting:false,activeOperations:0}
+  const running=controller.run({runId:'zoom-busy'},async operation=>{entered.resolve();await held.promise;operation.assertCurrent()})
+  await entered.promise
+  const before=controller.snapshot(),nativeCalls=calls.length
+  assert.throws(()=>setBrowserPageZoom(page,1.5,()=>layouts++),/browser_busy_wait_for_current_action/)
+  assert.equal(zoom,1);assert.equal(layouts,0);assert.equal(controller.snapshot().epoch,before.epoch);assert.equal(calls.length,nativeCalls)
+  held.resolve();await running
+  assert.equal(controller.snapshot().owner,'ai');assert.equal(controller.snapshot().leaseRunId,'zoom-busy')
+})
 
 test('annotation manual reservation drains submitted input without cancelling it and restores the valid AI lease',async t=>{
   const {controller,calls}=mock(t),entered=deferred(),held=deferred()
@@ -125,7 +181,7 @@ test('task ownership keeps native input guards during model waits and releases o
   assert.equal(controller.snapshot().inputProtected, true)
   assert.equal(controller.snapshot().owner, 'ai')
   assert.equal(controller.captureEpoch(), epoch)
-  assert.deepEqual(calls, [{ enabled: true, protect: true }])
+  assert.deepEqual(calls, [{ enabled: false, protect: true }])
   assert.equal(controller.snapshot().leaseRunId, 'run-A')
   await controller.finishRun('old-run')
   await controller.finishRun()
@@ -155,24 +211,35 @@ test('hover never pauses an idle page or invalidates a pending permission observ
 
 test('hidden cursor retains pointer and keyboard guards and setting changes do not release the task lease', async t => {
   const { controller, calls, wc } = mock(t)
-  const images: { style: string; visible: boolean }[] = []
+  const images: { style: string; visible: boolean; scale: number | undefined }[] = []
   Object.assign(wc, { setVirtualCursorImage() {} })
-  controller.bind({ getCursorImage: async (style, visible) => {
-    images.push({ style, visible })
+  controller.bind({ getCursorImage: async (style, visible, scale) => {
+    images.push({ style, visible, scale })
     return { image: {} as import('electron').NativeImage, hotspot: { x: 4, y: 3 } }
   } })
   await controller.run({ runId: 'run' }, async () => {})
+  await controller.pointerInput(async () => ({status:'dispatched'}), result => result.status === 'dispatched')
   const epoch = controller.captureEpoch()
   await controller.applySettings({ ...createDefaultBrowserAutomation(), show_virtual_cursor: false }, 1)
   assert.equal(controller.captureEpoch(), epoch, 'Hiding drawing does not abort the task')
-  assert.equal(controller.snapshot().cursorEnabled, true)
+  assert.equal(controller.snapshot().cursorEnabled, false)
   assert.equal(controller.snapshot().cursorVisible, false)
   assert.equal(controller.snapshot().inputProtected, true)
-  assert.deepEqual(images.at(-1), { style: 'navora-arrow', visible: false })
+  assert.deepEqual(images.at(-1), { style: 'windows-glow', visible: true, scale: 1 }, 'Hiding uses enabled:false without manufacturing a transparent cursor')
   await controller.applySettings({ ...createDefaultBrowserAutomation(), cursor_style: 'precision-cross' }, 2)
   assert.equal(controller.snapshot().cursorStyle, 'precision-cross')
   assert.equal(controller.snapshot().inputProtected, true)
-  assert.deepEqual(images.at(-1), { style: 'precision-cross', visible: true })
+  assert.deepEqual(images.at(-1), { style: 'precision-cross', visible: true, scale: 1 })
+  await controller.applySettings({ ...createDefaultBrowserAutomation(), cursor_style: 'precision-cross', cursor_scale: 1.5 }, 3)
+  assert.deepEqual(images.at(-1), { style: 'precision-cross', visible: true, scale: 1.5 })
+  assert.equal(controller.captureEpoch(), epoch, 'Resizing drawing does not invalidate task input')
+  assert.equal(controller.snapshot().leaseRunId, 'run')
+  assert.equal(controller.snapshot().inputProtected, true)
+  const count = images.length
+  await controller.applySettings({ ...createDefaultBrowserAutomation(), cursor_style: 'precision-cross', cursor_scale: 1.5, speed_multiplier: 0.8 }, 4)
+  assert.equal(images.length, count, 'A motion-only update does not recreate the same image')
+  await controller.applySettings({ ...createDefaultBrowserAutomation(), cursor_style:'precision-cross', cursor_scale:1.5 }, 5)
+  assert.deepEqual(images.at(-1), { style: 'precision-cross', visible: true, scale: 1.5 })
   assert.ok(calls.every(call => call.protect), 'No native unprotect was issued between task actions')
   await controller.takeControl()
   assert.equal(controller.snapshot().owner, 'user')
@@ -223,16 +290,18 @@ test('transferring an AI-owned page restores guards before returning while manua
   assert.equal(controller.snapshot().inputProtected, true)
 })
 
-test('a runtime without custom image support never silently disables hidden-cursor protection', async t => {
-  const { controller, wc } = mock(t)
+test('a hidden cursor does not need the legacy custom image methods to retain isolation', async t => {
+  const { controller, wc, configurations } = mock(t)
   Reflect.deleteProperty(wc, 'setVirtualCursorImage')
   await controller.applySettings({ ...createDefaultBrowserAutomation(), show_virtual_cursor: false }, 1)
   let acted = false
-  await assert.rejects(controller.run({ runId: 'run' }, async () => { acted = true }), /virtual_cursor_image_unavailable/)
-  assert.equal(acted, false)
-  assert.equal(controller.snapshot().inputProtected, false)
-  assert.equal(controller.snapshot().leaseRunId, undefined)
-  assert.equal(controller.snapshot().nativeConfirmed, true, 'Failed acquisition is settled with an explicit native release')
+  await controller.run({ runId: 'run' }, async () => { acted = true })
+  assert.equal(acted, true)
+  assert.equal(controller.snapshot().inputProtected, true)
+  assert.equal(controller.snapshot().isolateInput, true)
+  assert.equal(controller.snapshot().keepRendering, true)
+  assert.equal(controller.snapshot().cursorEnabled, false)
+  assert.equal(configurations.at(-1)?.virtualCursor?.image, undefined)
 })
 
 test('native protection confirmation precedes action; waiting retains it until full verification ends', async t => {
@@ -254,7 +323,7 @@ test('native protection confirmation precedes action; waiting retains it until f
   assert.equal(controller.snapshot().inputProtected, true)
   verify.resolve()
   await running
-  assert.deepEqual(calls, [{ enabled: true, protect: true }, { enabled: true, protect: false }])
+  assert.deepEqual(calls, [{ enabled: false, protect: true }, { enabled: false, protect: false }])
   assert.equal(controller.snapshot().activity, 'waiting')
 })
 
@@ -292,7 +361,7 @@ test('takeover aborts only its page, invalidates queued work and waits for clean
   assert.equal(b.controller.snapshot().owner, 'ai')
 })
 
-test('uncancellable native commit must settle before protection is released', async t => {
+test('takeover requests native reset immediately but waits for an uncancellable commit before granting ownership', async t => {
   const click = deferred<{ status: string }>()
   const { controller, calls } = mock(t)
   let committed = false
@@ -307,10 +376,10 @@ test('uncancellable native commit must settle before protection is released', as
   const takeover = controller.takeControl().then(state => { handedOver = true; return state })
   await tick()
   assert.equal(handedOver, false)
-  assert.equal(calls.length, 1)
+  assert.equal(calls.length, 2, 'The native cancellation barrier precedes receipt settlement')
   assert.equal(controller.snapshot().activity, 'handoff')
   assert.equal(controller.snapshot().owner, 'ai', 'The compatibility manual flag cannot report a handoff before native input settles')
-  assert.equal(controller.snapshot().inputProtected, true)
+  assert.equal(controller.snapshot().inputProtected, false, 'Reset confirmation alone does not grant ownership')
   click.resolve({ status: 'dispatched' })
   await takeover
   await rejected
@@ -320,7 +389,7 @@ test('uncancellable native commit must settle before protection is released', as
 test('legacy input cleanup precedes release and failed cleanup prevents false ready state', async t => {
   for (const fail of [false, true]) {
     const order: string[] = []
-    const { controller } = mock(t, async (_enabled, protect) => { order.push(protect ? 'protect' : 'unprotect') })
+  const { controller } = mock(t, async (_enabled, protect) => { if (protect || order.at(-1) !== 'unprotect') order.push(protect ? 'protect' : 'unprotect') })
     const action = controller.run({}, async op => {
       op.registerCleanup(async () => { order.push('release held button'); if (fail) throw Error('release failed') })
       order.push('press')
@@ -353,9 +422,11 @@ test('successful selector summary with unknown total count is allowed; nested pa
 
 test('close failure reports unconfirmed protection and retry never replays the action', async t => {
   let rejectClose = true
-  const { controller } = mock(t, async enabled => { if (!enabled && rejectClose) throw Error('barrier timeout') })
+  const { controller, wc } = mock(t)
   let actions = 0
   await controller.run({}, async () => { actions++ })
+  const reset = wc.resetAutomationOptions
+  wc.resetAutomationOptions = async () => { if (rejectClose) throw Error('barrier timeout'); await reset() }
   const failed = await controller.takeControl()
   assert.equal(failed.error, 'release_unconfirmed')
   assert.equal(failed.nativeConfirmed, false)
@@ -412,7 +483,8 @@ test('settings shutdown drains current input and newer settings win without stal
   const close = deferred()
   let delayClose = false
   const { controller } = mock(t, async enabled => { if (!enabled && delayClose) await close.promise })
-  await controller.run({}, async () => {})
+  await controller.run({runId:'settings'}, async () => {})
+  await controller.pointerInput(async () => true, result => result)
   delayClose = true
   const revision = (controller.snapshot().revision ?? 0) + 1
   const off = controller.applySettings({ ...createDefaultBrowserAutomation(), show_virtual_cursor: false }, revision)
@@ -422,7 +494,7 @@ test('settings shutdown drains current input and newer settings win without stal
   await Promise.all([off, on])
   assert.equal(controller.snapshot().revision, revision + 1)
   assert.equal(controller.snapshot().cursorEnabled, true)
-  await controller.run({}, async () => {})
+  await controller.run({runId:'settings'}, async () => {})
 })
 
 test('hidden pages continue their existing action; destroying them invalidates late work', async t => {
@@ -458,12 +530,111 @@ test('read-only inspection can run while manually owned without acquiring input 
 
 test('run completion hides cursor without changing permission or replaying input', async t => {
   const { controller } = mock(t)
-  await controller.run({}, async () => {})
+  await controller.run({runId:'completion'}, async () => {})
+  await controller.pointerInput(async () => true, result => result)
   assert.equal(controller.snapshot().cursorEnabled, true)
-  await controller.finishRun()
+  await controller.finishRun('completion')
   assert.equal(controller.snapshot().cursorEnabled, false)
   assert.equal(controller.snapshot().activity, 'idle')
   assert.equal(controller.snapshot().owner, 'ai')
+})
+
+test('navigation, reads and keyboard receipts keep the first cursor hidden without weakening ownership', async t => {
+  const {controller,calls}=mock(t)
+  await controller.claimRun('first-position')
+  await controller.run({runId:'first-position'}, async operation => {
+    await operation.commit(async () => ({status:'completed',dispatchedCount:2,lastDispatchedIndex:1}))
+  })
+  assert.equal(controller.snapshot().cursorPositionValid,false)
+  assert.equal(controller.snapshot().cursorEnabled,false)
+  assert.ok(calls.every(call => call.protect && !call.enabled))
+  await controller.pointerInput(async () => ({status:'failed'}), result => result.status === 'dispatched')
+  assert.equal(controller.snapshot().cursorEnabled,false)
+  await controller.pointerInput(async () => ({status:'dispatched'}), result => result.status === 'dispatched')
+  assert.equal(controller.snapshot().cursorPositionValid,true)
+  assert.equal(controller.snapshot().cursorEnabled,true)
+  assert.equal(controller.snapshot().cursorVisible,undefined,'Configuration is not physical screen evidence')
+  await controller.finishRun('first-position')
+  await controller.claimRun('second-position')
+  assert.equal(controller.snapshot().cursorPositionValid,false)
+  assert.equal(controller.snapshot().cursorEnabled,false)
+})
+
+test('navigation and geometry hide a confirmed cursor and reject late pointer receipts', async t => {
+  for (const kind of ['navigation','subframe','in-page','geometry'] as const) {
+    const {controller,events}=mock(t)
+    await controller.claimRun('position-lifecycle')
+    await controller.pointerInput(async () => true, result => result)
+    const held=deferred<boolean>()
+    const old=controller.pointerInput(() => held.promise, result => result)
+    if(kind==='geometry')controller.geometryChanged()
+    else if(kind==='in-page')events.emit('did-navigate-in-page')
+    else events.emit('did-start-navigation',{},'https://fixture.invalid',false,kind!=='subframe')
+    held.resolve(true);await old;await tick()
+    assert.equal(controller.snapshot().cursorPositionValid,false,kind)
+    assert.equal(controller.snapshot().cursorEnabled,false,kind)
+    assert.equal(controller.snapshot().inputProtected,true,kind)
+    await controller.pointerInput(async () => true, result => result)
+    assert.equal(controller.snapshot().cursorEnabled,true,kind)
+  }
+})
+
+test('lifecycle invalidation during asynchronous image creation wins over a display request', async t => {
+  const {controller,events,calls}=mock(t),image=deferred(),entered=deferred()
+  controller.bind({getCursorImage:async()=>{entered.resolve();await image.promise;return{image:{} as Electron.NativeImage,hotspot:{x:1,y:1}}}})
+  await controller.claimRun('image-race')
+  const input=controller.pointerInput(async()=>true,result=>result)
+  await entered.promise
+  events.emit('did-start-navigation',{},'https://fixture.invalid',false,true)
+  image.resolve();await input
+  assert.equal(controller.snapshot().cursorEnabled,false)
+  assert.ok(calls.every(call=>!call.enabled))
+})
+
+test('a display failure preserves the acknowledged native pointer receipt without inviting replay', async t => {
+  const {controller}=mock(t,async(enabled)=>{if(enabled)throw Error('image display failed')})
+  await controller.claimRun('display-failure')
+  const receipt={status:'dispatched'}
+  assert.equal(await controller.pointerInput(async()=>receipt,()=>true),receipt)
+  assert.equal(controller.snapshot().nativeConfirmed,false)
+  assert.equal(controller.snapshot().inputProtected,true)
+})
+
+test('navigation during the native enable barrier hides its late result while keeping protection', async t => {
+  const entered=deferred(),enable=deferred()
+  const {controller,events,calls}=mock(t,async enabled=>{if(enabled){entered.resolve();await enable.promise}})
+  await controller.claimRun('native-enable-race')
+  const input=controller.pointerInput(async()=>true,result=>result)
+  await entered.promise
+  assert.equal(controller.snapshot().cursorEnabled,false,'The old readback is still disabled')
+  events.emit('did-start-navigation',{},'https://fixture.invalid',false,true)
+  enable.resolve();await input
+  assert.equal(controller.snapshot().cursorEnabled,false)
+  assert.equal(controller.snapshot().cursorPositionValid,false)
+  assert.equal(controller.snapshot().inputProtected,true)
+  assert.deepEqual(calls.slice(-2),[{enabled:true,protect:true},{enabled:false,protect:true}])
+})
+
+test('takeover cancels native input even while external navigation remains pending', async t => {
+  const f=mock(t),navigation=deferred(),entered=deferred()
+  await f.controller.claimRun('concurrent-navigation')
+  f.controller.trackPending(navigation.promise)
+  let rejectInput!:(error:Error)=>void
+  const input=new Promise<void>((_resolve,reject)=>{rejectInput=reject})
+  const reset=f.wc.resetAutomationOptions
+  f.wc.resetAutomationOptions=async()=>{await reset();rejectInput(Error('AUTOMATION_RESET'))}
+  const running=f.controller.run({runId:'concurrent-navigation'},async operation=>{entered.resolve();await operation.commit(()=>input)})
+  const rejected=assert.rejects(running,/AUTOMATION_RESET/)
+  await entered.promise
+  let granted=false
+  const takeover=f.controller.takeControl().then(state=>{granted=true;return state})
+  await tick()
+  assert.equal(f.resets,1,'Pending navigation must not block native cancellation')
+  assert.equal(granted,false,'Navigation still drains before manual ownership is granted')
+  navigation.resolve();await rejected
+  const state=await takeover
+  assert.equal(state.owner,'user');assert.equal(state.nativeConfirmed,true)
+  assert.equal(state.error,undefined);assert.equal(state.leaseRunId,undefined)
 })
 
 test('takeover during transfer drain prevents transfer and cannot be undone by its finally', async t => {
@@ -496,7 +667,7 @@ test('submitted script tracked across a timeout settles before user handoff with
   const takeover = controller.takeControl().then(state => { finished = true; return state })
   await tick()
   assert.equal(finished, false)
-  assert.equal(calls.length, 1)
+  assert.equal(calls.length, 1, 'A script receipt alone does not authorize early native input reset')
   script.resolve()
   const state = await takeover
   await rejected
@@ -515,7 +686,7 @@ test('fresh observation explicitly advances an active operation document credent
   })
 })
 
-test('new actions wait for input-policy application without unprotecting a later active action', async t => {
+test('legacy input preferences cannot weaken an Agent action or its following task', async t => {
   const { controller, calls } = mock(t)
   const baseRevision = controller.snapshot().revision ?? 0
   await controller.applySettings({ ...createDefaultBrowserAutomation(), protect_input: false }, baseRevision + 1)
@@ -542,7 +713,8 @@ test('new actions wait for input-policy application without unprotecting a later
 test('cursor FPS applies during a long operation without releasing input protection', async t => {
   const { controller, wc } = mock(t)
   const rates: number[] = []
-  wc.setVirtualCursorFrameRate = fps => { rates.push(fps) }
+  const setFrameRate = wc.setVirtualCursorFrameRate
+  wc.setVirtualCursorFrameRate = fps => { rates.push(fps); setFrameRate(fps) }
   const finish = deferred()
   const running = controller.run({}, async () => { await finish.promise })
   await tick()
@@ -764,4 +936,268 @@ test('a previous chat finishing cannot release protection acquired by a newer ac
   assert.equal(controller.snapshot().activity, 'acting')
   release.resolve()
   await running
+})
+
+test('overdue handoff reports submitted input and waits for real completion before unlocking',async t=>{
+  const {controller}=mock(t),entered=deferred(),held=deferred()
+  controller.bind({controlWaitWarningMs:5})
+  const running=controller.run({runId:'delayed-input'},async operation=>{entered.resolve();await operation.commit(()=>held.promise);operation.assertCurrent()})
+  const observedFailure=running.catch(()=>{})
+  await entered.promise
+  let released=false
+  const taking=controller.takeControl().then(state=>{released=true;return state})
+  await new Promise(resolve=>setTimeout(resolve,15))
+  const waiting=controller.snapshot()
+  assert.equal(waiting.controlWait?.stage,'submitted-input');assert.equal(waiting.controlWait?.overdue,true)
+  assert.equal(waiting.controlWait?.committedInputs,1);assert.equal(waiting.inputProtected,false)
+  assert.equal(waiting.owner,'ai');assert.equal(released,false)
+  held.resolve();await observedFailure
+  const finished=await taking
+  assert.equal(finished.owner,'user');assert.equal(finished.inputProtected,false);assert.equal(finished.controlWait,undefined)
+})
+
+test('late native release remains unconfirmed without faking a timeout unlock',async t=>{
+  const held=deferred(),entered=deferred()
+  const {controller}=mock(t,async(_enabled,protect)=>{if(!protect){entered.resolve();await held.promise}})
+  controller.bind({controlWaitWarningMs:5})
+  await controller.claimRun('native-wait')
+  const taking=controller.takeControl()
+  await entered.promise;await new Promise(resolve=>setTimeout(resolve,15))
+  const waiting=controller.snapshot()
+  assert.equal(waiting.controlWait?.stage,'native');assert.equal(waiting.controlWait?.overdue,true)
+  assert.equal(waiting.nativePending,true);assert.equal(waiting.inputProtected,true);assert.equal(waiting.owner,'ai')
+  held.resolve();await taking
+  assert.equal(controller.snapshot().owner,'user');assert.equal(controller.snapshot().controlWait,undefined)
+})
+
+test('a full Agent lease isolates focus and rendering through waits despite disabled legacy preferences and hidden drawing', async t => {
+  const fixture = mock(t)
+  const { controller, configurations } = fixture
+  await controller.applySettings({ ...createDefaultBrowserAutomation(), show_virtual_cursor: false, protect_input: false }, 1)
+  const before = fixture.resets
+  await controller.claimRun('isolated-task')
+  await controller.run({ runId: 'isolated-task' }, async operation => {
+    await operation.setActivity('waiting', '等待网页')
+    const state = controller.snapshot()
+    assert.equal(state.isolateInput, true); assert.equal(state.keepRendering, true)
+    assert.equal(state.inputProtected, true); assert.equal(state.cursorEnabled, false)
+    assert.deepEqual(state.rendering, { viewAvailable: true, keepAlive: true, requestedBackgroundThrottling: true, effectiveBackgroundThrottling: false })
+  })
+  await tick()
+  await controller.applySettings({ ...createDefaultBrowserAutomation(), show_virtual_cursor: false, protect_input: false, cursor_fps: 30 }, 2)
+  await controller.run({ runId: 'isolated-task' }, async () => {})
+  assert.equal(fixture.resets, before, 'No reset may occur between tools or while the model waits')
+  assert.ok(configurations.every(options => options.isolateInput && options.blockRealPointer && options.blockRealKeyboard && options.keepRendering))
+  await controller.finishRun('isolated-task')
+  assert.equal(fixture.resets, before + 1)
+  const released = controller.snapshot()
+  assert.equal(released.isolateInput, false); assert.equal(released.keepRendering, false)
+  assert.equal(released.inputProtected, false); assert.equal(released.nativeConfirmed, true)
+})
+
+test('a successful native configuration Promise cannot authorize input when the readback disagrees', async t => {
+  for (const cause of ['isolation', 'rendering'] as const) {
+    const { controller, wc, nativeState } = mock(t)
+    const configure = wc.setAutomationOptions
+    wc.setAutomationOptions = async options => {
+      await configure(options)
+      if (options.isolateInput) {
+        if (cause === 'isolation') nativeState.isolateInput = false
+        else nativeState.rendering.keepAlive = false
+      }
+    }
+    let acted = false
+    await assert.rejects(controller.run({ runId: cause }, async () => { acted = true }),
+      cause === 'isolation' ? /automation_configuration_unconfirmed/ : /automation_rendering_unavailable/)
+    assert.equal(acted, false)
+    assert.equal(controller.snapshot().leaseRunId, undefined, 'A failed acquisition releases only after an explicit reset')
+    assert.equal(controller.snapshot().nativeConfirmed, true)
+  }
+})
+
+test('reset rejection never confirms a safe handoff even if its readback already looks released', async t => {
+  const { controller, wc } = mock(t)
+  await controller.claimRun('reset-reject')
+  const reset = wc.resetAutomationOptions
+  wc.resetAutomationOptions = async () => { await reset(); throw Error('cleanup acknowledgement failed') }
+  const failed = await controller.takeControl()
+  assert.equal(failed.owner, 'paused'); assert.equal(failed.error, 'release_unconfirmed')
+  assert.equal(failed.inputProtected, false); assert.equal(failed.nativeConfirmed, false)
+  assert.equal(failed.leaseRunId, 'reset-reject', 'An unconfirmed release keeps the task credential until recovery')
+  wc.resetAutomationOptions = reset
+  const recovered = await controller.retryRelease()
+  assert.equal(recovered.owner, 'user'); assert.equal(recovered.nativeConfirmed, true)
+  assert.equal(recovered.leaseRunId, undefined)
+})
+
+test('reset completion is checked for residual native input before granting manual control', async t => {
+  const { controller, wc, nativeState } = mock(t)
+  await controller.claimRun('held-input')
+  const reset = wc.resetAutomationOptions
+  wc.resetAutomationOptions = async () => { await reset(); nativeState.inputActive = true }
+  const state = await controller.takeControl()
+  assert.equal(state.owner, 'paused'); assert.equal(state.nativeConfirmed, false)
+  assert.equal(state.error, 'release_unconfirmed')
+})
+
+test('annotation reservation releases all native modes and restores the full lease independently of drawing', async t => {
+  const { controller, nativeState } = mock(t)
+  await controller.applySettings({ ...createDefaultBrowserAutomation(), show_virtual_cursor: false, protect_input: false }, 1)
+  await controller.claimRun('annotation-isolation')
+  const token = await controller.acquireManualSession()
+  for (const field of ['isolateInput', 'blockRealPointer', 'blockRealKeyboard', 'keepRendering'] as const) assert.equal(nativeState[field], false)
+  assert.equal(controller.snapshot().owner, 'user')
+  const restored = await controller.releaseManualSession(token)
+  assert.equal(restored.restored, true)
+  for (const field of ['isolateInput', 'blockRealPointer', 'blockRealKeyboard', 'keepRendering'] as const) assert.equal(nativeState[field], true)
+  assert.equal(nativeState.virtualCursor.enabled, false)
+})
+
+test('finishing an old task cannot reset a newly acquired lease', async t => {
+  const fixture = mock(t)
+  await fixture.controller.claimRun('first')
+  await fixture.controller.finishRun('first')
+  await fixture.controller.claimRun('second')
+  const resets = fixture.resets
+  await fixture.controller.finishRun('first')
+  await fixture.controller.finishRun()
+  assert.equal(fixture.resets, resets)
+  assert.equal(fixture.controller.snapshot().leaseRunId, 'second')
+  assert.equal(fixture.controller.snapshot().isolateInput, true)
+  assert.equal(fixture.controller.snapshot().keepRendering, true)
+})
+
+test('explicit takeover resets a submitted native queue before waiting and retains its cancellation receipt', async t => {
+  const fixture = mock(t)
+  const order: string[] = []
+  let cancelNative!: () => void
+  const native = new Promise<void>((_resolve, reject) => { cancelNative = () => reject(Error('AUTOMATION_RESET')) })
+  const entered = deferred()
+  const reset = fixture.wc.resetAutomationOptions
+  fixture.wc.resetAutomationOptions = async () => { order.push('reset'); await reset(); cancelNative() }
+  const running = fixture.controller.run({ runId: 'cancel-native' }, async operation => {
+    operation.registerCleanup(async () => { order.push('cleanup') })
+    entered.resolve()
+    await operation.commit(() => native)
+  })
+  const rejected = assert.rejects(running, /AUTOMATION_RESET/)
+  await entered.promise
+  const state = await fixture.controller.takeControl()
+  await rejected
+  assert.deepEqual(order, ['reset', 'cleanup'])
+  assert.equal(state.owner, 'user'); assert.equal(state.nativeConfirmed, true)
+  assert.equal(state.error, undefined)
+  assert.equal(state.lastResult?.reason, 'AUTOMATION_RESET')
+  assert.equal(state.lastResult?.dispatchedCount, null, 'The unknown partial count remains available to callers')
+})
+
+test('ordinary task completion settles submitted native work before resetting its channel', async t => {
+  const fixture = mock(t)
+  const entered = deferred(), native = deferred()
+  const running = fixture.controller.run({ runId: 'complete-native' }, async operation => {
+    entered.resolve()
+    await operation.commit(() => native.promise)
+  })
+  await entered.promise
+  const resets = fixture.resets
+  let finished = false
+  const finishing = fixture.controller.finishRun('complete-native').then(() => { finished = true })
+  await tick()
+  assert.equal(fixture.resets, resets)
+  assert.equal(finished, false)
+  assert.equal(fixture.controller.snapshot().inputProtected, true)
+  native.resolve()
+  await running; await finishing
+  assert.equal(fixture.resets, resets + 1)
+  assert.equal(fixture.controller.snapshot().leaseRunId, undefined)
+})
+
+test('legacy release callbacks wait for a native cancellation reset to finish before submitting input', async t => {
+  const fixture = mock(t), entered = deferred(), resetGate = deferred()
+  let cancelNative!: () => void
+  const native = new Promise<void>((_resolve, reject) => { cancelNative = () => reject(Error('AUTOMATION_RESET')) })
+  let resetting = false, cleaned = false
+  const reset = fixture.wc.resetAutomationOptions
+  fixture.wc.resetAutomationOptions = async () => {
+    resetting = true; cancelNative(); await resetGate.promise; await reset(); resetting = false
+  }
+  const running = fixture.controller.run({ runId: 'cleanup-barrier' }, async operation => {
+    operation.registerCleanup(async context => {
+      if (resetting) throw Error('AUTOMATION_RESET_IN_PROGRESS')
+      assert.equal(context?.nativeResetConfirmed, true)
+      cleaned = true
+    })
+    entered.resolve(); await operation.commit(() => native)
+  })
+  const rejected = assert.rejects(running, /AUTOMATION_RESET/)
+  await entered.promise
+  const takeover = fixture.controller.takeControl()
+  await tick()
+  assert.equal(resetting, true); assert.equal(cleaned, false)
+  resetGate.resolve()
+  const state = await takeover; await rejected
+  assert.equal(cleaned, true); assert.equal(state.owner, 'user'); assert.equal(state.error, undefined)
+})
+
+test('Agent stop cancels only its matching lease and shares one failed reset with finally', async t => {
+  const fixture = mock(t)
+  await fixture.controller.claimRun('current')
+  const epoch = fixture.controller.captureEpoch(), resets = fixture.resets
+  await fixture.controller.cancelRun('old')
+  assert.equal(fixture.controller.captureEpoch(), epoch)
+  assert.equal(fixture.resets, resets)
+  fixture.wc.resetAutomationOptions = async () => { throw Error('reset failed') }
+  const first = fixture.controller.cancelRun('current')
+  const duplicate = fixture.controller.cancelRun('current')
+  assert.equal(first, duplicate)
+  await assert.rejects(first, /release_unconfirmed/)
+  assert.equal(fixture.controller.snapshot().leaseRunId, 'current')
+  assert.equal(fixture.controller.snapshot().nativeConfirmed, false)
+  assert.equal(fixture.controller.cancelRun('current'), first, 'finally cannot silently retry an unconfirmed reset')
+})
+
+test('stopping the Agent during an annotation reservation leaves manual input usable and prevents lease restoration', async t => {
+  const fixture = mock(t)
+  await fixture.controller.claimRun('annotated-task')
+  const token = await fixture.controller.acquireManualSession()
+  const resets = fixture.resets, epoch = fixture.controller.captureEpoch()
+  await fixture.controller.cancelRun('annotated-task')
+  assert.equal(fixture.resets, resets)
+  assert.equal(fixture.controller.captureEpoch(), epoch)
+  assert.equal(fixture.controller.snapshot().owner, 'user')
+  const released = await fixture.controller.releaseManualSession(token)
+  assert.equal(released.restored, false)
+  assert.equal(released.state.owner, 'user'); assert.equal(released.state.leaseRunId, undefined)
+  assert.equal(released.state.isolateInput, false)
+})
+
+test('cleanup can forget held input only after reset and native readback both confirm it was cleared', async t => {
+  for (const mode of ['confirmed', 'rejected', 'residual-input'] as const) {
+    const fixture = mock(t), entered = deferred()
+    let cancelNative!: () => void
+    const native = new Promise<void>((_resolve, reject) => { cancelNative = () => reject(Error('AUTOMATION_RESET')) })
+    const confirmations: boolean[] = []
+    const reset = fixture.wc.resetAutomationOptions
+    fixture.wc.resetAutomationOptions = async () => {
+      cancelNative(); await reset()
+      if (mode === 'rejected') throw Error('reset acknowledgement failed')
+      if (mode === 'residual-input') fixture.nativeState.inputActive = true
+    }
+    const running = fixture.controller.run({ runId: mode }, async operation => {
+      operation.registerCleanup(async context => { confirmations.push(context?.nativeResetConfirmed === true) })
+      entered.resolve(); await operation.commit(() => native)
+    })
+    const rejected = assert.rejects(running, /AUTOMATION_RESET/)
+    await entered.promise
+    const state = await fixture.controller.takeControl(); await rejected
+    assert.deepEqual(confirmations, [mode === 'confirmed'])
+    assert.equal(state.owner, mode === 'confirmed' ? 'user' : 'paused')
+    assert.equal(state.nativeConfirmed, mode === 'confirmed')
+  }
+  const fixture = mock(t)
+  let ordinaryConfirmation: boolean | undefined
+  await fixture.controller.run({}, async operation => {
+    operation.registerCleanup(async context => { ordinaryConfirmation = context?.nativeResetConfirmed })
+  })
+  assert.equal(ordinaryConfirmation, false, 'Ordinary completion still releases its own input before reset')
 })

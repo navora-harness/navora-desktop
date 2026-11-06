@@ -80,7 +80,7 @@ export function classifyToolName(toolName: string): ToolDisplayKind {
     return 'plugin'
   }
 
-  if (name === 'agent_ask_user') return 'interact'
+  if (name === 'agent_ask_user'||name === 'agent_ask_form'||name === 'agent_form_templates'||name === 'agent_form_attachment') return 'interact'
   if (
     name === 'agent_spawn_subchat' ||
     name === 'agent_await_subchats' ||

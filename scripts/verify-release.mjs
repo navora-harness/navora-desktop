@@ -7,16 +7,17 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
+import {electronRuntimePin,electronRuntimeRelease} from './electron-runtime-release.mjs'
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(import.meta.url)
 const asar = require('@electron/asar'), yaml = require('js-yaml')
-const runtimeVersion = '45.0.0-cloudbypass.5'
-const runtimeArchiveSha256 = 'bf86a89be1a2578ea30fbf48d2f34082dd31938acda0cbc98b67f688c90c9ece'
+const runtimeVersion = electronRuntimePin.version
+const runtimeArchiveSha256 = electronRuntimePin.archive.sha256
 // Measured from electron.exe in the checksum-verified custom runtime archive.
 // App resources and signatures can change, but packaging must preserve .text.
-const runtimeCodeSha256 = 'ee166e9863c2a92748e35236b2182a76fe23cbe5b5612d8afa5d7e9b9461858f'
-const nativeBindings = ['dispatchInputSequence', 'setVirtualCursorEnabled', 'setVirtualCursorImage', 'setVirtualCursorFrameRate', 'getAgentSnapshot', 'NativePanel', 'showPageInfoDialog', 'setBorderRadius']
+const runtimeCodeSha256 = electronRuntimePin.binaryCodeSha256
+const nativeBindings = ['dispatchInputSequence', 'setAutomationOptions', 'getAutomationState', 'resetAutomationOptions', 'clickElement', 'setVirtualCursorImage', 'setVirtualCursorFrameRate', 'getAgentSnapshot', 'NativePanel', 'showPageInfoDialog']
 const args = process.argv.slice(2), flags = new Set()
 let version
 for (let index = 0; index < args.length; index++) {
@@ -79,11 +80,12 @@ function readPeIdentity(file) {
   }
   throw Error('Executable has no .text section')
 }
-const runtimeDirectory = path.join(project, 'node_modules/electron/dist')
+const runtimeDirectory = path.dirname(require('electron'))
+assert.equal(electronRuntimeRelease(path.join(runtimeDirectory,'electron.exe')),runtimeVersion)
 assert.equal(require('electron/package.json').version, runtimeVersion)
 const runtime = readPeIdentity(path.join(runtimeDirectory, 'electron.exe'))
 if (flags.has('--runtime-only')) {
-  console.log(JSON.stringify({ ok: true, mode: 'runtime-static-only', runtime, limitation: 'Code identity and binding presence do not certify physical OS input filtering or cursor compositor visibility.' }, null, 2))
+  console.log(JSON.stringify({ ok: true, mode: 'runtime-static-only', runtime, runtimeRevision:electronRuntimePin.revision, runtimeArchiveSha256, runtimeBinarySha256:electronRuntimePin.binarySha256, limitation: 'Binary identity and binding presence do not certify physical OS input filtering or cursor compositor visibility.' }, null, 2))
   process.exit(0)
 }
 assert.ok(/^\d+\.\d+\.\d+$/.test(version || ''), 'Supply --version with a release version such as 0.3.36')
@@ -154,7 +156,7 @@ if (flags.has('--write-manifest')) {
   fs.writeFileSync(sumsPath, artifacts.map(item => `${item.sha256}  ${item.name}`).join('\n') + '\n')
 }
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
-for (const field of ['version', 'platform', 'arch', 'runtimeVersion', 'runtimeCodeSha256']) assert.equal(manifest[field], report[field], `Release manifest mismatch: ${field}`)
+for (const field of ['version', 'platform', 'arch', 'runtimeVersion', 'runtimeCodeSha256', 'runtimeArchiveSha256']) assert.equal(manifest[field], report[field], `Release manifest mismatch: ${field}`)
 assert.equal(manifest.archive.sha256, report.archive.sha256); assert.deepEqual(manifest.archive.privatePaths, [])
 assert.equal(manifest.artifacts.length, artifacts.length)
 for (const item of artifacts) assert.deepEqual(manifest.artifacts.find(saved => saved.name === item.name), item, `Manifest artifact mismatch: ${item.name}`)

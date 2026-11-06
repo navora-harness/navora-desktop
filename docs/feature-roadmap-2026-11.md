@@ -1,5 +1,27 @@
 # Navora 产品功能路线图
 
+<!-- planning-completion-review:2026-11-06 -->
+## 完成情况复核（2026-11-06）
+
+**当前状态：部分完成；不能将所有新增项继续统称 Planned。** 本节依据现有源码、实施记录和报告复核；下文旧日期状态保留历史含义，当前完成范围以本节为准。
+
+- [x] **已完成**｜2026-11-03—05：聊天查找、结构化上下文编辑、共用标签与文件／网页混合独立宿主已实施并形成相应交付。
+- [x] **已完成**｜2026-11-05—06：插件安装备份事务、忙状态保护、正常退出排空首批已交付；受限依赖 staging／恢复重试与问卷扩展已有源码和定向验证。
+- [ ] **保留事项**｜PDF／CSV 阅读、受控编辑、完整持久事件与运行恢复、自动排空后升级以及平台完整验收仍保留。
+
+证据：[file-workspace-interaction-followup-2026-11-05.md](./file-workspace-interaction-followup-2026-11-05.md)；[plugin-reliability-followup-2026-11-06.md](./plugin-reliability-followup-2026-11-06.md)；[agent-questionnaire-plan-2026-11-05.md](./agent-questionnaire-plan-2026-11-05.md)。
+<!-- /planning-completion-review:2026-11-06 -->
+
+
+<!-- planning-obsolescence:2026-11-06 -->
+> **【部分过时】标记日期：2026-11-06；原文/演进日期：2026-11-03，后续交付至 2026-11-05—06。**
+> **过时范围：**“新增条目均为 Planned”、聊天查找/上下文编辑和混合独立宿主尚未实现等总括状态；旧批注独立列表路线亦已替换。
+> **当前依据/保留范围：**已交付项以对应实施为准；PDF/CSV 阅读、文件编辑、运行恢复、Fastls Cookie/逐跳与目标平台认证仍有效，不整份作废。
+> **接续证据：**[confirmed-plans-implementation-2026-11-05.md](./confirmed-plans-implementation-2026-11-05.md)；[file-workspace-interaction-followup-2026-11-05.md](./file-workspace-interaction-followup-2026-11-05.md)；[plugin-foundation-progress-2026-11-05.md](./plugin-foundation-progress-2026-11-05.md)；[panel-density-and-annotation-chat-implementation-2026-11-05.md](./panel-density-and-annotation-chat-implementation-2026-11-05.md)。
+<!-- /planning-obsolescence:2026-11-06 -->
+
+> 2026-11-05 规划整理核对：**部分完成**。聊天查找、上下文编辑等已有专项成果；PDF/CSV 阅读、文件编辑、持久运行恢复、插件占用升级/回滚、混合独立宿主等仍未交付。 状态与归档口径见[规划状态总览](./planning-status-and-next-work-2026-11-04.md)。
+
 > 规划基线：2026-11-03 · 当前版本：0.3.33
 >
 > 本文是建议的实施顺序，不是交付承诺。当前实现以 [当前功能与验证边界](./current-state.md) 为准；跨平台插件细节继续以[插件平台规划](./plugin-platform-installation-plan.md)和[Fastls 集成进展](./fastls-integration-progress.md)为准。
@@ -19,6 +41,8 @@
 阶段采用“完成门槛”推进。生成过某平台产物、测试中途通过或本机可以运行，都不自动等于该平台正式支持。
 
 ## 2. 当前基线
+
+> **过时段落提示（2026-11-06）：**“当前”是 2026-11-03 的历史快照。混合窗口、菜单/历史证据/阻断交接和插件首批可靠性已在后续交付，不应继续读取为尚未实现。
 
 ### 已交付或已有实现
 
@@ -281,7 +305,7 @@
 
 ### C03 · 搜索命中消息与长对话定位 · P1
 
-2026-11-03 补充：[当前聊天内查找规划](./conversation-find-plan-2026-11.md)细化本条的入口、作用域、计数、高亮、快捷键仲裁及流式更新规则；尚未接入正式功能。
+2026-11-03 补充：[当前聊天内查找规划](./已完成/conversation-find-plan-2026-11.md)细化本条的入口、作用域、计数、高亮、快捷键仲裁及流式更新规则；尚未接入正式功能。
 
 **用户价值：**搜索到一个对话后能直接到达包含关键词的那一条消息。
 
@@ -381,7 +405,7 @@ Fastls 0.2.x 继续按第 3 节阶段 2 的独立门槛实施。按对话选择�
 
 ### B02 · 文件/网页共用独立窗口 · P2
 
-- 接续[文件与网页统一方案](./workspace-unification-plan.md)阶段二、三，建立类型化混合窗口标签宿主，复用现有 WorkspaceTabItem 和系统窗口控件。
+- 接续[文件与网页统一方案](./已完成/workspace-unification-plan.md)阶段二、三，建立类型化混合窗口标签宿主，复用现有 WorkspaceTabItem 和系统窗口控件。
 - 首版独立混合窗口仅接收同一所属对话资源；主窗口继续保留现有跨对话预览规则。文件引用与网页 Session/WebContents 各自校验，不按 URL/标题猜身份。
 - 迁移网页保留原 WebContents；迁移文件传递受校验的引用和阅读状态。接收确认前保留来源标签，失败回到原位置；用户接管和未保存编辑按各自规则阻止或推迟迁移。
 - 统一排序、拖出/拖回、关闭相邻选择、最后一项关闭、移回全部、窗口标题及布局恢复。重启只恢复资源和布局元数据，不声称恢复网页 JS 内存或任务。
@@ -475,6 +499,6 @@ F04/T03、Fastls 0.2.x、B03 及阶段 4 分别评审。首轮四模块体验完
 - **聊天：**[ChatPage](../src/pages/ChatPage.vue)、[消息队列](../electron/modules/agent-inbox.ts)、[对话存储](../electron/modules/chat-store.ts)、[运行时](../electron/modules/agent-runtime.ts)、[共享消息契约](../shared/types.ts)。重点验证 `test:ui`、`test:ui:renovation` 及受影响的队列/运行身份测试。
 - **文件：**[预览面板](../src/components/FilePreviewPanel.vue)、[文件服务](../electron/modules/workspace-files.ts)、[预览契约](../shared/workspace-preview.ts)、[文件独立窗口](../electron/modules/file-windows.ts)。阅读器补格式边界检查，保存服务补有实际故障路径的测试。
 - **插件：**[插件工作区](../src/components/plugins/PluginWorkspace.vue)、[安装与加载](../electron/modules/plugin-store.ts)、[安装事务](../electron/modules/plugin-install-transaction.ts)、[调用授权边界](../electron/modules/plugin-host.ts)、[fcurl 运行时](../electron/modules/fcurl-runtime.ts)。重点验证 `test:ui:plugins`、`test:store`、`test:plugins:platform`。
-- **浏览器：**[浏览器面板](../src/components/BrowserTabPanel.vue)、[原生宿主](../electron/modules/browser-host.ts)、[工作区 IPC](../electron/modules/browser-workspace-ipc.ts)、[能力探测](../electron/modules/browser-capabilities.ts)、[统一窗口方案](./workspace-unification-plan.md)。重点验证 `test:browser`、`test:ui:browser`、`test:ui:browser:recovery`、`test:ui:browser:start`。
+- **浏览器：**[浏览器面板](../src/components/BrowserTabPanel.vue)、[原生宿主](../electron/modules/browser-host.ts)、[工作区 IPC](../electron/modules/browser-workspace-ipc.ts)、[能力探测](../electron/modules/browser-capabilities.ts)、[统一窗口方案](./已完成/workspace-unification-plan.md)。重点验证 `test:browser`、`test:ui:browser`、`test:ui:browser:recovery`、`test:ui:browser:start`。
 
 以上命令是后续实现的验证入口，本次规划未重新运行，也未将历史通过数量提升为当前验证结果。每个小版本只要求与变更相称的检查；涉及共享契约、安装事务、保存或运行身份时，再补跨模块回归与故障注入。

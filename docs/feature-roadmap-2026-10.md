@@ -1,5 +1,27 @@
 # Navora 后续功能规划
 
+<!-- planning-completion-review:2026-11-06 -->
+## 完成情况复核（2026-11-06）
+
+**当前状态：部分完成；历史路线由当前专项接续。** 本节依据现有源码、实施记录和报告复核；下文旧日期状态保留历史含义，当前完成范围以本节为准。
+
+- [x] **已完成**｜2026-10-31—11-05：文件标签／基础阅读、插件工作区、文档入口、进程内下载归属与延迟附件关联已实现；Fastls 三工具和插件平台基础已有实现。
+- [x] **已完成**｜2026-11-05—06：文件／网页混合独立窗口及插件备份恢复／忙状态首批已交付；依赖 staging 与恢复重试已有源码验证。
+- [ ] **保留事项**｜持久执行事件、完整产物来源链、跨重启下载恢复、受控文件编辑与整轮运行恢复尚未闭环。
+
+证据：[file-workspace-interaction-followup-2026-11-05.md](./file-workspace-interaction-followup-2026-11-05.md)；[plugin-foundation-progress-2026-11-05.md](./plugin-foundation-progress-2026-11-05.md)；[plugin-reliability-followup-2026-11-06.md](./plugin-reliability-followup-2026-11-06.md)。
+<!-- /planning-completion-review:2026-11-06 -->
+
+
+<!-- planning-obsolescence:2026-11-06 -->
+> **【部分过时】标记日期：2026-11-06；原文/演进日期：2026-10-31—11-01。**
+> **过时范围：**文件工作区基础、插件/Fastls 整体仍待实施，以及把旧过程/输出布局当作当前产品布局的条款。
+> **当前依据/保留范围：**文件交互、混合宿主和插件 S1/Fastls F0 首批已有交付；可控编辑、完整事件/来源链与持久恢复仍有效，按后续专项接续。
+> **接续证据：**[file-workspace-interaction-followup-2026-11-05.md](./file-workspace-interaction-followup-2026-11-05.md)；[plugin-foundation-progress-2026-11-05.md](./plugin-foundation-progress-2026-11-05.md)；[feature-roadmap-2026-11.md](./feature-roadmap-2026-11.md)。
+<!-- /planning-obsolescence:2026-11-06 -->
+
+> 2026-11-05 规划整理核对：**部分完成**。作为历史总范围保留并由 11 月路线接续；持久执行事件/完整来源链、可控文件编辑与恢复等未整体完成，旧 Fastls 待实施文字已落后于三个工具现状。 状态与归档口径见[规划状态总览](./planning-status-and-next-work-2026-11-04.md)。
+
 > 状态核对日期：2026-11-01。本页按日期保留演进及后续验收；进程内异步下载归属和附件关联已有实现，完整持久事件系统仍待实施。 当前行为与验证边界见 [当前功能](./current-state.md)，全部文档见 [导航](./README.md)。
 
 日期：2026-10-31。依据当前源码和本轮标签页工作区需求，按依赖顺序交付，不预设未经验证的完成日期。

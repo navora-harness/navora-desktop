@@ -1,0 +1,110 @@
+{
+  "electron": "45.0.0-beta.5",
+  "environment": {
+    "platform": "win32",
+    "release": "10.0.26100",
+    "systemDark": false,
+    "highContrast": false,
+    "forcedColors": false,
+    "reducedTransparency": false
+  },
+  "checks": [
+    "floating sidebar remains opaque while docked sidebar is tinted",
+    "main real useAppearance and theme CSS obey host material state",
+    "browser real useAppearance and theme CSS obey host material state",
+    "file real useAppearance and theme CSS obey host material state",
+    "switch off restores dark solid clear color and revokes all renderer transparency",
+    "observable accessibility fallback reaches all three existing hosts",
+    "forced dark application keeps all host materials and does not change guest media queries",
+    "forced light application keeps material over an isolated dark native theme",
+    "automatic appearance follows isolated native system-theme transitions",
+    "injected observable native API failure revokes real renderer transparency and restores solid theme",
+    "material toggles keep the same live WebContentsView document running"
+  ],
+  "shots": [
+    "D:\\electron\\navora-harness\\navora-desktop\\artifacts\\window-material-smoke\\first-show\\browser-acrylic-gdi.png",
+    "D:\\electron\\navora-harness\\navora-desktop\\artifacts\\window-material-smoke\\first-show\\file-acrylic-gdi.png",
+    "D:\\electron\\navora-harness\\navora-desktop\\artifacts\\window-material-smoke\\first-show\\main-acrylic-reactivated-gdi.png",
+    "D:\\electron\\navora-harness\\navora-desktop\\artifacts\\window-material-smoke\\first-show\\browser-solid-dark-gdi.png",
+    "D:\\electron\\navora-harness\\navora-desktop\\artifacts\\window-material-smoke\\first-show\\main-acrylic-app-dark-system-light-gdi.png",
+    "D:\\electron\\navora-harness\\navora-desktop\\artifacts\\window-material-smoke\\first-show\\browser-acrylic-app-dark-system-light-gdi.png",
+    "D:\\electron\\navora-harness\\navora-desktop\\artifacts\\window-material-smoke\\first-show\\file-acrylic-app-dark-system-light-gdi.png",
+    "D:\\electron\\navora-harness\\navora-desktop\\artifacts\\window-material-smoke\\first-show\\main-acrylic-app-light-system-dark-gdi.png"
+  ],
+  "captureFocus": [
+    {
+      "name": "main-acrylic",
+      "before": true,
+      "after": true,
+      "focusedWindowId": 2,
+      "foregroundMatches": true
+    },
+    {
+      "name": "browser-acrylic",
+      "before": true,
+      "after": true,
+      "focusedWindowId": 3,
+      "foregroundMatches": true
+    },
+    {
+      "name": "file-acrylic",
+      "before": true,
+      "after": true,
+      "focusedWindowId": 4,
+      "foregroundMatches": true
+    },
+    {
+      "name": "main-acrylic-reactivated",
+      "before": true,
+      "after": true,
+      "focusedWindowId": 2,
+      "foregroundMatches": true
+    },
+    {
+      "name": "browser-solid-dark",
+      "before": true,
+      "after": true,
+      "focusedWindowId": 3,
+      "foregroundMatches": true
+    },
+    {
+      "name": "main-acrylic-app-dark-system-light",
+      "before": true,
+      "after": true,
+      "focusedWindowId": 2,
+      "foregroundMatches": true
+    },
+    {
+      "name": "browser-acrylic-app-dark-system-light",
+      "before": true,
+      "after": true,
+      "focusedWindowId": 3,
+      "foregroundMatches": true
+    },
+    {
+      "name": "file-acrylic-app-dark-system-light",
+      "before": true,
+      "after": true,
+      "focusedWindowId": 4,
+      "foregroundMatches": true
+    },
+    {
+      "name": "main-acrylic-app-light-system-dark",
+      "before": true,
+      "after": true,
+      "focusedWindowId": 2,
+      "foregroundMatches": true
+    }
+  ],
+  "visualStatus": "Controlled fixture screenshots require visual inspection. Host state reports a request, not DWM success. Opposite tone combinations use translucent application colors over the actual system material, not an independent DWM tone API. The initial main-acrylic crop did not contain the controlled fixture during visual review; the invalid PNG was discarded and is not initial-presentation evidence. Opposite-tone captures were visually reviewed as the controlled fixture.",
+  "accessibilityTesting": "Real public nativeTheme flags were read; fallback transitions use injected environment conditions rather than changing OS accessibility settings. Light/dark native themeSource is set only in this isolated test process.",
+  "unverified": [
+    "Other OS builds",
+    "mixed DPI",
+    "IME",
+    "remote desktop",
+    "DWM silent fallback",
+    "battery policy",
+    "initial main-window native capture/compositor frame"
+  ]
+}

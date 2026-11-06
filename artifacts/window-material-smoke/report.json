@@ -1,0 +1,71 @@
+{
+  "electron": "45.0.0-beta.5",
+  "environment": {
+    "platform": "win32",
+    "release": "10.0.26100",
+    "systemDark": false,
+    "highContrast": false,
+    "forcedColors": false,
+    "reducedTransparency": false
+  },
+  "checks": [
+    "floating sidebar remains opaque while docked sidebar is tinted",
+    "main real useAppearance and theme CSS obey host material state",
+    "browser real useAppearance and theme CSS obey host material state",
+    "file real useAppearance and theme CSS obey host material state",
+    "switch off restores dark solid clear color and revokes all renderer transparency",
+    "observable accessibility fallback reaches all three existing hosts",
+    "opposite application/system tone uses solid without mutating nativeTheme",
+    "injected observable native API failure revokes real renderer transparency and restores solid theme",
+    "material toggles keep the same live WebContentsView document running"
+  ],
+  "shots": [
+    "D:\\electron\\navora-harness\\navora-desktop\\artifacts\\window-material-smoke\\main-acrylic.png",
+    "D:\\electron\\navora-harness\\navora-desktop\\artifacts\\window-material-smoke\\browser-acrylic.png",
+    "D:\\electron\\navora-harness\\navora-desktop\\artifacts\\window-material-smoke\\file-acrylic.png",
+    "D:\\electron\\navora-harness\\navora-desktop\\artifacts\\window-material-smoke\\main-acrylic-reactivated.png",
+    "D:\\electron\\navora-harness\\navora-desktop\\artifacts\\window-material-smoke\\browser-solid-dark.png"
+  ],
+  "captureFocus": [
+    {
+      "name": "main-acrylic",
+      "before": true,
+      "after": true,
+      "focusedWindowId": 2
+    },
+    {
+      "name": "browser-acrylic",
+      "before": true,
+      "after": true,
+      "focusedWindowId": 3
+    },
+    {
+      "name": "file-acrylic",
+      "before": true,
+      "after": true,
+      "focusedWindowId": 4
+    },
+    {
+      "name": "main-acrylic-reactivated",
+      "before": true,
+      "after": true,
+      "focusedWindowId": 2
+    },
+    {
+      "name": "browser-solid-dark",
+      "before": true,
+      "after": true,
+      "focusedWindowId": 3
+    }
+  ],
+  "visualStatus": "Controlled fixture screenshots require visual inspection. Initial activation can remain gray; reactivation is also captured. Host state reports a request, not DWM success.",
+  "accessibilityTesting": "Real public nativeTheme flags were read; fallback transitions use injected environment conditions rather than changing OS accessibility settings.",
+  "unverified": [
+    "Other OS builds",
+    "mixed DPI",
+    "IME",
+    "remote desktop",
+    "DWM silent fallback",
+    "battery policy"
+  ]
+}

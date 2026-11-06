@@ -154,11 +154,23 @@ export type AiProviderConfig = {
   source_preset?: string
 }
 
+export type BrowserLinkOpenMode='window'|'tab'|'external'
+export function resolveBrowserLinkOpenMode(value:unknown,strict=false):BrowserLinkOpenMode{
+  if(value===undefined)return 'window'
+  if(value==='window'||value==='tab'||value==='external')return value
+  if(strict)throw Error('invalid_config: browser.link_open_mode must be window, tab or external')
+  return 'window'
+}
+
 export type AppConfig = {
   app: {
     language: string
     appearance_theme?: AppearanceThemeId
     appearance_mode?: AppearanceMode
+    /** Stable seeded identity artwork; absent legacy values use mixed generation. */
+    subchat_glyph_style?: import('./subchat-glyph').SubchatGlyphStyle
+    /** Request native host Acrylic when the platform and accessibility policy allow it. */
+    window_acrylic?: boolean
     close_to_tray: boolean
     /**
      * Show the main window after launch (default true).
@@ -192,6 +204,8 @@ export type AppConfig = {
     shortcuts?: import('./app-shortcuts').AppShortcutPreferences
   }
   browser: {
+    /** User-opened HTTP links; does not change Agent navigation or site popup policy. */
+    link_open_mode?: BrowserLinkOpenMode
     automation: BrowserAutomationConfig
     default_ua_preset: string
     custom_ua: string
@@ -410,6 +424,8 @@ export function createDefaultConfig(): AppConfig {
       language: 'zh-CN',
       appearance_theme: 'mist',
       appearance_mode: 'auto',
+      subchat_glyph_style: 'mixed',
+      window_acrylic: true,
       close_to_tray: true,
       show_main_on_start: true,
       show_followup_suggestions: false,
@@ -424,6 +440,7 @@ export function createDefaultConfig(): AppConfig {
       shortcuts: createDefaultAppShortcuts(),
     },
     browser: {
+      link_open_mode: 'window',
       automation: createDefaultBrowserAutomation(),
       default_ua_preset: 'edge152',
       custom_ua: '',

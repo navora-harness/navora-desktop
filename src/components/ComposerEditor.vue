@@ -1,13 +1,16 @@
 <template>
   <div ref="root" class="composer-document-editor" :class="{'is-disabled':disabled,'is-readonly':readonly}" data-composer-editor data-ctx-menu="composer" @focusin="markActive" @keydown.capture="containerKey" @composer-context-action="contextAction">
     <p v-if="modelUnsupported" class="composer-document-unreadable" role="alert">此文档格式暂不支持，原始内容已保留。请使用兼容版本恢复编辑。</p>
+    <div v-if="declarationItems.length" class="composer-task-declarations" aria-label="本条任务声明"><div v-for="item in declarationItems" :key="item.id" class="composer-task-declaration"><button type="button" class="composer-task-meaning" :title="item.description" :aria-expanded="selectedDeclarationDetail===item.id" @click="selectedDeclarationDetail=selectedDeclarationDetail===item.id?null:item.id" @keydown.esc.stop.prevent="selectedDeclarationDetail=null"><AppIcon :icon="item.icon" />本条：{{ item.label }}</button><button type="button" :disabled="disabled||readonly" :aria-label="`移除${item.label}声明`" @click="toggleDeclaration(item.id)"><AppIcon icon="xmark" /></button></div></div>
+    <p v-if="declarationDetail" class="composer-task-meaning-text" role="status">{{ declarationDetail.description }}</p>
+    <p v-if="!declarationsSupported" class="composer-document-unreadable" role="alert">此任务声明暂不支持，内容已保留，发送前请使用兼容版本处理。</p>
     <EditorContent :editor="editor||undefined" />
     <ComposerSelectionToolbar v-if="editor" :key="editorGeneration" ref="selectionToolbar" :editor="editor" :blocked="disabled||readonly||linkOpen||textMenu?.open" @link="saveSelection();openLinkEditor()" @notify="emit('notify',$event)" />
     <SidebarContextMenu ref="textMenu"><template v-for="item in contextActions" :key="item.id"><div v-if="item.separator" class="composer-editor-menu-separator" role="separator" /><button type="button" role="menuitem" class="sidebar-more-item" :disabled="!item.enabled" @click.stop="menuCommand(item.id)"><AppIcon :icon="item.icon" /><span>{{ item.label }}</span><span v-if="item.shortcut" class="composer-editor-menu-shortcut">{{ item.shortcut }}</span></button></template></SidebarContextMenu>
     <Teleport to="body">
       <template v-if="linkOpen">
         <div class="composer-link-scrim" @pointerdown="cancelLink" />
-        <form ref="linkPanel" data-browser-chrome-overlay class="sidebar-ctx-panel composer-link-panel" :style="{left:`${linkPosition.x}px`,top:`${linkPosition.y}px`}" role="dialog" aria-modal="true" aria-label="编辑文本链接" @submit.prevent="saveLink" @keydown.esc.stop.prevent="cancelLink" @keydown="linkKey" @compositionstart="linkComposing=true" @compositionend="finishLinkComposition">
+        <form ref="linkPanel" popover="manual" data-browser-chrome-overlay class="sidebar-ctx-panel composer-link-panel" :style="{left:`${linkPosition.x}px`,top:`${linkPosition.y}px`,maxWidth:`${linkWidth}px`,maxHeight:`${linkHeight}px`}" role="dialog" aria-modal="true" aria-label="编辑文本链接" @submit.prevent="saveLink" @keydown.esc.stop.prevent="cancelLink" @keydown="linkKey" @compositionstart="linkComposing=true" @compositionend="finishLinkComposition">
           <label>显示文字<textarea ref="linkTextInput" v-model="linkText" rows="2" maxlength="20000" /></label>
           <label>链接地址<input ref="linkInput" v-model="linkUrl" type="text" autocomplete="off" placeholder="https://example.com" @input="linkError=''" /></label>
           <p v-if="linkError" class="composer-link-error" role="alert">{{ linkError }}</p>
@@ -24,6 +27,9 @@ import {Editor,EditorContent} from '@tiptap/vue-3'
 import {getMarkRange,type JSONContent} from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
+import Document from '@tiptap/extension-document'
+import {normalizeTaskDeclarations,taskDeclarationsSupported,taskDeclarationDefinitions,type TaskDeclarationId} from '@shared/task-declarations'
+import {composerDocumentContentIdentity} from '@shared/composer-document'
 import {DOMSerializer,Slice,type Node as ProseMirrorNode} from '@tiptap/pm/model'
 import {TextSelection,type Transaction} from '@tiptap/pm/state'
 import {closeHistory} from '@tiptap/pm/history'
@@ -35,6 +41,7 @@ import SidebarContextMenu from './sidebar/SidebarContextMenu.vue'
 import AppIcon from './icons/AppIcon.vue'
 import ComposerSelectionToolbar from './ComposerSelectionToolbar.vue'
 import {editableCut,editableDeleteSelection,editablePaste,editableSelectAll,copyTextToClipboard} from '@/utils/editable-context'
+import {composerOverlayBoundary,composerOverlayBounds} from '@/utils/composer-overlay'
 
 const props=withDefaults(defineProps<{modelValue:ComposerDocument;chatId?:string;placeholder?:string;disabled?:boolean;readonly?:boolean;submitOnEnter?:boolean;contextPreviews?:Record<string,string>}>(),{placeholder:'描述任务，输入 / 附加内容或使用工具…',disabled:false,readonly:false,submitOnEnter:true})
 const emit=defineEmits<{'update:modelValue':[document:ComposerDocument];submit:[];attach:[request?:{source?:string;files?:File[]}];'open-source':[block:ComposerContextBlock];'refresh-source':[block:ComposerContextBlock];'change-source':[block:ComposerContextBlock];notify:[message:string]}>()
@@ -42,10 +49,17 @@ const root=ref<HTMLElement>(),editor=shallowRef<Editor|null>(null),textMenu=ref<
 const selectionToolbar=ref<InstanceType<typeof ComposerSelectionToolbar>>(),editorGeneration=ref(0),modelUnsupported=ref(false)
 const metadata=ref(props.modelValue),linkOpen=ref(false),linkText=ref(''),linkUrl=ref(''),linkError=ref(''),linkExisting=ref(false),linkPosition=ref({x:8,y:8}),linkInput=ref<HTMLInputElement>(),linkTextInput=ref<HTMLTextAreaElement>()
 const linkPanel=ref<HTMLElement>()
+const linkWidth=ref(360),linkHeight=ref(300)
 const transactionVersion=ref(0),bookmarks=new Set<ComposerSelectionBookmark>()
 let saved:ComposerSelectionBookmark|null=null,linkBookmark:ComposerSelectionBookmark|null=null,unregister:(()=>void)|undefined,mounted=false,applying=false,lastContent=''
 let linkComposing=false,compositionTimer:ReturnType<typeof setTimeout>|undefined
+let linkResize:ResizeObserver|undefined
 let composing=false,compositionGuard:ReturnType<typeof setTimeout>|undefined,slashTrigger:ComposerSelectionBookmark|null=null
+const DeclarationDocument=Document.extend({addAttributes(){return {taskDeclarations:{default:null,rendered:false}}}})
+const selectedDeclarationDetail=ref<TaskDeclarationId|null>(null)
+const declarationDetail=computed(()=>declarationItems.value.find(item=>item.id===selectedDeclarationDetail.value))
+const declarationsSupported=computed(()=>taskDeclarationsSupported(metadata.value.declarations))
+const declarationItems=computed(()=>{try{return taskDeclarationDefinitions.filter(item=>normalizeTaskDeclarations(metadata.value.declarations).ids.includes(item.id))}catch{return []}})
 const owner=()=>props.chatId||props.modelValue.chatId
 const editable=()=>!!editor.value?.isEditable&&!props.disabled&&!props.readonly&&!modelUnsupported.value
 const clone=<T,>(value:T):T=>JSON.parse(JSON.stringify(value)) as T
@@ -97,14 +111,14 @@ function findContext(id:string){let result:{pos:number;node:ProseMirrorNode}|und
 function insertContext(block:ComposerContextBlock,text=''){
   const current=editor.value;if(!current||!editable())return false
   if(saved&&!restoreSelection(saved)){emit('notify','插入位置已变化，请重新选择附加位置。');return false}
-  if(block.mode==='reference'){
+  if(block.mode==='reference'&&!text){
     try{const node={type:'contextInline',attrs:{block:clone(block)}};normalized([{type:'paragraph',content:[node]}]);const selection=current.state.selection;let position=selection.to,inside=false
       for(let depth=selection.$to.depth;depth>0;depth--)if(selection.$to.node(depth).type.name==='contextBlock'||selection.$to.node(depth).type.name==='codeBlock'){position=selection.$to.after(depth);inside=true;break}
       const content=inside?[{type:'paragraph',content:[node,...(text?[{type:'text',text:' '+text}]:[])]}]:[node,...(text?[{type:'text',text:' '+text}]:[])]
       current.view.dispatch(closeHistory(current.state.tr).setMeta('addToHistory',false));const result=current.chain().focus().setTextSelection(position).insertContent(content).run();current.view.dispatch(closeHistory(current.state.tr).setMeta('addToHistory',false));saved=null;return result
     }catch{emit('notify','无法插入此引用，请重新选择来源。');return false}
   }
-  const node={type:'contextBlock',attrs:{block:clone(block),collapsed:false},content:paragraphs(text)}
+  const node={type:'contextBlock',attrs:{block:clone(block),collapsed:true},content:paragraphs(text)}
   try{normalized([node as ComposerNode]);const selection=current.state.selection;let position=selection.to
     // A source is a whole block. Attaching from its editable body inserts after
     // it instead of nesting a source or replacing the selected user text.
@@ -116,11 +130,12 @@ function updateContext(id:string,patch:{block?:ComposerContextBlock;text?:string
   const current=editor.value,found=findContext(id);if(!current||!found||!editable())return false
   if(found.node.type.name==='contextInline'||patch.block?.mode==='reference'){
     try{const block=patch.block?{...clone(patch.block),id}:found.node.attrs.block as ComposerContextBlock
-      if(block.mode==='reference'){
+      const text=patch.text??found.node.textContent
+      if(block.mode==='reference'&&!text){
         const inline=current.schema.nodes.contextInline!.create({block}),node=found.node.type.name==='contextInline'?inline:current.schema.nodes.paragraph!.create(null,[inline,...(patch.text?[current.schema.text(' '+patch.text)]:[])])
         normalized([{type:'paragraph',content:[{type:'contextInline',attrs:{block}}]}]);return dispatchUnit(current.state.tr.replaceWith(found.pos,found.pos+found.node.nodeSize,node))
       }
-      const node={type:'contextBlock',attrs:{block},content:paragraphs(patch.text||'')};normalized([node as ComposerNode]);current.view.dispatch(closeHistory(current.state.tr).setMeta('addToHistory',false));const ok=current.chain().focus().setTextSelection({from:found.pos,to:found.pos+found.node.nodeSize}).insertContent([node,{type:'paragraph'}]).run();current.view.dispatch(closeHistory(current.state.tr).setMeta('addToHistory',false));saved=null;return ok
+      const node={type:'contextBlock',attrs:{block,collapsed:true},content:paragraphs(text)};normalized([node as ComposerNode]);current.view.dispatch(closeHistory(current.state.tr).setMeta('addToHistory',false));const ok=current.chain().focus().setTextSelection({from:found.pos,to:found.pos+found.node.nodeSize}).insertContent([node,{type:'paragraph'}]).run();current.view.dispatch(closeHistory(current.state.tr).setMeta('addToHistory',false));saved=null;return ok
     }catch{emit('notify','来源已改变，请重新选择。');return false}
   }
   try{const block=patch.block?{...clone(patch.block),id}:found.node.attrs.block;normalized([{type:'contextBlock',attrs:{block},content:paragraphs(patch.text??found.node.textContent)} as ComposerNode]);let tr=current.state.tr
@@ -145,7 +160,9 @@ function canUndo(){return editable()&&!!editor.value?.can().undo()}
 function canRedo(){return editable()&&!!editor.value?.can().redo()}
 function getCommandState():Record<ComposerEditorCommand,boolean>{const current=editor.value,selection=current&&(resolveBookmark(saved)||current.state.selection),info=selectionInfo(),write=editable(),label=saved?.valid&&saved.label?.element.isConnected?saved.label:undefined,hasSelection=label?label.end>label.start:!!selection&&!selection.empty;return {undo:canUndo(),redo:canRedo(),cut:write&&hasSelection,copy:hasSelection,'copy-link':!label&&!!info.href,paste:write,'paste-plain':write,delete:write&&hasSelection,'select-all':!!current,link:!label&&write&&(info.canAdd||info.canEdit),unlink:!label&&write&&info.hasLink,attach:write}}
 const contextActions=computed(()=>{void transactionVersion.value;const state=getCommandState(),info=selectionInfo();return [
-  {id:'cut' as const,label:'剪切',icon:'scissors',enabled:state.cut,shortcut:'Ctrl+X'},
+  {id:'undo' as const,label:'撤销',icon:'arrow-left',enabled:state.undo,shortcut:'Ctrl+Z'},
+  {id:'redo' as const,label:'重做',icon:'arrow-rotate-right',enabled:state.redo,shortcut:'Ctrl+Shift+Z'},
+  {id:'cut' as const,label:'剪切',icon:'scissors',enabled:state.cut,shortcut:'Ctrl+X',separator:true},
   {id:'copy' as const,label:'复制',icon:'copy',enabled:state.copy,shortcut:'Ctrl+C'},
   {id:'paste' as const,label:'粘贴',icon:'paste',enabled:state.paste,shortcut:'Ctrl+V'},
   {id:'paste-plain' as const,label:'粘贴为纯文本',icon:'align-left',enabled:state['paste-plain'],shortcut:'Ctrl+Shift+V'},
@@ -164,8 +181,9 @@ function openLinkEditor(){
   else restoreSelection(saved)
   linkBookmark=saveSelection();if(!linkBookmark)return false
   linkText.value=current.state.doc.textBetween(linkBookmark.from,linkBookmark.to,'\n','\n');linkUrl.value=info.href;linkExisting.value=info.canEdit;linkError.value=''
-  const bounds=current.view.coordsAtPos(linkBookmark.from),width=Math.min(360,innerWidth-16)
-  linkPosition.value={x:Math.max(8,Math.min(bounds.left,innerWidth-width-8)),y:Math.max(8,Math.min(bounds.bottom+6,innerHeight-300))};linkOpen.value=true;textMenu.value?.hide();void nextTick(()=>linkInput.value?.focus());return true
+  const bounds=composerOverlayBounds(current.view.dom)
+  linkWidth.value=Math.min(360,bounds.width);linkHeight.value=bounds.height
+  linkPosition.value={x:bounds.left,y:bounds.top};linkOpen.value=true;textMenu.value?.hide();void nextTick(()=>{linkPanel.value?.showPopover();clampLinkPanel();linkInput.value?.focus({preventScroll:true})});return true
 }
 function validLink(value:string){const url=composerLinkUrl(value);if(!url||!/^https?:\/\//i.test(url)&&!/^mailto:[^?\s@]+@[^?\s@]+/i.test(url))return null;return url}
 function closeLink(restore=true){linkOpen.value=false;if(restore)restoreSelection(linkBookmark);linkBookmark=null;linkError.value=''}
@@ -193,7 +211,17 @@ function linkKey(event:KeyboardEvent){
   if(event.shiftKey&&at===0){event.preventDefault();items.at(-1)?.focus()}else if(!event.shiftKey&&at===items.length-1){event.preventDefault();items[0]?.focus()}
 }
 function finishLinkComposition(){clearTimeout(compositionTimer);compositionTimer=setTimeout(()=>{linkComposing=false},0)}
-function clampLinkPanel(){if(!linkOpen.value)return;const bounds=linkPanel.value?.getBoundingClientRect();if(bounds)linkPosition.value={x:Math.max(8,Math.min(linkPosition.value.x,innerWidth-bounds.width-8)),y:Math.max(8,Math.min(linkPosition.value.y,innerHeight-bounds.height-8))}}
+function clampLinkPanel(event?:Event){
+  const current=editor.value,panel=linkPanel.value,selection=resolveBookmark(linkBookmark)
+  if(!linkOpen.value||!current||!panel||!selection||event?.type==='scroll'&&panel.contains(event.target as Node))return
+  if(!current.view.dom.checkVisibility()){closeLink(false);return}
+  const bounds=composerOverlayBounds(current.view.dom)
+  linkWidth.value=Math.min(360,bounds.width);linkHeight.value=bounds.height
+  panel.style.maxWidth=`${linkWidth.value}px`;panel.style.maxHeight=`${linkHeight.value}px`
+  const rect=panel.getBoundingClientRect(),a=current.view.coordsAtPos(selection.from),b=current.view.coordsAtPos(selection.to),top=Math.min(a.top,b.top),bottom=Math.max(a.bottom,b.bottom)
+  const above=top-bounds.top-8,under=bounds.bottom-bottom-8,below=above<rect.height&&under>=rect.height
+  linkPosition.value={x:Math.max(bounds.left,Math.min(a.left,bounds.right-rect.width)),y:Math.max(bounds.top,Math.min(below?bottom+8:top-rect.height-8,bounds.bottom-rect.height))}
+}
 async function executeCommand(command:ComposerEditorCommand){
   const current=editor.value;if(!current||!getCommandState()[command])return false
   const label=saved?.valid&&saved.label?.element.isConnected?saved.label:undefined
@@ -261,7 +289,7 @@ function handleCopy(event:ClipboardEvent){
 }
 function contextAction(event:Event){const detail=(event as CustomEvent<{action:string;block:ComposerContextBlock}>).detail;if(!detail)return;event.stopPropagation();saveSelection();if(detail.action==='open')emit('open-source',detail.block);else if(detail.action==='refresh')emit('refresh-source',detail.block);else if(detail.action==='range')emit('change-source',detail.block)}
 function exitContext(id?:string){const current=editor.value;if(!current)return;const selected=id?findContext(id):undefined;let end=selected?selected.pos+selected.node.nodeSize:undefined;if(end===undefined){const at=current.state.selection.$from;for(let depth=at.depth;depth>0;depth--)if(at.node(depth).type.name==='contextBlock'){end=at.after(depth);break}}if(end!==undefined){current.view.dispatch(current.state.tr.setSelection(TextSelection.near(current.state.doc.resolve(Math.min(end,current.state.doc.content.size)),1)));current.view.focus()}}
-function containerKey(event:KeyboardEvent){if(!(event.target as Element)?.closest('.composer-context-label'))return;if(event.key==='Escape'){event.preventDefault();event.stopPropagation();exitContext((event.target as Element).closest<HTMLElement>('[data-context-id]')?.dataset.contextId);return}if((event.ctrlKey||event.metaKey)&&!event.altKey&&!event.isComposing&&(event.key.toLowerCase()==='z'||event.key.toLowerCase()==='y')){event.preventDefault();event.stopPropagation();saveSelection();const command=event.key.toLowerCase()==='y'||event.shiftKey?'redo':'undo';void executeCommand(command)}}
+function containerKey(event:KeyboardEvent){if(!(event.target as Element)?.closest('.composer-context-label'))return;if(event.key==='Escape'){if((event.target as Element).closest('.composer-context-card'))return;event.preventDefault();event.stopPropagation();exitContext((event.target as Element).closest<HTMLElement>('[data-context-id]')?.dataset.contextId);return}if((event.ctrlKey||event.metaKey)&&!event.altKey&&!event.isComposing&&(event.key.toLowerCase()==='z'||event.key.toLowerCase()==='y')){event.preventDefault();event.stopPropagation();saveSelection();const command=event.key.toLowerCase()==='y'||event.shiftKey?'redo':'undo';void executeCommand(command)}}
 function keyDown(event:KeyboardEvent){
   const current=editor.value;if(!current||event.isComposing||event.keyCode===229||current.view.composing||composing)return false
   if(event.altKey&&event.key==='F10'){if(selectionToolbar.value?.focus()){event.preventDefault();return true}}
@@ -281,11 +309,12 @@ function keyDown(event:KeyboardEvent){
   event.preventDefault();emit('submit');return true
 }
 function createEditor(){
+  selectedDeclarationDetail.value=null
   bookmarks.forEach(record=>{record.valid=false});bookmarks.clear();saved=null;linkBookmark=null;linkOpen.value=false;textMenu.value?.hide();editor.value?.destroy()
   try{metadata.value=normalizeComposerDocument(clone(props.modelValue),owner());modelUnsupported.value=false}catch{metadata.value=createComposerDocument(owner());modelUnsupported.value=true}
-  lastContent=JSON.stringify(metadata.value.content);slashTrigger=null;editorGeneration.value++
-  editor.value=new Editor({content:{type:'doc',content:metadata.value.content as JSONContent[]},editable:!props.disabled&&!props.readonly&&!modelUnsupported.value,
-    extensions:[StarterKit.configure({link:false}),Link.configure({openOnClick:false,autolink:false,linkOnPaste:false,isAllowedUri:url=>!!validLink(url),HTMLAttributes:{rel:'noopener noreferrer',target:null}}),ComposerContextBlockNode.configure({preview:block=>props.contextPreviews?.[block.id]}),ComposerContextInlineNode],
+  lastContent=composerDocumentContentIdentity(metadata.value);slashTrigger=null;editorGeneration.value++
+  editor.value=new Editor({content:{type:'doc',attrs:{taskDeclarations:metadata.value.declarations??null},content:metadata.value.content as JSONContent[]},editable:!props.disabled&&!props.readonly&&!modelUnsupported.value,
+    extensions:[StarterKit.configure({link:false,document:false}),DeclarationDocument,Link.configure({openOnClick:false,autolink:false,linkOnPaste:false,isAllowedUri:url=>!!validLink(url),HTMLAttributes:{rel:'noopener noreferrer',target:null}}),ComposerContextBlockNode.configure({preview:block=>props.contextPreviews?.[block.id]}),ComposerContextInlineNode.configure({preview:block=>props.contextPreviews?.[block.id]})],
     editorProps:{attributes:{class:'composer-richtext',role:'textbox','aria-multiline':'true','aria-label':'消息编辑器','data-placeholder':props.placeholder},handleKeyDown:(_view,event)=>keyDown(event),transformPastedHTML:cleanHtml,handlePaste:(_view,event)=>handlePaste(event),handleDOMEvents:{
       contextmenu:(_view,event)=>{if((event.target as Element)?.closest('input,textarea,button'))return false;event.preventDefault();saveSelection();textMenu.value?.show(event);return true},
       copy:(_view,event)=>handleCopy(event),
@@ -296,22 +325,36 @@ function createEditor(){
     }},
     onTransaction:({transaction})=>{mapBookmarks(transaction);transactionVersion.value++},
     onSelectionUpdate:()=>{if(editor.value?.isFocused&&!linkOpen.value&&!textMenu.value?.open)saveSelection();transactionVersion.value++},
-    onUpdate:()=>{if(applying||modelUnsupported.value)return;try{const content=currentContent(),signature=JSON.stringify(content);if(signature===lastContent)return;metadata.value={...metadata.value,revision:Math.max(metadata.value.revision,props.modelValue.revision)+1,updatedAt:Date.now(),content};lastContent=signature;emit('update:modelValue',clone(metadata.value))}catch{emit('notify','编辑内容超出可保存范围，请缩小上下文。')}},
+    onUpdate:()=>{if(applying||modelUnsupported.value)return;try{const content=currentContent(),declarations=editor.value?.state.doc.attrs.taskDeclarations??undefined,next=normalizeComposerDocument({...metadata.value,content,declarations}),signature=composerDocumentContentIdentity(next);if(signature===lastContent)return;metadata.value={...next,revision:Math.max(metadata.value.revision,props.modelValue.revision)+1,updatedAt:Date.now()};lastContent=signature;emit('update:modelValue',clone(metadata.value))}catch{emit('notify','编辑内容超出可保存范围，请缩小上下文。')}},
   })
 }
 function consumeAttachmentTrigger(){const record=slashTrigger;slashTrigger=null;const current=editor.value,selection=resolveBookmark(record);if(!current||!selection||current.state.doc.textBetween(selection.from,selection.to)!=='/')return false;return dispatchUnit(current.state.tr.delete(selection.from,selection.to))}
+function toggleDeclaration(id:TaskDeclarationId){const current=editor.value;if(!current||!editable()||!declarationsSupported.value)return false;const active=normalizeTaskDeclarations(current.state.doc.attrs.taskDeclarations??undefined).ids,ids=active.includes(id)?active.filter(value=>value!==id):[...active,id];let tr=current.state.tr;const trigger=resolveBookmark(slashTrigger);if(trigger&&tr.doc.textBetween(trigger.from,trigger.to)==='/')tr=tr.delete(trigger.from,trigger.to);cancelAttachmentTrigger();return dispatchUnit(tr.setDocAttribute('taskDeclarations',ids.length?normalizeTaskDeclarations({version:1,ids}):null))}
 function cancelAttachmentTrigger(){if(slashTrigger){slashTrigger.valid=false;bookmarks.delete(slashTrigger);slashTrigger=null}}
-const handle:ComposerEditorHandle={focus,select,insertText,insertContext,replaceRange,replaceTextRange,saveSelection,restoreSelection,getTextSelection,canUndo,canRedo,getCommandState,executeCommand,openLinkEditor,removeLink,updateContext,consumeAttachmentTrigger,cancelAttachmentTrigger}
-watch(()=>props.modelValue,value=>{if(!mounted)return;let next:ComposerDocument;try{next=normalizeComposerDocument(value,owner())}catch{createEditor();return}if(modelUnsupported.value||next.id!==metadata.value.id||next.chatId!==metadata.value.chatId){createEditor();return}metadata.value=next;if(JSON.stringify(next.content)!==lastContent){bookmarks.forEach(record=>{record.valid=false});saved=null;linkOpen.value=false;applying=true;editor.value?.commands.setContent({type:'doc',content:next.content as JSONContent[]},{emitUpdate:false});lastContent=JSON.stringify(next.content);applying=false}})
+const handle:ComposerEditorHandle={focus,select,insertText,insertContext,replaceRange,replaceTextRange,saveSelection,restoreSelection,getTextSelection,canUndo,canRedo,getCommandState,executeCommand,openLinkEditor,removeLink,updateContext,toggleDeclaration,consumeAttachmentTrigger,cancelAttachmentTrigger}
+watch(()=>props.modelValue,value=>{if(!mounted)return;let next:ComposerDocument;try{next=normalizeComposerDocument(value,owner())}catch{createEditor();return}if(modelUnsupported.value||next.id!==metadata.value.id||next.chatId!==metadata.value.chatId){createEditor();return}metadata.value=next;if(composerDocumentContentIdentity(next)!==lastContent){bookmarks.forEach(record=>{record.valid=false});saved=null;linkOpen.value=false;applying=true;editor.value?.commands.setContent({type:'doc',attrs:{taskDeclarations:next.declarations??null},content:next.content as JSONContent[]},{emitUpdate:false});lastContent=composerDocumentContentIdentity(next);applying=false}})
 watch(()=>[props.disabled,props.readonly],()=>editor.value?.setEditable(!props.disabled&&!props.readonly&&!modelUnsupported.value))
 watch(()=>props.placeholder,placeholder=>{const current=editor.value;if(current)current.setOptions({editorProps:{...current.options.editorProps,attributes:{class:'composer-richtext',role:'textbox','aria-multiline':'true','aria-label':'消息编辑器','data-placeholder':placeholder}}})})
 watch(()=>textMenu.value?.open,(value,previous)=>{if(previous&&!value&&!linkOpen.value)restoreSelection()})
-onMounted(()=>{mounted=true;createEditor();window.addEventListener('resize',clampLinkPanel);if(root.value)unregister=registerComposerEditor(root.value,handle)})
-onBeforeUnmount(()=>{clearTimeout(compositionTimer);clearTimeout(compositionGuard);window.removeEventListener('resize',clampLinkPanel);unregister?.();bookmarks.forEach(record=>{record.valid=false});editor.value?.destroy()})
+watch(linkOpen,async value=>{linkResize?.disconnect();if(!value)return;await nextTick();if(!linkOpen.value||!editor.value||!linkPanel.value)return;linkResize||=new ResizeObserver(()=>clampLinkPanel());linkResize.observe(composerOverlayBoundary(editor.value.view.dom));linkResize.observe(linkPanel.value)})
+onMounted(()=>{mounted=true;createEditor();window.addEventListener('resize',clampLinkPanel);window.addEventListener('scroll',clampLinkPanel,true);if(root.value)unregister=registerComposerEditor(root.value,handle)})
+onBeforeUnmount(()=>{clearTimeout(compositionTimer);clearTimeout(compositionGuard);linkResize?.disconnect();window.removeEventListener('resize',clampLinkPanel);window.removeEventListener('scroll',clampLinkPanel,true);unregister?.();bookmarks.forEach(record=>{record.valid=false});editor.value?.destroy()})
 defineExpose(handle)
 </script>
 <style>
 .composer-document-editor{position:relative;width:100%;min-width:0;color:var(--navora-ink,#263b55);font-size:14px;line-height:1.6}
+.composer-task-declarations{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 6px}
+.composer-task-declaration{display:flex;align-items:center;gap:2px;max-width:100%;padding:2px 4px;border:1px solid var(--navora-stroke);border-radius:7px;background:var(--control-selected);font-size:11px;transition:background-color 120ms ease,border-color 120ms ease;user-select:none}
+.composer-task-declaration:hover,.composer-task-declaration:focus-within,.composer-task-declaration:has(.composer-task-meaning[aria-expanded=true]){border-color:var(--navora-accent);background:color-mix(in srgb,var(--control-selected) 88%,var(--navora-accent))}
+.composer-task-declaration>button{display:grid;place-items:center;flex-shrink:0;width:22px;height:22px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--navora-muted);font:inherit;cursor:pointer}
+.composer-task-declaration>.composer-task-meaning{display:flex;align-items:center;gap:5px;min-width:0;flex-shrink:1;width:auto;height:24px;padding:2px 4px;white-space:nowrap;color:var(--navora-accent);background:transparent}
+.composer-task-declaration>.composer-task-meaning:hover{background:transparent}
+.composer-task-declaration>button:not(.composer-task-meaning):hover:not(:disabled){background:color-mix(in srgb,var(--control-danger) 12%,transparent);color:var(--control-danger)}
+.composer-task-declaration>button:disabled{opacity:.4;cursor:default}
+.composer-task-declaration>button:focus-visible{outline:2px solid var(--navora-accent);outline-offset:1px}
+.composer-task-meaning-text{font-size:11px;line-height:1.5;color:var(--navora-muted);margin:0 0 6px}
+.composer-task-declaration svg{width:13px;height:13px;flex-shrink:0}
+@media(prefers-reduced-motion:reduce){.composer-task-declaration{transition:none}}
 .composer-document-unreadable{font-size:12px;color:var(--control-danger,#ad4239);margin:0 0 8px}
 .composer-document-editor .composer-richtext{min-height:60px;max-height:32dvh;overflow:auto;overscroll-behavior:contain;outline:none;padding:6px 4px;white-space:pre-wrap;overflow-wrap:anywhere;cursor:text}
 .composer-document-editor .composer-richtext:focus-visible{outline:none;box-shadow:none}
@@ -328,7 +371,7 @@ defineExpose(handle)
 .composer-editor-menu-separator{height:1px;margin:5px 4px;background:var(--navora-stroke,#dbe1e9)}
 .composer-editor-menu-shortcut{margin-left:auto;padding-left:20px;color:var(--navora-muted,#788695);font-size:12px}
 .composer-link-scrim{position:fixed;inset:0;z-index:12000}
-.composer-link-panel{position:fixed;box-sizing:border-box;width:min(360px,calc(100vw - 16px));max-height:calc(100dvh - 16px);overflow:auto;z-index:12001;padding:14px;border:1px solid var(--navora-stroke,#dbe1e9);border-radius:12px;background:var(--navora-surface,#fff);color:var(--navora-ink,#263b55);box-shadow:0 8px 28px #18203029;font-size:13px}
+.composer-link-panel{position:fixed;inset:auto;margin:0;box-sizing:border-box;width:min(360px,calc(100vw - 16px));max-height:calc(100dvh - 16px);overflow:auto;z-index:12001;padding:14px;border:1px solid var(--navora-stroke,#dbe1e9);border-radius:12px;background:var(--navora-surface,#fff);color:var(--navora-ink,#263b55);box-shadow:0 8px 28px #18203029;font-size:13px}
 .composer-link-panel>label{display:block;margin-bottom:10px;font-size:12px;color:var(--navora-muted,#788695)}
 .composer-link-panel input,.composer-link-panel textarea{display:block;box-sizing:border-box;width:100%;padding:7px 9px;margin-top:5px;border:1px solid var(--navora-stroke,#dbe1e9);border-radius:7px;background:var(--appearance-well,#f8f9fb);color:var(--navora-ink,#263b55);font:inherit;font-size:13px;resize:vertical;outline-color:var(--navora-accent,#3269ac)}
 .composer-link-hint,.composer-link-error{font-size:11px;line-height:1.5;margin:8px 0}.composer-link-hint{color:var(--navora-muted,#788695)}.composer-link-error{color:var(--control-danger,#b65045)}

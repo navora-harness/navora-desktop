@@ -62,30 +62,39 @@
             <p class="preview-desc">{{ livePreview?.description || '（无描述）' }}</p>
           </div>
 
-          <dl class="meta-grid">
-            <div class="meta-row">
-              <dt>方式</dt>
-              <dd>{{ modeLabel }}</dd>
-            </div>
-            <div class="meta-row">
-              <dt>来源</dt>
-              <dd class="mono" :title="livePreview?.sourcePath || undefined">
-                {{ livePreview?.sourceLabel || '—' }}
-              </dd>
-            </div>
-            <div v-if="sizeLabel" class="meta-row">
-              <dt>大小</dt>
-              <dd>{{ sizeLabel }}</dd>
-            </div>
-            <div class="meta-row">
-              <dt>标识</dt>
-              <dd class="mono">{{ livePreview?.id || '—' }}</dd>
-            </div>
-            <div v-if="livePreview?.suite || isSuiteZip" class="meta-row">
-              <dt>套件</dt>
-              <dd class="mono">{{ livePreview?.suite || livePreview?.productId || '—' }}</dd>
-            </div>
-          </dl>
+          <details class="preview-details" :open="detailsOpen" @toggle="onDetailsToggle">
+            <summary>
+              <span>安装详情</span>
+              <AppIcon icon="chevron-down" />
+            </summary>
+            <p v-if="livePreview?.description" class="preview-full-desc selectable">
+              {{ livePreview.description }}
+            </p>
+            <dl class="meta-grid">
+              <div class="meta-row">
+                <dt>方式</dt>
+                <dd>{{ modeLabel }}</dd>
+              </div>
+              <div class="meta-row">
+                <dt>来源</dt>
+                <dd class="mono">
+                  {{ livePreview?.sourcePath || livePreview?.sourceLabel || '—' }}
+                </dd>
+              </div>
+              <div v-if="sizeLabel" class="meta-row">
+                <dt>大小</dt>
+                <dd>{{ sizeLabel }}</dd>
+              </div>
+              <div class="meta-row">
+                <dt>标识</dt>
+                <dd class="mono">{{ livePreview?.id || '—' }}</dd>
+              </div>
+              <div v-if="livePreview?.suite || isSuiteZip" class="meta-row">
+                <dt>套件</dt>
+                <dd class="mono">{{ livePreview?.suite || livePreview?.productId || '—' }}</dd>
+              </div>
+            </dl>
+          </details>
 
           <div v-if="livePreview?.existing" class="conflict-box" role="status">
             <div class="conflict-title">将覆盖已有插件</div>
@@ -224,6 +233,7 @@ const stepIndex = ref(0)
 const selectedPackageId = ref('')
 const livePreview = ref<PluginImportPreview | null>(null)
 const selecting = ref(false)
+const detailsOpen = ref(false)
 let stopProgress: (() => void) | null = null
 let phaseTimer: ReturnType<typeof setInterval> | null = null
 
@@ -394,6 +404,7 @@ function planSteps(preview: PluginImportPreview | null): StepDef[] {
 }
 
 function boot(preview: PluginImportPreview | null) {
+  detailsOpen.value = false
   livePreview.value = preview
   selectedPackageId.value =
     preview?.displayMode === 'suite'
@@ -405,6 +416,10 @@ function boot(preview: PluginImportPreview | null) {
   stepDefs.value = planSteps(preview)
   stepIndex.value = 0
   selecting.value = false
+}
+
+function onDetailsToggle(event: Event) {
+  detailsOpen.value = (event.currentTarget as HTMLDetailsElement).open
 }
 
 watch(
@@ -514,17 +529,17 @@ async function goNextFromTarget() {
   gap: 6px;
   padding: 4px 10px 4px 4px;
   border-radius: 999px;
-  background: #eef3f7;
-  color: #8a9aab;
+  background: var(--navora-header);
+  color: var(--navora-muted);
   font-size: 0.75rem;
   font-weight: 600;
 }
 .step-rail-item.active {
-  background: rgba(27, 79, 114, 0.12);
-  color: #1b4f72;
+  background: var(--control-selected, var(--navora-header));
+  color: var(--navora-accent);
 }
 .step-rail-item.done {
-  color: #5d6d7e;
+  color: var(--navora-muted);
 }
 .step-rail-num {
   width: 20px;
@@ -533,32 +548,32 @@ async function goNextFromTarget() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: #fff;
+  background: var(--navora-surface);
   font-variant-numeric: tabular-nums;
   font-size: 0.72rem;
 }
 .step-rail-item.active .step-rail-num {
-  background: #1b4f72;
-  color: #fff;
+  background: var(--navora-accent);
+  color: var(--appearance-on-accent, #fff);
 }
 
 .hero {
   padding: 12px 14px;
   border-radius: 12px;
-  border: 1px solid #e0e7ee;
-  background: linear-gradient(180deg, #f7fafc 0%, #fff 100%);
+  border: 1px solid var(--navora-stroke);
+  background: var(--navora-header);
 }
 .hero-name {
   font-size: 1.05rem;
   font-weight: 750;
-  color: #15202b;
+  color: var(--navora-ink);
   letter-spacing: -0.01em;
 }
 .hero-desc {
   margin: 6px 0 0;
   font-size: 0.88rem;
   line-height: 1.45;
-  color: #3d5163;
+  color: var(--navora-muted);
 }
 .chip-row {
   display: flex;
@@ -571,8 +586,8 @@ async function goNextFromTarget() {
   align-items: center;
   padding: 2px 8px;
   border-radius: 999px;
-  background: #eef3f7;
-  color: #5a6b7a;
+  background: var(--navora-header);
+  color: var(--navora-muted);
   font-size: 0.75rem;
 }
 .field {
@@ -581,26 +596,26 @@ async function goNextFromTarget() {
 .field-label {
   font-size: 0.78rem;
   font-weight: 650;
-  color: #5a6b7a;
+  color: var(--navora-muted);
   margin-bottom: 6px;
 }
 .field-hint {
   margin: 8px 0 0;
   font-size: 0.8rem;
   line-height: 1.4;
-  color: #5a6b7a;
+  color: var(--navora-muted);
 }
 
 .preview-card {
   border-radius: 12px;
-  border: 1px solid #e0e7ee;
-  background: #f8fafc;
+  border: 1px solid var(--navora-stroke);
+  background: var(--navora-surface);
   overflow: hidden;
   transition: opacity 0.2s ease;
 }
 .preview-head {
   padding: 14px 16px 12px;
-  border-bottom: 1px solid #e8eef4;
+  border-bottom: 1px solid var(--navora-stroke);
 }
 .preview-title-row {
   display: flex;
@@ -609,22 +624,66 @@ async function goNextFromTarget() {
   flex-wrap: wrap;
 }
 .preview-name {
-  font-size: 1.08rem;
-  font-weight: 700;
-  color: #15202b;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--navora-ink);
   line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 .preview-ver {
   font-size: 0.78rem;
   font-weight: 600;
-  color: #5d6d7e;
+  color: var(--navora-muted);
   font-variant-numeric: tabular-nums;
 }
 .preview-desc {
   margin: 8px 0 0;
-  color: #5d6d7e;
-  font-size: 0.88rem;
+  color: var(--navora-muted);
+  font-size: 13px;
   line-height: 1.5;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.preview-details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 16px;
+  color: var(--navora-muted);
+  font-size: 12px;
+  list-style: none;
+}
+.preview-details > summary::-webkit-details-marker {
+  display: none;
+}
+.preview-details > summary:hover {
+  background: var(--control-hover, var(--navora-header));
+  color: var(--navora-ink);
+}
+.preview-details > summary:focus-visible {
+  outline: 2px solid var(--navora-accent);
+  outline-offset: -3px;
+}
+.preview-details > summary svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.preview-details[open] > summary svg {
+  transform: rotate(180deg);
+}
+.preview-full-desc {
+  margin: 0;
+  padding: 2px 16px 10px;
+  color: var(--navora-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .meta-grid {
@@ -639,28 +698,27 @@ async function goNextFromTarget() {
   padding: 8px 16px;
 }
 .meta-row + .meta-row {
-  border-top: 1px solid #eef2f6;
+  border-top: 1px solid var(--navora-stroke);
 }
 .meta-row dt {
   margin: 0;
   font-size: 0.75rem;
   font-weight: 600;
-  color: #8a9aab;
+  color: var(--navora-muted);
   letter-spacing: 0.02em;
 }
 .meta-row dd {
   margin: 0;
   font-size: 0.86rem;
-  color: #2c3a47;
+  color: var(--navora-ink);
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 .meta-row dd.mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.8rem;
-  color: #3d4f5f;
+  color: var(--navora-muted);
 }
 
 @media (max-width: 600px) {
@@ -685,16 +743,16 @@ async function goNextFromTarget() {
 .conflict-box {
   margin: 0;
   padding: 12px 16px 14px;
-  border-top: 1px solid #f0d6d2;
-  background: #fdf6f5;
+  border-top: 1px solid color-mix(in srgb, var(--control-danger, #c0392b) 25%, var(--navora-stroke));
+  background: color-mix(in srgb, var(--control-danger, #c0392b) 7%, var(--navora-surface));
 }
 .suite-box {
-  border-top-color: #f0c9a8;
-  background: #fff8f1;
+  border-top-color: color-mix(in srgb, var(--control-warning, #b85c1a) 25%, var(--navora-stroke));
+  background: color-mix(in srgb, var(--control-warning, #b85c1a) 7%, var(--navora-surface));
 }
 .suite-box.is-blocked {
-  border-top-color: #f0d6d2;
-  background: #fdf6f5;
+  border-top-color: color-mix(in srgb, var(--control-danger, #c0392b) 25%, var(--navora-stroke));
+  background: color-mix(in srgb, var(--control-danger, #c0392b) 7%, var(--navora-surface));
 }
 .suite-item + .suite-item {
   margin-top: 8px;
@@ -703,16 +761,16 @@ async function goNextFromTarget() {
   margin: 10px 0 0;
   font-size: 0.78rem;
   line-height: 1.45;
-  color: #8a6a64;
+  color: var(--navora-muted);
 }
 .conflict-title {
   font-size: 0.78rem;
   font-weight: 700;
-  color: #c0392b;
+  color: var(--control-danger, #c0392b);
   letter-spacing: 0.02em;
 }
 .suite-box:not(.is-blocked) .conflict-title {
-  color: #b85c1a;
+  color: var(--control-warning, #b85c1a);
 }
 .conflict-body {
   margin-top: 6px;
@@ -724,15 +782,14 @@ async function goNextFromTarget() {
 .conflict-name {
   font-size: 0.9rem;
   font-weight: 650;
-  color: #15202b;
+  color: var(--navora-ink);
 }
 .conflict-meta {
   font-size: 0.76rem;
-  color: #8a6a64;
+  color: var(--navora-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .progress-panel {
@@ -742,8 +799,8 @@ async function goNextFromTarget() {
   margin-top: 14px;
   padding: 14px 16px;
   border-radius: 12px;
-  border: 1px solid #d5e3ef;
-  background: linear-gradient(180deg, #f7fbfe 0%, #eef5fb 100%);
+  border: 1px solid var(--navora-stroke);
+  background: var(--navora-header);
 }
 .progress-glyph {
   width: 28px;
@@ -756,7 +813,7 @@ async function goNextFromTarget() {
 .progress-title {
   font-size: 0.92rem;
   font-weight: 650;
-  color: #15202b;
+  color: var(--navora-ink);
 }
 .progress-steps {
   margin-top: 10px;
@@ -769,30 +826,30 @@ async function goNextFromTarget() {
   align-items: center;
   gap: 8px;
   font-size: 0.8rem;
-  color: #8a9aab;
+  color: var(--navora-muted);
   transition: color 0.2s ease;
 }
 .progress-step.active {
-  color: #1b4f72;
+  color: var(--navora-accent);
   font-weight: 600;
 }
 .progress-step.done {
-  color: #2e7d4f;
+  color: var(--control-success, #2e7d4f);
 }
 .step-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #c5d0db;
+  background: var(--navora-stroke);
   flex-shrink: 0;
 }
 .progress-step.active .step-dot {
-  background: #1b4f72;
-  box-shadow: 0 0 0 3px rgba(27, 79, 114, 0.18);
+  background: var(--navora-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--navora-accent) 18%, transparent);
   animation: plugin-pulse 1.1s ease-in-out infinite;
 }
 .progress-step.done .step-dot {
-  background: #2e7d4f;
+  background: var(--control-success, #2e7d4f);
 }
 
 .mono {
@@ -807,10 +864,10 @@ async function goNextFromTarget() {
 @keyframes plugin-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 3px rgba(27, 79, 114, 0.12);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--navora-accent) 12%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 5px rgba(27, 79, 114, 0.22);
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--navora-accent) 22%, transparent);
   }
 }
 </style>

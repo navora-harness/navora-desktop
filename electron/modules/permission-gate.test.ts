@@ -35,3 +35,17 @@ test('cancelled permission never becomes an approval', async () => {
   assert.deepEqual(await pending, { ok: false, reason: 'aborted' })
   assert.equal(gate.peek('a', 'session.fetch'), 'ask')
 })
+
+test('shared-data confirmation always prompts despite remembered approval and never bypasses denial',async()=>{
+  const config=createDefaultConfig();config.permissions.preset='custom';config.permissions.modes['session.cookies_read']='allow'
+  let prompts=0
+  const gate=new PermissionGate(()=>config,async()=>{prompts++;return 'always_allow'})
+  await gate.check('a','session.cookies_read','regular')
+  assert.equal(prompts,0)
+  await gate.check('a','session.cookies_read','shared',undefined,{forcePrompt:true})
+  await gate.check('a','session.cookies_read','shared again',undefined,{forcePrompt:true})
+  assert.equal(prompts,2)
+  config.permissions.modes['session.cookies_read']='deny'
+  assert.equal((await gate.check('a','session.cookies_read','denied',undefined,{forcePrompt:true})).ok,false)
+  assert.equal(prompts,2)
+})

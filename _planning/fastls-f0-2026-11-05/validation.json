@@ -1,0 +1,54 @@
+{
+  "date": "2026-11-05",
+  "platform": "win32-x64",
+  "binary": "fcurl 0.2.0",
+  "scope": "host runtime F0 lifecycle, bounded admission, trusted call receipts and explicit certificate environment",
+  "targetedTests": {
+    "total": 15,
+    "passed": 15,
+    "failed": 0,
+    "skipped": 0,
+    "runner": "node --test _planning/fcurl-runtime-f0.test.mjs",
+    "realBinary": true,
+    "network": "127.0.0.1 fixture HTTP only"
+  },
+  "typecheck": {
+    "command": "npx tsc -p tsconfig.electron.json --noEmit",
+    "passed": true
+  },
+  "implemented": [
+    "global/per-chat reservations include preparation",
+    "bounded cancellable queue",
+    "monotonic total budget includes queue/cleanup",
+    "dispose closes admission synchronously and awaits close/cleanup",
+    "failed dispose permits cleanup retry without reopening admission",
+    "scoped drain excludes unrelated cleanup failures",
+    "recheck host admission/current run after queue and before dispatch",
+    "host-generated per-call requestId and per-spawn attemptId",
+    "host receipt excludes URL/header/body/credentials",
+    "validated constructor certificate environment snapshot and explicit trust source",
+    "startup cleanup retains live/unknown orphan ownership",
+    "cancellation and cleanup failure retain priority over stale-run classification",
+    "AgentRuntime closes unified new-run/insert/subchat/continuation admission and can reopen after failed quit"
+  ],
+  "notImplementedOrNotCertified": [
+    "Windows Job Object and parent-death process-tree cleanup",
+    "macOS/Linux real host/binary tests",
+    "Cookie context and redirect follow",
+    "Windows private-directory ACL verification",
+    "strict temporary disk quota"
+  ],
+  "agentClosingTests": {
+    "total": 36,
+    "passed": 36,
+    "newClosingCases": 3,
+    "runner": "node --test _planning/agent-runtime-closing-policy.test.mjs"
+  },
+  "fullSuiteSnapshot": {
+    "total": 889,
+    "passed": 884,
+    "failed": 5,
+    "failures": "shared/window-find-panel.test invalid_native_ui_field; unrelated current search changes",
+    "runtimeAndAgentClosingPassed": true
+  }
+}

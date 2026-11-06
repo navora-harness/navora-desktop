@@ -2,7 +2,7 @@
 import type { WebContents } from 'electron'
 import { invalidatePointerMotion } from './pointer-motion'
 import { assertBrowserInputCurrent, commitTrustedInput, currentBrowserInputOperation } from './browser-input-context'
-import { getBrowserAutomationController, type BrowserAutomationOperation } from './browser-automation-controller'
+import { getBrowserAutomationController, withBrowserPointerInput, type BrowserAutomationOperation } from './browser-automation-controller'
 
 export type TrustedPointerAction = 'down' | 'move' | 'up' | 'wheel'
 type Button = 'left' | 'middle' | 'right'
@@ -29,17 +29,18 @@ function clampInt(n: number, fallback = 0): number { return Number.isFinite(n) ?
 async function rawPointer(wc: WebContents, opts: TrustedPointerOpts): Promise<void> {
   if (wc.isDestroyed()) throw new Error('browser_page_destroyed')
   const x = clampInt(opts.x), y = clampInt(opts.y), button = opts.button ?? 'left'
-  const api = wc as unknown as { dispatchMouseEvent?: (event: Electron.MouseEvent) => Promise<unknown> }
+  const api = wc as unknown as { dispatchMouseEvent?: (event: Electron.AutomationMouseEvent) => Promise<Electron.AgentDispatchResult> }
   if (typeof api.dispatchMouseEvent === 'function') {
     const type = opts.action === 'down' ? 'mousePressed' : opts.action === 'up' ? 'mouseReleased' : opts.action === 'wheel' ? 'mouseWheel' : 'mouseMoved'
-    const result = await api.dispatchMouseEvent({
-      type, x, y, button: opts.action === 'down' || opts.action === 'up' ? button : 'none',
+    const result = await withBrowserPointerInput(wc, () => api.dispatchMouseEvent!({
+      type, position: { x, y }, button: opts.action === 'down' || opts.action === 'up' ? button : 'none',
       buttons: opts.buttons ?? (opts.action === 'down' ? bits[button] : 0),
       ...(opts.action === 'down' || opts.action === 'up' ? { clickCount: opts.clickCount ?? 1 } : {}),
       ...(opts.action === 'wheel' ? { deltaX: 0, deltaY: clampInt(opts.deltaY ?? 0) } : {}),
-    })
-    if (result && typeof result === 'object' && (result as Record<string, unknown>).status === 'failed') {
-      throw new Error(String((result as Record<string, unknown>).reason || 'pointer_dispatch_failed'))
+    }), result => result.status === 'dispatched' && !result.deliveryWarning)
+    currentBrowserInputOperation(wc)?.noteResult(result)
+    if (result?.status !== 'dispatched') {
+      throw new Error(result?.reason || 'pointer_dispatch_failed')
     }
     return
   }
@@ -77,7 +78,11 @@ function trackPress(wc: WebContents, opts: TrustedPointerOpts): Held {
       entry.forget()
     })(),
   }
-  unregister = owner?.registerCleanup(entry.release)
+  const resetCoversInput = typeof wc.dispatchMouseEvent === 'function'
+  unregister = owner?.registerCleanup(async context => {
+    if(context?.nativeResetConfirmed&&resetCoversInput){entry.forget();return}
+    await entry.release()
+  })
   buttons.set(button, entry); held.set(wc, buttons)
   return entry
 }
@@ -119,6 +124,8 @@ export async function dispatchTrustedClick(wc: WebContents, x: number, y: number
     await dispatchTrustedPointer(wc, { action: 'up', x, y })
   } finally {
     press ??= held.get(wc)?.get('left')
-    if (press && press.owner === currentBrowserInputOperation(wc)) await press.release()
+    // Managed cleanup waits for any reset barrier and knows whether native reset
+    // already released this press. Only unowned callers need this local finally.
+    if (press && !press.owner) await press.release()
   }
 }

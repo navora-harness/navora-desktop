@@ -2,7 +2,9 @@ import type {ChatMessage} from './types'
 import {makeFileTab} from './file-tabs'
 import {finalOutputs} from './message-presentation'
 
-export type ResourceEvidence={messageId:string;turnId?:string;runId?:string;answerId?:string;operation:string;createdAt:number}
+export type ResourcePurpose='delivery'|'process'|'example'|'evidence'
+export type ResourceEvidence={messageId:string;turnId?:string;runId?:string;answerId?:string;operation:string;createdAt:number;purpose?:ResourcePurpose}
+export function resourcePurpose(value:unknown):ResourcePurpose|undefined{return ['delivery','process','example','evidence'].includes(String(value))?value as ResourcePurpose:undefined}
 export type WorkspaceResource = {
   id: string
   ownerChatId: string
@@ -30,8 +32,10 @@ export function associateResourceEvidence(entries:readonly WorkspaceResource[],m
     }
     if(finals.has(message.id)){
       if(message.meta?.runId)completedAnswers.set(message.meta.runId,message.id)
+      const declarations=new Map((Array.isArray(message.meta?.fileOutputs)?message.meta.fileOutputs:[]).flatMap(output=>{if(!output||typeof output!=='object')return [];const path=safe(output.path),purpose=resourcePurpose(output.purpose);return path&&purpose?[[path,purpose] as const]:[]}))
       for(const [path,record] of pending){
         if(record.runId&&message.meta?.runId&&record.runId!==message.meta.runId)continue
+        const declared=declarations.get(path);if(declared)record.purpose=declared
         record.answerId=message.id;pending.delete(path)
       }
       continue
@@ -49,7 +53,7 @@ export function associateResourceEvidence(entries:readonly WorkspaceResource[],m
     }
     if(message.role!=='tool'||message.meta?.status!=='done'||message.meta?.fromPlugin)continue
     const operation=String(message.meta?.toolName||'')
-    if(!['file_write','file_copy','file_move','file_concat','file_download','file_delete','browser_screenshot','desktop_screenshot'].includes(operation))continue
+    if(!['file_write','file_copy','file_move','file_concat','file_download','file_download_compose','file_delete','browser_screenshot','desktop_screenshot'].includes(operation))continue
     let result=message.meta?.result
     if(!result&&message.content.length<=262144){try{result=JSON.parse(message.content)}catch{continue}}
     if(!result||typeof result!=='object'||Array.isArray(result))continue
@@ -60,7 +64,9 @@ export function associateResourceEvidence(entries:readonly WorkspaceResource[],m
     if(!path)continue
     if(operation==='file_delete'){clear(path);continue}
     if(!wanted.has(path))continue
-    const record:ResourceEvidence={messageId:message.id,turnId:message.meta.turnId||turnId,operation,createdAt:message.createdAt,...(message.meta.runId?{runId:message.meta.runId}:{})}
+    const args=message.meta?.args&&typeof message.meta.args==='object'?message.meta.args as Record<string,unknown>:undefined
+    const purpose=resourcePurpose(message.meta.resourcePurpose)||resourcePurpose(data.purpose)||resourcePurpose(args?.purpose)
+    const record:ResourceEvidence={messageId:message.id,turnId:message.meta.turnId||turnId,operation,createdAt:message.createdAt,...(message.meta.runId?{runId:message.meta.runId}:{}),...(purpose?{purpose}:{})}
     records.set(path,record);pending.set(path,record)
   }
   return entries.map(entry=>({...entry,evidence:records.get(entry.path)}))
@@ -71,7 +77,7 @@ export function replyArtifactGroups(entries:readonly WorkspaceResource[],message
   const groups=new Map<string,WorkspaceResource[]>()
   for(const entry of associateResourceEvidence(entries,messages)){
     const answerId=entry.evidence?.answerId
-    if(!answerId)continue
+    if(!answerId||entry.evidence?.purpose&&entry.evidence.purpose!=='delivery')continue
     const group=groups.get(answerId)||[]
     group.push(entry)
     groups.set(answerId,group)

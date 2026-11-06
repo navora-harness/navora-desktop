@@ -43,7 +43,16 @@ fs.writeFileSync(path.join(catalogRoot,'index.json'),JSON.stringify({schemaVersi
 const importArchive=path.join(root,'imported-helper.zip'),importZip=new AdmZip();for(const [file,content] of Object.entries(files('imported-helper','导入助手')))importZip.addFile(file,Buffer.from(content));importZip.writeZip(importArchive)
 const config=createDefaultConfig();config.app.onboarding_completed=true;config.app.ai_generate_chat_title=false;config.remote.enabled=false;config.store.base_url=catalogRoot
 fs.writeFileSync(path.join(root,'config.yml'),JSON.stringify(config));app.setPath('userData',root)
-BrowserWindow.prototype.show=function(){};BrowserWindow.prototype.focus=function(){}
+if(process.env.NAVORA_UI_PLUGIN_RECOVERY==='1'){
+  const plugins=path.join(root,'plugins'),good=path.join(plugins,'.transaction-quarantine',crypto.randomUUID()),bad=path.join(plugins,'.transactions',crypto.randomUUID())
+  fs.mkdirSync(path.join(good,'backup'),{recursive:true});fs.mkdirSync(bad,{recursive:true})
+  fs.writeFileSync(path.join(good,'journal.json'),JSON.stringify({version:2,target:null,existing:[],removed:[],oldIndex:null,committed:false}))
+  fs.writeFileSync(path.join(bad,'journal.json'),'{"private-token":"SECRET", invalid')
+  fs.appendFileSync(path.join(plugins,'local-tool/main.cjs'),`\nrequire('node:fs').writeFileSync(${JSON.stringify(path.join(root,'plugin-executed'))},'loaded')`)
+}
+// The hidden compositor fixture supplies the visibility notification that the
+// normal window manager sends. Startup presentation has its own native suite.
+BrowserWindow.prototype.show=function(){if(process.env.NAVORA_UI_PLUGIN_RECOVERY==='1')this.emit('show')};BrowserWindow.prototype.focus=function(){}
 dialog.showOpenDialog=(async()=>({canceled:false,filePaths:[importArchive]})) as typeof dialog.showOpenDialog
 dialog.showSaveDialog=(async()=>({canceled:false,filePath:path.join(root,'exported-plugin.zip')})) as typeof dialog.showSaveDialog
 const wait=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms))
@@ -59,6 +68,55 @@ win.webContents.once('did-finish-load',()=>void(async()=>{
   const capture=async(name:string)=>{await wait(80);fs.writeFileSync(path.join(output,name+'.png'),(await win.webContents.capturePage(undefined,{stayHidden:true})).toPNG())}
   try{
     for(let n=0;n<60;n++){if(await js('!!document.querySelector(".composer")'))break;await wait(100)}win.setMinimumSize(0,0);win.setContentSize(1440,900);await wait(150)
+    if(process.env.NAVORA_UI_PLUGIN_RECOVERY==='1'){
+      for(let n=0;n<80;n++){if(await js('document.documentElement.dataset.navoraStartup!=="loading"'))break;await wait(100)}
+      assert.equal(await js('document.body.inert'),false,'Hidden test startup gate has released')
+      await js('document.querySelector("[data-panel=plugins]").click()')
+      for(let n=0;n<80;n++){if(await js('document.querySelector(".plugin-recovery")?.checkVisibility()'))break;await wait(100)}
+      assert.equal(await js('document.querySelector(".plugin-recovery")?.checkVisibility()'),true,JSON.stringify(await js('({text:document.body.innerText,api:typeof window.navora.plugins.recoveryStatus})')))
+      assert.equal(fs.existsSync(path.join(root,'plugin-executed')),false,'Blocked storage does not execute plugin entries')
+      const initial=await js('window.navora.plugins.recoveryStatus()');assert.equal(initial.blocked,true);assert.equal(initial.issues.length,2)
+      await js('Object.defineProperty(navigator.clipboard,"writeText",{configurable:true,value:async text=>{window.__recoveryDiagnostic=text}})')
+      await click('.plugin-recovery button:last-child')
+      assert.equal(await js('JSON.parse(window.__recoveryDiagnostic).blocked'),true)
+      assert.equal(await js('window.__recoveryDiagnostic.includes("SECRET")'),false,'Copied diagnostics omit parser source snippets')
+      await capture('plugin-recovery-required')
+      await click('.plugin-recovery button:first-child');await wait(250)
+      const partial=await js('window.navora.plugins.recoveryStatus()');assert.equal(partial.blocked,true);assert.equal(partial.recovered,1);assert.equal(partial.issues.length,1)
+      assert.equal(fs.existsSync(path.join(root,'plugin-executed')),false)
+      win.setContentSize(390,844);await wait(200)
+      await click('[data-panel="plugins"]');await wait(150)
+      assert.equal(await js('document.documentElement.scrollWidth<=innerWidth+1'),true)
+      await capture('plugin-recovery-narrow')
+      // Repair only this isolated fixture's corrupt record, then exercise the
+      // real main/preload retry route. No UI action discards quarantine data.
+      const evidence=partial.issues[0].path
+      assert.equal(path.dirname(evidence),path.join(root,'plugins/.transaction-quarantine'))
+      fs.mkdirSync(path.join(evidence,'backup'),{recursive:true})
+      fs.writeFileSync(path.join(evidence,'journal.json'),JSON.stringify({version:2,target:null,existing:[],removed:[],oldIndex:null,committed:false}))
+      await click('.plugin-recovery button:first-child');await wait(350)
+      const complete=await js('window.navora.plugins.recoveryStatus()');assert.equal(complete.blocked,false,JSON.stringify(complete))
+      assert.equal(await js('!!document.querySelector(".plugin-recovery")'),false)
+      assert.equal((await js('window.navora.plugins.list()')).length,3)
+      assert.equal(fs.existsSync(path.join(root,'plugin-executed')),true)
+      if(process.platform==='win32'){
+        const index=path.join(root,'plugins/index.json')
+        fs.chmodSync(index,0o444)
+        try{
+          const failed=await js('window.navora.plugins.remove("local-tool")')
+          assert.equal(failed.error,'install_rollback_failed')
+          for(let n=0;n<40;n++){if(await js('!!document.querySelector(".plugin-recovery")'))break;await wait(50)}
+          assert.equal(await js('document.querySelector(".plugin-recovery")?.checkVisibility()'),true,'Live rollback failure notifies the already open workspace')
+        }finally{fs.chmodSync(index,0o666)}
+        await click('.plugin-recovery button:first-child');await wait(350)
+        assert.equal((await js('window.navora.plugins.recoveryStatus()')).blocked,false)
+        assert.equal((await js('window.navora.plugins.list()')).length,3,'Recovery restores the failed uninstall and reloads the previous plugin')
+      }
+      const unexpected=errors.filter(error=>!error.includes('installation recovery required'))
+      assert.deepEqual(unexpected,[])
+      fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,reduced,checks:['startup-blocks-entry-execution','real-recovery-ipc','sanitized-copy','retry-valid-quarantine','invalid-journal-retained','narrow-layout','retry-after-fixture-repair-loads-plugins',...(process.platform==='win32'?['live-rollback-failure-notifies-recovery']:[])]},null,2))
+      app.exit(0);return
+    }
     await input('.composer-input textarea','保留的对话草稿')
     await js(`(()=>{const button=[...document.querySelectorAll('[aria-label="页面更多操作"]')].find(el=>el.checkVisibility());if(!button)throw Error('Visible page actions are missing');button.click()})()`);await wait(180)
     const menuLayout=await js('(()=>{const menu=document.querySelector(".conversation-actions-menu"),parent=menu.parentElement,r=menu.getBoundingClientRect();return {visible:menu.checkVisibility(),rect:{x:r.x,y:r.y,width:r.width,height:r.height},visibility:getComputedStyle(menu).visibility,parentHeight:parent.clientHeight,parentOverflow:getComputedStyle(parent).overflow}})()')

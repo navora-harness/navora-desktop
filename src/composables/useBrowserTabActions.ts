@@ -1,12 +1,14 @@
 import {computed,onBeforeUnmount,ref,watch} from 'vue'
 import type {BrowserTabMenuItem} from '@/components/BrowserTabContextMenu.vue'
+import {browserPageAddressError,sameBrowserPageAddress,type BrowserPageAddressState,type BrowserPageAddressContext} from '@shared/browser-page-address'
 
 /** A host supplies only browser pages; file tabs never enter browser batch actions. */
-export type BrowserActionTab={id:string;title:string;url?:string;pinned?:boolean;muted?:boolean;audible?:boolean;loading?:boolean;movable?:boolean;ownerId?:string}
+export type BrowserActionTab={id:string;title:string;url?:string;pinned?:boolean;muted?:boolean;audible?:boolean;loading?:boolean;movable?:boolean;ownerId?:string;addressState?:BrowserPageAddressState}
 export type BrowserActionHost={id:string;label:string;count:number;disabled?:boolean}
 export type BrowserTabActionRequest={
-  command:'new'|'reopen'|'reload'|'duplicate'|'pin'|'mute'|'copy-url'|'move-start'|'move-end'|'move-new'|'move-host'|'attach'|'close'
+  command:'new'|'reopen'|'reload'|'duplicate'|'pin'|'mute'|'copy-url'|'external'|'move-start'|'move-end'|'move-new'|'move-host'|'attach'|'close'
   ids:string[];targetId?:string;afterId?:string;value?:boolean;hostId?:string
+  addressContexts?:BrowserPageAddressContext[]
 }
 type MenuHandle={show:(event:MouseEvent|KeyboardEvent)=>void;hide:()=>void}
 type BrowserTabActionOptions={
@@ -18,6 +20,7 @@ type BrowserTabActionOptions={
 export function useBrowserTabActions(options:BrowserTabActionOptions){
   const menuRef=ref<MenuHandle>(),contextId=ref<string|null>(null),selectedIds=ref<string[]>([]),pending=ref(false)
   let anchorId=''
+  let addressSnapshot=new Map<string,BrowserPageAddressContext|undefined>()
   const tabs=computed(()=>options.tabs()),busy=computed(()=>pending.value||!!options.busy?.())
   const ordered=(ids:Iterable<string>)=>{const selected=new Set(ids);return tabs.value.filter(tab=>selected.has(tab.id)).map(tab=>tab.id)}
   const contextIds=computed(()=>{
@@ -48,6 +51,7 @@ export function useBrowserTabActions(options:BrowserTabActionOptions){
   function showMenu(event:MouseEvent|KeyboardEvent,id:string|null){
     if(id&&!tabs.value.some(tab=>tab.id===id))return
     contextId.value=id
+    addressSnapshot=new Map(targets.value.map(tab=>[tab.id,tab.addressState?.context]))
     window.dispatchEvent(new Event('navora:tab-hover-dismiss'))
     menuRef.value?.show(event)
   }
@@ -71,7 +75,8 @@ export function useBrowserTabActions(options:BrowserTabActionOptions){
       {id:'duplicate',label:many?`复制${suffix}`:'复制标签页',icon:'copy',disabled},
       {id:'pin',label:`${allPinned?'取消固定':'固定'}${many?suffix:''}`,icon:'thumbtack',disabled},
       {id:'mute',label:`${allMuted?'取消静音':'静音'}${many?suffix:''}`,icon:allMuted?'tab-muted':'tab-audio',disabled},
-      {id:'copy-url',label:many?'复制所选标签页网址':'复制网址',icon:'link',disabled:disabled||!targets.value.some(tab=>isPageUrl(tab.url)),reason:targets.value.some(tab=>isPageUrl(tab.url))?undefined:'空白新标签页没有可复制的网址'},
+      {id:'copy-url',label:many?'复制所选标签页网址':targets.value[0]?.addressState?.copyLabel||'复制网址',icon:'link',disabled:disabled||!targets.value.some(tab=>!!tab.addressState?.context),reason:targets.value.some(tab=>!!tab.addressState?.context)?undefined:targets.value[0]?.addressState?.reason||'当前页面没有可复制的网址'},
+      ...(targets.value.some(tab=>tab.addressState?.visible)?[{id:'external',label:many?'在外部浏览器中打开':targets.value[0]?.addressState?.label||'在外部浏览器中打开',icon:'arrow-up-right-from-square',disabled:disabled||many||!targets.value[0]?.addressState?.context,reason:many?'请选择一个标签页后打开':targets.value[0]?.addressState?.reason}]:[]),
     )
     const mixedOwners=new Set(targets.value.map(tab=>tab.ownerId).filter(Boolean)).size>1
     const moveDisabled=disabled||mixedOwners||targets.value.some(tab=>tab.movable===false)
@@ -102,13 +107,17 @@ export function useBrowserTabActions(options:BrowserTabActionOptions){
     if(busy.value||!item||item.disabled||item.children)return
     if(action==='select-all'){selectAll();closeMenu();return}
     const ids=[...contextIds.value],request:BrowserTabActionRequest={command:'close',ids,targetId:contextId.value||undefined}
+    if(action==='copy-url'||action==='external'){
+      if(ids.some(id=>!sameBrowserPageAddress(addressSnapshot.get(id),tabs.value.find(tab=>tab.id===id)?.addressState?.context)&&!!addressSnapshot.get(id))){closeMenu();options.onError('网页已变化，请重新打开菜单。');return}
+      request.addressContexts=ids.flatMap(id=>addressSnapshot.get(id)?[addressSnapshot.get(id)!]:[])
+    }
     if(action==='new'){request.command='new';request.afterId=contextId.value||options.activeId()||undefined}
     else if(action==='reopen')request.command='reopen'
     else if(action==='pin'){request.command='pin';request.value=!targets.value.every(tab=>tab.pinned)}
     else if(action==='mute'){request.command='mute';request.value=!targets.value.every(tab=>tab.muted)}
     else if(action==='close-left'||action==='close-right'||action==='close-others'){request.ids=closeCandidates(action==='close-left'?'left':action==='close-right'?'right':'others');request.targetId=undefined}
     else if(action.startsWith('move-host:')){request.command='move-host';request.hostId=action.slice('move-host:'.length)}
-    else if(['reload','duplicate','copy-url','move-start','move-end','move-new','attach','close'].includes(action))request.command=action as BrowserTabActionRequest['command']
+    else if(['reload','duplicate','copy-url','external','move-start','move-end','move-new','move-host','attach','close'].includes(action))request.command=action as BrowserTabActionRequest['command']
     else return
     if(!request.ids.length&&!['new','reopen'].includes(request.command))return
     closeMenu();pending.value=true
@@ -123,9 +132,9 @@ export function useBrowserTabActions(options:BrowserTabActionOptions){
   return {menuRef,menuItems,contextId,contextIds,selectedIds,pending,busy,selectTab,showMenu,closeMenu,execute,isContextTarget,selectAll,clearSelection}
 }
 
-function isPageUrl(url?:string){return !!url&&/^https?:\/\//i.test(url)}
 function actionError(error:unknown){
   const message=String(error)
+  if(/browser_page_address|external_open|url_not_allowed/.test(message))return browserPageAddressError(error)
   if(message.includes('mixed_chat_selection'))return '请选择同一对话的网页后再移动。'
   if(/wrong_host|not_found|not_live|stale/.test(message))return '标签页已移动或关闭，请在当前窗口重新操作。'
   if(/busy|manual_control|annotation/.test(message))return '页面当前正在执行任务，请完成后再操作。'

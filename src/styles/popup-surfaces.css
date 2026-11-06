@@ -1,0 +1,32 @@
+/* HTML overlays position a single painted surface. The library otherwise
+   paints both the overlay wrapper and its content with different corner radii. */
+:root{--html-popup-radius:12px;--html-popup-shadow:0 4px 12px #18202b0a,0 12px 32px #18202b1f}
+.v-menu.v-overlay>.v-overlay__content,
+.v-dialog.v-overlay>.v-overlay__content{
+  padding:0;border:0!important;border-radius:0!important;
+  background:transparent!important;box-shadow:none!important;
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+  overflow:visible;
+}
+.v-menu.v-overlay>.v-overlay__content>:is(div,section,nav,ul,form),
+.v-dialog.v-overlay:not(.v-dialog--fullscreen)>.v-overlay__content>:is(div,section,form):not(form:has(>.v-card,>.v-sheet)),
+.v-dialog.v-overlay:not(.v-dialog--fullscreen)>.v-overlay__content>form>:is(.v-card,.v-sheet){
+  border:1px solid var(--navora-stroke,#dce3ec)!important;
+  border-radius:var(--html-popup-radius)!important;
+  background:var(--navora-surface,#fff)!important;
+  color:var(--navora-ink,#263c50);
+  box-shadow:var(--html-popup-shadow)!important;
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+}
+.v-dialog.v-overlay>.v-overlay__content>form:has(>.v-card,>.v-sheet){
+  border:0!important;border-radius:0!important;background:transparent!important;
+  box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+}
+.v-menu.v-overlay>.v-overlay__content>:is(div,section,nav,ul,form){
+  max-height:inherit;overflow:auto;overscroll-behavior:contain;
+}
+.composer-menu-boundary{position:fixed;pointer-events:none;z-index:2000;contain:layout}
+.composer-menu-boundary>.v-overlay-container{position:absolute;inset:0}
+.composer-menu-boundary .v-overlay{position:absolute!important}
+.composer-menu-boundary .v-overlay__content{max-width:calc(100% - 8px)!important;max-height:calc(100% - 8px)!important}
+.composer-menu-boundary .composer-perm-panel,.composer-menu-boundary .composer-usage-panel{max-width:100%!important;box-sizing:border-box}

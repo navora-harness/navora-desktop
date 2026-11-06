@@ -23,6 +23,7 @@ BrowserWindow.prototype.show=function(){if(!placed.has(this)){placed.add(this);t
 // Actual schema, widgets and application handlers; only disable native activation.
 // This unattended suite does not claim physical keys or OS IME coverage.
 const requests:NativePanelShow[]=[],commands:unknown[]=[],downloadActions:unknown[]=[],nativeVisible=new Set<NativePanel>(),panels:NativePanel[]=[],contentUpdates:NativePanelContent[]=[]
+const panelDiagnostics:unknown[]=[]
 let previewRequests=0,downloadVersion=0,downloads:BrowserDownloadEntry[]=[],observingPageInfo=false,pageInfoConstructed=0,nativeVisualShows=0
 const pageInfoAnchors:unknown[]=[]
 const originalHandle=ipcMain.handle.bind(ipcMain)
@@ -32,6 +33,7 @@ ipcMain.handle=(channel,listener)=>originalHandle(channel,async(event,...args)=>
   if(channel==='navora:native-ui.pageInfo'){observingPageInfo=true;try{return await listener(event,...args)}finally{observingPageInfo=false}}
   if(channel==='navora:native-ui.show'){args[0]={...args[0],focusMode:'none'};requests.push(structuredClone(args[0]))}
   if(channel==='navora:native-ui.update'&&args[2]?.content)contentUpdates.push(structuredClone(args[2].content))
+  if(channel==='navora:native-ui.hide'||channel==='navora:native-ui.destroy')panelDiagnostics.push({channel,id:args[0],time:Date.now()})
   if(channel==='navora:browser.workspace.command')commands.push(structuredClone(args))
   if(channel==='navora:browser.workspace.preview')previewRequests++
   if(channel==='navora:downloads.list')return structuredClone(downloads.filter(item=>!args[0]||item.chatId===args[0]))
@@ -85,13 +87,16 @@ app.on('browser-window-created',(_event,win)=>{
       await until(()=>!!latest('agent-root')&&nativeVisible.size>0,'Agent native panel')
       assert.equal(await js('document.querySelectorAll("[data-browser-agent-panel]").length'),0);assert.equal(commands.length,commandStart);await continuous('Agent-native-panel-keeps-original-webpage-visible-and-draws-without-preview-or-control-change')
       await guest!.executeJavaScript('window.nativeDirectedMoves=[];document.addEventListener("pointermove",event=>window.nativeDirectedMoves.push({trusted:event.isTrusted,x:event.clientX,y:event.clientY,buttons:event.buttons,time:performance.now()}),{capture:true})')
-      const directedSteps:Electron.InputSequenceMouseStep[]=Array.from({length:11},(_,index)=>({kind:'mouse',type:'mouseMoved',x:40+index*10,y:180+index*3,button:'none',buttons:0,atMs:index*50}))
+      const directedSteps:Electron.InputSequenceMouseStep[]=Array.from({length:11},(_,index)=>({kind:'mouse',type:'mouseMoved',position:{x:40+index*10,y:180+index*3},button:'none',buttons:0,atMs:index*50}))
       const directedSequence=await guest!.dispatchInputSequence(directedSteps,{timeoutMs:5000})
       assert.equal(directedSequence.status,'completed');assert.equal(directedSequence.dispatchedCount,directedSteps.length);assert.equal(directedSequence.mouseCount,directedSteps.length);assert.ok(directedSequence.executionMs>=350)
       const directedMoves=await guest!.executeJavaScript('structuredClone(window.nativeDirectedMoves)')
       assert.ok(directedMoves.length>0&&directedMoves.every((event:{trusted:boolean;buttons:number})=>event.trusted&&event.buttons===0));assert.ok(nativeVisible.size>0);assert.equal(await js('document.querySelector(".browser-agent-trigger").getAttribute("aria-expanded")'),'true');assert.equal(commands.length,commandStart)
       metrics.push({directedSequence,directedMoves});await continuous('native-directed-mouse-sequence-completes-with-trusted-pointermove-while-Agent-native-panel-is-open')
-      await js('window.navora.config.save({browser:{automation:{speed_multiplier:1.15}}})');await until(()=>contentUpdates.some(content=>content.id==='agent-root'&&JSON.stringify(content).includes('1.15')),'Agent state updates in stable native tree');checks.push('Agent-live-update-retains-native-instance')
+      // Motion speed lives in settings, rather than the compact Agent summary.
+      const agentShows=requests.filter(request=>request.content.id==='agent-root').length,agentPanel=panels.at(-1)!
+      await js('window.navora.config.save({browser:{automation:{speed_multiplier:1.15}}})');await wait(160)
+      assert.equal(requests.filter(request=>request.content.id==='agent-root').length,agentShows);assert.equal(nativeVisible.has(agentPanel),true);checks.push('Agent-settings-update-retains-native-instance')
       await dismiss();assert.equal(commands.length,commandStart);checks.push('Agent-dismissal-does-not-request-takeover')
 
       await click('.address-site-info');await until(()=>pageInfoConstructed>0,'real page-info construction');assert.equal(await js('document.querySelectorAll(".address-site-popover").length'),0);await continuous(pageInfoVisual?'real-page-info-dialog-overlays-live-webpage':'page-info-delegates-to-real-runtime-constructor-without-DOM-fallback-display-not-exercised');if(pageInfoVisual)await dismiss();else panels.at(-1)!.destroy();await wait(100)
@@ -119,7 +124,7 @@ app.on('browser-window-created',(_event,win)=>{
       metrics.push({identity,pageId,guestWebContentsId:guest!.id,bounds:baselineBounds,previewRequests,webContents:baselineWc,nativePanelShowCalls:panels.length,nativeVisualShows,nativeContentUpdates:contentUpdates.length,pageInfoConstructed,pageInfoAnchors,pageInfoVisual,errors})
       assert.deepEqual(errors,[])
       fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,checks,metrics,boundaries:['NativePanel focusMode is overridden to none in this unattended fixture to avoid foreground activation.',pageInfoVisual?'Explicit PageInfo visual mode enabled; runtime controls its native activation.':'PageInfo uses the real runtime constructor and application delegation; its show is skipped to avoid activation. PageInfo visual display and focus are unverified.','Native button action and dismissal events are injected; physical mouse, native keyboard traversal and OS IME are not covered.','The page uses actual RAF and a changing visual block; this is not a video decoding test.','No active model run is started; control continuity assertions cover the actual idle controller.','Download list and pause IPC responses use isolated simulated data; the production renderer and preload channel are exercised, not the backend download transport.']},null,2));console.log(JSON.stringify({ok:true,checks:checks.length,output}));app.exit(0)
-    }catch(error){const renderer=await js('({address:document.querySelector(".browser-address-bar")?.outerHTML,active:document.activeElement?.outerHTML,trace:window.nativeAddressTrace})').catch(()=>null);fs.writeFileSync(path.join(output,'failed.json'),JSON.stringify({error:String(error),stack:error instanceof Error?error.stack:undefined,checks,requests,metrics,errors,previewRequests,renderer},null,2));console.error(error);app.exit(1)}
+    }catch(error){const renderer=await js('({address:document.querySelector(".browser-address-bar")?.outerHTML,active:document.activeElement?.outerHTML,trace:window.nativeAddressTrace})').catch(()=>null);fs.writeFileSync(path.join(output,'failed.json'),JSON.stringify({error:String(error),stack:error instanceof Error?error.stack:undefined,checks,requests,metrics,errors,previewRequests,renderer,contentUpdates,panelDiagnostics},null,2));console.error(error);app.exit(1)}
   })())
 })
 await import(pathToFileURL(path.join(project,'dist-electron','main.js')).href)

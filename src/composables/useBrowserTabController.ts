@@ -1,6 +1,7 @@
 import {computed,onBeforeUnmount,onMounted,ref,watch} from 'vue'
 import type {BrowserTabCommandInput,BrowserTabCommandResult,BrowserTabState} from '@shared/browser-workspace'
 import {useBrowserTabActions,type BrowserActionTab,type BrowserTabActionRequest} from './useBrowserTabActions'
+import {browserPageAddressState,browserPageAddressError} from '@shared/browser-page-address'
 
 export type BrowserControllerTab=BrowserActionTab&{pageId?:string;chatId?:string}
 export function useBrowserTabController(options:{
@@ -25,7 +26,7 @@ export function useBrowserTabController(options:{
   async function refresh(){await Promise.all([...wantedOwners()].map(refreshOwner))}
   const tabs=computed(()=>options.tabs().map(tab=>{
     const owner=tab.chatId||options.chatId(),page=ownerStates.value.get(owner)?.pages.find(page=>page.windowId===(tab.pageId||tab.id)||page.tabKey===tab.id)
-    return {...tab,ownerId:owner,pinned:page?.pinned??tab.pinned,muted:page?.muted??tab.muted,audible:page?.audible??tab.audible,movable:tab.movable!==false&&!!page&&!page.annotationSelecting&&!page.automation?.activeOperations&&!page.automation?.nativePending}
+    return {...tab,ownerId:owner,addressState:browserPageAddressState(page,owner),pinned:page?.pinned??tab.pinned,muted:page?.muted??tab.muted,audible:page?.audible??tab.audible,movable:tab.movable!==false&&!!page&&!page.annotationSelecting&&!page.automation?.activeOperations&&!page.automation?.nativePending}
   }))
   async function pageId(id:string,chatId=options.chatId()){
     if(options.resolvePageId)return options.resolvePageId(id,chatId)
@@ -37,9 +38,10 @@ export function useBrowserTabController(options:{
     if(!desktop)throw Error('browser_desktop_only')
     const viewChatId=options.chatId(),available=options.tabs(),requested=available.find(tab=>tab.id===(request.ids[0]||request.targetId||request.afterId)),chatId=requested?.chatId||viewChatId;if(!chatId)return
     if(request.ids.some(id=>!available.some(tab=>tab.id===id)))throw Error('browser_page_not_found')
-    if(request.command==='copy-url'){
-      const selected=new Set(request.ids),urls=tabs.value.filter(tab=>selected.has(tab.id)&&/^https?:\/\//i.test(tab.url||'')).map(tab=>tab.url!)
-      if(urls.length)await navigator.clipboard.writeText(urls.join('\n'))
+    if(request.command==='copy-url'||request.command==='external'){
+      const contexts=request.addressContexts||request.ids.flatMap(id=>tabs.value.find(tab=>tab.id===id)?.addressState?.context?[tabs.value.find(tab=>tab.id===id)!.addressState!.context!]:[])
+      if(!contexts.length)throw Error('browser_page_address_changed')
+      await api.pageAddressAction(contexts,request.command==='external'?'external':'copy')
       return
     }
     if(request.command==='new'&&options.newTab){await options.newTab(request.afterId);return}
@@ -83,6 +85,7 @@ export function useBrowserTabController(options:{
 }
 export function browserTabError(error:unknown){
   const value=String(error)
+  if(/browser_page_address|external_open/.test(value))return browserPageAddressError(error)
   if(/wrong_host|not_found|not_live|stale|drag_expired/.test(value))return '标签页已移动或关闭，正在更新列表。'
   if(value.includes('mixed_chat_selection'))return '请选择同一对话的网页后再移动到其它位置或窗口。'
   if(/busy|manual_control|annotation/.test(value))return '页面正在执行操作，请完成后再试。'

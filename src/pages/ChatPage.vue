@@ -1,6 +1,8 @@
 <template>
+  <Teleport to="body"><div ref="composerMenuBoundary" class="composer-menu-boundary" /></Teleport>
   <div
     class="shell main-shell"
+    :data-chat-id="activeId||undefined"
     :style="[sidebarStyle,{'--workspace-caption-reserve':'12px'}]"
     :class="{
       'mobile-layout': isMobileLayout,
@@ -9,6 +11,7 @@
       'sidebar-collapsed': allSidebarHidden && !settingsOpen && !creatorKind,
       'sidebar-floating': sidebarFloating && !settingsOpen && !creatorKind,
       'sidebar-resizing': sidebarResizing,
+      'docs-open':docsOpen,
       frameless: showDesktopChrome,
       'platform-mac': windowPlatform === 'darwin',
     }"
@@ -19,7 +22,7 @@
         <span>Navora</span>
       </div>
       <ApplicationMenuBar ref="appMenu" :command-state="applicationCommandState" :context-key="activeId || ''" :app-version="applicationVersion" :shortcuts-active="!settingsOpen&&!docsOpen&&!creatorKind" :capture-target="captureApplicationTarget" :restore-target="restoreApplicationTarget" @beforeopen="refreshApplicationTarget" @command="executeApplicationCommand" @error="onPanelNotify" />
-      <button type="button" class="ui-icon-button window-sidebar-toggle" :disabled="!!settingsOpen||!!creatorKind" :aria-label="allSidebarHidden?'显示侧栏':'隐藏侧栏'" :title="allSidebarHidden?'显示侧栏':'隐藏侧栏'" :aria-expanded="!allSidebarHidden" @click="toggleSidebarVisibility"><AppIcon icon="workspace" /></button>
+      <button type="button" class="ui-icon-button window-sidebar-toggle" :disabled="!!settingsOpen||!!creatorKind||sidebarFloatingDisabled" :aria-label="sidebarPresentationLabel" :title="sidebarPresentationLabel" :aria-pressed="sidebarFloatingDisabled||sidebarPresentationMode==='fixed'" @click="toggleSidebarPresentation"><SidebarPresentationIcon :floating="!sidebarFloatingDisabled&&sidebarPresentationMode==='floating'" /></button>
       <div class="window-titlebar-drag" aria-hidden="true" />
     </header>
     <Transition name="sidebar-backdrop">
@@ -35,21 +38,21 @@
           <div v-if="!showDesktopChrome || isMobileLayout" class="rail-brand" :class="{ 'app-drag': showDesktopChrome }" title="Navora">
             <img src="/app-icon.png" alt="Navora" draggable="false" />
           </div>
-          <SidebarNavigation :panels="sidebarPanels" :active="sidebarRail.active" :inactive="settingsOpen || !!creatorKind" @activate="toggleSidebarGroup" />
+          <SidebarNavigation :panels="sidebarPanels" :active="sidebarRail.active" :inactive="docsOpen || settingsOpen || !!creatorKind" @activate="toggleSidebarGroup" />
         </div>
         <div class="sidebar-foot">
         <div class="sidebar-foot-actions">
           <button v-if="!showDesktopChrome || isMobileLayout" type="button" class="sidebar-icon-btn" title="应用菜单" aria-label="应用菜单" @mousedown.prevent @click="appMenu?.openMenu('file')"><AppIcon icon="bars" /></button>
-          <button v-if="!isWebRemote()" type="button" class="sidebar-icon-btn" title="文献检索" aria-label="文献检索" @click="router.push('/literature')"><AppIcon icon="book" /></button>
-          <button v-else type="button" class="sidebar-icon-btn" title="远程窗口" aria-label="远程窗口" @click="openRemoteWindows"><AppIcon icon="browser" /></button>
+          <button type="button" class="sidebar-icon-btn sidebar-docs-btn" :class="{selected:docsOpen}" title="使用文档" aria-label="使用文档" :aria-current="docsOpen?'page':undefined" :aria-pressed="docsOpen" @click="onMoreDocs()"><AppIcon icon="book" /></button>
+          <button v-if="isWebRemote()" type="button" class="sidebar-icon-btn" title="远程窗口" aria-label="远程窗口" @click="openRemoteWindows"><AppIcon icon="browser" /></button>
           <div class="sidebar-foot-end">
             <button
               type="button"
               class="sidebar-icon-btn sidebar-settings-btn"
-              :class="{ selected: settingsOpen }"
+              :class="{ selected: settingsOpen && !docsOpen }"
               :title="settingsOpen ? '返回上一页（Alt ←）' : '设置'"
               :aria-label="settingsOpen ? '返回上一页' : '设置'"
-              :aria-pressed="settingsOpen"
+              :aria-pressed="settingsOpen && !docsOpen"
               @click="toggleSettings"
             >
               <AppIcon icon="gear" />
@@ -63,7 +66,7 @@
       <div class="sidebar-content-stack">
       <Transition name="sidebar-flip">
       <div v-show="(!settingsOpen && !creatorKind) || isMobileLayout" class="sidebar-chat-face">
-      <SidebarDock :active="sidebarRail.active" :panels="sidebarPanels" :floating="sidebarFloating" :pinned="sidebarPresentationMode==='fixed'" @pin="toggleSidebarPin" @close="closeSidebar">
+      <SidebarDock :active="sidebarRail.active" :panels="sidebarPanels" :floating="sidebarFloating" :pinned="sidebarFloatingDisabled || sidebarPresentationMode==='fixed'" :pin-disabled="sidebarFloatingDisabled" :pin-disabled-reason="sidebarFloatingDisabledReason" :show-pin="!showDesktopChrome||isMobileLayout" @pin="toggleSidebarPin" @close="closeSidebar">
         <template #chats="slot">
       <Teleport :to="slot.headerTarget" defer><button v-show="slot.active" type="button" class="chat-toolbar-icon-btn chat-batch-trigger" :title="chatBatchMode ? '取消批量操作' : '批量管理对话'" :aria-label="chatBatchMode ? '取消批量操作' : '批量操作'" :aria-pressed="chatBatchMode" @click="chatBatchMode ? exitChatBatchMode() : enterChatBatchMode()"><AppIcon :icon="chatBatchMode ? 'xmark' : 'list-check'" /></button></Teleport>
       <div class="chat-list-actions" role="group" aria-label="对话操作">
@@ -87,8 +90,8 @@
       </div>
       <Transition name="sidebar-pane">
       <div v-show="true" class="chat-list" :class="{ 'batch-mode': chatBatchMode }">
-        <template v-for="sec in visibleChatListSections" :key="sec.key">
-          <div class="chat-date-label">{{ sec.label }}</div>
+        <section v-for="sec in visibleChatListSections" :key="sec.key" class="chat-date-group" :aria-label="sec.label">
+          <div class="chat-date-label" role="heading" aria-level="3"><span>{{ sec.label }}</span></div>
           <template v-for="c in sec.items" :key="c.id" v-memo="[c, chats, activeId, chatBatchMode, batchSelectedIds, isMobileLayout, chatSwipeOpenId, chatSwipeDragId, chatSwipeOffset, chatSwipeLockedH, chatMoreOpenId, renamingChatId, renameDraft, chatStatusById, pendingAsks, windowCounts, subchatsByParent, runningChats, exportingChat, Math.floor(nowTick / 60000)]">
             <div
               class="chat-item"
@@ -121,6 +124,7 @@
               @touchend="chatBatchMode ? undefined : onChatTouchEnd(c.id)"
               @touchcancel="chatBatchMode ? undefined : onChatTouchEnd(c.id)"
               @contextmenu="onChatItemContext($event, c)"
+              @keydown="onChatItemContextKey($event,c)"
             >
               <button type="button" class="chat-item-main" :aria-pressed="chatBatchMode ? batchSelectedIds.has(c.id) : undefined" @click="onChatItemActivate(c.id)">
                 <Transition name="batch-check">
@@ -178,12 +182,14 @@
                     <span class="chat-item-time">{{ formatRelative(c.updatedAt) }}</span>
                     <span class="chat-item-meta-end">
                       <span
-                        v-if="!chatBatchMode && pendingAskForSidebar(c.id)"
+                        v-if="!chatBatchMode && (pendingAskForSidebar(c.id)||pendingQuestionnaireForSidebar(c.id))"
                         class="badge ask-pending-badge"
                       >
                         {{
-                          pendingAskBadge(pendingAskForSidebar(c.id)!.chatId) ||
-                          (pendingAskForSidebar(c.id)!.chatId !== c.id ? '子任务' : '询问/决策')
+                          pendingQuestionnaireForSidebar(c.id)
+                            ? (pendingQuestionnaireForSidebar(c.id)!.chatId===c.id?'问卷待填写':'子任务问卷')
+                            : pendingAskBadge(pendingAskForSidebar(c.id)!.chatId) ||
+                              (pendingAskForSidebar(c.id)!.chatId !== c.id ? '子任务' : '询问/决策')
                         }}
                       </span>
                       <span
@@ -232,65 +238,7 @@
                   </button>
                 </div>
                 <div class="chat-item-trail-more">
-                  <v-menu
-                    :model-value="chatMoreOpenId === c.id"
-                    location="bottom end"
-                    :close-on-content-click="true"
-                    content-class="chat-more-menu"
-                    @update:model-value="(v) => onChatMoreOpen(c.id, v)"
-                  >
-                    <template #activator="{ props: menuProps }">
-                      <button
-                        type="button"
-                        class="chat-more-btn"
-                        title="更多"
-                        aria-label="更多"
-                        v-bind="menuProps"
-                        @click.stop
-                      >
-                        <AppIcon icon="ellipsis" />
-                      </button>
-                    </template>
-                    <div class="chat-more-panel" role="menu">
-                      <button
-                        type="button"
-                        class="chat-more-item"
-                        role="menuitem"
-                        @click="startRenameChat(c)"
-                      >
-                        <AppIcon icon="pen-to-square" />
-                        <span>修改标题</span>
-                      </button>
-                      <button
-                        type="button"
-                        class="chat-more-item"
-                        role="menuitem"
-                        @click="toggleChatPinned(c)"
-                      >
-                        <AppIcon icon="thumbtack" />
-                        <span>{{ c.pinned ? '取消置顶' : '置顶' }}</span>
-                      </button>
-                      <button
-                        type="button"
-                        class="chat-more-item"
-                        role="menuitem"
-                        :disabled="exportingChat || !c.messages?.length"
-                        @click="exportChatById(c.id)"
-                      >
-                        <AppIcon icon="file-export" />
-                        <span>导出对话</span>
-                      </button>
-                      <button
-                        type="button"
-                        class="chat-more-item danger"
-                        role="menuitem"
-                        @click="askDeleteChat(c)"
-                      >
-                        <AppIcon icon="trash" />
-                        <span>删除</span>
-                      </button>
-                    </div>
-                  </v-menu>
+                  <button type="button" class="chat-more-btn" title="更多" aria-label="更多" aria-haspopup="menu" :aria-expanded="chatMoreOpenId===c.id" @click.stop="showNativeChatRowMenu(c,$event)"><AppIcon icon="ellipsis" /></button>
                 </div>
               </div>
             </div>
@@ -298,7 +246,7 @@
 
 
           </template>
-        </template>
+        </section>
         <button
           v-if="chatListRemainingCount > 0 && !chatBatchMode"
           type="button"
@@ -358,7 +306,7 @@
       <div v-if="!isMobileLayout && !sidebarFloating && (!allSidebarHidden || settingsOpen || creatorKind)" class="sidebar-divider vertical" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarLayout.width" aria-valuemin="292" :aria-valuemax="sidebarWidthMaximum" tabindex="0" @pointerdown="beginSidebarResize($event, 'width')" @keydown="sidebarResizeKey($event, 'width')" />
     </aside>
 
-    <main ref="mainElement" class="main" :data-workspace-expansion="workspaceExpansionReason||'manual-or-split'" :data-workspace-width="fileWorkspaceMainWidth" :class="{ 'resource-card-docked': resourceOpen && !resourceOverlay && !settingsOpen && !creatorKind && !fileManagerActive && !pluginWorkspaceActive && !browserWorkspaceActive, 'file-workspace-open': fileWorkspaceVisible, 'workspace-single':fileWorkspaceVisible && (browserExpanded || fileWorkspaceOverlay) && !workspaceConversationActive,'workspace-chat-active':fileWorkspaceVisible && browserExpanded && workspaceConversationActive }" :style="{ '--preview-width': `${previewWidth}px`, '--file-workspace-reserve':`${fileWorkspaceReserve}px` }">
+    <main ref="mainElement" class="main" :data-workspace-expansion="workspaceExpansionReason||'manual-or-split'" :data-workspace-width="fileWorkspaceMainWidth" :class="{ 'docs-workspace-open':docsOpen, 'resource-card-docked': resourceOpen && !resourceOverlay && !settingsOpen && !creatorKind && !fileManagerActive && !pluginWorkspaceActive && !browserWorkspaceActive, 'file-workspace-open': fileWorkspaceVisible, 'workspace-single':fileWorkspaceVisible && (browserExpanded || fileWorkspaceOverlay) && !workspaceConversationActive,'workspace-chat-active':fileWorkspaceVisible && browserExpanded && workspaceConversationActive }" :style="{ '--preview-width': `${previewWidth}px`, '--file-workspace-reserve':`${fileWorkspaceReserve}px` }">
       <div v-if="showDesktopChrome && ((!settingsOpen && !creatorKind) || isMobileLayout)" class="win-drag-main" aria-hidden="true" />
       <header v-if="isMobileLayout && !settingsOpen && !creatorKind" class="mobile-topbar" :class="{'plugin-mobile-topbar':pluginWorkspaceActive}">
         <button
@@ -425,12 +373,13 @@
           </button>
         </div>
       </header>
-      <CreatorWorkspace ref="creatorWorkspace" v-if="creatorKind" :key="creatorKind" :kind="creatorKind" :navigation-target="isMobileLayout ? undefined : '#creator-sidebar-nav'" @close="closeCreator" @trial="openCreatorTrial" @notify="onPanelNotify" />
-      <SettingsPage ref="settingsWorkspace" v-if="settingsOpen && !creatorKind" class="settings-workspace" :initial-tab="settingsTab" :return-label="settingsReturnLabel" :focus-on-entry="browserSettingsFocusPending" @entry-focused="browserSettingsFocusPending = false" @navigate="settingsTab = $event" embedded :mobile="isMobileLayout" :navigation-target="isMobileLayout ? undefined : '#settings-sidebar-nav'" @close="completeSettingsReturn" @create="openCreator" />
+      <DocsPage ref="docsWorkspace" v-if="docsOpen" class="docs-workspace" embedded :mobile="isMobileLayout" :initial-chapter="docsChapter" :initial-section="docsSection" @close="closeDocsPage" @navigate="navigateDocs" />
+      <CreatorWorkspace ref="creatorWorkspace" v-show="!docsOpen" v-if="creatorKind" :key="creatorKind" :kind="creatorKind" :navigation-target="isMobileLayout ? undefined : '#creator-sidebar-nav'" @close="closeCreator" @trial="openCreatorTrial" @notify="onPanelNotify" />
+      <SettingsPage ref="settingsWorkspace" v-show="!docsOpen" v-if="settingsOpen && !creatorKind" class="settings-workspace" :initial-tab="settingsTab" :return-label="settingsReturnLabel" :focus-on-entry="browserSettingsFocusPending" @entry-focused="browserSettingsFocusPending = false" @navigate="settingsTab = $event" embedded :mobile="isMobileLayout" :navigation-target="isMobileLayout ? undefined : '#settings-sidebar-nav'" @close="completeSettingsReturn" @create="openCreator" />
       <template v-if="!creatorKind">
       <FileManager ref="fileManagerWorkspace" v-if="fileManagerMounted" v-show="fileManagerActive" :active="fileManagerActive" :class="{'is-active':fileManagerActive}" :chat-id="fileManagerOwner?.id || ''" :title="fileManagerOwner?.title || ''" :directory="fileManagerDirectory" @browse="fileManagerDirectory=$event" @preview="openFilePreview" @back="activateSidebar('chats',false)" @notify="onPanelNotify" />
       <PluginWorkspace ref="pluginsWorkspace" v-if="pluginWorkspaceMounted" v-show="pluginWorkspaceActive" :active="pluginWorkspaceActive" :class="{'is-active':pluginWorkspaceActive}" sidebar-target="#plugins-sidebar-nav" @back="activateSidebar('chats',false)" @create="openCreator('plugin')" @selected="closeMobileSidebar" @notify="onPanelNotify" />
-      <div v-show="!settingsOpen && !fileManagerActive && !pluginWorkspaceActive && !browserWorkspaceActive" id="conversation-panel" class="conversation-content" :inert="settingsOpen || fileManagerActive || pluginWorkspaceActive || browserWorkspaceActive || (fileWorkspaceVisible && browserExpanded && !workspaceConversationActive)">
+      <div v-show="!docsOpen && !settingsOpen && !fileManagerActive && !pluginWorkspaceActive && !browserWorkspaceActive" id="conversation-panel" class="conversation-content" :inert="docsOpen || settingsOpen || fileManagerActive || pluginWorkspaceActive || browserWorkspaceActive || (fileWorkspaceVisible && browserExpanded && !workspaceConversationActive)">
       <template v-if="active">
         <header
           class="main-top conversation-title-header"
@@ -472,12 +421,12 @@
             <span class="agent-elapsed">{{ elapsedLabel }}</span>
             <button type="button" class="quick-stop-btn" title="停止任务" aria-label="停止任务" @click="stopAgent"><StatusIcon kind="stopped" />停止</button>
           </div>
-          <Teleport :to="workspaceToolsTarget||'body'" :disabled="!workspaceHeaderActive||!workspaceConversationActive||!workspaceToolsTarget"><div class="workspace-chat-tools" @keydown="onWorkspaceChatToolKey"><button type="button" class="ui-icon-button" title="在当前聊天中查找（Ctrl/⌘ F）" aria-label="在当前聊天中查找" @click="openConversationFind"><AppIcon icon="magnifying-glass"/></button><button v-if="subchatSignals.total" type="button" class="ui-icon-button subchat-workspace-trigger" :title="`子对话 ${subchatSignals.total} 个${subchatSignals.pending?`，${subchatSignals.pending} 项需要处理`:''}${subchatSignals.unread?`，${subchatSignals.unread} 个有未读内容`:''}`" :aria-label="`打开子对话列表，${subchatSignals.total} 个子对话${subchatSignals.pending?`，${subchatSignals.pending} 项需要处理`:''}${subchatSignals.unread?`，${subchatSignals.unread} 个未读`:''}`" @click="openSubchatList"><AppIcon icon="robot" /><span v-if="subchatSignals.pending" class="subchat-pending-count">{{subchatSignals.pending}}</span><span v-else-if="subchatSignals.unread" class="subchat-unread-dot" aria-hidden="true"/></button><ChatResourcesMenu ref="browserResources" class="conversation-title-actions" context="chat" :running="agentRunning" @context-action="onPageAction" @new-browser-tab="openBrowserTab" @new-chat="createChat" @search="openConversationFind" @delete="active && askDeleteChat(active)" @stop="stopAgent" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :open="resourceOpen" :updated="resourceUpdated" :update-count="resourceUpdateCount" :pinned="!!active?.pinned" :can-export="!!active?.messages.length" :exporting="exportingChat" @rename="renameCurrentChat" @pin="active && toggleChatPinned(active)" @export="exportActiveChat" @notify="onPanelNotify" @toggle-resources="toggleResources" @show-browser="showResources('browser')" /></div></Teleport>
+          <Teleport :to="workspaceToolsTarget||'body'" :disabled="!workspaceHeaderActive||!workspaceConversationActive||!workspaceToolsTarget"><div class="workspace-chat-tools" @keydown="onWorkspaceChatToolKey"><button type="button" class="ui-icon-button" title="在当前聊天中查找（Ctrl/⌘ F）" aria-label="在当前聊天中查找" @click="openConversationFind"><AppIcon icon="magnifying-glass"/></button><button v-if="subchatSignals.total" type="button" class="ui-icon-button subchat-workspace-trigger" :title="`子对话 ${subchatSignals.total} 个${subchatSignals.pending?`，${subchatSignals.pending} 项需要处理`:''}${subchatSignals.unread?`，${subchatSignals.unread} 个有未读内容`:''}`" :aria-label="`打开子对话列表，${subchatSignals.total} 个子对话${subchatSignals.pending?`，${subchatSignals.pending} 项需要处理`:''}${subchatSignals.unread?`，${subchatSignals.unread} 个未读`:''}`" @click="openSubchatList"><AppIcon icon="robot" /><span v-if="subchatSignals.pending" class="subchat-pending-count">{{subchatSignals.pending}}</span></button><ChatResourcesMenu ref="browserResources" class="conversation-title-actions" context="chat" :running="agentRunning" @context-action="onPageAction" @new-browser-tab="openBrowserTab" @new-chat="createChat" @search="openConversationFind" @delete="active && askDeleteChat(active)" @stop="stopAgent" :chat-id="activeId || ''" :tree="tree" :is-remote="isWebRemote()" :annotation-entries="chatAnnotationEntries" :annotation-busy-key="annotationCardBusy" :annotation-error="chatAnnotationError" @annotation-action="annotationCardAction" @refresh-annotations="refreshChatAnnotations" :open="resourceOpen" :updated="resourceUpdated" :update-count="resourceUpdateCount" :pinned="!!active?.pinned" :can-export="!!active?.messages.length" :exporting="exportingChat" @rename="renameCurrentChat" @pin="active && toggleChatPinned(active)" @export="exportActiveChat" @notify="onPanelNotify" @toggle-resources="toggleResources" @show-browser="showResources('browser')" /></div></Teleport>
           <span v-if="!fileWorkspaceVisible" class="workspace-controls-divider" aria-hidden="true" />
           <WorkspaceLauncher v-if="!fileWorkspaceVisible" :count="fileTabsState.tabs.length" :open="false" :disabled="!activeId" @activate="toggleRightSidebar" />
         </header>
 
-        <ConversationFind ref="conversationFind" :active="conversationIsVisible" :chat-id="activeId||''" :messages="active.messages" :live-text="liveAnswerText" :root="msgBox" :display-text="message => message.role==='log' ? logFullText(message) : displayMessageContent(message)" :locate="locateFindMessage" @open="conversationFindOpen=$event;restoreFindExpansion($event)" @navigate="stickToBottom=false" />
+        <ConversationFind ref="conversationFind" :active="conversationIsVisible" :chat-id="activeId||''" :messages="active.messages" :live-text="liveAnswerText" :root="msgBox" :display-text="message => message.role==='log' ? logFullText(message) : displayMessageContent(message)" :locate="locateFindMessage" @open="conversationFindOpen=$event;restoreFindExpansion($event)" @navigate="revealFindConversation" />
         <div class="messages-wrap">
           <section
             ref="msgBox"
@@ -491,23 +440,24 @@
             @keydown="onMessagesScrollInput"
             @click="onMessagesClick"
             @contextmenu.prevent="onMessagesContext"
+            @keydown.capture="onMessageContextKey"
+            tabindex="0"
           >
-            <div v-if="!active.messages.length && !agentRunning" class="msg-empty">
+            <div v-if="!messageBlocks.length && !agentRunning" class="msg-empty">
               <div class="msg-empty-title">开始一段对话</div>
               <p class="msg-empty-desc">直接提问，或让 Navora 帮你浏览、整理和完成任务。</p>
-              <div class="suggest-grid" aria-label="推荐对话">
-                <button v-for="s in suggestions.slice(0,4)" :key="s" type="button" class="suggest-chip" @click="useSuggestion(s)">{{ s }}</button>
-              </div>
             </div>
 
+            <div v-if="chatAnnotationError" class="annotation-chat-status" role="status">{{chatAnnotationError}} <button type="button" class="ui-button" @click="refreshChatAnnotations">重试</button></div>
+            <div v-if="chatAnnotationRecovery.issues.length" class="annotation-chat-status" role="status">{{chatAnnotationRecovery.issues.length}} 个异常批注草稿已隔离保留。</div>
             <!-- Sidebar and composer changes must not rebuild unchanged transcript rows. -->
-            <template v-for="block in messageBlocks" :key="block.key" v-memo="[block, activeId, agentRunning, expandedTools, expandedLogs, findToolReveal, logOverflowById, toolMediaSrc, chats, showReadPages, readPagesPanelOpen, readPagesPanelFromId, copiedMessageId, replyFilesById, Math.floor(nowTick / 60000)]">
-
-
+            <template v-for="block in messageBlocks" :key="block.key" v-memo="[block, activeId, agentRunning, processHeaders, expandedProcesses, expandedTools, expandedLogs, findToolReveal, logOverflowById, toolMediaSrc, chats, showReadPages, readPagesPanelOpen, readPagesPanelFromId, copiedMessageId, replyFilesById, Math.floor(nowTick / 60000)]">
+              <ConversationProcessToggle v-if="processHeaders.has(block.key)" :group="processHeaders.get(block.key)!" :open="!!expandedProcesses[processHeaders.get(block.key)!.key]" @toggle="toggleProcess(processHeaders.get(block.key)!.key)"/>
               <div
                 v-if="block.type === 'log'"
+                v-show="!processMessageHidden(block.key)"
                 class="msg log"
-                :data-msg-id="block.message.id"
+                :data-msg-id="block.message.id" tabindex="0"
                 :class="logToneClass(block.message)"
               >
                 <div class="msg-row">
@@ -558,7 +508,7 @@
                 </div>
               </div>
 
-              <div v-else-if="block.type === 'tool'" class="msg tool transcript-tool" :data-msg-id="block.message.id">
+              <div v-else-if="block.type === 'tool'" v-show="!processMessageHidden(block.key)" class="msg tool transcript-tool" :data-msg-id="block.message.id" tabindex="0">
                 <SubchatLink v-if="isSubchatSpawnTool(block.message)" :chat-id="spawnSubChatId(block.message)" :title="spawnGoalLabel(block.message)" :status="spawnStatusOf(block.message)" :pending="!!pendingAsks[spawnSubChatId(block.message)]||pendingPermRequests.some(request=>request.chatId===spawnSubChatId(block.message))" :disabled="!spawnSubChatId(block.message)||isSpawnSubchatDeleted(block.message)" @open="routeConversationTarget" />
                 <ConversationActivityRow v-else :message="block.message" :reveal="findToolReveal[block.message.id]" :label="toolActivityLabel(block.message,effectiveToolStatus(block.message),toolDisplay(block.message).label)" :icon="toolDisplay(block.message).icon" :status="effectiveToolStatus(block.message)" :expanded="isActivityExpanded(block.message.id)" @toggle="toggleTool(block.message.id)">
                   <div v-if="toolDownloadProgress(block.message)" class="tool-dl-progress"><span class="tool-dl-label">{{ toolDownloadProgressLabel(block.message) }}</span></div>
@@ -569,8 +519,10 @@
 
               <div
                 v-else-if="block.type === 'chat'"
+                v-show="!processMessageHidden(block.key)"
                 class="msg"
-                :data-msg-id="block.message.id"
+                :data-message-phase="block.message.meta?.phase"
+                :data-msg-id="block.message.id" tabindex="0"
                 :class="[block.message.role]"
               >
                 <div class="msg-row">
@@ -595,16 +547,18 @@
                         {{ chipLabel(r) }}
                       </span>
                     </div>
-                    <details v-if="block.message.role==='assistant' && block.message.meta?.reasoning" class="transcript-reasoning"><summary>思考过程</summary><pre>{{ String(block.message.meta.reasoning).slice(0,24000) }}</pre></details>
+                    <div v-if="block.message.role==='user'&&messageTaskDeclarationLabel(block.message)" class="msg-task-declarations">本条：{{ messageTaskDeclarationLabel(block.message) }}</div>
+                    <ConversationReasoning v-if="block.message.role==='assistant' && block.message.meta?.reasoning && processDetailsVisible(block.key)" :text="String(block.message.meta.reasoning)" />
                     <template v-if="block.message.role === 'assistant' || block.message.role === 'user'">
                       <ChatMarkdown
                         :chat-id="activeId || ''"
                         :content="displayMessageContent(block.message)"
+                        :artifact-paths="replyFilesById.get(block.message.id)?.map(file=>file.path)"
                         :shimmer="isMessageShimmer(block.message)"
                         @open-media="(p) => openLightbox(p.src, p.alt)" @open-file="openFilePreview" @notify="onPanelNotify"
                       >
                         <template v-if="block.message.role === 'assistant' && replyFinalIds.has(block.message.id)" #footer>
-                          <ReplyArtifacts v-if="replyFilesById.has(block.message.id)" :files="replyFilesById.get(block.message.id)!" @open="openFilePreview" />
+                          <ReplyArtifacts v-if="replyFilesById.has(block.message.id)" :reply-id="block.message.id" :files="replyFilesById.get(block.message.id)!" @open="openFilePreview" @notify="onPanelNotify" />
                           <div class="reply-footer">
                             <button
                               v-if="showReadPages && messageSources(block.message).length"
@@ -648,6 +602,9 @@
                 :remaining-pct="permRemainingPct"
                 :pending-count="permPendingCount"
                 :busy="permBusyId===permReq?.id"
+                :submission-error="decisionSubmissions[permReq.id]?.error"
+                :expired="decisionSubmissions[permReq.id]?.expired"
+                @dismiss="removePermRequest(permReq.id)"
                 @decide="respondPerm"
               />
               <InChatAskCard
@@ -656,7 +613,11 @@
                 :remaining-label="inlineAskRemainingLabel"
                 :remaining-urgent="inlineAskRemainingUrgent"
                 :remaining-pct="inlineAskRemainingPct"
+                :key="activePendingAsk.id"
                 :busy="askBusy"
+                :submission-error="decisionSubmissions[activePendingAsk.id]?.error"
+                :expired="decisionSubmissions[activePendingAsk.id]?.expired"
+                @dismiss="clearPendingAsk(activePendingAsk.chatId,activePendingAsk.id)"
                 @option="respondAskOption"
                 @custom="respondAskCustomText"
                 @deny="respondAskDeny"
@@ -695,27 +656,27 @@
                   </div>
                   <span class="tool-dl-label">{{ liveDownloadBar.label }}</span>
                 </div>
-                <div v-if="liveReasoningText" class="thinking-reason activity-group">
+                <div v-if="liveReasoningText" class="transcript-activity transcript-reasoning" :class="{'is-open':liveReasoningOpen}">
                   <button
                     type="button"
-                    class="thinking-reason-toggle activity-trigger"
+                    class="transcript-activity-trigger"
                     :aria-expanded="liveReasoningOpen"
                     @click="toggleLiveReasoning"
                   >
-                    <StatusIcon kind="thought" />
+                    <AppIcon icon="lightbulb" />
                     <span class="thinking-reason-title">
                       思考中
                       <span v-if="liveReasoningRoundLabel" class="thinking-reason-round">{{
                         liveReasoningRoundLabel
                       }}</span>
                     </span>
-                    <AppIcon class="thinking-reason-chevron" icon="chevron-right" />
+                    <AppIcon class="activity-chevron" icon="chevron-right" />
                   </button>
                   <DisclosureTransition>
                   <div
                     v-if="liveReasoningOpen"
                     ref="liveReasoningBodyEl"
-                    class="thinking-reason-body activity-detail"
+                    class="thinking-reason-body transcript-activity-detail reasoning-detail"
                   >
                     {{ liveReasoningText }}
                   </div>
@@ -787,7 +748,7 @@
             </div>
           </section>
 
-          <ConversationOutline :messages="active.messages" :scroll-container="msgBox" @jump="jumpToMessage" />
+          <ConversationOutline :messages="active.messages" :scroll-container="msgBox" @jump="jumpToMessage" @navigate="onOutlineNavigate" />
 
           <button
             v-if="showJumpBottom"
@@ -810,7 +771,7 @@
           @drop.prevent="onDrop"
         >
           <button
-            v-if="showInlinePendingAsk || showInlinePerm"
+            v-if="(showInlinePendingAsk || showInlinePerm) && !inlineDecisionVisible"
             type="button"
             class="pending-ask-dock"
             @click="scrollToInlineDecision"
@@ -856,19 +817,19 @@
               />
             </span>
           </button>
+          <div v-for="questionnaire in questionnaireDocks" :key="questionnaire.id" class="questionnaire-pending-dock"><button type="button" @click="openQuestionnaireRecord(questionnaire)"><AppIcon icon="list-ul" /><span><strong>{{questionnaire.title}}</strong><small>{{questionnaire.questions.length}} 个问题<template v-if="questionnaire.chatId!==activeId"> · 子任务</template></small></span><span class="questionnaire-dock-action">打开填写</span></button></div>
           <MessageQueue :key="activeId || ''" :chat-id="activeId || ''" :files="artifactEntries" :messages="active?.messages || []" :context-previews="contextPreviews" :entries="active?.queuedMessages || []" :paused="active?.queuePaused === true" :busy="queueBusy" :max-chars="maxComposerChars" @edit="(id,content,document,revision)=>changeQueue('edit',id,content,document,revision)" @recover="recoverComposerDocument" @open-source="openComposerSource" @notify="onPanelNotify" @remove="changeQueue('remove',$event)" @insert="changeQueue('insert',$event)" @resume="changeQueue('resume')"  @creator="openCreator" />
-          <ComposerNativePanels ref="nativeComposerPanels" :chat-id="activeId||''" :state="nativeComposerState" @model="applyChatModel" @reasoning="applyReasoningLevel" @mode="applyNativeExecutionMode" @permission="applyNativePermission" @retry="refreshAiProviders()" @update:model-query="modelQuery=$event" @notify="onPanelNotify" />
-          <p v-if="modelSelectionBusy||executionModeBusy" class="composer-validation" role="status" aria-live="polite">正在保存选择…</p><p v-else-if="modelLoadError||modelSelectionInvalid||!chatModelKey" class="composer-validation" role="status">{{modelLoadError||'请先选择可用模型后发送。'}} <button type="button" @click="openNativeComposerOrFallback('model')">选择模型</button></p>
+          <p v-if="modelSelectionBusy||executionModeBusy" class="composer-validation" role="status" aria-live="polite">正在保存选择…</p><p v-else-if="modelLoadError||modelSelectionInvalid||!chatModelKey" class="composer-validation" role="status">{{modelLoadError||'请先选择可用模型后发送。'}} <button type="button" @click="modelMenuOpen=true">选择模型</button></p>
           <p v-if="composerProblem" class="composer-validation" role="status">{{ composerProblem }}</p>
           <p v-if="draftUnsupported" class="composer-validation" role="alert">原始草稿使用了当前版本无法读取的格式，已完整保留。此处仅显示可读副本；请升级到兼容版本后恢复编辑和发送。</p>
           <p v-if="active?.draftUnsupportedRecoveries?.length" class="composer-validation" role="status">另有 {{ active.draftUnsupportedRecoveries.length }} 份较新格式的草稿备份已保留，请在兼容版本中恢复。</p>
           <div v-if="draftConflict" class="composer-draft-recovery" role="status"><strong>草稿在另一处有更新</strong><details><summary>查看两份内容</summary><p>当前编辑</p><pre>{{ draft }}</pre><p>同步版本</p><pre>{{ draftConflict.draft }}</pre></details><div><button type="button" @click="draftState.resolveConflict(true)">保留当前编辑</button><button type="button" @click="draftState.resolveConflict(false)">使用同步版本</button></div></div>
-          <div v-for="pending in visibleSubmissions" :key="pending.id" class="composer-pending-submit" role="status"><span>{{ pending.failed ? '提交失败，内容已保留' : '正在提交，下面可以继续写下一条…' }}</span><details><summary>查看内容</summary><pre>{{ pending.text }}</pre></details><button v-if="pending.failed" type="button" @click="restoreFailedSubmission(pending.id)">放回编辑器</button><button v-if="pending.failed" type="button" @click="dismissFailedSubmission(pending.id)">移除</button></div>
-          <div v-for="recovery in visibleDraftRecoveries" :key="recovery.id" class="composer-draft-recovery"><span>{{ recovery.reason==='conflict'?'已保留一份同步冲突的草稿':'有一份未确认提交的草稿快照' }}</span><details><summary>查看内容</summary><pre>{{ compileComposerDocument(recovery.document).content }}</pre></details><button v-if="recovery.reason==='send_failed'" type="button" :disabled="sending" @click="retryDraftRecovery(recovery.id)">重试提交</button><button type="button" @click="restoreDraftRecovery(recovery.id)">放回编辑器</button><button type="button" @click="dismissDraftRecovery(recovery.id)">移除</button></div>
+          <div v-for="pending in visibleSubmissions" :key="pending.id" class="composer-pending-submit" role="status"><span>{{ pending.failed ? '提交失败，内容已保留' : '正在提交，确认后开始执行或进入队列…' }}</span><details><summary>查看内容</summary><pre>{{ pending.text }}</pre></details><button v-if="pending.failed" type="button" @click="restoreFailedSubmission(pending.id)">放回编辑器</button><button v-if="pending.failed" type="button" @click="dismissFailedSubmission(pending.id)">移除</button></div>
+          <div v-for="recovery in visibleDraftRecoveries" :key="recovery.id" class="composer-draft-recovery"><span>{{ recovery.reason==='conflict'?'已保留一份同步冲突的草稿':'有一份未确认提交的草稿快照' }}</span><details><summary>查看内容</summary><pre>{{ previewComposerDocument(recovery.document).content }}</pre></details><button v-if="recovery.reason==='send_failed'" type="button" :disabled="sending" @click="retryDraftRecovery(recovery.id)">重试提交</button><button type="button" @click="restoreDraftRecovery(recovery.id)">放回编辑器</button><button type="button" @click="dismissDraftRecovery(recovery.id)">移除</button></div>
           <div class="composer-box">
 
-            <div class="composer-input-row">
-              <ComposerEditor ref="draftField" class="composer-input" :model-value="composerDocument" :disabled="composerStaging===activeId" :readonly="draftUnsupported" :context-previews="contextPreviews" :chat-id="activeId || ''" :placeholder="agentRunning ? (runningMessageMode === 'insert' ? '补充想法，插入当前任务…' : '继续输入，加入待发送队列…') : '描述任务，输入 / 附加内容或使用工具…'" @update:model-value="draftState.edited" @submit="send" @attach="onAttachRequest" @open-source="openComposerSource" @refresh-source="refreshComposerSource" @change-source="changeComposerSource" @notify="onPanelNotify" />
+            <div class="composer-input-row" @compositionstart.capture="onComposerCompositionStart" @compositionend.capture="onComposerCompositionEnd">
+              <ComposerEditor ref="draftField" class="composer-input" :model-value="composerDocument" :disabled="composerStaging===activeId" :readonly="draftUnsupported" :context-previews="contextPreviews" :chat-id="activeId || ''" :placeholder="activeOwnQuestionnaire ? '有疑问可以补充，发送后切回聊天…' : agentRunning ? '继续输入，加入队列…' : '描述任务，输入 / 附加内容或使用工具…'" @update:model-value="draftState.edited" @submit="send" @attach="onAttachRequest" @open-source="openComposerSource" @refresh-source="refreshComposerSource" @change-source="changeComposerSource" @notify="onPanelNotify" />
 
             </div>
             <div
@@ -881,15 +842,15 @@
             <div class="composer-actions">
               <div class="composer-actions-left">
                 <button type="button" class="composer-perm-btn composer-attach-trigger" title="附加文件、网页或会话，也可输入 /" aria-label="附加" :disabled="!activeId||draftUnsupported" @mousedown.prevent="captureComposerSelection" @click="openAttachmentMenu()"><AppIcon icon="paperclip" /></button>
-                <v-menu location="top start" :disabled="agentRunning||nativeComposerAvailable">
-                  <template #activator="{ props: modeProps }"><button type="button" class="composer-perm-btn execution-mode-button" v-bind="modeProps" :disabled="agentRunning || sending || executionModeBusy || modelSelectionBusy" aria-label="回答方式" :aria-busy="executionModeBusy" @click="nativeComposerAvailable&&openNativeComposerOrFallback('mode',$event)"><AppIcon :icon="executionModeIcon" />{{ executionModeLabel }}<AppIcon icon="chevron-down" /></button></template>
+                <v-menu v-model="modeMenuOpen" :attach="composerMenuBoundary" contained location="top start" :disabled="agentRunning">
+                  <template #activator="{ props: modeProps }"><button type="button" class="composer-perm-btn execution-mode-button" v-bind="modeProps" :disabled="agentRunning || sending || executionModeBusy || modelSelectionBusy" aria-label="回答方式" :aria-busy="executionModeBusy"><AppIcon :icon="executionModeIcon" />{{ executionModeLabel }}<AppIcon icon="chevron-down" /></button></template>
                   <div class="composer-perm-panel" role="menu" aria-label="回答方式">
                     <button v-for="mode in executionModes" :key="mode.id" type="button" class="composer-perm-item" role="menuitemradio" :aria-checked="(active?.executionMode || 'auto') === mode.id" @click="applyExecutionMode(mode.id)"><AppIcon :icon="mode.icon" class="composer-perm-item-icon"/><span class="composer-perm-item-label">{{ mode.label }}</span><span class="composer-perm-item-desc">{{ mode.hint }}</span></button>
                   </div>
                 </v-menu>
                 <v-menu
                   v-model="permMenuOpen"
-                  :disabled="nativeComposerAvailable"
+                  :attach="composerMenuBoundary" contained
                   location="top start"
                   :close-on-content-click="true"
                   content-class="composer-perm-menu"
@@ -901,7 +862,6 @@
                       v-bind="menuProps"
                       title="本会话权限预设"
                       aria-label="本会话权限预设"
-                      @click="nativeComposerAvailable&&openNativeComposerOrFallback('permission',$event)"
                     >
                       <AppIcon :icon="permPresetIcon" />
                       <span>{{ permPresetLabel }}</span>
@@ -934,9 +894,10 @@
               <div class="composer-actions-right">
                 <v-menu
                   v-model="modelMenuOpen"
+                  :attach="composerMenuBoundary" contained
                   location="top end"
                   :close-on-content-click="false"
-                  :disabled="agentRunning||nativeComposerAvailable"
+                  :disabled="agentRunning"
                   content-class="composer-perm-menu"
                 >
                   <template #activator="{ props: menuProps }">
@@ -947,7 +908,6 @@
                       :disabled="agentRunning"
                       :title="`${chatModelLabel}${reasoningLevels.length?' · '+reasoningLabel(selectedReasoningLevel):''}`"
                       aria-label="本会话模型"
-                      @click="nativeComposerAvailable&&openNativeComposerOrFallback('model',$event)"
                     >
                       <AppIcon icon="microchip" />
                       <span class="model-trigger-label">{{ chatModelLabel }}</span><span v-if="reasoningLevels.length" class="model-trigger-tier">{{ reasoningLabel(selectedReasoningLevel) }}</span><AppIcon icon="chevron-down" />
@@ -989,7 +949,7 @@
 
                 <v-menu
                   v-model="usageMenuOpen"
-                  :disabled="nativeComposerAvailable"
+                  :attach="composerMenuBoundary" contained
                   location="top end"
                   :close-on-content-click="true"
                   content-class="composer-usage-menu"
@@ -1001,7 +961,6 @@
                       v-bind="menuProps"
                       :title="`上下文估算 ${usagePctLabel}`"
                       :aria-label="`查看上下文估算，约占 ${usagePctLabel}`"
-                      @click="nativeComposerAvailable&&openNativeComposerOrFallback('usage',$event)"
                     >
                       <svg class="usage-ring" viewBox="0 0 36 36" aria-hidden="true">
                         <circle class="usage-ring-track" cx="18" cy="18" r="14" fill="none" />
@@ -1047,29 +1006,7 @@
                   </div>
                 </v-menu>
 
-                <button
-                  type="button"
-                  class="composer-send"
-                  :class="{supplement:agentRunning}"
-                  :disabled="!canSend || sending"
-                  :aria-busy="sending"
-                  :title="agentRunning ? (runningMessageMode === 'insert' ? '插入当前任务' : '加入队列') : '发送'"
-                  :aria-label="agentRunning ? (runningMessageMode === 'insert' ? '插入当前任务' : '加入队列') : '发送'"
-                  @click="send"
-                >
-                  <AppIcon :icon="agentRunning && runningMessageMode === 'queue' ? 'list-ul' : 'paper-plane'" />
-                  <span v-if="agentRunning">{{ runningMessageMode === 'insert' ? '插入' : '排队' }}</span>
-                </button>
-                <button
-                  v-if="agentRunning"
-                  type="button"
-                  class="composer-send stop"
-                  title="停止"
-                  aria-label="停止"
-                  @click="stopAgent"
-                >
-                  <AppIcon icon="stop" />
-                </button>
+                <ComposerSendButton :label="activeOwnQuestionnaire && composerMainMode!=='stop' ? '发送并切回聊天' : undefined" :mode="composerMainMode" :disabled="composerComposing||(composerMainMode!=='stop'&&!canSend)" :busy="sending" @submit="onComposerMainAction"/>
               </div>
             </div>
           </div>
@@ -1087,17 +1024,23 @@
       </div>
       </template>
       <Transition name="resource-card">
-        <ConversationResourcesCard v-if="resourceOpen && activeId && !settingsOpen && !creatorKind && !fileManagerActive && !pluginWorkspaceActive && !browserWorkspaceActive" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :overlay="resourceOverlay" :available-width="resourceAvailableWidth" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="locateResourceMessage({chatId:activeId!,messageId:$event})" @open-media="(p) => openLightbox(p.src,p.alt)" />
+        <ConversationResourcesCard v-if="!docsOpen && resourceOpen && activeId && !settingsOpen && !creatorKind && !fileManagerActive && !pluginWorkspaceActive && !browserWorkspaceActive" :chat-id="activeId" :title="active?.title || '新对话'" :messages="active?.messages || []" :tree="tree" :tab="resourceTab" :width="previewWidth" :overlay="resourceOverlay" :available-width="resourceAvailableWidth" :is-remote="isWebRemote()" :owner-label="treeOwnerLabel" :dnd-mime="DND_MIME" @close="closeResources" @tab="resourceTab=$event" @resize="setPreviewWidth" @preview="openFilePreview" @notify="onPanelNotify" @add-ref="addRef" @ask-close-session="askCloseSession" @remote-view="openRemoteWindow" @jump="locateResourceMessage({chatId:activeId!,messageId:$event})" @open-media="(p) => openLightbox(p.src,p.alt)" />
       </Transition>
-    <Transition name="file-workspace"><FileWorkspace ref="fileWorkspace" :presented="(fileWorkspaceVisible||browserWorkspaceActive)&&!settingsOpen&&!creatorKind" v-if="fileTabsState.open || browserWorkspaceMode" v-show="!settingsOpen && (fileWorkspaceVisible || browserWorkspaceActive)" :inert="settingsOpen" @tools-target="workspaceToolsTarget=$event" @conversation-detach="restoreConversationSplit" @creator="openCreator" @select-subchat="selectWorkspaceSubchat" @locate-parent="locateSubchatParent" :full-page="browserWorkspaceMode" :tabs="browserWorkspaceMode?browserWorkspaceTabs:fileTabsState.tabs" :workspace-count="fileTabsState.tabs.length" :active="settingsOpen ? null : browserWorkspaceMode?browserWorkspaceTab:activeFileTab" :viewer-chat-id="activeId || ''" :width="fileWorkspaceWidth" :maximum="fileWorkspaceMaximum" :overlay="fileWorkspaceOverlay" :expanded="browserExpanded" :expand-preview="workspaceExpandPreview" :conversation-preview="workspaceConversationPreview" :conversation="browserExpanded&&!browserWorkspaceMode?{title:active?.title||'当前对话',active:workspaceConversationActive,status:workspaceConversationStatus}:undefined" :running="agentRunning" @conversation="showWorkspaceConversation" @stop="stopAgent" :owner-label="treeOwnerLabel" :resolve-browser="resolveBrowserTab" @open-browser="openBrowserTab" @browser-changed="updateBrowserTab" @reorder="(id,before,ids)=>reorderBrowserTab(id,before,activeId,ids)" @expand="toggleBrowserExpand" @select="selectFileTab" @close="closeFileTab" @hide="hideWorkspace" @open-file="openFilePreview($event.path,$event.chatId)" @locate="locateResourceMessage" @resize="resizeFileWorkspace" @notify="onPanelNotify" /></Transition>
+    <Transition name="file-workspace"><FileWorkspace ref="fileWorkspace" :presented="(fileWorkspaceVisible||browserWorkspaceActive)&&!settingsOpen&&!creatorKind&&!docsOpen" v-if="fileTabsState.open || browserWorkspaceMode" v-show="!docsOpen && !settingsOpen && (fileWorkspaceVisible || browserWorkspaceActive)" :inert="settingsOpen" @questionnaire-submitted="acceptQuestionnaireRecord($event)" @questionnaire-cancelled="acceptQuestionnaireRecord($event)" @questionnaire-return-to-chat="onQuestionnaireReturnToChat" @tools-target="workspaceToolsTarget=$event" @conversation-detach="restoreConversationSplit" @creator="openCreator" @select-subchat="selectWorkspaceSubchat" @locate-parent="locateSubchatParent" :full-page="browserWorkspaceMode" :tabs="browserWorkspaceMode?browserWorkspaceTabs:fileTabsState.tabs" :workspace-count="fileTabsState.tabs.length" :active="settingsOpen ? null : browserWorkspaceMode?browserWorkspaceTab:activeFileTab" :viewer-chat-id="activeId || ''" :width="fileWorkspaceWidth" :maximum="fileWorkspaceMaximum" :overlay="fileWorkspaceOverlay" :expanded="browserExpanded" :expand-preview="workspaceExpandPreview" :conversation-preview="workspaceConversationPreview" :conversation="browserExpanded&&!browserWorkspaceMode?{title:active?.title||'当前对话',active:workspaceConversationActive,status:workspaceConversationStatus}:undefined" :running="agentRunning" @conversation="showWorkspaceConversation" @stop="stopAgent" :owner-label="treeOwnerLabel" :resolve-browser="resolveBrowserTab" @open-browser="openBrowserTab" @browser-changed="updateBrowserTab" @reorder="(id,before,ids)=>reorderBrowserTab(id,before,activeId,ids)" @tab-expand="toggleWorkspaceTabExpanded" @expand="toggleBrowserExpand" @select="selectFileTab" @close="closeFileTab" @hide="hideWorkspace" @open-file="openFilePreview($event.path,$event.chatId)" @locate="locateResourceMessage" @resize="resizeFileWorkspace" @notify="onPanelNotify" /></Transition>
     </main>
     </div>
 
-    <v-dialog
+    <NativePanelDialog
       :model-value="readPagesPanelOpen"
+      :active="!settingsOpen&&!creatorKind"
+      :content="readSourcesNative.content"
+      :context-key="`${activeId}:${readPagesPanelFromId}`"
+      title="引用来源"
       max-width="540"
       scrollable
       content-class="read-pages-dialog-host"
+      @action="readSourcesAction"
+      @error="showToast($event)"
       @update:model-value="onReadPagesDialog"
     >
       <div class="read-pages-dialog" aria-label="引用来源">
@@ -1117,6 +1060,7 @@
             type="button"
             class="read-page-card"
             @click="openSourceUrl(s.url)"
+            @contextmenu="appLinks.showLinkMenu(s.url,$event,activeId||undefined)"
           >
             <div class="read-page-card-top">
               <img
@@ -1133,10 +1077,10 @@
           </button>
         </div>
       </div>
-    </v-dialog>
+    </NativePanelDialog>
 
 
-    <v-dialog v-model="deleteDialog" max-width="440" persistent>
+    <BrowserConfirmationDialog v-model="deleteDialog" confirmation="delete-chat" :context-key="deleteTarget?.id||deleteBatchIds?.join(',')||''" max-width="440" persistent>
       <v-card>
         <v-card-title>{{ deleteBatchIds?.length ? '批量删除对话' : '删除 Chat' }}</v-card-title>
         <v-card-text>
@@ -1158,15 +1102,15 @@
           <v-btn color="error" :loading="deleting" @click="confirmDeleteChat">删除</v-btn>
         </v-card-actions>
       </v-card>
-    </v-dialog>
+    </BrowserConfirmationDialog>
 
-    <v-dialog v-model="closeSessionDialog" max-width="420" persistent>
+    <BrowserConfirmationDialog v-model="closeSessionDialog" confirmation="close-session" max-width="420" persistent>
       <v-card>
         <v-card-title>关闭 Session</v-card-title>
         <v-card-text>
           <p>
             确定关闭
-            <strong>Session #{{ closeSessionTarget?.sessionIndex }}</strong>
+            <strong>{{ closeSessionTarget?browserSessionLabel(closeSessionTarget):'浏览会话' }}</strong>
             吗？
           </p>
           <p class="text-medium-emphasis mt-2">
@@ -1179,23 +1123,28 @@
           <v-btn color="error" :loading="closingSession" @click="confirmCloseSession">关闭</v-btn>
         </v-card-actions>
       </v-card>
-    </v-dialog>
+    </BrowserConfirmationDialog>
 
-    <v-dialog v-model="quitDialog" max-width="400" persistent>
-      <v-card>
+    <BrowserConfirmationDialog v-model="quitDialog" confirmation="quit" max-width="400" persistent>
+      <v-card class="app-quit-dialog" :aria-busy="quitChecking||quitting">
         <v-card-title>退出 Navora</v-card-title>
-        <v-card-text>确定要退出程序吗？正在运行的 Agent 将被停止。</v-card-text>
+        <v-card-text aria-live="polite">{{ quitMessage }}</v-card-text>
         <v-card-actions>
           <v-spacer />
           <v-btn variant="text" :disabled="quitting" @click="quitDialog = false">取消</v-btn>
-          <v-btn color="error" :loading="quitting" @click="confirmQuit">退出</v-btn>
+          <v-btn v-if="quitStateError" variant="text" :disabled="quitting||quitChecking" @click="quitConfirmation.refresh()">重试</v-btn>
+          <v-btn color="error" :disabled="!quitReady" :loading="quitting" @click="confirmQuit">退出</v-btn>
         </v-card-actions>
       </v-card>
-    </v-dialog>
+    </BrowserConfirmationDialog>
 
     <SidebarContextMenu ref="pageCtxMenu">
       <template v-if="pageCtx?.kind === 'chat' || pageCtx?.kind === 'sub'">
-        <button type="button" class="sidebar-more-item" role="menuitem" @click="startRenameChat(pageCtx.chat)">
+        <button type="button" class="sidebar-more-item" role="menuitem" @click="runChatContextAction('find')"><AppIcon icon="magnifying-glass"/><span>在此对话查找</span></button>
+        <button type="button" class="sidebar-more-item" role="menuitem" :disabled="isWebRemote()" :title="isWebRemote()?'远程界面不能打开本机文件夹':undefined" @click="runChatContextAction('folder')"><AppIcon icon="folder-open"/><span>打开对话文件夹</span></button>
+        <button type="button" class="sidebar-more-item" role="menuitem" :disabled="!pageCtx.running||!pageCtx.runId" @click="runChatContextAction('stop')"><StatusIcon kind="stopped"/><span>停止本对话任务</span></button>
+        <div class="sidebar-more-divider" role="separator"/>
+        <button type="button" class="sidebar-more-item" role="menuitem" @click="runChatContextAction('rename')">
           <AppIcon icon="pen-to-square" />
           <span>修改标题</span>
         </button>
@@ -1204,7 +1153,7 @@
           type="button"
           class="sidebar-more-item"
           role="menuitem"
-          @click="toggleChatPinned(pageCtx.chat)"
+          @click="runChatContextAction('pin')"
         >
           <AppIcon icon="thumbtack" />
           <span>{{ pageCtx.chat.pinned ? '取消置顶' : '置顶' }}</span>
@@ -1214,12 +1163,12 @@
           class="sidebar-more-item"
           role="menuitem"
           :disabled="exportingChat || !pageCtx.chat.messages?.length"
-          @click="exportChatById(pageCtx.chat.id)"
+          @click="runChatContextAction('export')"
         >
           <AppIcon icon="file-export" />
           <span>导出对话</span>
         </button>
-        <button type="button" class="sidebar-more-item danger" role="menuitem" @click="askDeleteChat(pageCtx.chat)">
+        <button type="button" class="sidebar-more-item danger" role="menuitem" @click="runChatContextAction('delete')">
           <AppIcon icon="trash" />
           <span>删除</span>
         </button>
@@ -1231,7 +1180,7 @@
             type="button"
             class="sidebar-more-item"
             role="menuitem"
-            @click="copyText(pageCtx.selected)"
+            @click="runMessageContextAction('copy-selection')"
           >
             <AppIcon icon="copy" />
             <span>复制</span>
@@ -1240,7 +1189,7 @@
             type="button"
             class="sidebar-more-item"
             role="menuitem"
-            @click="quoteToComposer(pageCtx.selected)"
+            @click="runMessageContextAction('quote-selection')"
           >
             <AppIcon icon="pen-to-square" />
             <span>引用到输入框</span>
@@ -1259,7 +1208,7 @@
             type="button"
             class="sidebar-more-item"
             role="menuitem"
-            @click="copyText(pageCtx.messageText)"
+            @click="runMessageContextAction('copy-message')"
           >
             <AppIcon icon="copy" />
             <span>复制本条</span>
@@ -1269,7 +1218,7 @@
             type="button"
             class="sidebar-more-item"
             role="menuitem"
-            @click="quoteToComposer(pageCtx.messageText)"
+            @click="runMessageContextAction('quote-message')"
           >
             <AppIcon icon="pen-to-square" />
             <span>引用本条到输入框</span>
@@ -1279,7 +1228,7 @@
             type="button"
             class="sidebar-more-item"
             role="menuitem"
-            @click="copyEntireChat"
+            @click="runMessageContextAction('copy-chat')"
           >
             <AppIcon icon="comments" />
             <span>复制全部对话</span>
@@ -1290,7 +1239,7 @@
             class="sidebar-more-item"
             role="menuitem"
             :disabled="exportingChat"
-            @click="exportActiveChat"
+            @click="runMessageContextAction('export')"
           >
             <AppIcon icon="file-export" />
             <span>导出对话</span>
@@ -1299,13 +1248,12 @@
       </template>
     </SidebarContextMenu>
 
-    <SidebarContextMenu ref="railContextMenu"><button type="button" class="sidebar-more-item" role="menuitemcheckbox" :aria-checked="!allSidebarHidden" :disabled="!!settingsOpen||!!creatorKind" @click="toggleSidebarVisibility"><AppIcon icon="workspace"/><span>显示侧栏</span><span class="rail-context-check" aria-hidden="true">{{allSidebarHidden?'':'✓'}}</span></button><div class="sidebar-more-divider"/><button type="button" class="sidebar-more-item" role="menuitemcheckbox" :aria-checked="sidebarPresentationMode==='fixed'" :disabled="isMobileLayout||!!settingsOpen||!!creatorKind" @click="toggleSidebarPin"><AppIcon icon="thumbtack"/><span>固定侧栏</span><span class="rail-context-check" aria-hidden="true">{{sidebarPresentationMode==='fixed'?'✓':''}}</span></button></SidebarContextMenu>
+    <SidebarContextMenu ref="railContextMenu"><button type="button" class="sidebar-more-item" role="menuitemcheckbox" :aria-checked="!allSidebarHidden" :disabled="!!settingsOpen||!!creatorKind" @click="toggleSidebarVisibility"><AppIcon :icon="allSidebarHidden?'sidebar-show':'sidebar-hide'"/><span>显示侧栏</span><span class="rail-context-check" aria-hidden="true">{{allSidebarHidden?'':'✓'}}</span></button><div class="sidebar-more-divider"/><button type="button" class="sidebar-more-item" role="menuitemcheckbox" :aria-checked="sidebarFloatingDisabled || sidebarPresentationMode==='fixed'" :disabled="isMobileLayout||!!settingsOpen||!!creatorKind||sidebarFloatingDisabled" :title="sidebarFloatingDisabledReason||undefined" @click="toggleSidebarPin"><AppIcon :icon="sidebarFloatingDisabled || sidebarPresentationMode==='fixed'?'sidebar-docked':'sidebar-floating'"/><span>固定侧栏</span><span class="rail-context-check" aria-hidden="true">{{sidebarFloatingDisabled||sidebarPresentationMode==='fixed'?'✓':''}}</span></button></SidebarContextMenu>
     <ApplicationMenuBar v-if="!showDesktopChrome || isMobileLayout" ref="appMenu" mode="compact" collapsed :command-state="applicationCommandState" :context-key="activeId || ''" :app-version="applicationVersion" :shortcuts-active="!settingsOpen&&!docsOpen&&!creatorKind" :capture-target="captureApplicationTarget" :restore-target="restoreApplicationTarget" @beforeopen="refreshApplicationTarget" @command="executeApplicationCommand" @error="onPanelNotify" />
-    <ComposerAttachmentMenu ref="attachmentMenu" :context-key="activeId||''" @select="selectAttachmentSource" @creator="createFromAttachment" @closed="attachmentClosed" @notify="onPanelNotify" />
-    <ComposerSourcePicker ref="sourcePicker" :chat-id="activeId || ''" :files="artifactEntries" :messages="active?.messages || []" @insert="insertContextSources" @closed="closeContextPicker" @notify="onPanelNotify" />
-    <v-dialog v-model="applicationFilePicker" max-width="460"><section class="application-file-picker"><header><strong>打开对话文件</strong><button type="button" aria-label="关闭文件选择" @click="applicationFilePicker=false"><AppIcon icon="xmark" /></button></header><WorkspaceFilePicker :chat-id="activeId || ''" @open="path=>{applicationFilePicker=false;openFilePreview(path)}" /></section></v-dialog>
+    <ComposerAttachmentMenu ref="attachmentMenu" :chat-id="activeId||''" :files="artifactEntries" :messages="active?.messages||[]" @insert="insertContextSources" :context-key="activeId||''" :selected-declarations="selectedTaskDeclarations" @declaration="selectTaskDeclaration" @select="selectAttachmentSource" @creator="createFromAttachment" @closed="attachmentClosed" @notify="onPanelNotify" />
+    <WorkspaceFilePickerDialog v-model="applicationFilePicker" :active="!settingsOpen&&!creatorKind" :chat-id="activeId || ''" title="打开对话文件" :show-locate="false" @open="path=>{applicationFilePicker=false;openFilePreview(path)}" @error="showToast($event)" />
 
-    <v-dialog v-model="chatSearchOpen" max-width="600" content-class="chat-search-dialog" aria-label="搜索对话" @after-enter="chatSearchInput?.focus()">
+    <NativePanelDialog v-model="chatSearchOpen" :active="!settingsOpen&&!creatorKind" :content="chatSearchNative.content" :initial-content="chatSearchNativeInitial" context-key="chat-search" title="搜索对话" focus-mode="input" role="search" position="top" :focus-request="chatSearchFocusRequest" max-width="600" content-class="chat-search-dialog" aria-label="搜索对话" @action="chatSearchAction" @error="showToast($event)" @after-enter="chatSearchInput?.focus()">
         <div class="chat-search-panel">
           <div class="chat-search-box">
             <AppIcon icon="magnifying-glass" class="chat-search-lead" />
@@ -1345,33 +1293,33 @@
             </button>
           </div>
         </div>
-    </v-dialog>
+    </NativePanelDialog>
 
-    <Teleport to="body">
+    <BrowserContentDialog :model-value="!!lightbox.src" max-width="1200" width="94vw" @update:model-value="!$event && closeLightbox()">
       <div
         v-if="lightbox.src"
         class="media-lightbox"
         role="dialog"
-        aria-modal="true"
+        aria-label="图片预览"
         tabindex="0"
         @click.self="closeLightbox"
         @keydown.esc.prevent="closeLightbox"
       >
-        <button type="button" class="media-lightbox-close" title="关闭" @click="closeLightbox">
+        <button type="button" class="media-lightbox-close" title="关闭" aria-label="关闭图片预览" @click="closeLightbox">
           <AppIcon icon="xmark" />
         </button>
         <img :src="lightbox.src" :alt="lightbox.alt" />
         <p v-if="lightbox.alt" class="media-lightbox-cap">{{ lightbox.alt }}</p>
       </div>
-    </Teleport>
+    </BrowserContentDialog>
 
 
 
-    <DocsDialog v-if="docsOpen" v-model="docsOpen" />
+
     <SkillReviewHost />
 
-    <v-snackbar v-model="toast.show" :color="toast.color" timeout="2800" location="top end" variant="tonal" class="app-toast">
-      {{ toast.text }}
+    <v-snackbar v-model="toast.show" :color="toast.color" timeout="2800" location="bottom end" :transition="false" variant="tonal" class="app-toast">
+      <button type="button" class="app-toast-dismiss" :aria-label="`${toast.text}，点击关闭提示`" @click="toast.show=false"><span>{{ toast.text }}</span><AppIcon icon="xmark" /></button>
     </v-snackbar>
   </div>
 </template>
@@ -1380,21 +1328,37 @@
 import AppIcon from '@/components/icons/AppIcon.vue'
 defineOptions({ name: 'ChatPage' })
 import {finalOutputs} from '@shared/message-presentation'
-import {conversationOutputBlocks,toolActivityLabel} from '@shared/conversation-output'
+import {conversationOutputBlocks,conversationProcessGroups,toolActivityLabel} from '@shared/conversation-output'
+import {useChatAnnotations} from '@/composables/useChatAnnotations'
+import type {AnnotationChatAction,AnnotationChatEntry,AnnotationChatEdit} from '@shared/browser-annotation-chat'
+import {requestAnnotationEdit,cancelAnnotationEdit} from '@/composables/annotationChatEditor'
+import ConversationProcessToggle from '@/components/ConversationProcessToggle.vue'
+import ComposerSendButton from '@/components/ComposerSendButton.vue'
+import {useAppLinks} from '@/composables/useAppLinks'
+import {browserSessionLabel} from '@shared/browser-session'
 import ConversationActivityRow from '@/components/ConversationActivityRow.vue'
+import ConversationReasoning from '@/components/ConversationReasoning.vue'
 import SubchatLink from '@/components/SubchatLink.vue'
 import {useSubchatSignals} from '@/composables/useConversationSession'
 import { replyArtifactGroups } from '@shared/workspace-resources'
 import { useWorkspaceResources } from '@/composables/useWorkspaceResources'
 import ReplyArtifacts from '@/components/ReplyArtifacts.vue'
-import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { finishWindowStartup } from '../utils/window-startup'
 import StatusIcon from '@/components/StatusIcon.vue'
 import ComposerEditor from '@/components/ComposerEditor.vue'
-import ComposerSourcePicker, {type ComposerSourceInsert} from '@/components/ComposerSourcePicker.vue'
+import type {ComposerSourceInsert} from '@/components/ComposerSourcePicker.vue'
 import ApplicationMenuBar from '@/components/ApplicationMenuBar.vue'
-import WorkspaceFilePicker from '@/components/WorkspaceFilePicker.vue'
+import WorkspaceFilePickerDialog from '@/components/WorkspaceFilePickerDialog.vue'
+import NativePanelDialog from '@/components/NativePanelDialog.vue'
+import BrowserConfirmationDialog from '@/components/BrowserConfirmationDialog.vue'
+import BrowserContentDialog from '@/components/BrowserContentDialog.vue'
+import type {BrowserPageAddressContext} from '@shared/browser-page-address'
+import {chatSearchPanel,readSourcesPanel} from '@shared/native-dialog-panels'
+import type {NativePanelAction} from '@shared/native-ui'
 import {useComposerDraft} from '@/composables/useComposerDraft'
-import {compileComposerDocument,composerDocumentFromLegacy,composerSubmissionKey,composerErrorMessage,createComposerDocument,mergeComposerDocuments,normalizeComposerDocument,type ComposerDocument,type ComposerContextBlock} from '@shared/composer-document'
+import {normalizeTaskDeclarations,taskDeclarationsLabel,taskDeclarationsSupported,type TaskDeclarationId} from '@shared/task-declarations'
+import {compileComposerDocument,previewComposerDocument,composerDocumentFromLegacy,composerSubmissionKey,composerErrorMessage,mergeComposerDocuments,normalizeComposerDocument,type ComposerDocument,type ComposerContextBlock} from '@shared/composer-document'
 import type {AppCommandId,AppCommandContext,AppCommandStateMap} from '@shared/app-commands'
 import {captureActiveComposerEditor,type ComposerSelectionBookmark,type ComposerEditorCommand,type ComposerEditorHandle} from '@/editor/composer-editor-registry'
 import {useApplicationEditTarget} from '@/composables/useApplicationEditTarget'
@@ -1435,25 +1399,22 @@ import {normalizeModelUsage} from '@shared/model-usage'
 import {browserTabShortcut} from '@shared/browser-workspace'
 import ChatMarkdown from '@/components/ChatMarkdown.vue'
 import ConversationFind from '@/components/ConversationFind.vue'
+import {useWindowFind,openWindowFind,stepWindowFind} from '@/composables/useWindowFind'
+import {useAppQuitConfirmation} from '@/composables/useAppQuitConfirmation'
 import ComposerAttachmentMenu from '@/components/ComposerAttachmentMenu.vue'
-import ComposerNativePanels from '@/components/ComposerNativePanels.vue'
-import type {ComposerNativePanelKind,ComposerNativePanelState} from '@shared/composer-native-panels'
 const conversationFind=ref<InstanceType<typeof ConversationFind>|null>(null),conversationFindOpen=ref(false),attachmentMenu=ref<InstanceType<typeof ComposerAttachmentMenu>|null>(null)
 const findToolReveal=ref<Record<string,{from:number;to:number}>>({})
-const findTemporaryExpansion={tools:new Set<string>(),logs:new Set<string>()}
+const findTemporaryExpansion={tools:new Set<string>(),logs:new Set<string>(),processes:new Set<string>()}
+const windowFind=useWindowFind()
 async function openConversationFind(){
-  if(activeFileTab.value?.kind==='subchats'&&fileWorkspaceVisible.value&&!conversationIsVisible.value){fileWorkspace.value?.openSubchatFind();return}
   if(!activeId.value||!await canLeaveSettings())return
   settingsOpen.value=false;creatorKind.value=null
-  fileManagerMode.value=false;pluginWorkspaceMode.value=false;browserWorkspaceMode.value=false
-  activateSidebar('chats',false)
-  if(fileWorkspaceOverlay.value)hideFileWorkspace()
-  else if(browserExpanded.value)workspaceConversationActive.value=true
   await nextTick()
   conversationFind.value?.open()
 }
-async function locateFindMessage(id:string,match?:{from:number;to:number}){if(match)findToolReveal.value={...findToolReveal.value,[id]:match};if(!isActivityExpanded(id)){expandedTools.value={...expandedTools.value,[id]:true};findTemporaryExpansion.tools.add(id)}if(!expandedLogs.value[id]){expandedLogs.value={...expandedLogs.value,[id]:true};findTemporaryExpansion.logs.add(id)}await jumpToMessage(id)}
-function restoreFindExpansion(open:boolean){if(open)return;findToolReveal.value={};for(const [state,keys] of [[expandedTools,findTemporaryExpansion.tools],[expandedLogs,findTemporaryExpansion.logs]] as const){const next={...state.value};for(const key of keys)delete next[key];state.value=next;keys.clear()}}
+function revealFindConversation(){stickToBottom.value=false;if(conversationIsVisible.value)return;fileManagerMode.value=false;pluginWorkspaceMode.value=false;browserWorkspaceMode.value=false;if(fileWorkspaceOverlay.value)hideFileWorkspace();else if(browserExpanded.value)workspaceConversationActive.value=true}
+async function locateFindMessage(id:string,match?:{from:number;to:number}){if(match)findToolReveal.value={...findToolReveal.value,[id]:match};const group=processByMessage.value.get(id);if(group&&!expandedProcesses.value[group.key])findTemporaryExpansion.processes.add(group.key);if(!isActivityExpanded(id)){expandedTools.value={...expandedTools.value,[id]:true};findTemporaryExpansion.tools.add(id)}if(!expandedLogs.value[id]){expandedLogs.value={...expandedLogs.value,[id]:true};findTemporaryExpansion.logs.add(id)}await jumpToMessage(id)}
+function restoreFindExpansion(open:boolean){if(open)return;findToolReveal.value={};for(const [state,keys] of [[expandedTools,findTemporaryExpansion.tools],[expandedLogs,findTemporaryExpansion.logs],[expandedProcesses,findTemporaryExpansion.processes]] as const){const next={...state.value};for(const key of keys)delete next[key];state.value=next;keys.clear()}}
 import {lazyPanel} from '@/utils/lazy-panel'
 const SettingsPage=lazyPanel(()=>import('./SettingsPage.vue'),'设置')
 import { useSidebarLayout } from '@/composables/useSidebarLayout'
@@ -1461,9 +1422,13 @@ import { useSidebarPresentation } from '@/composables/useSidebarPresentation'
 import SidebarNavigation from '@/components/sidebar/SidebarNavigation.vue'
 import GlobalResourcesPanel from '@/components/sidebar/GlobalResourcesPanel.vue'
 import ChatResourcesMenu from '@/components/ChatResourcesMenu.vue'
+import {browserPageAddressError} from '@shared/browser-page-address'
+import {GUIDE_READING_STORAGE_KEY,readGuideReading,resolveGuideTarget} from '@shared/user-guide'
+import {hasVisibleUi} from '@/utils/visible-ui'
+import {browserViewports} from '@/composables/useBrowserSurfaceLayout'
 import WorkspaceLauncher from '@/components/WorkspaceLauncher.vue'
 import MessageQueue from '@/components/MessageQueue.vue'
-const DocsDialog=lazyPanel(()=>import('@/components/DocsDialog.vue'),'帮助',true)
+const DocsPage=lazyPanel(()=>import('./DocsPage.vue'),'使用文档')
 import SkillReviewHost from '@/components/skills/SkillReviewHost.vue'
 import CatalogItemCard from '@/components/store/CatalogItemCard.vue'
 import ToolCatalogList from '@/components/store/ToolCatalogList.vue'
@@ -1476,14 +1441,19 @@ import {useResourceCardLayout} from '@/composables/useResourceCardLayout'
 import {useFileTabs} from '@/composables/useFileTabs'
 import {useFileWorkspaceLayout} from '@/composables/useFileWorkspaceLayout'
 import FileWorkspace from '@/components/FileWorkspace.vue'
+import type {QuestionnaireRecord} from '@shared/questionnaire'
+import {OPEN_QUESTIONNAIRE_EVENT,type OpenQuestionnaireRequest} from '@/utils/questionnaire-events'
 import FileManager from '@/components/FileManager.vue'
 const PluginWorkspace=lazyPanel(()=>import('@/components/plugins/PluginWorkspace.vue'),'插件')
 const CreatorWorkspace=lazyPanel(()=>import('@/components/CreatorWorkspace.vue'),'创建器')
 import type { CreatorKind } from '@shared/creators'
 import SidebarDock from '@/components/sidebar/SidebarDock.vue'
+import SidebarPresentationIcon from '@/components/icons/SidebarPresentationIcon.vue'
 import { useSidebarDock } from '@/composables/useSidebarDock'
 import SidebarContextMenu from '@/components/sidebar/SidebarContextMenu.vue'
 import InChatAskCard from '@/components/chat/InChatAskCard.vue'
+import {submitDecision,deferDecisionCancellation,isDecisionSubmitting,type DecisionSubmissionStates} from '@shared/decision-submission'
+import {clearDecisionDraft} from '@/composables/useDecisionDraft'
 import InChatPermCard from '@/components/chat/InChatPermCard.vue'
 import { useMobileLayout } from '@/composables/useMobileLayout'
 import {
@@ -1572,11 +1542,12 @@ async function applyExecutionMode(mode: 'auto' | 'chat' | 'agent') {
   } catch (error) { showToast(error instanceof Error ? error.message : '切换模式失败') } finally {executionModeBusy.value=false}
 }
 function onAppShortcut(event: KeyboardEvent) {
-  if (event.defaultPrevented || event.isComposing || event.altKey || event.repeat || settingsOpen.value || docsOpen.value || document.querySelector('.v-dialog.v-overlay--active,.v-menu.v-overlay--active,.sidebar-ctx-panel:not([data-browser-tab-preview])')) return
+  if (event.defaultPrevented || event.isComposing || event.altKey || event.repeat || settingsOpen.value&&!docsOpen.value || hasVisibleUi('.v-dialog.v-overlay--active,.v-menu.v-overlay--active,.sidebar-ctx-panel:not([data-browser-tab-preview])')) return
   const key = event.key.toLowerCase()
+  if(docsOpen.value){if((event.ctrlKey||event.metaKey)&&key==='f'&&!event.shiftKey){event.preventDefault();docsWorkspace.value?.runAction('focusSearch')}return}
   if(browserExpanded.value&&fileWorkspaceVisible.value&&!(event.target instanceof Element&&event.target.closest('.file-workspace'))){const action=browserTabShortcut({key:event.key,control:event.ctrlKey,meta:event.metaKey,shift:event.shiftKey});if(action&&(['next','previous','last','close'].includes(action)||action.startsWith('index'))){event.preventDefault();void fileWorkspace.value?.shortcut(action);return}}
-  if(key==='f3'&&conversationFind.value?.opened){event.preventDefault();conversationFind.value.step(event.shiftKey?-1:1);return}
-  if((event.ctrlKey||event.metaKey)&&key==='f'&&!event.shiftKey&&!fileManagerActive.value&&!pluginWorkspaceActive.value&&!browserWorkspaceActive.value&&!(event.target instanceof Element&&event.target.closest('.file-workspace,.browser-tab-panel'))){event.preventDefault();openConversationFind();return}
+  if(key==='f3'&&windowFind.opened.value){event.preventDefault();void stepWindowFind(event.shiftKey?-1:1);return}
+  if((event.ctrlKey||event.metaKey)&&key==='f'&&!event.shiftKey&&!(event.target instanceof Element&&event.target.closest('.file-workspace,.browser-tab-panel'))){event.preventDefault();if(!conversationIsVisible.value&&openWindowFind('workspace'))return;void openConversationFind();return}
   if (event.ctrlKey || event.metaKey) {
     if (key === 't' && event.shiftKey && activeId.value && !isWebRemote()) { event.preventDefault(); void window.navora!.browser.workspace.tabAction({chatId:activeId.value,action:'reopen'}).catch(()=>showToast('当前对话没有可恢复的标签页。')) }
     else if (key === 't' && !event.shiftKey && activeId.value && !browserWorkspaceActive.value) { event.preventDefault(); openBrowserTab(); settingsOpen.value=false; creatorKind.value=null; pluginWorkspaceMode.value=false; fileManagerMode.value=false }
@@ -1626,6 +1597,9 @@ const PERM_LABELS: Record<string, string> = {
 }
 
 const chats = ref<ChatSession[]>([])
+let nativeRowMenuEpoch=0
+onBeforeUnmount(()=>{nativeRowMenuEpoch++})
+onBeforeRouteLeave(()=>{nativeRowMenuEpoch++;pageCtxMenu.value?.hide()})
 const activeId = ref<string | null>(null)
 const active = ref<ChatSession | null>(null)
 const tree = ref<BrowserTreeSession[]>([])
@@ -1641,25 +1615,18 @@ const modelSelectionBusy = ref(false),executionModeBusy=ref(false),modelLoading=
 const permMenuOpen = ref(false)
 const modelMenuOpen = ref(false)
 const usageMenuOpen = ref(false)
-const nativeComposerPanels=ref<InstanceType<typeof ComposerNativePanels>|null>(null)
-const nativeComposerAvailable=computed(()=>nativeComposerPanels.value?.supported===true)
-let nativeComposerKind:ComposerNativePanelKind|undefined
-async function openNativeComposerOrFallback(kind:ComposerNativePanelKind,event?:Event){
-  if(!activeId.value)return
-  const target=(event?.currentTarget as HTMLElement|null)||document.querySelector<HTMLElement>(kind==='model'?'.model-panel-trigger':kind==='usage'?'.usage-ring-btn':kind==='mode'?'.execution-mode-button':'[aria-label="本会话权限预设"]')
-  if(nativeComposerAvailable.value&&target){
-    if(nativeComposerPanels.value?.opened&&nativeComposerKind===kind){await nativeComposerPanels.value.hide();nativeComposerKind=undefined;return}
-    nativeComposerKind=kind
-    if(kind==='model'){modelQuery.value='';void refreshAiProviders()}
-    await nativeComposerPanels.value?.show(kind,target)
-    return
-  }
-  if(kind==='model')modelMenuOpen.value=true
-  else if(kind==='usage')usageMenuOpen.value=true
-  else if(kind==='permission')permMenuOpen.value=true
+const docsOpen=ref(false)
+const modeMenuOpen=ref(false),composerMenuBoundary=ref<HTMLElement>()
+function placeComposerMenus(){
+  const host=composerMenuBoundary.value,composer=document.querySelector<HTMLElement>('.composer-box')
+  if(!host||!composer)return
+  const rect=composer.getBoundingClientRect(),main=composer.closest('.main')?.getBoundingClientRect()
+  Object.assign(host.style,{left:`${rect.left+8}px`,top:`${(main?.top||0)+8}px`,width:`${Math.max(0,rect.width-16)}px`,height:`${Math.max(0,(main?.bottom||innerHeight)-(main?.top||0)-16)}px`})
 }
-function applyNativeExecutionMode(mode:string){if(mode==='auto'||mode==='chat'||mode==='agent')void applyExecutionMode(mode)}
-function applyNativePermission(preset:string){if(permPresetOptions.some(option=>option.value===preset))void applyChatPreset(preset as PermissionPreset)}
+watch([modeMenuOpen,permMenuOpen,modelMenuOpen,usageMenuOpen],()=>{placeComposerMenus();void nextTick(placeComposerMenus)},{flush:'sync'})
+watch(activeId,()=>{modeMenuOpen.value=false;permMenuOpen.value=false;modelMenuOpen.value=false;usageMenuOpen.value=false})
+onMounted(()=>window.addEventListener('resize',placeComposerMenus))
+onBeforeUnmount(()=>window.removeEventListener('resize',placeComposerMenus))
 const settingsPermissions = ref<ChatPermissions | null>(null)
 const aiProviders = ref<AiProviderConfig[]>([])
 const aiDefaultProviderId = ref('')
@@ -1700,8 +1667,9 @@ const pendingPermRequests = ref<PermissionRequest[]>([])
 const visiblePermRequests = computed(() => permissionRequestsForChat(pendingPermRequests.value,activeId.value,chats.value))
 const permReq = computed(() => visiblePermRequests.value[0] || null)
 const permPendingCount = computed(() => visiblePermRequests.value.length)
-const permBusyId = ref('')
-const askBusy = ref(false)
+const decisionSubmissions=reactive<DecisionSubmissionStates>({})
+const permBusyId=computed(()=>permReq.value&&decisionSubmissions[permReq.value.id]?.pending?permReq.value.id:'')
+const askBusy=computed(()=>!!activePendingAsk.value&&!!decisionSubmissions[activePendingAsk.value.id]?.pending)
 const permCapabilityLabel = computed(
   () => PERM_LABELS[permReq.value?.capability || ''] || permReq.value?.capability || '权限确认',
 )
@@ -1876,22 +1844,71 @@ function treeOwnerLabel(chatId: string): string {
 const closeSessionDialog = ref(false)
 const closeSessionTarget = ref<BrowserTreeSession | null>(null)
 const closingSession = ref(false)
-const quitDialog = ref(false)
+const quitConfirmation=useAppQuitConfirmation()
+const {open:quitDialog,runningAgents:quitRunningAgents,checking:quitChecking,error:quitStateError,ready:quitReady,message:quitMessage}=quitConfirmation
 const quitting = ref(false)
 const exportingChat = ref(false)
 const {open:resourceOpen,tab:resourceTab,updated:resourceUpdated,updateCount:resourceUpdateCount,reading:resourceReading,show:showResources,close:hideResources} = useConversationResources(activeId,tree)
 function closeResources(){hideResources()}
 function toggleResources(){if(resourceOpen.value)closeResources();else showResources('overview')}
-const {current:fileTabsState,active:activeFileTab,open:openFileTab,openBrowser:openBrowserTabBase,openSubchats:openSubchatWorkspaceTab,selectSubchat:selectWorkspaceSubchat,updateBrowser:updateBrowserTab,syncBrowser:syncBrowserTabs,presentResource:presentBrowserResource,reorder:reorderBrowserTab,select:selectFileTabBase,close:closeFileTab,hide:hideFileWorkspace,show:showFileWorkspace,removeOwner:removeFileOwner,transfer:transferFileTab,resolveBrowser:resolveBrowserTab}=useFileTabs(activeId,onPanelNotify)
+const {current:fileTabsState,active:activeFileTab,open:openFileTab,openBrowser:openBrowserTabBase,openSubchats:openSubchatWorkspaceTab,openQuestionnaire:openQuestionnaireWorkspaceTab,updateQuestionnaire:updateQuestionnaireWorkspaceTab,selectSubchat:selectWorkspaceSubchat,updateBrowser:updateBrowserTab,syncBrowser:syncBrowserTabs,presentResource:presentBrowserResource,reorder:reorderBrowserTab,select:selectFileTabBase,close:closeFileTabBase,hide:hideFileWorkspaceBase,show:showFileWorkspace,removeOwner:removeFileOwner,transfer:transferFileTab,resolveBrowser:resolveBrowserTab}=useFileTabs(activeId,onPanelNotify)
+const questionnaireRecords=ref<Record<string,QuestionnaireRecord>>({})
+let unsubscribeQuestionnaires:(()=>void)|undefined,questionnaireOpenRevision=0
+function questionnaireBelongsTo(record:QuestionnaireRecord,chatId:string){return record.chatId===chatId||record.parentChatId===chatId||chats.value.some(chat=>chat.id===record.chatId&&chat.parentChatId===chatId)}
+const activeQuestionnaires=computed(()=>Object.values(questionnaireRecords.value).filter(record=>record.status==='pending'&&!!activeId.value&&questionnaireBelongsTo(record,activeId.value)).sort((a,b)=>Number(b.chatId===activeId.value)-Number(a.chatId===activeId.value)||a.createdAt-b.createdAt))
+const activeOwnQuestionnaire=computed(()=>activeQuestionnaires.value.find(record=>record.chatId===activeId.value))
+const questionnaireDocks=computed(()=>activeQuestionnaires.value.filter(record=>!fileWorkspaceVisible.value||workspaceConversationActive.value||activeFileTab.value?.kind!=='questionnaire'||activeFileTab.value.questionnaireId!==record.id))
+function pendingQuestionnaireForSidebar(chatId:string){return Object.values(questionnaireRecords.value).find(record=>record.status==='pending'&&questionnaireBelongsTo(record,chatId))}
+function acceptQuestionnaireRecord(record:QuestionnaireRecord,autoOpen=false){
+  const previous=questionnaireRecords.value[record.id]
+  if(previous&&(previous.updatedAt>record.updatedAt||(previous.status!=='pending'&&record.status==='pending')))return
+  questionnaireRecords.value={...questionnaireRecords.value,[record.id]:record}
+  updateQuestionnaireWorkspaceTab(record)
+  if(autoOpen&&!previous&&record.status==='pending'&&record.chatId===activeId.value&&!settingsOpen.value&&!creatorKind.value&&!fileManagerActive.value&&!pluginWorkspaceActive.value&&!browserWorkspaceActive.value&&activeFileTab.value?.kind!=='questionnaire')void openQuestionnaireRecord(record)
+}
+async function refreshQuestionnaires(){
+  const api=window.navora?.questionnaires
+  if(!api)return
+  try{for(const record of await api.list())acceptQuestionnaireRecord(record)}catch{showToast('暂时无法读取问卷，稍后可重新打开。','warning')}
+}
+async function flushQuestionnaireDraft(){return await fileWorkspace.value?.flushQuestionnaireDraft()??true}
+async function openQuestionnaireRecord(input:QuestionnaireRecord|string){
+  const revision=++questionnaireOpenRevision,api=window.navora?.questionnaires
+  if(!api)return
+  try{
+    const record=typeof input==='string'?await api.get(input):input
+    if(revision!==questionnaireOpenRevision)return
+    if(!record){showToast('问卷已不存在。','warning');return}
+    if(!await canLeaveSettings()||!await flushQuestionnaireDraft()||revision!==questionnaireOpenRevision)return
+    const owner=chats.value.find(chat=>chat.id===record.chatId)||await window.navora!.chats.get(record.chatId)
+    if(!owner||revision!==questionnaireOpenRevision){if(!owner)showToast('所属对话已删除。','warning');return}
+    const viewer=owner.kind==='sub'&&owner.parentChatId?owner.parentChatId:owner.id
+    if(activeId.value!==viewer)await selectChat(viewer)
+    if(revision!==questionnaireOpenRevision||activeId.value!==viewer)return
+    settingsOpen.value=false;creatorKind.value=null;fileManagerMode.value=false;pluginWorkspaceMode.value=false;browserWorkspaceMode.value=false
+    acceptQuestionnaireRecord(record);workspaceConversationActive.value=false
+    if(openQuestionnaireWorkspaceTab(record)){if(fileWorkspaceOverlay.value)hideResources();if(isMobileLayout.value)closeMobileSidebar()}
+  }catch{showToast('无法打开问卷，填写内容会继续保留。','warning')}
+}
+function onOpenQuestionnaireEvent(event:Event){const detail=(event as CustomEvent<OpenQuestionnaireRequest>).detail;if(detail&&typeof detail.id==='string'&&typeof detail.chatId==='string')void openQuestionnaireRecord(detail.id)}
+async function onQuestionnaireReturnToChat(target:{chatId:string;questionnaireId:string}){
+  if(!await flushQuestionnaireDraft())return
+  if(target.chatId!==activeId.value){await routeConversationTarget(target.chatId);await nextTick();document.querySelector<HTMLElement>('.subchat-composer [contenteditable="true"]')?.focus();return}
+  if(fileWorkspaceOverlay.value)await hideFileWorkspace()
+  else if(browserExpanded.value)workspaceConversationActive.value=true
+  await nextTick();focusComposer()
+}
+async function closeFileTab(key:string){if(activeFileTab.value?.key===key&&activeFileTab.value.kind==='questionnaire'&&!await flushQuestionnaireDraft())return;await closeFileTabBase(key)}
+async function hideFileWorkspace(){if(activeFileTab.value?.kind==='questionnaire'&&!await flushQuestionnaireDraft())return;hideFileWorkspaceBase()}
 const pluginWorkspaceMode=ref(false),pluginWorkspaceMounted=ref(false),browserWorkspaceMode=ref(false)
-const fileWorkspaceVisible=computed(()=>fileTabsState.value.open&&!settingsOpen.value&&!creatorKind.value&&!pluginWorkspaceMode.value&&!browserWorkspaceMode.value)
-async function openBrowserTab(afterKey?:string){if(!activeId.value)return;workspaceConversationActive.value=false;await openBrowserTabBase(afterKey)}
-function selectFileTab(key:string){workspaceConversationActive.value=false;selectFileTabBase(key)}
-function openSubchatList(){if(activeId.value){workspaceConversationActive.value=false;openSubchatWorkspaceTab(activeId.value)}}
+const fileWorkspaceVisible=computed(()=>fileTabsState.value.open&&!settingsOpen.value&&!creatorKind.value&&!pluginWorkspaceMode.value&&!browserWorkspaceMode.value&&!docsOpen.value)
+async function openBrowserTab(afterKey?:string){if(!activeId.value||!await flushQuestionnaireDraft())return;workspaceConversationActive.value=false;await openBrowserTabBase(afterKey)}
+async function selectFileTab(key:string){if(activeFileTab.value?.key!==key&&!await flushQuestionnaireDraft())return;workspaceConversationActive.value=false;selectFileTabBase(key)}
+async function openSubchatList(){if(activeId.value&&await flushQuestionnaireDraft()){workspaceConversationActive.value=false;openSubchatWorkspaceTab(activeId.value)}}
 let subchatTargetRevision=0
 async function routeConversationTarget(chatId:string){
   const revision=++subchatTargetRevision
-  if(!window.navora||!await canLeaveSettings())return
+  if(!window.navora||!await canLeaveSettings()||!await flushQuestionnaireDraft())return
   const child=chats.value.find(chat=>chat.id===chatId)||await window.navora.chats.get(chatId)
   if(revision!==subchatTargetRevision)return
   if(!child){showToast('子对话记录已删除。','warning');return}
@@ -1915,6 +1932,7 @@ const workspaceViews=new Map<string,{expanded:boolean;conversation:boolean}>()
 watch(activeId,(id,previous)=>{if(previous)workspaceViews.set(previous,{expanded:manualBrowserExpanded.value,conversation:workspaceConversationActive.value});const saved=id?workspaceViews.get(id):undefined;manualBrowserExpanded.value=saved?.expanded||false;workspaceConversationActive.value=saved?.conversation||false},{flush:'sync'})
 watch(()=>fileTabsState.value.tabs.length,count=>{if(!count){manualBrowserExpanded.value=false;workspaceConversationActive.value=false}})
 function toggleBrowserExpand(){if(!toggleWorkspaceExpanded())showToast('当前窗口宽度不足以显示分栏。','info');workspaceConversationActive.value=false}
+function toggleWorkspaceTabExpanded(target:'conversation'|'workspace'){if(!toggleWorkspaceExpanded())showToast('当前窗口宽度不足以显示分栏。','info');workspaceConversationActive.value=target==='conversation'}
 function showWorkspaceConversation(){workspaceConversationActive.value=true}
 const workspaceToolsTarget=ref<HTMLElement|null>(null)
 const workspaceHeaderActive=computed(()=>fileWorkspaceVisible.value&&browserExpanded.value&&!browserWorkspaceActive.value)
@@ -1932,8 +1950,8 @@ function setPreviewWidth(width: number) {
   previewWidth.value = width
   try { localStorage.setItem('navora.preview.width', String(width)) } catch { /* optional persistence */ }
 }
-function openFilePreview(path: string, chatId = activeId.value) {
-  if (!chatId) return
+async function openFilePreview(path: string, chatId = activeId.value) {
+  if (!chatId||!await flushQuestionnaireDraft()) return
   try { openFileTab(chatId,path);workspaceConversationActive.value=false } catch(error) { onPanelNotify(error instanceof Error?error.message:'无法打开文件');return }
   if(browserWorkspaceActive.value)activateSidebar('chats',false)
   if(fileWorkspaceOverlay.value)hideResources()
@@ -1972,6 +1990,7 @@ function captureSettingsSource(target?:ApplicationTarget){
 }
 watch(settingsOpen,open=>{if(!open){browserSettingsFocusPending.value=false;if(settingsReturnId){void window.navora?.app.returnFromSettings(settingsReturnId,false).catch(()=>{});settingsReturnId=''}settingsSourceSnapshot=undefined}})
 async function openSettings(section?:string,source?:{target?:ApplicationTarget;returnId?:string}){
+  if(docsOpen.value)await closeDocsPage();else ++docsNavigation
   if(document.querySelector('.v-dialog.v-overlay--active')){showToast('请先完成当前窗口中的对话框。','warning');return}
   if(settingsOpen.value&&section&&settingsTab.value!==section&&!await canLeaveSettings())return false
   ++settingsNavigationEpoch
@@ -1981,7 +2000,7 @@ async function openSettings(section?:string,source?:{target?:ApplicationTarget;r
   settingsOpen.value=true;browserSettingsFocusPending.value=true
   return true
 }
-async function toggleSettings(){if(settingsOpen.value){if(await canLeaveSettings())await completeSettingsReturn()}else await openSettings()}
+async function toggleSettings(){if(docsOpen.value){await closeDocsPage();if(!settingsOpen.value)await openSettings();return}if(settingsOpen.value){if(await canLeaveSettings())await completeSettingsReturn()}else await openSettings()}
 async function completeSettingsReturn(){
   const snapshot=settingsSourceSnapshot,ticket=settingsReturnId,epoch=++settingsNavigationEpoch
   settingsSourceSnapshot=undefined;settingsReturnId=''
@@ -2013,13 +2032,24 @@ async function completeSettingsReturn(){
 watch(settingsOpen, open => { if (open) creatorKind.value = null })
 const { panels: sidebarPanels, visible: sidebarVisible, rail: sidebarRail, activate: activateSidebar, close: closeSidebar } = useSidebarDock()
 const sidebarElement=ref<HTMLElement|null>(null),sidebarWidthForPresentation=computed(()=>sidebarLayout.value.width)
-const {mode:sidebarPresentationMode,lastPanel:sidebarLastPanel,floating:sidebarFloating,togglePin:toggleSidebarPin}=useSidebarPresentation(sidebarRail,sidebarWidthForPresentation,isMobileLayout)
+const browserWorkspaceActive=computed(()=>browserWorkspaceMode.value&&!settingsOpen.value&&!creatorKind.value&&!docsOpen.value)
+const browserWorkspaceTabs=computed(()=>fileTabsState.value.tabs.filter(tab=>tab.kind==='browser'))
+const browserWorkspaceTab=computed(()=>activeFileTab.value?.kind==='browser'?activeFileTab.value:browserWorkspaceTabs.value[0]||null)
+const sidebarFloatingDisabledReason=computed(()=>browserWorkspaceActive.value&&sidebarRail.value.active==='browser'&&browserWorkspaceTab.value?'浏览器资源显示网页时使用固定侧栏':fileWorkspaceVisible.value&&browserExpanded.value?'展开工作区时仅使用固定侧栏':'')
+const sidebarFloatingDisabled=computed(()=>!!sidebarFloatingDisabledReason.value)
+const {mode:sidebarPresentationMode,lastPanel:sidebarLastPanel,floating:sidebarFloating,togglePin:toggleSidebarPin}=useSidebarPresentation(sidebarRail,sidebarWidthForPresentation,isMobileLayout,sidebarFloatingDisabled)
+const sidebarPresentationLabel=computed(()=>sidebarFloatingDisabledReason.value||(allSidebarHidden.value?'显示侧栏':sidebarPresentationMode.value==='fixed'?'切换为悬浮侧栏':'固定侧栏'))
+function toggleSidebarPresentation(){
+  if(settingsOpen.value||creatorKind.value||sidebarFloatingDisabled.value)return
+  if(allSidebarHidden.value){activateSidebar(sidebarPanels.value.some(panel=>panel.id===sidebarLastPanel.value)?sidebarLastPanel.value:'chats',false);return}
+  toggleSidebarPin()
+}
 async function toggleSidebarVisibility(){if(settingsOpen.value||creatorKind.value)return;if(isMobileLayout.value){if(mobileSidebarOpen.value){closeMobileSidebar();return}if(allSidebarHidden.value)activateSidebar(sidebarPanels.value.some(panel=>panel.id===sidebarLastPanel.value)?sidebarLastPanel.value:'chats',false);mobileSidebarOpen.value=true;return}if(allSidebarHidden.value)activateSidebar(sidebarPanels.value.some(panel=>panel.id===sidebarLastPanel.value)?sidebarLastPanel.value:'chats',false);else closeSidebar()}
 const railContextMenu=ref<InstanceType<typeof SidebarContextMenu>|null>(null)
 function onRailContextKey(event:KeyboardEvent){if(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10'){event.preventDefault();event.stopPropagation();railContextMenu.value?.show(event)}}
 function dismissFloatingSidebar(event:PointerEvent|KeyboardEvent){
   if(!sidebarFloating.value||allSidebarHidden.value||settingsOpen.value||creatorKind.value)return
-  if(event instanceof KeyboardEvent){if(event.key!=='Escape'||event.defaultPrevented||event.isComposing||event.keyCode===229)return;if(document.querySelector('.v-overlay--active,.sidebar-ctx-panel:not([data-browser-tab-preview])'))return;closeSidebar();event.preventDefault();document.querySelector<HTMLElement>('.window-sidebar-toggle')?.focus({preventScroll:true});return}
+  if(event instanceof KeyboardEvent){if(event.key!=='Escape'||event.defaultPrevented||event.isComposing||event.keyCode===229)return;if(hasVisibleUi('.v-overlay--active,.sidebar-ctx-panel:not([data-browser-tab-preview])'))return;closeSidebar();event.preventDefault();document.querySelector<HTMLElement>('.window-sidebar-toggle')?.focus({preventScroll:true});return}
   const target=event.target instanceof Element?event.target:null
   if(!target||sidebarElement.value?.contains(target)||target.closest('.activity-rail,.window-sidebar-toggle,.sidebar-ctx-panel,.v-overlay--active')||sidebarResizing.value)return
   closeSidebar()
@@ -2030,19 +2060,16 @@ const fileManagerMounted=ref(false),fileManagerMode=ref(sidebarRail.value.active
 watch(()=>sidebarRail.value.active,id=>{if(id){fileManagerMode.value=id==='workspace';pluginWorkspaceMode.value=id==='plugins';browserWorkspaceMode.value=id==='browser'}},{immediate:true})
 const fileManagerOwnerId=ref(''),fileManagerDirectory=ref('.')
 const fileManagerOwner=computed(()=>chats.value.find(chat=>chat.id===fileManagerOwnerId.value))
-const fileManagerActive=computed(()=>fileManagerMode.value&&!settingsOpen.value&&!creatorKind.value)
-const browserWorkspaceActive=computed(()=>browserWorkspaceMode.value&&!settingsOpen.value&&!creatorKind.value)
-const browserWorkspaceTabs=computed(()=>fileTabsState.value.tabs.filter(tab=>tab.kind==='browser'))
-const browserWorkspaceTab=computed(()=>activeFileTab.value?.kind==='browser'?activeFileTab.value:browserWorkspaceTabs.value[0]||null)
+const fileManagerActive=computed(()=>fileManagerMode.value&&!settingsOpen.value&&!creatorKind.value&&!docsOpen.value)
 watch(browserWorkspaceActive,visible=>{if(visible)hideResources()})
-const pluginWorkspaceActive=computed(()=>pluginWorkspaceMode.value&&!settingsOpen.value&&!creatorKind.value)
+const pluginWorkspaceActive=computed(()=>pluginWorkspaceMode.value&&!settingsOpen.value&&!creatorKind.value&&!docsOpen.value)
 watch(pluginWorkspaceActive,visible=>{if(visible){pluginWorkspaceMounted.value=true;hideResources()}},{immediate:true})
 function browseFiles(selection:{chatId:string;path:string}){fileManagerOwnerId.value=selection.chatId;fileManagerDirectory.value=selection.path}
 async function openResourceChat(id:string){await selectChat(id);activateSidebar('chats',false)}
 watch(fileManagerActive,visible=>{if(visible){fileManagerMounted.value=true;hideResources();if(activeFileTab.value?.kind==='browser')hideFileWorkspace()}},{immediate:true})
 const loadedResourcePanels=ref(new Set<string>())
 watch(()=>sidebarRail.value.active,id=>{if(id)loadedResourcePanels.value=new Set([...loadedResourcePanels.value,id])},{immediate:true})
-const conversationIsVisible=computed(()=>!settingsOpen.value&&!creatorKind.value&&!fileManagerActive.value&&!pluginWorkspaceActive.value&&!browserWorkspaceActive.value&&!(fileWorkspaceVisible.value&&(browserExpanded.value||fileWorkspaceOverlay.value)&&!workspaceConversationActive.value))
+const conversationIsVisible=computed(()=>!docsOpen.value&&!settingsOpen.value&&!creatorKind.value&&!fileManagerActive.value&&!pluginWorkspaceActive.value&&!browserWorkspaceActive.value&&!(fileWorkspaceVisible.value&&(browserExpanded.value||fileWorkspaceOverlay.value)&&!workspaceConversationActive.value))
 watch([resourceOpen,conversationIsVisible],([open,visible])=>{resourceReading.value=open&&visible},{immediate:true,flush:'sync'})
 let parkedConversation:{chatId:string;top:number;follow:boolean}|undefined
 let conversationReading:{chatId:string;top:number;follow:boolean}|undefined
@@ -2079,10 +2106,12 @@ watch(conversationIsVisible,(visible,wasVisible,onCleanup)=>{
 },{flush:'sync'})
 const allSidebarHidden = computed(() => sidebarPanels.value.every(panel => !sidebarVisible.value[panel.id]))
 watch(()=>sidebarVisible.value.chats,visible=>{if(!visible)exitChatBatchMode()})
-async function toggleSidebarGroup(id:string){if(!await canLeaveSettings())return;const force=settingsOpen.value||!!creatorKind.value||(id==='plugins'&&!pluginWorkspaceMode.value)||(id==='workspace'&&!fileManagerMode.value)||(id==='browser'&&!browserWorkspaceMode.value);settingsOpen.value=false;creatorKind.value=null;exitChatBatchMode();if(force){fileManagerMode.value=id==='workspace';pluginWorkspaceMode.value=id==='plugins';browserWorkspaceMode.value=id==='browser'}activateSidebar(id,!force)}
-const docsOpen = ref(false)
+async function toggleSidebarGroup(id:string){const leavingDocs=docsOpen.value;if(leavingDocs)await closeDocsPage();else ++docsNavigation;if(!await canLeaveSettings())return;const force=leavingDocs||settingsOpen.value||!!creatorKind.value||(id==='plugins'&&!pluginWorkspaceMode.value)||(id==='workspace'&&!fileManagerMode.value)||(id==='browser'&&!browserWorkspaceMode.value);settingsOpen.value=false;creatorKind.value=null;exitChatBatchMode();if(force){fileManagerMode.value=id==='workspace';pluginWorkspaceMode.value=id==='plugins';browserWorkspaceMode.value=id==='browser'}activateSidebar(id,!force)}
+const docsChapter=ref(''),docsSection=ref(''),docsWorkspace=ref<{runAction:(action:string)=>unknown}>()
 const mobileSidebarOpen = ref(false)
 const chatSearchOpen = ref(false)
+const chatSearchFocusRequest=ref(0)
+watch(windowFind.opened,opened=>{if(opened)chatSearchOpen.value=false})
 const chatSearchQuery = ref('')
 const chatSearchInput = ref<HTMLInputElement | null>(null)
 const toast = ref({ show: false, text: '', color: 'error' as string })
@@ -2211,6 +2240,14 @@ const inlineAskProgress = computed(() => {
 })
 
 const inlineDecisionEl = ref<HTMLElement | null>(null)
+const inlineDecisionVisible=ref(false)
+watch(inlineDecisionEl,(element,_previous,onCleanup)=>{
+  inlineDecisionVisible.value=false
+  if(!element)return
+  const observer=new IntersectionObserver(entries=>{inlineDecisionVisible.value=entries.some(entry=>entry.isIntersecting&&entry.intersectionRatio>=0.3)},{threshold:[0,0.3]})
+  observer.observe(element)
+  onCleanup(()=>observer.disconnect())
+})
 
 const permChatTitle = computed(() => {
   if (!permReq.value) return ''
@@ -2239,6 +2276,7 @@ function clearPermExpiry(id:string) {
 function removePermRequest(id:string) {
   pendingPermRequests.value=pendingPermRequests.value.filter(request=>request.id!==id)
   clearPermExpiry(id)
+  delete decisionSubmissions[id]
 }
 
 const permRemainingLabel = computed(() => {
@@ -2261,8 +2299,10 @@ const permRemainingPct = computed(() => {
 })
 
 function showToast(text: string, color = 'error') {
+  if(browserViewports.value.length){window.dispatchEvent(new CustomEvent('navora:ui-notice',{detail:{message:text}}));return}
   toast.value = { show: true, text, color }
 }
+const appLinks=useAppLinks(text=>showToast(text,'warning'))
 let unsubFileTransfer:(()=>void)|undefined
 let unsubBrowserPresent:(()=>void)|undefined
 let browserPresentRequest=0
@@ -2274,36 +2314,12 @@ let unsubPerm: (() => void) | undefined
 let unsubPermCancel: (() => void) | undefined
 let unsubAsk: (() => void) | undefined
 let unsubAskCancel: (() => void) | undefined
+let unsubQuitRequested:(()=>void)|undefined
 let dragDepth = 0
 let tickTimer: ReturnType<typeof setInterval> | undefined
 let resizeObserver: ResizeObserver | undefined
 let stopMessageResizeWatch: (() => void) | undefined
 let onWinResize: (() => void) | undefined
-
-const suggestions = [
-  '帮我润色一段文字，表达更简洁',
-  '请解释什么是大语言模型',
-  '整理当前网页的要点和相关链接',
-  '帮我写一份今天的任务清单',
-  '用权威天气站查一下北京今天天气和穿衣建议',
-  '搜索今日热点新闻，用三条要点概括',
-  '帮我对比两家外卖平台同款套餐的价格与配送时长',
-  '打开高铁/机票查询页，查一下周末去上海的可选班次概况',
-  '去招聘网站搜「前端」岗位，归纳薪资区间与常见要求',
-  '打开 GitHub Trending，挑 3 个值得关注的开源项目并简述',
-  '帮我做一份本周买菜清单，并写进工作区文件',
-  '截一张当前桌面，帮我标出可能要处理的窗口',
-  '新建一个浏览器 Session，打开待办网站帮我理清任务',
-  '下载一份公开 PDF 到工作区并提炼摘要',
-  '打开邮箱网页版（勿登录），说明登录后怎么快速清空促销信',
-  '用浏览器查最近油价/电价政策变化，给结论和来源',
-  '打开知乎/小红书搜「周末短途」，整理 5 个可执行点子',
-  '访问医院/政务预约说明页，总结挂号或办事步骤',
-  '列出当前浏览器 Session 与窗口，清理不用的资源',
-  '打开商品比价页，帮我判断这款耳机值不值得买',
-  '查一下国家图书馆开放时间与网上借阅/预约流程',
-  '用 shell 在工作区建个 notes 文件夹，并写一份今日备忘',
-]
 
 const showFollowupSuggestions = ref(true)
 const showReadPages = ref(true)
@@ -2313,6 +2329,16 @@ const collapseRunLogs = ref(true)
 const readPagesPanelOpen = ref(false)
 const readPagesPanelList = ref<AnswerSource[]>([])
 const readPagesPanelFromId = ref<string | null>(null)
+const readSourcesPage=ref(0)
+const readSourcesNative=computed(()=>readSourcesPanel(readPagesPanelList.value,`${activeId.value}:${readPagesPanelFromId.value}`,readSourcesPage.value))
+function readSourcesAction(action:NativePanelAction){
+  if(!readPagesPanelOpen.value||!activeId.value||!readPagesPanelFromId.value)return
+  if(action.type!=='click')return
+  if(action.id==='read-sources-close')closeReadPagesPanel()
+  else if(action.id==='read-sources-previous')readSourcesPage.value=Math.max(0,readSourcesNative.value.page-1)
+  else if(action.id==='read-sources-next')readSourcesPage.value=Math.min(Math.max(0,Math.ceil(readPagesPanelList.value.length/30)-1),readSourcesNative.value.page+1)
+  else{const url=readSourcesNative.value.actions.get(action.id);if(url&&readPagesPanelList.value.some(source=>source.url===url))openSourceUrl(url)}
+}
 const followupSuggestions = ref<FollowupSuggestion[]>([])
 const followupsByChat = ref<Record<string, FollowupSuggestion[]>>({})
 const { openInstallerById } = useStoreUi()
@@ -2324,6 +2350,7 @@ const textFollowups = computed(() =>
 )
 const expandedTools = ref<Record<string, boolean>>({})
 const expandedLogs = ref<Record<string, boolean>>({})
+const expandedProcesses=ref<Record<string,boolean>>({})
 const liveReasoningByChat = ref<
   Record<string, { content: string; status: 'live' | 'done'; round?: number }>
 >({})
@@ -2335,7 +2362,48 @@ const logOverflowById = ref<Record<string, boolean>>({})
 const logMeasureEls = new Map<string, HTMLElement>()
 const logResizeObservers = new Map<string, ResizeObserver>()
 
+const annotationOwner=computed(()=>activeId.value||'')
+const {entries:chatAnnotationEntries,recovery:chatAnnotationRecovery,error:chatAnnotationError,refresh:refreshChatAnnotations}=useChatAnnotations(annotationOwner)
+const annotationCardBusy=ref('')
+watch(activeId,cancelAnnotationEdit,{flush:'sync'})
+onBeforeUnmount(cancelAnnotationEdit)
 const messageBlocks = computed(() => conversationOutputBlocks(active.value?.messages || [],showRunLogs.value))
+async function annotationCardAction(entry:AnnotationChatEntry,action:AnnotationChatAction,copyId?:string){
+  if(annotationCardBusy.value||!activeId.value||!window.navora)return
+  const chatId=activeId.value,api=window.navora.browser.workspace,note=entry.note,target=entry.target
+  annotationCardBusy.value=entry.key
+  try{
+    if(action==='edit'||action==='copy'||action==='latest'){
+      const pageId=note?.pageId||target?.pageId
+      if(!pageId)return
+      const state=await api.tabState(chatId),page=state.pages.find(page=>page.windowId===pageId)
+      if(activeId.value!==chatId)return
+      if(!page)throw Error('原页面已关闭，批注内容和证据仍保留。')
+      if(page.presentation==='detached')await api.tabAction({chatId,pageId,action:'attach'})
+      if(activeId.value!==chatId)return
+      await api.tabAction({chatId,pageId,action:'activate'})
+      if(activeId.value!==chatId)return
+      if(!await presentBrowserResource(pageId,chatId))throw Error('无法打开批注所属页面，请重试。')
+      await nextTick();if(activeId.value!==chatId)return
+      const detail:AnnotationChatEdit={chatId,pageId,noteId:note?.id,targetId:target?.id,copyId,latest:action==='latest'}
+      requestAnnotationEdit(detail)
+    }else if(action==='send'&&note){const reference=await api.presentAnnotation(chatId,note.id,{revealPage:false});if(activeId.value===chatId)addRef(reference)}
+    else if(action==='evidence')await openFilePreview(note?.screenshotPath||target!.screenshotPath,chatId)
+    else if(action==='locate'&&note){if(!await api.locateAnnotation(chatId,note.id))throw Error('原位置已变化或页面不可用，请查看创建时证据。')}
+    else if(action==='resolve'&&note)await api.updateAnnotation(chatId,note.id,note.revision,{taskState:note.taskState==='resolved'?'pending':'resolved'})
+    else if(action==='delete'&&note)await api.removeAnnotation(chatId,note.id)
+    else if(action==='discard'&&target)await api.discardAnnotationTarget(chatId,target.pageId,target.id,target.version)
+    await refreshChatAnnotations()
+  }catch(cause){showToast(cause instanceof Error?cause.message:String(cause),'warning')}
+  finally{annotationCardBusy.value=''}
+}
+const processGroups=computed(()=>conversationProcessGroups(active.value?.messages||[],agentRunning.value,showRunLogs.value))
+const processHeaders=computed(()=>new Map(processGroups.value.map(group=>[group.firstId,group])))
+const processByMessage=computed(()=>new Map(processGroups.value.flatMap(group=>group.messageIds.map(id=>[id,group] as const))))
+function processMessageHidden(id:string){const group=processByMessage.value.get(id);return !!group&&group.processIds.has(id)&&!expandedProcesses.value[group.key]}
+function processDetailsVisible(id:string){const group=processByMessage.value.get(id);return !group||!!expandedProcesses.value[group.key]}
+function toggleProcess(key:string){expandedProcesses.value={...expandedProcesses.value,[key]:!expandedProcesses.value[key]}}
+async function revealMessageProcess(id:string){const group=processByMessage.value.get(id);if(group&&!expandedProcesses.value[group.key]){expandedProcesses.value={...expandedProcesses.value,[group.key]:true};await nextTick()}}
 const artifactChatId = computed(() => activeId.value || '')
 const {entries: artifactEntries} = useWorkspaceResources(artifactChatId)
 const replyFinalIds=computed(()=>new Set(finalOutputs(active.value?.messages||[]).map(message=>message.id)))
@@ -2417,7 +2485,6 @@ async function loadUiPrefs() {
 
 function applyUiPrefs(cfg: AppConfig | null | undefined) {
   if (!cfg) return
-  runningMessageMode.value = cfg.app?.running_message_mode === 'insert' ? 'insert' : 'queue'
   showFollowupSuggestions.value = cfg.app?.show_followup_suggestions === true
   showReadPages.value = cfg.app?.show_read_pages !== false
   showRunLogs.value = cfg.app?.show_run_logs !== false
@@ -2448,7 +2515,12 @@ async function refreshProviderKeyFlags() {
   providerKeyOk.value = next
 }
 
-const runningMessageMode = ref<'queue'|'insert'>('queue')
+const composerComposing=ref(false)
+let composerCompositionTimer:ReturnType<typeof setTimeout>|undefined
+function onComposerCompositionStart(){clearTimeout(composerCompositionTimer);composerComposing.value=true}
+function onComposerCompositionEnd(){clearTimeout(composerCompositionTimer);composerCompositionTimer=setTimeout(()=>{composerComposing.value=false},0)}
+onBeforeUnmount(()=>clearTimeout(composerCompositionTimer))
+watch(activeId,()=>{clearTimeout(composerCompositionTimer);composerComposing.value=false})
 const queueBusy=ref(false)
 async function changeQueue(action:'edit'|'remove'|'insert'|'resume',id='',content='',document?:ComposerDocument,baseRevision?:number) {
   const chatId=activeId.value,api=window.navora?.agent
@@ -2459,8 +2531,11 @@ async function changeQueue(action:'edit'|'remove'|'insert'|'resume',id='',conten
     if(result&&active.value?.id===chatId)active.value={...active.value,queuedMessages:result.queuedMessages,queuePaused:result.queuePaused}
   }catch{showToast('队列操作失败，请重试','error')}finally{queueBusy.value=false}
 }
-const composerProblem=computed(()=>{const blocks=compileComposerDocument(composerDocument.value).contexts;const pending=blocks.find(item=>item.block.status==='loading');if(pending)return `正在准备“${pending.block.label}”，请稍候。`;const missing=blocks.find(item=>item.block.mode==='reference'&&(item.block.status==='missing'||item.block.status==='error'));return missing?`“${missing.block.label}”的来源不可用，请更换来源、移除引用或改用已有摘录。`:''})
+const composerProblem=computed(()=>{if(!taskDeclarationsSupported(composerDocument.value.declarations))return '此任务声明暂不支持，内容已保留，请使用兼容版本处理后发送。';const blocks=previewComposerDocument(composerDocument.value).contexts;const pending=blocks.find(item=>item.block.status==='loading');if(pending)return `正在准备“${pending.block.label}”，请稍候。`;const missing=blocks.find(item=>item.block.mode==='reference'&&(item.block.status==='missing'||item.block.status==='error'));return missing?`“${missing.block.label}”的来源不可用，请更换来源、移除引用或改用已有摘录。`:''})
 const canSend = computed(() => !modelSelectionBusy.value && !executionModeBusy.value && !modelLoading.value && !modelLoadError.value && !!chatModelKey.value && !modelSelectionInvalid.value && !draftUnsupported.value && !draftConflict.value && !composerProblem.value && Boolean(draft.value.trim() || contextRefs.value.length) && draft.value.length <= maxComposerChars.value)
+const composerHasReadyPayload=computed(()=>!composerProblem.value&&Boolean(draft.value.trim()||contextRefs.value.length))
+const composerMainMode=computed<'send'|'queue'|'stop'>(()=>agentRunning.value?composerHasReadyPayload.value?activeOwnQuestionnaire.value?'send':'queue':'stop':'send')
+function onComposerMainAction(){if(composerComposing.value||sending.value)return;if(composerMainMode.value==='stop'){void stopAgent();return}void send()}
 const draftLen = computed(() => draft.value.length)
 const draftNearLimit = computed(() => draftLen.value >= maxComposerChars.value * 0.9)
 const draftAtLimit = computed(() => draftLen.value >= maxComposerChars.value)
@@ -2596,13 +2671,6 @@ const usageTokensEst=computed(()=>usageHistoryEst.value+usageDraftEst.value)
 const actualUsageMessage=computed(()=>[...(active.value?.messages||[])].reverse().find(message=>message.role==='assistant'&&!message.meta?.partial&&message.meta?.phase!=='progress'))
 const actualUsage=computed(()=>normalizeModelUsage(actualUsageMessage.value?.meta?.usage))
 const actualUsageModel=computed(()=>String((actualUsageMessage.value?.meta?.usageModel as {model?:string}|undefined)?.model||''))
-const nativeComposerState=computed<ComposerNativePanelState>(()=>({
-  modelOptions:modelMenuOptions.value,modelKey:chatModelKey.value,modelQuery:modelQuery.value,modelLoading:modelLoading.value,modelError:modelLoadError.value,modelInvalid:modelSelectionInvalid.value,modelBusy:modelSelectionBusy.value||executionModeBusy.value||modelLoading.value||sending.value||agentRunning.value,
-  reasoningLevels:reasoningLevels.value.map(level=>({id:level.id,label:reasoningLabel(level.id)})),reasoningLevel:selectedReasoningLevel.value,
-  modes:executionModes.map(mode=>({id:mode.id,label:mode.label,description:mode.hint,icon:mode.icon})),mode:active.value?.executionMode||'auto',modeBusy:agentRunning.value||sending.value||executionModeBusy.value||modelSelectionBusy.value,
-  permissionOptions:permPresetOptions.map(option=>({id:option.value,label:option.title,description:option.desc,icon:option.icon})),permission:chatPermissions.value.preset,
-  usage:{estimated:usageTokensEst.value,history:usageHistoryEst.value,draft:usageDraftEst.value,window:chatModelSettings.value.context_window,maxOutput:chatModelSettings.value.max_output_tokens,actual:actualUsage.value,actualModel:actualUsageModel.value},
-}))
 const usageRatio = computed(() => usageTokensEst.value / Math.max(1, chatModelSettings.value.context_window))
 const usagePctLabel = computed(() => `${Math.round(usageRatio.value * 100)}%`)
 function formatUsageCount(value: number): string {
@@ -2716,13 +2784,13 @@ const liveReasoningRoundLabel = computed(() => {
   return typeof r === 'number' && r > 0 ? `第 ${r} 轮` : ''
 })
 
-/** Stay open for the whole run unless the user folds it. Hidden when run clears. */
+/** Reasoning stays secondary; opening it is an explicit reading action. */
 const liveReasoningOpen = computed(() => {
   const id = activeId.value
   if (!id || !liveReasoningText.value) return false
   const forced = liveReasoningForced.value[id]
   if (forced !== undefined) return forced
-  return true
+  return false
 })
 
 function toggleLiveReasoning() {
@@ -2860,6 +2928,8 @@ function assistantElapsedLabel(msg: ChatMessage): string {
 
 function toolDisplay(m: ChatMessage): ToolDisplayInfo {
   const toolName = typeof m.meta?.toolName === 'string' ? m.meta.toolName : ''
+  if(toolName==='agent_await_subchats')return {...resolveToolDisplay(toolName),label:'等待子任务',icon:'clock'}
+  if(toolName==='agent_subchat_status')return {...resolveToolDisplay(toolName),label:'子任务进展',icon:'robot'}
   const pluginId = typeof m.meta?.pluginId === 'string' ? m.meta.pluginId : undefined
   const fromPlugin = m.meta?.fromPlugin === true
   return resolveToolDisplay(toolName, { pluginId, fromPlugin })
@@ -2956,6 +3026,7 @@ function toggleReadPagesPanel(messageId: string, list: AnswerSource[]) {
     return
   }
   readPagesPanelFromId.value = messageId
+  readSourcesPage.value = 0
   readPagesPanelList.value = list
   readPagesPanelOpen.value = true
 }
@@ -2971,12 +3042,13 @@ function closeReadPagesPanel() {
 
 function openSourceUrl(url: string) {
   if (!/^https?:\/\//i.test(url)) return
-  void window.navora?.app.openExternal(url)
+  void appLinks.openLink(url,activeId.value||undefined)
 }
 
 function friendlyToolName(name: string) {
   const map: Record<string, string> = {
     agent_ask_user: '询问你',
+    agent_ask_form: '填写问卷',
     agent_spawn_subchat: '启动子对话',
     agent_await_subchats: '等待子对话',
     agent_subchat_status: '子对话状态',
@@ -3377,6 +3449,9 @@ function formatAgentError(raw: string): { message: string; code?: string } {
   if (s === 'agent_already_running') {
     return { code: 'agent_already_running', message: '该会话 Agent 正在运行' }
   }
+  if (s === 'app_closing') {
+    return { code: 'app_closing', message: '程序正在退出，任务已保留，请稍后再试' }
+  }
   if (s === 'max_parallel_agent_chats') {
     return { code: 'max_parallel_agent_chats', message: '并行 Agent 数量已达上限' }
   }
@@ -3415,6 +3490,7 @@ function clearChatError(chatId: string) {
 }
 
 function chatListStatus(chatId: string): ChatListStatus | null {
+  if(pendingQuestionnaireForSidebar(chatId))return {icon:'circle-question',tone:'ask',title:'问卷待填写'}
   if (runningChats.value[chatId]) {
     const ph = phaseByChat.value[chatId]?.phase
     if (ph === 'awaiting_permission') {
@@ -3768,6 +3844,11 @@ function onMessagesScrollInput(event:Event){
   userMessageScroll=true;userMessageScrollPending=true
   cancelMessageJump()
 }
+function onOutlineNavigate(){
+  cancelMessageJump()
+  messageReadingIntent=true;userMessageScroll=true;userMessageScrollPending=true;stickToBottom.value=false
+  requestAnimationFrame(onMessagesScroll)
+}
 function onMessagesScrollEnd(){
   if(userMessageScroll){
     const box=msgBox.value
@@ -3837,14 +3918,13 @@ function applyDraftLocally(text:string,touchedAt:number,document?:ComposerDocume
 function scheduleDraftSave(){draftState.schedule()}
 async function flushDraftSave(chatId?:string|null){await draftState.flush(chatId??activeId.value)}
 
-const sourcePicker=ref<InstanceType<typeof ComposerSourcePicker>|null>(null)
 const contextPreviews=ref<Record<string,string>>({})
 let previewGeneration=0
 let previewSourceKeys=new Map<string,string>()
-watch(()=>[activeId.value,composerDocument.value.id,compileComposerDocument(composerDocument.value).contexts.filter(item=>item.block.source.kind==='image').map(item=>`${item.block.id}:${item.block.source.path}:${item.block.version}`).join('|')],async()=>{
+watch(()=>[activeId.value,composerDocument.value.id,previewComposerDocument(composerDocument.value).contexts.filter(item=>item.block.source.kind==='image').map(item=>`${item.block.id}:${item.block.source.path}:${item.block.version}`).join('|')],async()=>{
   const request=++previewGeneration,chatId=activeId.value,documentId=composerDocument.value.id
   if(!chatId)return
-  const blocks=compileComposerDocument(composerDocument.value).contexts.filter(item=>item.block.source.kind==='image'&&item.block.source.path).slice(0,8)
+  const blocks=previewComposerDocument(composerDocument.value).contexts.filter(item=>item.block.source.kind==='image'&&item.block.source.path).slice(0,8)
   const keys=new Map(blocks.map(item=>[item.block.id,`${chatId}:${item.block.source.path}:${item.block.version}`]))
   contextPreviews.value=Object.fromEntries(Object.entries(contextPreviews.value).filter(([id])=>keys.has(id)&&keys.get(id)===previewSourceKeys.get(id)));previewSourceKeys=keys
   await Promise.allSettled(blocks.filter(item=>!contextPreviews.value[item.block.id]).map(async item=>{
@@ -3858,10 +3938,13 @@ function captureComposerSelection(){sourceSelection={chatId:activeId.value||'',d
 async function openContextPicker(source='file',files?:File[],replacement?:ComposerContextBlock){
   if(!activeId.value)return
   if(!sourceSelection||sourceSelection.chatId!==activeId.value||sourceSelection.documentId!==composerDocument.value.id)captureComposerSelection()
-  await sourcePicker.value?.show(source,replacement,files)
+  const anchor=document.querySelector<HTMLElement>('.composer-box')
+  if(anchor)await attachmentMenu.value?.showSource(anchor,source,replacement,files)
 }
 function openAttachmentMenu(){captureComposerSelection();const anchor=document.querySelector<HTMLElement>('.composer-box');if(anchor)attachmentMenu.value?.show(anchor)}
 function onAttachRequest(request?:{source?:string;files?:File[]}){captureComposerSelection();if(request?.source||request?.files?.length)void openContextPicker(request?.source||'file',request?.files);else openAttachmentMenu()}
+const selectedTaskDeclarations=computed(()=>{try{return normalizeTaskDeclarations(composerDocument.value.declarations).ids}catch{return []}})
+function selectTaskDeclaration(id:TaskDeclarationId){const selection=sourceSelection;if(!selection||selection.chatId!==activeId.value||selection.documentId!==composerDocument.value.id){showToast('草稿已切换，请重新选择声明。','warning');return}if(selection.bookmark)draftField.value?.restoreSelection(selection.bookmark);draftField.value?.toggleDeclaration(id);sourceSelection=null}
 function selectAttachmentSource(source:string){draftField.value?.consumeAttachmentTrigger();captureComposerSelection();void openContextPicker(source)}
 function createFromAttachment(kind:CreatorKind){draftField.value?.consumeAttachmentTrigger();captureComposerSelection();openCreator(kind)}
 function attachmentClosed(committed:boolean){if(!committed){draftField.value?.cancelAttachmentTrigger();closeContextPicker()}}
@@ -3887,7 +3970,7 @@ async function openComposerSource(block:ComposerContextBlock){
   else if(source.kind==='annotation')await window.navora?.browser.workspace.presentAnnotation(chatId,source.identity).catch(()=>showToast('标注来源已不可用。','warning'))
   else if(source.kind==='page'){
     try{await window.navora?.browser.workspace.command(source.browserRef?.windowId||source.identity,'focus')}catch{showToast('页面已关闭，请更换来源或使用保留的摘录。','warning')}
-  }else if(source.kind==='url'&&source.url)await window.navora?.app.openExternal(source.url)
+  }else if(source.kind==='url'&&source.url)await appLinks.openLink(source.url,chatId)
   else if(source.kind==='session')showResources('browser')
 }
 function sourceTab(block:ComposerContextBlock){if(block.source.identity.startsWith('skill:'))return 'skill';if(block.source.identity.startsWith('plugin:'))return 'plugin';return block.source.kind==='image'?'file':block.source.kind==='page'?'page':block.source.kind==='message'?'message':block.source.kind==='annotation'?'annotation':block.source.kind==='session'?'session':block.source.kind==='url'?'url':block.source.kind==='text'?'text':'file'}
@@ -3912,13 +3995,19 @@ async function recoverComposerDocument(document:ComposerDocument){
 }
 
 const applicationEdit=useApplicationEditTarget({nativePage:()=>activeFileTab.value?.kind==='browser'&&(fileWorkspaceVisible.value||browserWorkspaceActive.value)?activeFileTab.value.pageId:undefined,preview:()=>msgBox.value})
-type ApplicationTarget={kind:'composer';editor:ComposerEditorHandle;bookmark:ComposerSelectionBookmark|null}|{kind:'standard';bookmark:ReturnType<typeof applicationEdit.capture>}|{kind:'none'}
+type ApplicationTarget=({kind:'composer';editor:ComposerEditorHandle;bookmark:ComposerSelectionBookmark|null}|{kind:'standard';bookmark:ReturnType<typeof applicationEdit.capture>}|{kind:'none'})&{browser?:{pageId:string;context?:BrowserPageAddressContext}}
 const appMenu=ref<InstanceType<typeof ApplicationMenuBar>|null>(null),applicationFilePicker=ref(false),applicationVersion=ref(''),applicationTarget=ref<ApplicationTarget>({kind:'none'}),recentClosedCount=ref(0)
+const windowFullscreen=ref(false)
+let offWindowFullscreen:(()=>void)|undefined
+onMounted(()=>{if(isWebRemote())return;void window.navora?.app.isFullscreen().then(state=>{windowFullscreen.value=state.fullscreen}).catch(()=>{});offWindowFullscreen=window.navora?.app.onFullscreen(value=>{windowFullscreen.value=value})})
+onBeforeUnmount(()=>offWindowFullscreen?.())
 function captureApplicationTarget(nativePageId?:string):ApplicationTarget{
+  const state=(fileWorkspaceVisible.value||browserWorkspaceActive.value)?fileWorkspace.value?.browserApplicationState:null
+  const browser=state?.pageId&&(!nativePageId||state.pageId===nativePageId)?{pageId:state.pageId,context:state.addressState.context?{...state.addressState.context}:undefined}:undefined
   const selection=window.getSelection(),anchor=selection?.anchorNode?.parentElement,focused=document.activeElement
   const editor=!nativePageId&&((focused instanceof Element&&focused.closest('[data-composer-editor]'))||(!selection?.isCollapsed&&anchor?.closest('[data-composer-editor]')))?captureActiveComposerEditor():null
-  if(editor)return applicationTarget.value={kind:'composer',editor,bookmark:editor.saveSelection()}
-  return applicationTarget.value={kind:'standard',bookmark:applicationEdit.capture(nativePageId)}
+  if(editor)return applicationTarget.value={kind:'composer',editor,bookmark:editor.saveSelection(),browser}
+  return applicationTarget.value={kind:'standard',bookmark:applicationEdit.capture(nativePageId),browser}
 }
 function restoreApplicationTarget(value:unknown){
   const target=value as ApplicationTarget|undefined
@@ -3933,15 +4022,19 @@ function refreshApplicationTarget(nativePageId?:string){
 }
 const applicationCommandState=computed<AppCommandStateMap>(()=>{
   const hasChat=!!activeId.value,reason=hasChat?undefined:'请先选择对话',target=applicationTarget.value,editor=target.kind==='composer'?target.editor.getCommandState():null,standard=target.kind==='standard'?applicationEdit.state.value:null
+  const browser=(fileWorkspaceVisible.value||browserWorkspaceActive.value)?fileWorkspace.value?.browserApplicationState:null
   // Touch the active document so the next menu opening sees its latest command state.
   void composerDocument.value
   const scoped=(enabled:boolean,label?:string,checked?:boolean)=>({enabled:hasChat&&enabled,label,checked,reason:!hasChat?reason:!enabled?'当前内容不可用':undefined})
   return {
-    'conversation.new':true,'browser.new':scoped(!isWebRemote()),'browser.reopen':scoped(!isWebRemote()&&recentClosedCount.value>0),'conversation.openFile':scoped(true),'conversation.openFolder':scoped(true),'conversation.export':scoped(!exportingChat.value),'content.close':scoped(!!activeFileTab.value&&(fileWorkspaceVisible.value||browserWorkspaceActive.value)),
-    'app.settings':true,'help.about':true,'app.quit':{enabled:!isWebRemote(),visible:!isWebRemote()},
+    'conversation.new':true,'browser.new':scoped(!isWebRemote()),'browser.reopen':scoped(!isWebRemote()&&recentClosedCount.value>0),'conversation.openFile':scoped(true),'conversation.openFolder':scoped(true),'conversation.export':scoped(!exportingChat.value),'content.close':{enabled:docsOpen.value||!!activeFileTab.value&&(fileWorkspaceVisible.value||browserWorkspaceActive.value)},
+    'browser.copyUrl':{visible:!!browser,enabled:!!browser?.addressState.context,label:browser?.addressState.copyLabel,reason:browser?.addressState.reason},
+    'browser.openExternal':{visible:!!browser?.addressState.visible,enabled:!!browser?.addressState.context&&!isWebRemote(),label:browser?.addressState.label,reason:browser?.addressState.reason},
+    'browser.reload':{visible:!!browser,enabled:!!browser},'browser.reloadIgnoringCache':{visible:!!browser,enabled:!!browser},'browser.mute':{visible:!!browser,enabled:!!browser,checked:browser?.muted,label:browser?.muted?'取消页面静音':'静音当前页面'},
+    'app.settings':true,'help.about':true,'app.quit':{enabled:!isWebRemote(),visible:!isWebRemote()},'view.fullscreen':{enabled:!isWebRemote(),visible:!isWebRemote(),label:windowFullscreen.value?'退出全屏':'进入全屏',checked:windowFullscreen.value},
     'edit.undo':{enabled:editor?.undo??standard?.undo??false,reason:'当前目标没有可撤销的编辑'},'edit.redo':{enabled:editor?.redo??standard?.redo??false,reason:'当前目标没有可重做的编辑'},'edit.cut':editor?.cut??standard?.cut??false,'edit.copy':editor?.copy??standard?.copy??false,'edit.paste':editor?.paste??standard?.paste??false,'edit.pastePlain':editor?.['paste-plain']??standard?.pastePlain??false,'edit.delete':editor?.delete??standard?.delete??false,'edit.selectAll':editor?.['select-all']??standard?.selectAll??false,
-    'editor.link':{enabled:editor?.link||false,label:'添加／编辑链接…',reason:'请在消息编辑器中选择一段文字或定位到链接'},'editor.unlink':editor?.unlink||false,'editor.attach':scoped(!!editor?.attach),'conversation.search':true,'conversation.find':scoped(true),
-    'view.sidebar':{enabled:!settingsOpen.value&&!creatorKind.value,label:'显示侧栏',checked:!allSidebarHidden.value},'view.sidebarPinned':{enabled:!isMobileLayout.value&&!settingsOpen.value&&!creatorKind.value,checked:sidebarPresentationMode.value==='fixed',reason:'请先返回工作区，桌面侧栏支持固定或悬浮'},'view.workspace':scoped(true,fileWorkspaceVisible.value?'隐藏工作区':'显示工作区',fileWorkspaceVisible.value),'view.workspaceExpand':scoped(fileWorkspaceVisible.value,browserExpanded.value?'恢复分栏':'展开工作区',browserExpanded.value),'view.summary':scoped(true,resourceOpen.value?'隐藏对话摘要':'显示对话摘要',resourceOpen.value),'editor.focus':scoped(true),'help.docs':true,
+    'editor.link':{enabled:editor?.link||false,label:'添加／编辑链接…',reason:'请在消息编辑器中选择一段文字或定位到链接'},'editor.unlink':editor?.unlink||false,'editor.attach':scoped(!!editor?.attach),'conversation.search':true,'conversation.find':{enabled:docsOpen.value||hasChat,label:docsOpen.value?'搜索使用文档':undefined,reason:docsOpen.value?undefined:reason},
+    'view.sidebar':{enabled:!settingsOpen.value&&!creatorKind.value,label:'显示侧栏',checked:!allSidebarHidden.value},'view.sidebarPinned':{enabled:!isMobileLayout.value&&!settingsOpen.value&&!creatorKind.value&&!sidebarFloatingDisabled.value,checked:sidebarFloatingDisabled.value||sidebarPresentationMode.value==='fixed',reason:sidebarFloatingDisabledReason.value||'请先返回工作区，桌面侧栏支持固定或悬浮'},'view.workspace':scoped(true,fileWorkspaceVisible.value?'隐藏工作区':'显示工作区',fileWorkspaceVisible.value),'view.workspaceExpand':scoped(fileWorkspaceVisible.value,browserExpanded.value?'恢复分栏':'展开工作区',browserExpanded.value),'view.summary':scoped(true,resourceOpen.value?'隐藏对话摘要':'显示对话摘要',resourceOpen.value),'editor.focus':scoped(true),'help.docs':true,
   }
 })
 const appEditCommands:Partial<Record<AppCommandId,ComposerEditorCommand>>={'edit.undo':'undo','edit.redo':'redo','edit.cut':'cut','edit.copy':'copy','edit.paste':'paste','edit.pastePlain':'paste-plain','edit.delete':'delete','edit.selectAll':'select-all','editor.link':'link','editor.unlink':'unlink','editor.attach':'attach'}
@@ -3955,25 +4048,28 @@ async function executeApplicationCommand(id:AppCommandId,context?:AppCommandCont
       return
     }
     if(id==='conversation.new')await createChat()
-    else if(id==='browser.new'){settingsOpen.value=false;creatorKind.value=null;activateSidebar('chats',false);await openBrowserTab()}
+    else if(id==='browser.new'){if(docsOpen.value)await closeDocsPage();else ++docsNavigation;settingsOpen.value=false;creatorKind.value=null;activateSidebar('chats',false);await openBrowserTab()}
+    else if(id==='browser.copyUrl'||id==='browser.openExternal'){if(!target.browser?.context)throw Error('页面地址不可用，请重新打开菜单。');await window.navora!.browser.workspace.pageAddressAction(target.browser.context,id==='browser.copyUrl'?'copy':'external')}
+    else if(id==='browser.reload'||id==='browser.reloadIgnoringCache'||id==='browser.mute'){if(!target.browser?.pageId)throw Error('页面已变化，请重新打开菜单。');await fileWorkspace.value?.shortcut(id==='browser.reload'?'reload':id==='browser.reloadIgnoringCache'?'reloadIgnoringCache':'mute',target.browser.pageId)}
     else if(id==='browser.reopen'&&activeId.value)await window.navora?.browser.workspace.tabAction({chatId:activeId.value,action:'reopen'})
     else if(id==='conversation.openFile')applicationFilePicker.value=true
     else if(id==='conversation.openFolder'&&activeId.value){const result=await window.navora?.workspace.open(activeId.value,'.');if(!result?.ok)throw Error(result?.error||'无法打开对话文件夹')}
     else if(id==='conversation.export')await exportActiveChat()
-    else if(id==='content.close'&&activeFileTab.value)await closeFileTab(activeFileTab.value.key)
+    else if(id==='content.close'){if(docsOpen.value)await closeDocsPage();else if(activeFileTab.value)await closeFileTab(activeFileTab.value.key)}
     else if(id==='app.settings')await openSettings(undefined,{target})
     else if(id==='help.about')await openSettings('about',{target})
     else if(id==='app.quit')onMoreQuit()
     else if(id==='conversation.search')openChatSearch()
-    else if(id==='conversation.find')openConversationFind()
+    else if(id==='conversation.find'){if(docsOpen.value)docsWorkspace.value?.runAction('focusSearch');else openConversationFind()}
     else if(id==='view.sidebar')await toggleSidebarVisibility()
     else if(id==='view.sidebarPinned'){if(!settingsOpen.value&&!creatorKind.value)toggleSidebarPin()}
     else if(id==='view.workspace')toggleRightSidebar()
     else if(id==='view.workspaceExpand')toggleBrowserExpand()
+    else if(id==='view.fullscreen')await window.navora?.app.toggleFullscreen()
     else if(id==='view.summary')toggleResources()
-    else if(id==='editor.focus'){settingsOpen.value=false;creatorKind.value=null;activateSidebar('chats',false);focusComposer()}
-    else if(id==='help.docs')onMoreDocs()
-  }catch(error){showToast(error instanceof Error?error.message:'操作未完成，请重试。','warning')}
+    else if(id==='editor.focus'){if(docsOpen.value)await closeDocsPage();else ++docsNavigation;settingsOpen.value=false;creatorKind.value=null;activateSidebar('chats',false);focusComposer()}
+    else if(id==='help.docs')await onMoreDocs()
+  }catch(error){showToast(id==='browser.copyUrl'||id==='browser.openExternal'?browserPageAddressError(error):error instanceof Error?error.message:'操作未完成，请重试。','warning')}
 }
 
 async function useSuggestion(s: string | FollowupSuggestion) {
@@ -4037,7 +4133,8 @@ function onMessagesClick(e: MouseEvent) {
   if (!/^https?:/i.test(href) && !/^mailto:/i.test(href)) return
   e.preventDefault()
   e.stopPropagation()
-  void window.navora?.app.openExternal(href)
+  if(/^https?:/i.test(href))void appLinks.openLink(href,activeId.value||undefined)
+  else void window.navora?.app.openExternal(href)
 }
 
 function refKey(r: BrowserContextRef) {
@@ -4099,19 +4196,20 @@ async function refreshList() {
   windowCounts.value = await window.navora.browser.windowCounts()
   if (!activeId.value && chats.value.length) {
     const firstMain = chats.value.find((c) => c.kind !== 'sub') || chats.value[0]
-    await selectChat(firstMain.id)
+    await selectChat(firstMain.id,{preserveDocs:true})
   }
 }
 
 let chatSelection = 0
 let chatTransition: Animation | undefined
-async function selectChat(id: string) {
+async function selectChat(id: string,options?:{preserveDocs?:boolean}) {
+  if(!options?.preserveDocs){if(docsOpen.value)await closeDocsPage();else ++docsNavigation}
   const selection = ++chatSelection
   const linked=chats.value.find(chat=>chat.id===id)||(window.navora?await window.navora.chats.get(id):null)
   if(selection!==chatSelection)return
   if(!linked)return
   if(linked?.kind==='sub'&&linked.parentChatId){await routeConversationTarget(id);return}
-  if(!await canLeaveSettings())return
+  if(!await canLeaveSettings()||!await flushQuestionnaireDraft())return
   creatorKind.value = null
   if (!window.navora) return
   settingsOpen.value = false
@@ -4125,6 +4223,7 @@ async function selectChat(id: string) {
   closeLightbox()
   closeReadPagesPanel()
   activeId.value = id
+  if(options?.preserveDocs&&docsSnapshot&&!docsSnapshot.chatId)docsSnapshot.chatId=id
   const [nextChat, nextTree, running] = await Promise.all([
     window.navora.chats.get(id), window.navora.browser.tree(id), window.navora.agent.isRunning(id),
   ])
@@ -4188,7 +4287,8 @@ async function selectChat(id: string) {
 
 let creatingChat: Promise<void> | undefined
 async function createChat() {
-  if(!await canLeaveSettings())return
+  if(docsOpen.value)await closeDocsPage();else ++docsNavigation
+  if(!await canLeaveSettings()||!await flushQuestionnaireDraft())return
   activateSidebar('chats',false)
   creatorKind.value = null
   if (!window.navora) return
@@ -4222,10 +4322,7 @@ function askDeleteChat(c: ChatSession) {
   deleteDialog.value = true
 }
 
-function onChatMoreOpen(chatId: string, open: boolean) {
-  if (open) chatMoreOpenId.value = chatId
-  else if (chatMoreOpenId.value === chatId) chatMoreOpenId.value = null
-}
+function showNativeChatRowMenu(chat:ChatSession,event:MouseEvent|KeyboardEvent){void openChatRowContext(event,chat)}
 
 function setRenameInputRef(chatId: string, el: unknown) {
   if (el instanceof HTMLInputElement) {
@@ -4453,14 +4550,25 @@ async function confirmCloseSession() {
 }
 
 async function confirmQuit() {
-  if (!window.navora?.app.quit || quitting.value) return
+  if (!window.navora?.app.quit || quitting.value || !quitReady.value) return
+  const acknowledgedRunningAgents=quitRunningAgents.value!
   quitting.value = true
+  let draftsSaved=false
   try {
-    await window.navora.app.quit()
+    if(!await flushQuestionnaireDraft()){showToast('问卷草稿尚未保存，请处理保存提示后重试。','warning');quitting.value=false;return}
+    await flushDraftSave()
+    draftsSaved=true
+    if(!await quitConfirmation.refresh()){quitting.value=false;return}
+    if(quitRunningAgents.value!>acknowledgedRunningAgents){showToast('运行中的任务已变化，请再次确认退出。','warning');quitting.value=false;return}
+    const result=await window.navora.app.quit(acknowledgedRunningAgents)
+    if(result?.ok===false&&result.reason==='running_agents_changed'){
+      await quitConfirmation.refresh();showToast('运行中的任务已变化，请再次确认退出。','warning');quitting.value=false;return
+    }
+    if(result?.ok===false)throw Error('退出未完成，请重试。')
   } catch (e) {
     console.error(e)
     quitting.value = false
-    showToast(e instanceof Error ? e.message : '退出失败')
+    showToast(draftsSaved?(e instanceof Error?e.message:'退出失败'):'草稿尚未保存，内容仍保留在编辑器中，请处理保存提示后重试。','warning')
   }
 }
 
@@ -4491,12 +4599,44 @@ function openRemoteWindows() {
   void router.push('/remote')
 }
 
-function onMoreDocs() {
-  docsOpen.value = true
+let docsSnapshot:{chatId:string|null;focus:HTMLElement|null;scrolls:{element:HTMLElement;top:number;left:number}[]}|undefined
+let docsNavigation=0
+function storedGuideChapter(){try{return readGuideReading(localStorage.getItem(GUIDE_READING_STORAGE_KEY)).chapter}catch{return 'start'}}
+function guideQuery(chapter:string,section?:string){const query={...route.query};query.docs=chapter;delete query.section;if(section)query.section=section;return query}
+async function onMoreDocs(chapter?:string,section?:string,fromRoute=false){
+  const request=++docsNavigation,target=resolveGuideTarget(chapter||docsChapter.value||storedGuideChapter(),section),routeIntent=fromRoute?route.fullPath:undefined
+  const current=()=>request===docsNavigation&&(!fromRoute||route.fullPath===routeIntent)
+  if(!await canLeaveSettings()||!await flushQuestionnaireDraft()||!current())return
+  try{await flushDraftSave()}catch{showToast('草稿尚未保存，请处理保存提示后再打开使用文档。','warning');return}
+  if(!current())return
+  if(!docsOpen.value)docsSnapshot={chatId:activeId.value,focus:document.activeElement instanceof HTMLElement?document.activeElement:null,scrolls:[...document.querySelectorAll<HTMLElement>('.messages,.preview-content,.file-manager-scroll,.plugin-detail-scroll')].filter(element=>element.checkVisibility()).map(element=>({element,top:element.scrollTop,left:element.scrollLeft}))}
+  modeMenuOpen.value=false;permMenuOpen.value=false;modelMenuOpen.value=false;usageMenuOpen.value=false;attachmentMenu.value?.hide(false);windowFind.close();chatSearchOpen.value=false
+  docsChapter.value=target.chapter;docsSection.value=target.section||'';docsOpen.value=true;closeMobileSidebar();await nextTick()
+  if(!current()||!docsOpen.value)return
+  docsWorkspace.value?.runAction('focusSearch')
+  if(route.query.docs!==target.chapter||(route.query.section||'')!==(target.section||''))await router.replace({path:'/',query:guideQuery(target.chapter,target.section)})
 }
+async function navigateDocs(value:{chapter:string;section?:string}){
+  if(!docsOpen.value)return
+  ++docsNavigation;const target=resolveGuideTarget(value.chapter,value.section)
+  docsChapter.value=target.chapter;docsSection.value=target.section||''
+  await router.replace({path:'/',query:guideQuery(target.chapter,target.section)})
+}
+async function closeDocsPage(updateRoute=true){
+  const request=++docsNavigation,saved=docsSnapshot;docsSnapshot=undefined;docsOpen.value=false
+  if(updateRoute){const query={...route.query};delete query.docs;delete query.section;await router.replace({path:'/',query})}
+  await nextTick()
+  if(request!==docsNavigation||docsOpen.value)return
+  if(saved?.chatId===activeId.value){for(const scroll of saved.scrolls)if(scroll.element.isConnected){scroll.element.scrollTop=scroll.top;scroll.element.scrollLeft=scroll.left}if(saved.focus?.isConnected&&saved.focus.checkVisibility())saved.focus.focus({preventScroll:true})}
+}
+watch(()=>[route.query.docs,route.query.section],([chapter,section],previous)=>{
+  if(typeof chapter==='string'){if(!docsOpen.value||docsChapter.value!==chapter||docsSection.value!==(section||''))void onMoreDocs(chapter,typeof section==='string'?section:undefined,true)}
+  else if(docsOpen.value&&typeof previous?.[0]==='string')void closeDocsPage(false)
+},{immediate:true})
 
 function onMoreQuit() {
-  quitDialog.value = true
+  if(quitDialog.value)void quitConfirmation.refresh()
+  else quitDialog.value = true
 }
 
 async function exportActiveChat() {
@@ -4596,12 +4736,18 @@ const chatSearchHits = computed((): ChatSearchHit[] => {
   }
   return hits.slice(0, 50)
 })
+const chatSearchNative=computed(()=>chatSearchPanel(chatSearchHits.value.map(hit=>({...hit,relative:formatRelative(hit.updatedAt)})),chatSearchQuery.value,activeId.value))
+const chatSearchNativeInitial=computed(()=>chatSearchPanel(chatSearchHits.value.map(hit=>({...hit,relative:formatRelative(hit.updatedAt)})),chatSearchQuery.value,activeId.value,true).content)
+function chatSearchAction(action:NativePanelAction){
+  if(!chatSearchOpen.value)return
+  if(action.id==='chat-search-query'&&typeof action.value==='string'){chatSearchQuery.value=action.value;if(action.type==='submit')void pickFirstSearchHit()}
+  else if(action.type==='click'){if(action.id==='chat-search-close')closeChatSearch();else{const id=chatSearchNative.value.actions.get(action.id);if(id&&chatSearchHits.value.some(hit=>hit.id===id)&&chats.value.some(chat=>chat.id===id))void pickSearchChat(id)}}
+}
 
 function openChatSearch() {
-  fileManagerMode.value=false
-  pluginWorkspaceMode.value=false
-  browserWorkspaceMode.value=false
-  chatSearchQuery.value = ''
+  windowFind.close()
+  if(!chatSearchOpen.value)chatSearchQuery.value = ''
+  chatSearchFocusRequest.value++
   chatSearchOpen.value = true
   void nextTick(() => chatSearchInput.value?.focus())
 }
@@ -4627,10 +4773,10 @@ function onPanelNotify(text: string, color = 'error') {
 }
 
 type PageCtx =
-  | { kind: 'chat'; chat: ChatSession }
-  | { kind: 'sub'; chat: ChatSession }
+  | { kind: 'chat'|'sub'; chat: ChatSession;runId?:string;running:boolean }
   | {
       kind: 'msg'
+      chatId:string
       selected: string
       messageText: string
       messageId?: string
@@ -4638,8 +4784,52 @@ type PageCtx =
     }
 
 const pageCtx = ref<PageCtx | null>(null)
-const pageCtxMenu = ref<{ show: (e: MouseEvent) => void } | null>(null)
+const pageCtxMenu = ref<{ show: (e: MouseEvent|KeyboardEvent) => void;hide:()=>void;open:boolean } | null>(null)
+watch(()=>pageCtxMenu.value?.open,open=>{if(!open)chatMoreOpenId.value=null})
 
+function chatContextKeyboard(event:KeyboardEvent){return !event.isComposing&&(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10')}
+async function openChatRowContext(event:MouseEvent|KeyboardEvent,chat:ChatSession){
+  if(chatBatchMode.value||(event.target as HTMLElement|null)?.closest?.('input,textarea,[contenteditable]'))return
+  event.preventDefault();event.stopPropagation()
+  const epoch=++nativeRowMenuEpoch,id=chat.id,anchor=event.currentTarget as HTMLElement|null
+  try{
+    const [current,running]=await Promise.all([window.navora?.chats.get(id),window.navora?.agent.isRunning(id)])
+    if(epoch!==nativeRowMenuEpoch||!anchor?.isConnected)return
+    if(!current||!chats.value.some(item=>item.id===id)){showToast('对话已变化，请重新打开菜单。','warning');return}
+    const runId=current.kind==='sub'&&current.subchatRun?.status==='running'?current.subchatRun.id:[...current.messages].reverse().find(message=>typeof message.meta?.runId==='string')?.meta?.runId
+    pageCtx.value={kind:current.kind==='sub'?'sub':'chat',chat:current,runId,running:!!running}
+    chatMoreOpenId.value=id
+    await nextTick();pageCtxMenu.value?.show(event)
+  }catch{if(epoch===nativeRowMenuEpoch)showToast('菜单暂时无法打开，请重试。','warning')}
+}
+function onChatItemContextKey(event:KeyboardEvent,chat:ChatSession){if(chatContextKeyboard(event))void openChatRowContext(event,chat)}
+async function runChatContextAction(action:'find'|'folder'|'stop'|'rename'|'pin'|'export'|'delete'){
+  const target=pageCtx.value;if(!target||target.kind==='msg'||!window.navora)return
+  const id=target.chat.id,current=chats.value.find(chat=>chat.id===id)
+  if(!current){showToast('对话已变化，请重新打开菜单。','warning');return}
+  try{
+    if(action==='find'){
+      await routeConversationTarget(id);await nextTick()
+      if(current.kind==='sub'){if(activeFileTab.value?.kind==='subchats'&&activeFileTab.value.selectedSubchatId===id&&!openWindowFind('workspace'))showToast('此对话暂时无法查找，请重试。','warning')}
+      else if(activeId.value===id){revealFindConversation();await nextTick();await openConversationFind()}
+      return
+    }
+    if(action==='folder'){
+      if(isWebRemote())return
+      const result=await window.navora.workspace.open(id,'.');if(!result.ok)throw Error(result.error||'无法打开对话文件夹')
+    }else if(action==='stop'){
+      if(!target.running||!target.runId)return
+      const result=await window.navora.agent.stop(id,target.runId)
+      if(result.error==='agent_run_changed')showToast('任务已变化，请重新打开菜单。','warning')
+      else if(!result.ok)showToast('当前任务已结束。','warning')
+    }else if(action==='rename')startRenameChat(current)
+    else if(action==='pin')await toggleChatPinned(current)
+    else if(action==='export')await exportChatById(id)
+    else if(action==='delete')askDeleteChat(current)
+  }catch(error){showToast(error instanceof Error?error.message:'操作未完成，请重试。','warning')}
+}
+
+function messageTaskDeclarationLabel(message:ChatMessage){return taskDeclarationsLabel(message.meta?.taskConstraints?.declarations??message.meta?.document?.declarations)}
 function messagePlainText(m: ChatMessage): string {
   if (m.role === 'log') return logFullText(m)
   if (m.role === 'tool') {
@@ -4651,10 +4841,11 @@ function messagePlainText(m: ChatMessage): string {
     return body ? `${head}\n${body}` : head
   }
   if (m.role === 'assistant') return displayMessageContent(m).trim()
-  return String(m.content || '').trim()
+  const label=messageTaskDeclarationLabel(m)
+  return [label?'任务声明：'+label:'',String(m.content||'').trim()].filter(Boolean).join('\n\n')
 }
 
-function resolveMsgContext(e: MouseEvent): { messageText: string; messageId?: string } {
+function resolveMsgContext(e: MouseEvent|KeyboardEvent): { messageText: string; messageId?: string } {
   const target = e.target as HTMLElement | null
   if (!target?.closest) return { messageText: '' }
 
@@ -4681,31 +4872,40 @@ function resolveMsgContext(e: MouseEvent): { messageText: string; messageId?: st
   return { messageText: '' }
 }
 
-function onChatItemContext(e: MouseEvent, c: ChatSession) {
-  if (chatBatchMode.value) return
-  // Rename / other inputs: shared TextContextMenuHost handles them in capture.
-  if ((e.target as HTMLElement | null)?.closest?.('input, textarea, [contenteditable]')) return
-  e.preventDefault()
-  e.stopPropagation()
-  pageCtx.value = { kind: c.kind === 'sub' ? 'sub' : 'chat', chat: c }
-  pageCtxMenu.value?.show(e)
-}
+function onChatItemContext(e: MouseEvent, c: ChatSession) {void openChatRowContext(e,c)}
+function onMessageContextKey(event:KeyboardEvent){if(chatContextKeyboard(event))onMessagesContext(event)}
 
-function onMessagesContext(e: MouseEvent) {
+function onMessagesContext(e: MouseEvent|KeyboardEvent) {
   // Inputs inside the message list (rare) are handled globally.
   if ((e.target as HTMLElement | null)?.closest?.('input, textarea, [contenteditable]')) return
-  const selected = String(window.getSelection?.()?.toString() || '').trim()
+  const selection=window.getSelection?.(),root=msgBox.value
+  const selected = selection?.anchorNode&&selection.focusNode&&root?.contains(selection.anchorNode)&&root.contains(selection.focusNode)?String(selection.toString()).trim():''
   const { messageText, messageId } = resolveMsgContext(e)
   const hasChat = !!(active.value?.messages?.length)
   if (!selected && !messageText && !hasChat) return
   pageCtx.value = {
     kind: 'msg',
+    chatId:activeId.value||'',
     selected,
     messageText,
     messageId,
     hasChat,
   }
   pageCtxMenu.value?.show(e)
+}
+
+async function runMessageContextAction(action:'copy-selection'|'quote-selection'|'copy-message'|'quote-message'|'copy-chat'|'export'){
+  const target=pageCtx.value;if(target?.kind!=='msg'||!target.chatId)return
+  if(action==='copy-selection'){await copyText(target.selected);return}
+  if(action==='copy-message'){await copyText(target.messageText);return}
+  if(action==='export'){await exportChatById(target.chatId);return}
+  if(action==='copy-chat'){
+    const chat=await window.navora?.chats.get(target.chatId)
+    if(chat?.messages.length)await copyText(formatChatExportContent(chat,'md'))
+    return
+  }
+  if(activeId.value!==target.chatId){await selectChat(target.chatId);await nextTick()}
+  if(activeId.value===target.chatId){revealFindConversation();await nextTick();quoteToComposer(action==='quote-selection'?target.selected:target.messageText)}
 }
 
 const copiedMessageId = ref<string | null>(null)
@@ -4767,6 +4967,7 @@ async function locateResourceMessage(payload:{chatId:string;messageId:string}){
   await jumpToMessage(payload.messageId)
 }
 async function jumpToMessage(id: string) {
+  await revealMessageProcess(id)
   cancelMessageJump()
   const request = ++messageJump
   const version=++conversationScrollVersion,chatId=activeId.value
@@ -4846,12 +5047,6 @@ async function copyText(text: string) {
   }
 }
 
-async function copyEntireChat() {
-  const chat = active.value
-  if (!chat?.messages?.length) return
-  await copyText(formatChatExportContent(chat, 'md'))
-}
-
 function quoteToComposer(text: string) {
   const t = String(text || '').trim()
   if (!t) return
@@ -4881,7 +5076,7 @@ async function restoreDraftRecovery(id:string){const entry=active.value?.draftRe
 async function retryDraftRecovery(id:string){const entry=active.value?.draftRecoveries?.find(entry=>entry.id===id);if(!entry||sending.value)return;await submitComposerSnapshot(entry.document,false,id)}
 async function send(){
   const chatId=activeId.value
-  if(!chatId||!window.navora||sending.value||!canSend.value)return
+  if(!chatId||!window.navora||sending.value||composerComposing.value||!canSend.value)return
   const modelIdentity=captureModelIdentity()
   if(!modelIdentity)return
   const clicked=normalizeComposerDocument(JSON.parse(JSON.stringify(composerDocument.value)),chatId)
@@ -4903,7 +5098,12 @@ async function submitComposerSnapshot(snapshot:ComposerDocument,rotate:boolean,k
   if(!window.navora)return
   const modelIdentity=selectedIdentity||captureModelIdentity()
   if(!modelIdentity)return
-  const chatId=snapshot.chatId,compiled=compileComposerDocument(snapshot),wasRunning=!!runningChats.value[chatId]
+  let compiled:ReturnType<typeof compileComposerDocument>;try{compiled=compileComposerDocument(snapshot)}catch(error){showToast(composerErrorMessage(error)||'无法读取这份提交，原始内容已保留。','warning');return}
+  const chatId=snapshot.chatId,wasRunning=!!runningChats.value[chatId],submissionMode=Object.values(questionnaireRecords.value).some(record=>record.chatId===chatId&&record.status==='pending')?'insert' as const:'queue' as const
+  if((submissionMode==='insert'||activeFileTab.value?.kind==='questionnaire'&&activeFileTab.value.chatId===chatId)&&!await flushQuestionnaireDraft()){
+    showToast('请先保存问卷草稿或处理版本冲突，再切回聊天。','warning')
+    return
+  }
   if(compiled.content.length>maxComposerChars.value){showToast(`内容超过上限（${maxComposerChars.value} 字），请缩小范围或移除部分资料。`,'warning');return}
   const id=composerSubmissionKey(snapshot)
   if(pendingSubmissions.value.some(item=>item.id===id&&!item.failed))return
@@ -4915,16 +5115,12 @@ async function submitComposerSnapshot(snapshot:ComposerDocument,rotate:boolean,k
   try{
     // Persist the frozen submission before allowing a separate next draft.
     // A crash or lost acknowledgement leaves an explicit, idempotent recovery.
-    if(!pending.recoveryId){const saved=await window.navora.chats.saveDraftRecovery(chatId,snapshot);pending.recoveryId=saved?.draftRecoveries?.find(entry=>composerSubmissionKey(entry.document)===id)?.id;if(!pending.recoveryId)throw Error('无法保存提交快照');if(activeId.value===chatId)active.value={...active.value!,draftRecoveries:saved?.draftRecoveries}}
+    if(!pending.recoveryId){const saved=await window.navora.chats.saveDraftRecovery(chatId,snapshot);pending.recoveryId=saved?.draftRecoveries?.find(entry=>{try{return composerSubmissionKey(entry.document)===id}catch{return false}})?.id;if(!pending.recoveryId)throw Error('无法保存提交快照');if(activeId.value===chatId)active.value={...active.value!,draftRecoveries:saved?.draftRecoveries}}
     staged=true
-    if(rotate&&activeId.value===chatId&&composerDocument.value.id===snapshot.id&&JSON.stringify(composerDocument.value.content)===JSON.stringify(snapshot.content)){
-      const next=createComposerDocument(chatId);next.revision=snapshot.revision+1
-      applyDraftLocally('',Date.now(),next);scheduleDraftSave()
-    }
-    if(composerStaging.value===chatId)composerStaging.value=null
+    // Keep the frozen draft visible until the host acknowledges this idempotent submission.
     if(activeId.value===chatId)resumeMessageFollow()
     clearFollowups(chatId);clearChatError(chatId)
-    const sent=await window.navora.agent.submit(chatId,{content:compiled.content,refs:compiled.refs,document:snapshot,clientMessageId:id,draftRevision:snapshot.revision,modelIdentity},runningMessageMode.value)
+    const sent=await window.navora.agent.submit(chatId,{content:compiled.content,refs:compiled.refs,document:snapshot,clientMessageId:id,draftRevision:snapshot.revision,modelIdentity},submissionMode)
     if(!sent)throw Error('提交未获得确认')
     draftState.acknowledge(sent,snapshot)
     if(pending.recoveryId){const cleaned=await window.navora.chats.dismissDraftRecovery(chatId,pending.recoveryId).catch(()=>null);if(cleaned)sent.draftRecoveries=cleaned.draftRecoveries}
@@ -4980,63 +5176,17 @@ async function stopAgent() {
 
 async function respondPerm(decision: PermissionDecision) {
   const request=permReq.value
-  if (!window.navora || !request || permBusyId.value) return
-  permBusyId.value = request.id
-  try {
-    const delivered=await window.navora.permission.respond(request.id, decision)
-    removePermRequest(request.id)
-    if(!delivered)showToast('授权请求已失效，请重新发起操作。','warning')
-  } finally {
-    if(permBusyId.value===request.id)permBusyId.value = ''
-  }
+  if(!window.navora||!request)return
+  await submitDecision(decisionSubmissions,request.id,()=>window.navora!.permission.respond(request.id,decision),()=>removePermRequest(request.id))
 }
-
-async function respondAskOption(opt: string) {
-  const req = activePendingAsk.value
-  if (!window.navora || !req) return
-  const id = req.id
-  const chatId = req.chatId
-  askBusy.value = true
-  clearPendingAsk(chatId, id)
-  try {
-    const ok = await window.navora.agent.respondAsk(id, { answer: opt, source: 'option' })
-    if (!ok) showToast('选择未送达（可能已超时）', 'warning')
-  } finally {
-    askBusy.value = false
-  }
+async function respondAsk(answer:string,source:'option'|'custom'|'deny') {
+  const request=activePendingAsk.value
+  if(!window.navora||!request)return
+  await submitDecision(decisionSubmissions,request.id,()=>window.navora!.agent.respondAsk(request.id,{answer,source}),()=>clearPendingAsk(request.chatId,request.id))
 }
-
-async function respondAskCustomText(text: string) {
-  const req = activePendingAsk.value
-  if (!window.navora || !req) return
-  const trimmed = String(text || '').trim()
-  if (!trimmed) return
-  const id = req.id
-  const chatId = req.chatId
-  askBusy.value = true
-  clearPendingAsk(chatId, id)
-  try {
-    const ok = await window.navora.agent.respondAsk(id, { answer: trimmed, source: 'custom' })
-    if (!ok) showToast('选择未送达（可能已超时）', 'warning')
-  } finally {
-    askBusy.value = false
-  }
-}
-
-async function respondAskDeny() {
-  const req = activePendingAsk.value
-  if (!window.navora || !req) return
-  const id = req.id
-  const chatId = req.chatId
-  askBusy.value = true
-  clearPendingAsk(chatId, id)
-  try {
-    const ok = await window.navora.agent.respondAsk(id, { answer: '', source: 'deny' })
-    if (!ok) showToast('操作未送达（可能已超时）', 'warning')
-  } finally {
-    askBusy.value = false
-  }
-}
+async function respondAskOption(option:string){await respondAsk(option,'option')}
+async function respondAskCustomText(text:string){const value=String(text||'').trim();if(value)await respondAsk(value,'custom')}
+async function respondAskDeny(){await respondAsk('','deny')}
 
 function scrollToInlineDecision() {
   void nextTick(async () => {
@@ -5050,11 +5200,14 @@ function rememberPendingAsk(req: AgentAskRequest) {
   pendingAsks.value = { ...pendingAsks.value, [req.chatId]: req }
 }
 
-function clearPendingAsk(chatId: string, id?: string) {
+function clearPendingAsk(chatId: string, id?: string,preserveDraft=false) {
   const cur = pendingAsks.value[chatId]
   if (!cur) return
   if (id && cur.id !== id) return
   clearAskExpiry(cur.id)
+  if(!preserveDraft)clearDecisionDraft(cur.id)
+  closeAskUi(cur.id)
+  delete decisionSubmissions[cur.id]
   const next = { ...pendingAsks.value }
   delete next[chatId]
   pendingAsks.value = next
@@ -5063,11 +5216,12 @@ function clearPendingAsk(chatId: string, id?: string) {
 function clearPendingAskById(id: string) {
   for (const [chatId, req] of Object.entries(pendingAsks.value)) {
     if (req.id === id) {
-      clearPendingAsk(chatId, id)
+      clearPendingAsk(chatId, id,isDecisionSubmitting(id))
       return
     }
   }
   clearAskExpiry(id)
+  if(!isDecisionSubmitting(id))clearDecisionDraft(id)
 }
 
 function openAskDialog(req: AgentAskRequest) {
@@ -5086,6 +5240,8 @@ function openAskDialog(req: AgentAskRequest) {
 }
 
 async function openPendingAsk(chatId: string) {
+  const questionnaire=pendingQuestionnaireForSidebar(chatId)
+  if(questionnaire){await openQuestionnaireRecord(questionnaire);return}
   const req = pendingAskForSidebar(chatId)
   if (!req) return
   const owner=chats.value.find(chat=>chat.id===req.chatId)||await window.navora?.chats.get(req.chatId)
@@ -5140,7 +5296,6 @@ watch(settingsOpen, async (open, wasOpen) => {
 // Agent 可能通过工具写入新服务商/模型；打开菜单时再拉一次，避免只靠缓存。
 watch(modelMenuOpen, async (open) => {
   if (!open)return
-  if(nativeComposerAvailable.value){modelMenuOpen.value=false;await openNativeComposerOrFallback('model');return}
   modelQuery.value=''
   await refreshAiProviders()
   await nextTick()
@@ -5175,10 +5330,14 @@ watch(
 
 onMounted(async () => {
   window.addEventListener('keydown', onAppShortcut)
+  window.addEventListener(OPEN_QUESTIONNAIRE_EVENT,onOpenQuestionnaireEvent)
   if (!window.navora) {
     console.warn('Navora API unavailable (open via Electron)')
     return
   }
+  unsubscribeQuestionnaires=window.navora.questionnaires?.onChanged(record=>acceptQuestionnaireRecord(record,true))
+  if(!isWebRemote())unsubQuitRequested=window.navora.app.onQuitRequested?.(request=>{onMoreQuit();if(request.error)showToast(request.error,'warning')})
+  void refreshQuestionnaires()
   void window.navora.app.info().then(info=>{applicationVersion.value=info.version}).catch(()=>{})
   if(!isWebRemote())unsubFileTransfer=window.navora.fileTabs.onTransfer(async event=>{
     try{
@@ -5199,7 +5358,8 @@ onMounted(async () => {
     const selection=chatSelection
     if(!tree.value.some(session=>session.windows.some(page=>page.windowId===payload.pageId&&page.presentation==='embedded'))){const nextTree=await window.navora!.browser.tree(parentId);if(request!==browserPresentRequest||selection!==chatSelection||parentId!==activeId.value)return;tree.value=nextTree}
     syncBrowserTabs(tree.value);workspaceConversationActive.value=false
-    await presentBrowserResource(payload.pageId,payload.chatId)
+    const presented=await presentBrowserResource(payload.pageId,payload.chatId)
+    if(!presented||request!==browserPresentRequest||selection!==chatSelection||parentId!==activeId.value)return
     if(payload.annotation){activateSidebar('chats',false);addRef(payload.annotation)}
   })
   unsubTree = window.navora.browser.onTreeUpdated((payload) => {
@@ -5274,6 +5434,7 @@ onMounted(async () => {
         liveAnswerByChat.value = next
       }
       setRunning(ev.chatId, ev.running)
+      if(quitDialog.value)void quitConfirmation.refresh()
     }
     if (ev.type === 'title') {
       const idx = chats.value.findIndex((c) => c.id === ev.chatId)
@@ -5438,6 +5599,7 @@ onMounted(async () => {
     }
   })
   unsubPermCancel = window.navora.permission.onCancel((id) => {
+    if(deferDecisionCancellation(decisionSubmissions,id))return
     removePermRequest(id)
   })
   unsubAsk = window.navora.agent.onAsk((req) => {
@@ -5453,6 +5615,7 @@ onMounted(async () => {
   unsubAskCancel = window.navora.agent.onAskCancel((payload) => {
     const id = typeof payload === 'string' ? payload : payload.id
     const reason = typeof payload === 'string' ? undefined : payload.reason
+    if(deferDecisionCancellation(decisionSubmissions,id))return
     clearPendingAskById(id)
     closeAskUi(id)
     if (reason === 'timeout') {
@@ -5494,10 +5657,12 @@ onMounted(async () => {
   await refreshSettingsPermissions()
   await refreshList()
   if (!chats.value.length) await createChat()
+  await finishWindowStartup()
 })
 
 onActivated(() => {
   void refreshList()
+  void refreshQuestionnaires()
   void loadUiPrefs()
   void refreshSettingsPermissions()
   if (activeId.value && window.navora) {
@@ -5520,6 +5685,9 @@ onUnmounted(() => {
   chatSelection++
   chatTransition?.cancel()
   window.removeEventListener('keydown', onAppShortcut)
+  window.removeEventListener(OPEN_QUESTIONNAIRE_EVENT,onOpenQuestionnaireEvent)
+  unsubscribeQuestionnaires?.()
+  unsubQuitRequested?.()
   void flushDraftSave(activeId.value).catch(()=>{})
   unsubTree?.()
   unsubBrowserPresent?.()
@@ -5543,6 +5711,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.annotation-chat-status{margin:10px 0;font-size:12px;color:var(--navora-muted)}
+.questionnaire-pending-dock{width:min(720px,100%);margin-bottom:8px}.questionnaire-pending-dock>button{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:1px solid var(--navora-stroke);border-radius:10px;background:var(--appearance-well,var(--navora-surface));color:var(--navora-ink);text-align:left;cursor:pointer}.questionnaire-pending-dock>button:hover{background:var(--control-hover)}.questionnaire-pending-dock>button:focus-visible{outline:2px solid var(--navora-accent);outline-offset:2px}.questionnaire-pending-dock>button>svg{color:var(--navora-accent);flex:none}.questionnaire-pending-dock>button>span:not(.questionnaire-dock-action){display:flex;flex-direction:column;min-width:0}.questionnaire-pending-dock strong{font-size:13px;font-weight:600;overflow-wrap:anywhere}.questionnaire-pending-dock small{font-size:12px;color:var(--navora-muted)}.questionnaire-dock-action{margin-left:auto;flex:none;font-size:12px;color:var(--navora-accent)}
 .composer-pending-submit,.composer-draft-recovery{width:min(720px,100%);box-sizing:border-box;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 12px;border:1px solid var(--navora-stroke,#dbe3ed);border-radius:10px;margin:0 0 8px;background:var(--appearance-well,#f7f9fc);color:var(--navora-muted,#78869a);font-size:12px}
 .composer-pending-submit>span,.composer-draft-recovery>span{margin-right:auto}.composer-pending-submit details,.composer-draft-recovery details{flex:0 0 100%;font-size:11px}.composer-pending-submit summary,.composer-draft-recovery summary{color:var(--navora-accent,#3f6c9b)}.composer-pending-submit pre,.composer-draft-recovery pre{max-height:150px;overflow:auto;white-space:pre-wrap;font:inherit;padding:8px;background:var(--navora-surface,#fff);border-radius:6px;color:var(--navora-ink,#384b63)}.composer-pending-submit button,.composer-draft-recovery button{padding:3px 7px;border-radius:5px;color:var(--navora-accent,#3f6c9b)}.composer-pending-submit button:hover,.composer-draft-recovery button:hover{background:var(--control-hover,#eaf0f7)}.composer-validation{width:min(720px,100%);font-size:12px;line-height:1.5;color:var(--control-danger,#ad6456);margin:0 0 8px}
 .conversation-content{display:contents}
@@ -7380,6 +7550,7 @@ onUnmounted(() => {
   flex: 1;
   min-width: 0;
 }
+.msg-task-declarations{display:flex;align-items:center;margin:0 0 8px;font-size:11px;line-height:1.5;color:var(--navora-muted)}
 .msg-role {
   font-size: 0.72rem;
   font-weight: 600;
@@ -7720,9 +7891,12 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 .media-lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 4000;
+  position: relative;
+  width: 100%;
+  height: min(80vh, 900px);
+  min-height: 240px;
+  box-sizing: border-box;
+  border-radius: 12px;
   background: rgba(10, 16, 22, 0.88);
   display: grid;
   place-items: center;
@@ -7730,8 +7904,8 @@ onUnmounted(() => {
   cursor: zoom-out;
 }
 .media-lightbox img {
-  max-width: min(96vw, 1400px);
-  max-height: calc(100vh - 96px);
+  max-width: 100%;
+  max-height: calc(min(80vh, 900px) - 96px);
   object-fit: contain;
   border-radius: 8px;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
@@ -7758,7 +7932,7 @@ onUnmounted(() => {
   left: 50%;
   transform: translateX(-50%);
   margin: 0;
-  max-width: 90vw;
+  max-width: 90%;
   color: rgba(255, 255, 255, 0.82);
   font-size: 0.82rem;
   text-align: center;
@@ -9295,7 +9469,7 @@ onUnmounted(() => {
   z-index: 1;
   pointer-events: auto;
   width: min(560px, 100%);
-  max-height: min(68vh, 640px);
+  max-height: min(60vh, 330px);
   display: flex;
   flex-direction: column;
   border-radius: 14px;
@@ -9348,13 +9522,14 @@ onUnmounted(() => {
   color: #1b4f72;
 }
 .chat-search-results {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
+  max-height: min(240px, 45vh);
   overflow: auto;
   padding: 8px;
 }
 .chat-search-hint {
-  margin: 18px 8px;
+  margin: 10px 8px;
   text-align: center;
   font-size: 0.86rem;
   color: #8a97a5;
@@ -9362,6 +9537,7 @@ onUnmounted(() => {
 .chat-search-hit {
   width: 100%;
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 3px;
   text-align: left;
   padding: 10px 12px;
@@ -9387,15 +9563,18 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 .chat-search-hit-snippet {
+  grid-column: 1 / -1;
   font-size: 0.78rem;
   color: #5d6d7e;
   line-height: 1.4;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 .chat-search-hit-meta {
+  grid-column: 2;
+  grid-row: 1;
   font-size: 0.72rem;
   color: #9aa7b4;
 }

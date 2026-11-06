@@ -1,0 +1,1283 @@
+{
+  "anchorBounds": {
+    "height": 1,
+    "width": 1,
+    "x": 10,
+    "y": 10
+  },
+  "backgroundMaterial": "none",
+  "backgroundMaterialApplied": "none",
+  "bounds": {
+    "height": 365,
+    "width": 629,
+    "x": 2,
+    "y": 2
+  },
+  "contentBounds": {
+    "height": 337,
+    "width": 601,
+    "x": 16,
+    "y": 16
+  },
+  "contentHeight": 312,
+  "controls": [
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 214,
+        "y": 28
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 215,
+          "y": 29
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-0-0",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 262,
+        "y": 28
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 263,
+          "y": 29
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-0-1",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 310,
+        "y": 28
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 311,
+          "y": 29
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-0-2",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 358,
+        "y": 28
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 359,
+          "y": 29
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-0-3",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 406,
+        "y": 28
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 407,
+          "y": 29
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-0-4",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 454,
+        "y": 28
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 455,
+          "y": 29
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-0-5",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 214,
+        "y": 68
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 215,
+          "y": 69
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-1-0",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 262,
+        "y": 68
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 263,
+          "y": 69
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-1-1",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 310,
+        "y": 68
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 311,
+          "y": 69
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-1-2",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 358,
+        "y": 68
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 359,
+          "y": 69
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-1-3",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 406,
+        "y": 68
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 407,
+          "y": 69
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-1-4",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 454,
+        "y": 68
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 455,
+          "y": 69
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-1-5",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 214,
+        "y": 108
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 215,
+          "y": 109
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-2-0",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 262,
+        "y": 108
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 263,
+          "y": 109
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-2-1",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 310,
+        "y": 108
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 311,
+          "y": 109
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-2-2",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 358,
+        "y": 108
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 359,
+          "y": 109
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-2-3",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 406,
+        "y": 108
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 407,
+          "y": 109
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-2-4",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 454,
+        "y": 108
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 455,
+          "y": 109
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-2-5",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 214,
+        "y": 148
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 215,
+          "y": 149
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-3-0",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 262,
+        "y": 148
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 263,
+          "y": 149
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-3-1",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 310,
+        "y": 148
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 311,
+          "y": 149
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-3-2",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 358,
+        "y": 148
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 359,
+          "y": 149
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-3-3",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 406,
+        "y": 148
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 407,
+          "y": 149
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-3-4",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 454,
+        "y": 148
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 455,
+          "y": 149
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-3-5",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 214,
+        "y": 188
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 215,
+          "y": 189
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-4-0",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 262,
+        "y": 188
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 263,
+          "y": 189
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-4-1",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 310,
+        "y": 188
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 311,
+          "y": 189
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-4-2",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 358,
+        "y": 188
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 359,
+          "y": 189
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-4-3",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 406,
+        "y": 188
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 407,
+          "y": 189
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-4-4",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 454,
+        "y": 188
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 455,
+          "y": 189
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-4-5",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 214,
+        "y": 228
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 215,
+          "y": 229
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-5-0",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 262,
+        "y": 228
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 263,
+          "y": 229
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-5-1",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 310,
+        "y": 228
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 311,
+          "y": 229
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-5-2",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 358,
+        "y": 228
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 359,
+          "y": 229
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-5-3",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 406,
+        "y": 228
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 407,
+          "y": 229
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-5-4",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 454,
+        "y": 228
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 455,
+          "y": 229
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-5-5",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 214,
+        "y": 268
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 215,
+          "y": 269
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-6-0",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 262,
+        "y": 268
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 263,
+          "y": 269
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-6-1",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 310,
+        "y": 268
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 311,
+          "y": 269
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-6-2",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 358,
+        "y": 268
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 359,
+          "y": 269
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-6-3",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 406,
+        "y": 268
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 407,
+          "y": 269
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-6-4",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 454,
+        "y": 268
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 455,
+          "y": 269
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-6-5",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 214,
+        "y": 308
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 215,
+          "y": 309
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-7-0",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 262,
+        "y": 308
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 263,
+          "y": 309
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-7-1",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 310,
+        "y": 308
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 311,
+          "y": 309
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-7-2",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 358,
+        "y": 308
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 359,
+          "y": 309
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-7-3",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 406,
+        "y": 308
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 407,
+          "y": 309
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-7-4",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 32,
+        "x": 454,
+        "y": 308
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 30,
+          "width": 30,
+          "x": 455,
+          "y": 309
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "icon-7-5",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 170,
+        "x": 28,
+        "y": 28
+      },
+      "fontSize": 13,
+      "fontWeight": 400,
+      "id": "label-0",
+      "text": "single-1x",
+      "type": "text"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 170,
+        "x": 28,
+        "y": 68
+      },
+      "fontSize": 13,
+      "fontWeight": 400,
+      "id": "label-1",
+      "text": "single-1.75x",
+      "type": "text"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 170,
+        "x": 28,
+        "y": 108
+      },
+      "fontSize": 13,
+      "fontWeight": 400,
+      "id": "label-2",
+      "text": "multi-reps",
+      "type": "text"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 170,
+        "x": 28,
+        "y": 148
+      },
+      "fontSize": 13,
+      "fontWeight": 400,
+      "id": "label-3",
+      "text": "physical-28-scale1",
+      "type": "text"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 170,
+        "x": 28,
+        "y": 188
+      },
+      "fontSize": 13,
+      "fontWeight": 400,
+      "id": "label-4",
+      "text": "single-2x",
+      "type": "text"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 170,
+        "x": 28,
+        "y": 228
+      },
+      "fontSize": 13,
+      "fontWeight": 400,
+      "id": "label-5",
+      "text": "single-3.5x",
+      "type": "text"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 170,
+        "x": 28,
+        "y": 268
+      },
+      "fontSize": 13,
+      "fontWeight": 400,
+      "id": "label-6",
+      "text": "single-20DIP-exact",
+      "type": "text"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 170,
+        "x": 28,
+        "y": 308
+      },
+      "fontSize": 13,
+      "fontWeight": 400,
+      "id": "label-7",
+      "text": "single-16DIP-over",
+      "type": "text"
+    },
+    {
+      "bounds": {
+        "height": 312,
+        "width": 577,
+        "x": 28,
+        "y": 28
+      },
+      "id": "root",
+      "type": "column"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 577,
+        "x": 28,
+        "y": 28
+      },
+      "id": "row-0",
+      "type": "row"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 577,
+        "x": 28,
+        "y": 68
+      },
+      "id": "row-1",
+      "type": "row"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 577,
+        "x": 28,
+        "y": 108
+      },
+      "id": "row-2",
+      "type": "row"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 577,
+        "x": 28,
+        "y": 148
+      },
+      "id": "row-3",
+      "type": "row"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 577,
+        "x": 28,
+        "y": 188
+      },
+      "id": "row-4",
+      "type": "row"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 577,
+        "x": 28,
+        "y": 228
+      },
+      "id": "row-5",
+      "type": "row"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 577,
+        "x": 28,
+        "y": 268
+      },
+      "id": "row-6",
+      "type": "row"
+    },
+    {
+      "bounds": {
+        "height": 32,
+        "width": 577,
+        "x": 28,
+        "y": 308
+      },
+      "id": "row-7",
+      "type": "row"
+    }
+  ],
+  "destroyed": false,
+  "materialDwmBackdrop": 0,
+  "materialFallbackReason": "",
+  "nativeWindowsValid": true,
+  "parentWindowHandle": "4591048",
+  "scrollbar": {
+    "bounds": {
+      "height": 0,
+      "width": 0,
+      "x": 28,
+      "y": 28
+    },
+    "hovered": false,
+    "maximum": 0,
+    "placement": "gutter",
+    "position": 0,
+    "pressed": false,
+    "thumb": {
+      "height": 0,
+      "width": 0,
+      "x": 28,
+      "y": 28
+    },
+    "thumbPaintBounds": {
+      "height": 0,
+      "width": 4,
+      "x": 26,
+      "y": 28
+    },
+    "track": {
+      "height": 0,
+      "width": 0,
+      "x": 28,
+      "y": 28
+    },
+    "visible": false
+  },
+  "scrollbarPlacement": "gutter",
+  "shadowBounds": {
+    "height": 367,
+    "width": 630,
+    "x": 2,
+    "y": 2
+  },
+  "shadowVisible": true,
+  "shadowWindowHandle": "3935642",
+  "theme": {
+    "background": "#ffffff",
+    "fontFamily": "Segoe UI",
+    "fontSize": 13,
+    "mode": "light",
+    "text": "#263b55"
+  },
+  "viewportHeight": 313,
+  "visible": true,
+  "windowHandle": "1249118"
+}

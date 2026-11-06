@@ -1,6 +1,6 @@
 import {computed,nextTick,onBeforeUnmount,ref,watch,type Ref} from 'vue'
 import type {ChatSession} from '@shared/types'
-import {compileComposerDocument,composerDocumentFromLegacy,createComposerDocument,normalizeComposerDocument,composerDocumentEmpty,composerErrorMessage,type ComposerDocument} from '@shared/composer-document'
+import {previewComposerDocument,composerDocumentFromLegacy,createComposerDocument,normalizeComposerDocument,composerDocumentHasState,composerDocumentsHaveSameContent,composerErrorMessage,type ComposerDocument} from '@shared/composer-document'
 
 /** One versioned document owns text and sources, including while a save is in flight. */
 export function useComposerDraft(owner:Ref<string|null>,notify:(message:string)=>void){
@@ -9,8 +9,8 @@ export function useComposerDraft(owner:Ref<string|null>,notify:(message:string)=
   const unreadable=new Set<string>()
   let quiet=false,timer:ReturnType<typeof setTimeout>|undefined,disposed=false
   const clone=(value:ComposerDocument)=>JSON.parse(JSON.stringify(value)) as ComposerDocument
-  const sameContent=(left:ComposerDocument|undefined,right:ComposerDocument|undefined)=>!!left&&!!right&&left.id===right.id&&JSON.stringify(left.content)===JSON.stringify(right.content)
-  const ownClear=(chat:ChatSession,local:ComposerDocument,revision:number)=>chat.draftClearedFromRevision===revision&&chat.draftDocument?.id===local.id&&composerDocumentEmpty(chat.draftDocument)
+  const sameContent=(left:ComposerDocument|undefined,right:ComposerDocument|undefined)=>!!left&&!!right&&left.id===right.id&&composerDocumentsHaveSameContent(left,right)
+  const ownClear=(chat:ChatSession,local:ComposerDocument,revision:number)=>chat.draftClearedFromRevision===revision&&chat.draftDocument?.id===local.id&&!composerDocumentHasState(chat.draftDocument)
   function replace(value:ComposerDocument){quiet=true;document.value=clone(value);touchedAt.value=value.updatedAt;void nextTick(()=>{quiet=false})}
   function load(chat:ChatSession|null){
     const id=chat?.id||owner.value||'',cached=cache.get(id)
@@ -39,6 +39,7 @@ export function useComposerDraft(owner:Ref<string|null>,notify:(message:string)=
     const id=owner.value||document.value.chatId
     if(unreadable.has(id)){notify('原始草稿格式暂不支持，请升级到兼容版本后恢复。');return}
     const next=supplied?normalizeComposerDocument(supplied,id):composerDocumentFromLegacy(id,text)
+    if(!supplied&&document.value.chatId===id&&document.value.declarations!==undefined)next.declarations=clone(document.value).declarations
     next.updatedAt=updatedAt;cache.set(id,clone(next));replace(next)
   }
   function edited(next:ComposerDocument){if(unreadable.has(owner.value||next.chatId))return;document.value=normalizeComposerDocument(next,owner.value||next.chatId);schedule(true)}
@@ -53,7 +54,7 @@ export function useComposerDraft(owner:Ref<string|null>,notify:(message:string)=
     const task=previous.catch(()=>{}).then(async()=>{
       if(unreadable.has(id)||blocked.has(id)||!dirty.has(id))return
       const pending=cache.get(id);if(!pending)return
-      const snapshot=clone(pending),base=bases.get(id)||0,compiled=compileComposerDocument(snapshot)
+      const snapshot=clone(pending),base=bases.get(id)||0,compiled=previewComposerDocument(snapshot)
       try{
         const chat=await window.navora!.chats.setDraft(id,compiled.content,{document:snapshot,baseRevision:base,updatedAt:snapshot.updatedAt})
         if(!chat)return
@@ -61,7 +62,7 @@ export function useComposerDraft(owner:Ref<string|null>,notify:(message:string)=
         bases.set(id,Math.max(bases.get(id)||0,chat.draftRevision||0))
         if(chat.draftConflict){blocked.add(id);if(owner.value===id)conflict.value=chat;notify('草稿在另一处有更新，两份内容都已保留。');return}
         const latest=cache.get(id)
-        if(latest&&latest.id===snapshot.id&&latest.revision===snapshot.revision&&JSON.stringify(latest.content)===JSON.stringify(snapshot.content)&&latest.updatedAt===snapshot.updatedAt){
+        if(latest&&latest.id===snapshot.id&&latest.revision===snapshot.revision&&composerDocumentsHaveSameContent(latest,snapshot)&&latest.updatedAt===snapshot.updatedAt){
           dirty.delete(id)
           const accepted=chat.draftDocument?normalizeComposerDocument(chat.draftDocument,id):{...snapshot,revision:chat.draftRevision||snapshot.revision}
           cache.set(id,accepted)
@@ -111,10 +112,10 @@ export function useComposerDraft(owner:Ref<string|null>,notify:(message:string)=
       const latest=await window.navora!.chats.get(id)
       if(!latest)throw Error('chat_not_found')
       const synced=latest.draftDocument?normalizeComposerDocument(latest.draftDocument,id):composerDocumentFromLegacy(id,latest.draft||'')
-      const confirmed=await window.navora!.chats.setDraft(id,compileComposerDocument(synced).content,{document:synced,baseRevision:latest.draftRevision||0,updatedAt:latest.draftUpdatedAt||synced.updatedAt})
+      const confirmed=await window.navora!.chats.setDraft(id,previewComposerDocument(synced).content,{document:synced,baseRevision:latest.draftRevision||0,updatedAt:latest.draftUpdatedAt||synced.updatedAt})
       if(!confirmed)throw Error('chat_not_found')
       const edited=cache.get(id)
-      if(confirmed.draftConflict||snapshot&&edited&&(edited.id!==snapshot.id||edited.revision!==snapshot.revision||edited.updatedAt!==snapshot.updatedAt||JSON.stringify(edited.content)!==JSON.stringify(snapshot.content))){
+      if(confirmed.draftConflict||snapshot&&edited&&(edited.id!==snapshot.id||edited.revision!==snapshot.revision||edited.updatedAt!==snapshot.updatedAt||!composerDocumentsHaveSameContent(edited,snapshot))){
         if(edited)await window.navora!.chats.saveDraftRecovery(id,clone(edited),'conflict')
         blocked.add(id);if(owner.value===id)conflict.value=confirmed
         notify(confirmed.draftConflict?'同步版本再次更新，请重新选择。':'本地草稿又有编辑，内容已保留，请重新选择版本。');return
@@ -142,12 +143,12 @@ export function useComposerDraft(owner:Ref<string|null>,notify:(message:string)=
       if(owner.value===chat.id)replace(synchronized)
       return
     }
-    if(!latest||latest.id!==sent.id||latest.revision!==sent.revision||JSON.stringify(latest.content)!==JSON.stringify(sent.content))return
+    if(!latest||latest.id!==sent.id||latest.revision!==sent.revision||!composerDocumentsHaveSameContent(latest,sent))return
     const empty=chat.draftDocument?normalizeComposerDocument(chat.draftDocument,chat.id):createComposerDocument(chat.id)
     cache.set(chat.id,empty);dirty.delete(chat.id)
     if(owner.value===chat.id)replace(empty)
   }
-  const text=computed(()=>compileComposerDocument(document.value).content),refs=computed(()=>compileComposerDocument(document.value).refs)
+  const text=computed(()=>previewComposerDocument(document.value).content),refs=computed(()=>previewComposerDocument(document.value).refs)
   watch(document,()=>{if(!quiet)schedule()},{deep:true})
   watch(owner,id=>{clearTimeout(timer);conflict.value=null;unsupported.value=unreadable.has(id||'');const saved=cache.get(id||'')||createComposerDocument(id||'');replace(saved)},{flush:'sync'})
   const beforeUnload=()=>{const id=owner.value;if(id)void save(id)}

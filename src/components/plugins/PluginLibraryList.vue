@@ -27,15 +27,7 @@
           <span class="plugin-state" :class="{ enabled: pluginLibraryStatus(plugin, conflicts) === 'enabled', failed: plugin.error, conflict: conflicts.has(plugin.id) && !plugin.error }"><AppIcon v-if="plugin.error || conflicts.has(plugin.id)" icon="circle-exclamation" />{{ plugin.error ? '加载失败' : conflicts.has(plugin.id) ? '套件冲突' : plugin.enabled ? '已启用' : '已停用' }}</span>
           <button type="button" class="plugin-tool-count" :aria-expanded="expanded.has(plugin.id)" :aria-controls="`plugin-detail-${plugin.id}`" :title="`查看 ${plugin.tools.length} 个工具与插件详情`" @click="toggleExpanded(plugin.id)">{{ plugin.tools.length }}<span> 个工具</span></button>
           <input v-if="!batchMode" type="checkbox" class="surface-toggle plugin-enable" role="switch" :checked="plugin.enabled" :aria-checked="plugin.enabled" :aria-label="`${plugin.enabled ? '停用' : '启用'} ${plugin.name}`" :disabled="busy || (!!plugin.error && !plugin.enabled)" :title="plugin.error && !plugin.enabled ? '修复入口后可启用' : undefined" @change="emit('toggle', plugin.id, ($event.target as HTMLInputElement).checked)" />
-          <v-menu v-if="!batchMode" location="bottom end">
-            <template #activator="{ props: menuProps }"><button v-bind="menuProps" type="button" class="library-icon-button plugin-actions" :aria-label="`${plugin.name}的更多操作`" title="更多操作" :disabled="busy"><AppIcon icon="ellipsis" /></button></template>
-            <div class="library-action-menu" role="menu">
-              <button type="button" role="menuitem" :disabled="!plugin.hasReadme || busy" @click="emit('docs', plugin)"><AppIcon icon="book" />查看说明</button>
-              <button type="button" role="menuitem" :disabled="busy" @click="emit('export', plugin.id)"><AppIcon icon="file-export" />导出插件</button>
-              <button type="button" role="menuitem" :disabled="busy" @click="copy(plugin.path)"><AppIcon icon="copy" />复制路径</button>
-              <button type="button" role="menuitem" class="danger" :disabled="protectedPlugin(plugin) || busy" @click="emit('remove', plugin)"><AppIcon icon="trash" />{{ protectedPlugin(plugin) ? '随附不可卸载' : plugin.kind === 'linked' ? '取消外链' : '卸载' }}</button>
-            </div>
-          </v-menu>
+          <ActionMenu v-if="!batchMode" class="library-icon-button plugin-actions" :label="`${plugin.name}的更多操作`" :context-key="pluginMenuContext(plugin)" :disabled="busy" :items="pluginMenuItems(plugin)" @select="pluginMenuAction(plugin.id,$event)" />
           <button type="button" class="library-icon-button plugin-disclosure" :aria-expanded="expanded.has(plugin.id)" :aria-controls="`plugin-detail-${plugin.id}`" :aria-label="`${expanded.has(plugin.id) ? '收起' : '展开'} ${plugin.name}详情`" @click="toggleExpanded(plugin.id)"><AppIcon icon="chevron-down" /></button>
         </div>
         <DisclosureTransition>
@@ -58,6 +50,7 @@ import { computed, ref, watch } from 'vue'
 import type { PluginRecord } from '@shared/plugins'
 import { filterPluginLibrary, pluginLibrarySource, pluginLibraryStatus, type PluginLibraryStatus, type PluginLibrarySource } from '@shared/plugin-library'
 import DisclosureTransition from '@/components/motion/DisclosureTransition'
+import ActionMenu, { type ActionMenuItem } from '../ActionMenu.vue'
 const props = defineProps<{ records:PluginRecord[]; busy:boolean; loading:boolean; error:string; batchMode:boolean; selected:Set<string>; conflicts:Set<string> }>()
 const emit = defineEmits<{ batch:[enabled:boolean]; select:[id:string]; toggle:[id:string,enabled:boolean]; docs:[plugin:PluginRecord]; export:[id:string]; remove:[plugin:PluginRecord]; create:[]; retry:[]; visible:[ids:string[]]; notify:[text:string,color?:string] }>()
 const query = ref(''), status = ref<PluginLibraryStatus>('all'), source = ref<PluginLibrarySource>('all'), expanded = ref(new Set<string>())
@@ -73,6 +66,21 @@ watch(() => props.records, records => { const alive = new Set(records.map(plugin
 function count(id:PluginLibraryStatus) { return id === 'all' ? props.records.length : props.records.filter(plugin => pluginLibraryStatus(plugin,props.conflicts) === id).length }
 function toggleExpanded(id:string) { const next=new Set(expanded.value); if(next.has(id))next.delete(id);else next.add(id);expanded.value=next }
 function reset() { query.value='';status.value='all';source.value='all' }
+function pluginMenuContext(plugin:PluginRecord) { return JSON.stringify([plugin.id,plugin.path,plugin.version,plugin.name,plugin.kind,plugin.hasReadme,protectedPlugin(plugin)]) }
+function pluginMenuItems(plugin:PluginRecord):ActionMenuItem[] { return [
+  {id:'docs',label:'查看说明',icon:'book',disabled:!plugin.hasReadme},
+  {id:'export',label:'导出插件',icon:'file-export'},
+  {id:'path',label:'复制路径',icon:'copy'},
+  {id:'remove',label:protectedPlugin(plugin)?'随附不可卸载':plugin.kind==='linked'?'取消外链':'卸载',icon:'trash',danger:true,disabled:protectedPlugin(plugin)},
+] }
+function pluginMenuAction(id:string,action:string) {
+  const plugin=props.records.find(record=>record.id===id)
+  if(!plugin||props.busy||props.batchMode)return
+  if(action==='docs'&&plugin.hasReadme)emit('docs',plugin)
+  else if(action==='export')emit('export',plugin.id)
+  else if(action==='path')void copy(plugin.path)
+  else if(action==='remove'&&!protectedPlugin(plugin))emit('remove',plugin)
+}
 async function copy(value:string) { try { await navigator.clipboard.writeText(value);emit('notify','已复制路径','success') } catch { emit('notify','复制失败','error') } }
 </script>
 

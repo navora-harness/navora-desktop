@@ -24,7 +24,7 @@ import type {
 } from '../shared/types'
 import type { AppConfig, AppConfigPatch } from '../shared/config'
 import type {SettingsCommit} from '../shared/settings-commit'
-import type {BrowserSessionUpdate,BrowserSessionManageAction,BrowserSessionManageResult} from '../shared/types'
+import type {BrowserSessionCreateOptions,BrowserSessionManageOptions,BrowserSessionUpdate,BrowserSessionManageAction,BrowserSessionManageResult} from '../shared/types'
 import type { SkillDetail, SkillImportPreview, SkillRecord, SkillWriteInput } from '../shared/skills'
 import { parseBridgeFrame } from '../shared/bridge-frame'
 import { getStoredToken } from './remote-token'
@@ -243,13 +243,15 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
     ws.onEvent(event, (payload) => cb(payload as T))
 
   return {
-    nativeUi:{
-      capabilities:async()=>({menus:false,panels:false,pageInfo:false,distributionVersion:'remote'}),popupMenu:async()=>({supported:false}),closeMenu:async()=>{},showPanel:async input=>({supported:false,id:input.id,session:''}),updatePanel:async()=>false,hidePanel:async()=>{},destroyPanel:async()=>{},showPageInfo:async()=>false,onPanelEvent:()=>()=>{},
+    questionnaires:{
+      list:chatId=>invoke('navora:questionnaires.list',chatId),get:id=>invoke('navora:questionnaires.get',id),
+      saveDraft:(id,input)=>invoke('navora:questionnaires.saveDraft',id,input),submit:(id,input)=>invoke('navora:questionnaires.submit',id,input),
+      attach:(id,questionId,files)=>invoke('navora:questionnaires.attach',id,questionId,files),openAttachment:(id,attachmentId)=>invoke('navora:questionnaires.openAttachment',id,attachmentId),
+      revise:id=>invoke('navora:questionnaires.revise',id),listTemplates:()=>invoke('navora:questionnaires.listTemplates'),saveTemplate:(id,title)=>invoke('navora:questionnaires.saveTemplate',id,title),deleteTemplate:id=>invoke('navora:questionnaires.deleteTemplate',id),useTemplate:(id,chatId)=>invoke('navora:questionnaires.useTemplate',id,chatId),
+      cancel:(id,reason)=>invoke('navora:questionnaires.cancel',id,reason),onChanged:callback=>{const cleanup=on('navora:questionnaires.changed',callback);return()=>{cleanup()}},
     },
-    literature: {
-      search: async () => { throw new Error('文献检索目前需要桌面端') },
-      cancel: async () => {},
-      onEvent: () => () => {},
+    nativeUi:{
+      capabilities:async()=>({menus:false,panels:false,pageInfo:false,distributionVersion:'remote'}),popupMenu:async()=>({supported:false}),updateMenu:async()=>false,closeMenu:async()=>{},showPanel:async input=>({supported:false,id:input.id,session:''}),updatePanel:async()=>false,commandPanel:async(_id,_session,command)=>command.type==='bounds'?null:false,patchPanel:async()=>false,hidePanel:async()=>{},destroyPanel:async()=>{},showPageInfo:async()=>false,onMenuOpened:()=>()=>{},onMenuControl:()=>()=>{},onPanelEvent:()=>()=>{},
     },
     fileTabs:new Proxy({onChanged:()=>()=>{},onTransfer:()=>()=>{}} as Partial<FileWindowsApi>,{get:(target,key)=>key in target?Reflect.get(target,key):async()=>{throw Error('文件独立窗口需要桌面端')}}) as FileWindowsApi,
     creators: {
@@ -266,6 +268,7 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
     } satisfies import('../shared/creators').CreatorApi,
     pathForFile: () => '',
     app: {
+      startup: { active: false, shown: async () => {}, ready: async () => true, complete: async () => {} },
       platform: 'web',
       nativeTitleBar: false,
       openSettings: async () => ({ok:false,error:'请使用当前页面的设置入口。'}),
@@ -276,11 +279,20 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
       onOpenSettings: () => () => {},
       info: () => invoke<AppInfo>('navora:app.info'),
       openExternal: (url: string) => invoke<{ ok: boolean }>('navora:app.openExternal', url),
-      quit: () => invoke<{ ok: boolean }>('navora:app.quit'),
+      openLink: async () => ({ok:false,error:'local_only'}),
+      onLinkError: () => () => {},
+      quitState: async () => {throw Error('local_only')},
+      quit: async () => ({ok:false,reason:'local_only'}),
+      onQuitRequested: () => () => {},
       minimize: async () => ({ ok: false as const }),
       toggleMaximize: async () => ({ ok: false as const, maximized: false }),
       close: async () => ({ ok: false as const }),
       isMaximized: async () => ({ maximized: false }),
+      toggleFullscreen: async()=>({ok:false,fullscreen:false}),
+      isFullscreen: async()=>({fullscreen:false}),
+      onFullscreen: ()=>()=>{},
+      windowMaterial: async () => ({ role: 'main' as const, requested: false, supported: false as const, supportReason: 'platform' as const, mode: 'solid' as const, reason: 'platform' as const, revision: 0, theme: 'mist', dark: false }),
+      onWindowMaterial: () => () => {},
       onMaximized: () => () => {},
     },
     models: {
@@ -350,7 +362,7 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
       run: (chatId: string, payload: ComposerSubmitInput) =>
         invoke<ChatSession | null>('navora:agent.run', chatId, payload),
       retry: (chatId: string) => invoke<ChatSession | null>('navora:agent.retry', chatId),
-      stop: (chatId: string) => invoke<{ ok: boolean }>('navora:agent.stop', chatId),
+      stop: (chatId: string,expectedRunId?:string) => expectedRunId===undefined?invoke<{ ok: boolean;error?:string }>('navora:agent.stop',chatId):invoke<{ ok: boolean;error?:string }>('navora:agent.stop',chatId,expectedRunId),
       isRunning: (chatId: string) => invoke<boolean>('navora:agent.isRunning', chatId),
       onEvent: (cb: (ev: AgentEvent) => void) => on<AgentEvent>('navora:agent.event', cb),
       onAsk: (cb: (req: AgentAskRequest) => void) => on<AgentAskRequest>('navora:agent.ask', cb),
@@ -382,13 +394,13 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
       treeAll: () => invoke<BrowserTreeSession[]>('navora:browser.treeAll'),
       tree: (chatId: string) => invoke<BrowserTreeSession[]>('navora:browser.tree', chatId),
       windowCounts: () => invoke<Record<string, number>>('navora:browser.windowCounts'),
-      createSession: (chatId: string, opts?: { persist?: boolean }) =>
+      createSession: (chatId: string, opts?: BrowserSessionCreateOptions) =>
         invoke<BrowserTreeSession>('navora:browser.session.create', chatId, opts),
       closeSession: (sessionId: string) =>
         invoke<boolean>('navora:browser.session.close', sessionId),
       updateSession:(sessionId:string,patch:BrowserSessionUpdate)=>invoke<BrowserTreeSession>('navora:browser.session.update',sessionId,patch),
-      manageSession:(sessionId:string,action:BrowserSessionManageAction)=>invoke<BrowserSessionManageResult>('navora:browser.session.manage',sessionId,action),
-      createWindow: (sessionId: string, opts?: { url?: string; show?: boolean }) =>
+      manageSession:(sessionId:string,action:BrowserSessionManageAction,options?:BrowserSessionManageOptions)=>invoke<BrowserSessionManageResult>('navora:browser.session.manage',sessionId,action,options),
+      createWindow: (sessionId: string, opts?: { url?: string; show?: boolean;chatId?:string }) =>
         invoke<BrowserTreeWindow>('navora:browser.window.create', sessionId, opts),
       setVisible: (windowId: string, visible: boolean) =>
         invoke<boolean>('navora:browser.window.setVisible', windowId, visible),
@@ -431,6 +443,7 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
       },
     },
     workspace: {
+      fileAction:async()=>({ok:false,error:'local_file_ui_only'}),
       saveAs:async()=>({ok:false,error:'local_only'}),
       resources:(chatId:string,refresh=false)=>invoke<import('../shared/workspace-resources').WorkspaceResourceSnapshot>('navora:workspace.resources',chatId,refresh),
       hasFiles:(chatId:string)=>invoke<boolean>('navora:workspace.hasFiles',chatId),
@@ -505,6 +518,8 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
         invoke<BrowserDownloadEntry[]>('navora:downloads.list', ...downloadScopeArgs(chatId)),
       clear: (chatId?: string) =>
         invoke<{ ok: true; removed: number }>('navora:downloads.clear', ...downloadScopeArgs(chatId)),
+      icon: (id: string, chatId?: string) =>
+        invoke<string | undefined>('navora:downloads.icon', id, ...downloadScopeArgs(chatId)),
       remove: (id: string, chatId?: string) => invoke<{ ok: boolean; error?: string }>('navora:downloads.remove', id, ...downloadScopeArgs(chatId)),
       pause: (id: string, chatId?: string) =>
         invoke<{ ok: boolean; error?: string }>('navora:downloads.pause', id, ...downloadScopeArgs(chatId)),
@@ -520,6 +535,8 @@ function createRemoteNavoraApi(ws: RemoteWsSession): NavoraApi {
         on<BrowserDownloadsChanged>('navora:downloads.changed', cb),
     } satisfies BrowserDownloadsApi,
     plugins: {
+      recoveryStatus: () => invoke<import('../shared/plugins').PluginRecoveryStatus>('navora:plugins.recoveryStatus'),
+      retryRecovery: () => invoke<{ ok: boolean; status: import('../shared/plugins').PluginRecoveryStatus; error?: string }>('navora:plugins.retryRecovery'),
       list: () => invoke<import('../shared/plugins').PluginRecord[]>('navora:plugins.list'),
       get: (id: string) =>
         invoke<import('../shared/plugins').PluginRecord | null>('navora:plugins.get', id),

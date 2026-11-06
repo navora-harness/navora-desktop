@@ -6,6 +6,7 @@ import { createDefaultBrowserAutomation } from '../../shared/browser-automation'
 import { getBrowserAutomationController } from './browser-automation-controller'
 import { withBrowserInputOperation } from './browser-input-context'
 import { startOwnedHistoryNavigation, startOwnedNavigation } from './browser-navigation-control'
+import { automationTestApi } from './browser-automation-test-api'
 
 let nextId = 70000
 const tick = () => new Promise<void>(resolve => setImmediate(resolve))
@@ -21,16 +22,19 @@ function fixture(t: { after(fn: () => void): void }, onStop?: () => void) {
   const protection: boolean[] = []
   let stops = 0
   let loading = false
+  const automation = automationTestApi()
   const wc = Object.assign(events, {
     id: nextId++,
     isDestroyed: () => false,
     isLoadingMainFrame: () => loading,
     stop: () => { stops++; onStop?.() },
-    setVirtualCursorEnabled: async (_enabled: boolean, options: { blockRealPointer: boolean; blockRealKeyboard: boolean }) => {
+    ...automation,
+    setAutomationOptions: async (options: Electron.AutomationOptions) => {
       assert.equal(options.blockRealPointer, options.blockRealKeyboard)
-      protection.push(options.blockRealPointer)
+      await automation.setAutomationOptions(options)
+      protection.push(automation.getAutomationState().blockRealPointer)
     },
-    setVirtualCursorFrameRate: () => {},
+    resetAutomationOptions: async () => { await automation.resetAutomationOptions(); protection.push(false) },
   }) as unknown as WebContents
   const controller = getBrowserAutomationController(wc, { getSettings: createDefaultBrowserAutomation })
   t.after(() => controller.dispose())

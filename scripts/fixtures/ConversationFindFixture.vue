@@ -14,7 +14,7 @@ async function locate(id:string){const owner=chatId.value;locates.push(id);await
 ;(window as any).findFixture={
   open(){find.value?.open()},close(){find.value?.close()},get opened(){return lastOpen.value},get navigations(){return navigations.value},get locates(){return [...locates]},get scroll(){return root.value?.scrollTop},set scroll(value:number){if(root.value)root.value.scrollTop=value},
   stream(text:string){liveText.value=text},persist(){messages.value.push({id:'persisted',role:'assistant',content:liveText.value,createdAt:10})},switchChat(){chatId.value='chat-b';messages.value=[{id:'new',role:'user',content:'新的 keyword',createdAt:11}];liveText.value=''},delayLocate(value:number){delay.value=value},
-  get highlights(){const registry=(CSS as any).highlights;return {all:[...(registry?.get('navora-chat-find')||[])].map((range:Range)=>range.toString()),active:[...(registry?.get('navora-chat-find-active')||[])].map((range:Range)=>({text:range.toString(),message:range.startContainer.parentElement?.closest('[data-msg-id]')?.getAttribute('data-msg-id')||'__live__'}))}},
+  get highlights(){const registry=(CSS as any).highlights,names=find.value?.highlightNames||[];return {all:[...(registry?.get(names[0])||[])].map((range:Range)=>range.toString()),active:[...(registry?.get(names[1])||[])].map((range:Range)=>({text:range.toString(),message:range.startContainer.parentElement?.closest('[data-msg-id]')?.getAttribute('data-msg-id')||'__live__'}))}},
 }
 </script>
 <style>

@@ -1,5 +1,5 @@
 <template>
-  <section class="file-manager" aria-label="文件管理" :aria-busy="loading" @keydown.esc.stop>
+  <section ref="managerRoot" class="file-manager" aria-label="文件管理" :aria-busy="loading" @keydown="onManagerKey">
     <header class="main-top file-manager-head">
       <div class="file-manager-title"><AppIcon icon="folder-open" /><div><h1>文件</h1><p>{{ title || '选择左侧的对话文件夹' }}</p></div></div>
       <button type="button" class="file-manager-back" aria-label="返回对话" title="返回对话" @click="emit('back')"><AppIcon icon="comments" /><span>返回对话</span></button>
@@ -8,8 +8,8 @@
       <div class="file-manager-body">
       <div class="file-manager-controls">
       <div class="file-manager-toolbar">
-        <button type="button" class="file-manager-icon file-manager-up" aria-label="返回上一级目录" title="返回上一级目录" :disabled="directory==='.'" @click="emit('browse',parentDirectory)"><AppIcon icon="chevron-left" /></button>
-        <nav class="file-manager-breadcrumbs" aria-label="文件目录"><button type="button" :aria-current="directory==='.'?'page':undefined" @click="emit('browse','.')"><AppIcon icon="folder" /><span>对话文件夹</span></button><template v-for="part in breadcrumbs" :key="part.path"><AppIcon icon="chevron-right" class="breadcrumb-divider" /><button type="button" :aria-current="part.path===directory?'page':undefined" :title="part.path" @click="emit('browse',part.path)"><span>{{ part.name }}</span></button></template></nav>
+        <button type="button" class="file-manager-icon file-manager-up" aria-label="返回上一级目录" title="返回上一级目录（Alt+↑）" :disabled="directory==='.'" @click="browse(parentDirectory)"><AppIcon icon="chevron-left" /></button>
+        <nav class="file-manager-breadcrumbs" aria-label="文件目录"><button type="button" :aria-current="directory==='.'?'page':undefined" @click="browse('.')"><AppIcon icon="folder" /><span>对话文件夹</span></button><template v-for="part in breadcrumbs" :key="part.path"><AppIcon icon="chevron-right" class="breadcrumb-divider" /><button type="button" :aria-current="part.path===directory?'page':undefined" :title="part.path" @click="browse(part.path)"><span>{{ part.name }}</span></button></template></nav>
         <button type="button" class="file-manager-icon" aria-label="在系统中打开文件夹" title="在系统中打开文件夹" @click="reveal(directory)"><AppIcon icon="arrow-up-right-from-square" /></button>
         <button type="button" class="file-manager-icon" aria-label="刷新文件管理视图" title="刷新" :disabled="loading" @click="refreshAll"><AppIcon icon="arrow-rotate-right" /></button>
       </div>
@@ -19,26 +19,26 @@
         <div class="file-manager-views" role="group" aria-label="文件显示方式"><button type="button" :aria-pressed="view==='list'" aria-label="列表视图" @click="view='list'"><AppIcon icon="list-ul" /></button><button type="button" :aria-pressed="view==='grid'" aria-label="网格视图" @click="view='grid'"><AppIcon icon="grid" /></button></div>
       </div>
       </div>
-      <div class="file-manager-collection" :class="{'grid-collection':view==='grid','has-search':!!query.trim()}">
+      <div ref="collection" class="file-manager-collection" :class="{'grid-collection':view==='grid','has-search':!!query.trim()}" tabindex="0" aria-label="当前文件夹内容" :aria-describedby="helpId" @click="collectionClick" @contextmenu="directoryMenu" @keydown="onCollectionKey">
       <div v-if="error || (query && indexError)" class="file-manager-empty" role="alert"><span class="file-manager-empty-icon"><AppIcon icon="circle-exclamation" /></span><strong>无法读取文件夹</strong><p>请检查文件夹是否可用，然后重试。</p><button type="button" @click="refreshAll">重新加载</button></div>
       <div v-else-if="!rows.length" class="file-manager-empty"><span class="file-manager-empty-icon"><AppIcon :icon="query?'magnifying-glass':'folder-open'" /></span><strong>{{ loading || (query && indexLoading) ? '正在读取…' : query ? '没有匹配的文件' : '此文件夹为空' }}</strong><p v-if="!loading && !(query && indexLoading)">{{ query ? '试试其他文件名，或清空搜索。' : '保存在这里的文件和下载会显示在此处。' }}</p><button v-if="query && !indexLoading" type="button" @click="clearSearch">清空搜索</button></div>
-      <div v-else class="file-manager-scroll" :class="{'is-grid':view==='grid'}" @keydown="onListKey">
+      <div v-else ref="list" class="file-manager-scroll" :class="{'is-grid':view==='grid'}" role="grid" aria-label="文件列表" aria-multiselectable="true">
         <div v-if="view==='list'" class="file-manager-columns" aria-hidden="true"><span>名称</span><span>类型</span><span>大小</span><span>修改时间</span><span /></div>
-        <div v-for="(entry,index) in rows" :key="entry.path" class="file-manager-row" :data-file-path="entry.path" :data-download-state="entry.download?.state" :class="{selected:selected===entry.path}" @contextmenu="downloadMenu($event,entry)">
-          <button type="button" class="file-manager-entry" :tabindex="selected===entry.path || (!visibleSelection && index===0) ? 0 : -1" :aria-label="`${entry.type==='dir'?'打开文件夹':'预览文件'} ${entry.path}`" :aria-disabled="entry.type==='file' && (entry.virtual || (entry.download && entry.download.state!=='completed')) || undefined" :title="entry.download ? `${entry.name}\n${downloadDetail(entry.download)}${entry.virtual ? '' : `\n${entry.path}`}` : entry.path" @focus="selected=entry.path" @click="open(entry)">
+        <div v-for="(entry,index) in rows" :key="entry.path" class="file-manager-row" role="row" :aria-selected="selectedPaths.has(entry.path)" :data-file-path="entry.path" :data-download-state="entry.download?.state" :class="{selected:selectedPaths.has(entry.path),'is-current':selection.current===entry.path}" @click="selectRow($event,entry)" @dblclick="activateRow($event,entry)" @contextmenu.stop="entryMenu($event,entry)">
+          <button type="button" role="gridcell" class="file-manager-entry" :tabindex="selection.current===entry.path || (!selection.current && index===0) ? 0 : -1" :aria-label="`${entry.type==='dir'?'文件夹':'文件'} ${entry.path}，单击选择，双击打开`" :aria-disabled="!canActivate(entry) || undefined" :title="entry.download ? `${entry.name}\n${downloadDetail(entry.download)}${entry.virtual ? '' : `\n${entry.path}`}` : entry.path" @focus="focusRow(entry.path)">
             <span class="file-manager-entry-icon" :data-kind="entry.type==='dir'?'folder':resourceKind(entry.path)"><AppIcon :icon="fileIcon(entry)" /></span>
             <span>
               <span class="file-manager-name-line"><strong>{{ entry.name }}</strong><FileDownloadIndicator v-if="entry.download" :download="entry.download" /><span v-else-if="entry.activeDownloads" class="manager-active-downloads" :title="`${entry.activeDownloads} 个文件正在下载`"><AppIcon icon="download" />{{ entry.activeDownloads }}</span></span>
               <small v-if="query">{{ entry.path }}</small>
             </span>
           </button>
-          <span class="file-manager-type">{{ entry.type==='dir'?'文件夹':entry.name.split('.').length>1?entry.name.split('.').at(-1)?.toUpperCase():'文件' }}</span>
-          <span class="file-manager-size">{{ entry.type==='dir'?'—':fileSize(entry.download && activeDownload(entry.download) ? entry.download.receivedBytes : entry.size) }}</span>
-          <time :datetime="entry.mtimeMs ? new Date(entry.mtimeMs).toISOString() : undefined">{{ entry.mtimeMs ? new Date(entry.mtimeMs).toLocaleDateString() : '—' }}</time>
-          <button v-if="!entry.virtual" type="button" class="file-manager-icon file-manager-reveal" :tabindex="selected===entry.path?0:-1" :aria-label="`在系统中显示 ${entry.name}`" title="在系统中显示" @click="reveal(entry.path)"><AppIcon icon="arrow-up-right-from-square" /></button>
+          <span role="gridcell" class="file-manager-type">{{ entry.type==='dir'?'文件夹':entry.name.split('.').length>1?entry.name.split('.').at(-1)?.toUpperCase():'文件' }}</span>
+          <span role="gridcell" class="file-manager-size">{{ entry.type==='dir'?'—':fileSize(entry.download && activeDownload(entry.download) ? entry.download.receivedBytes : entry.size) }}</span>
+          <time role="gridcell" :datetime="entry.mtimeMs ? new Date(entry.mtimeMs).toISOString() : undefined">{{ entry.mtimeMs ? new Date(entry.mtimeMs).toLocaleDateString() : '—' }}</time>
+          <button v-if="!entry.virtual" type="button" class="file-manager-icon file-manager-reveal" :tabindex="selection.current===entry.path?0:-1" :aria-label="`在系统中显示 ${entry.name}`" title="在系统中显示" @click.stop="reveal(entry.path)" @dblclick.stop><AppIcon icon="arrow-up-right-from-square" /></button>
         </div>
       </div>
-      <footer class="file-manager-status" role="status"><span>{{ rows.length }} 项{{ query?'匹配结果':'' }}</span><span v-if="truncated || (query && snapshot?.truncated)">仅显示已索引项目</span><span v-if="query && snapshot?.unavailable">部分目录无法读取</span></footer>
+      <footer class="file-manager-status" role="status"><span>{{ rowOrder.length }} 项{{ query?'匹配结果':'' }}<template v-if="selection.paths.length"> · 已选 {{ selection.paths.length }} 项</template></span><span :id="helpId" class="file-manager-help" title="文件列表内：Enter 打开当前选中项；Ctrl/⌘ 单击多选，Shift 连选；方向键、Home、End 移动，Ctrl/⌘ A 全选，Escape 取消选择；Alt+↑ 或 Backspace 返回上级，F5 刷新；菜单键或 Shift+F10 打开当前对象菜单。">单击选择 · 双击打开</span><span v-if="truncated || (query && snapshot?.truncated)">仅显示已索引项目</span><span v-if="query && snapshot?.unavailable">部分目录无法读取</span></footer>
       </div>
       </div>
     </template>
@@ -55,7 +55,7 @@
   </section>
 </template>
 <script setup lang="ts">
-import {computed,onBeforeUnmount,onMounted,ref,toRef,watch} from 'vue'
+import {computed,nextTick,onBeforeUnmount,onMounted,ref,toRef,watch} from 'vue'
 import {useWorkspaceResources} from '@/composables/useWorkspaceResources'
 import {resourceKind,searchWorkspaceResources} from '@shared/workspace-resources'
 import type {WsEntry} from './sidebar/WorkspaceTreeNode.vue'
@@ -63,24 +63,30 @@ import type {BrowserDownloadEntry} from '@shared/types'
 import {activeDownload,downloadDetail,mergeWorkspaceDownloads} from '@shared/workspace-downloads'
 import FileDownloadIndicator from './FileDownloadIndicator.vue'
 import SidebarContextMenu from './sidebar/SidebarContextMenu.vue'
+import {useWorkspaceFileActions} from '@/composables/useWorkspaceFileActions'
+import {emptyFileManagerSelection,moveFileManagerSelection,reconcileFileManagerSelection,selectFileManagerItem} from '@shared/file-manager-selection'
 const props=defineProps<{active:boolean;chatId:string;title:string;directory:string}>()
 const emit=defineEmits<{browse:[path:string];preview:[path:string,chatId:string];back:[];notify:[text:string]}>()
-const query=ref(''),sort=ref('name'),view=ref('list'),selected=ref(''),folderEntries=ref<WsEntry[]>([]),loading=ref(false),error=ref(false),truncated=ref(false)
+const query=ref(''),sort=ref('name'),view=ref('list'),selection=ref(emptyFileManagerSelection()),folderEntries=ref<WsEntry[]>([]),loading=ref(false),error=ref(false),truncated=ref(false)
+const managerRoot=ref<HTMLElement>(),collection=ref<HTMLElement>(),list=ref<HTMLElement>(),helpId=`file-manager-help-${crypto.randomUUID()}`
+const selectedPaths=computed(()=>new Set(selection.value.paths)),menuContext=computed(()=>JSON.stringify([props.chatId,props.directory,query.value]))
 const {entries,snapshot,loading:indexLoading,error:indexError,refresh:refreshIndex}=useWorkspaceResources(toRef(props,'chatId'))
 const downloads=ref<BrowserDownloadEntry[]>([]),awaitingDisk=ref(new Set<string>())
 const downloadContextMenu=ref<InstanceType<typeof SidebarContextMenu>|null>(null),menuDownloadId=ref('')
-const menuDownload=computed(()=>downloads.value.find(item=>item.id===menuDownloadId.value))
+let menuDownloadOwner='',menuDownloadContext='',browseFocus:{chatId:string;directory:string}|undefined
+const menuDownload=computed(()=>downloads.value.find(item=>item.id===menuDownloadId.value&&item.chatId===menuDownloadOwner))
+const fileActions=useWorkspaceFileActions({open:(path,chatId)=>emit('preview',path,chatId),notify:text=>emit('notify',text),isCurrent:target=>props.active&&target.chatId===props.chatId&&target.contextKey===menuContext.value&&(target.path===props.directory||rowOrder.value.includes(target.path)&&rows.value.some(entry=>entry.path===target.path&&!entry.virtual))})
 const breadcrumbs=computed(()=>props.directory==='.'?[]:props.directory.split('/').filter(Boolean).map((name,index,parts)=>({name,path:parts.slice(0,index+1).join('/')})))
 const parentDirectory=computed(()=>props.directory.split('/').filter(Boolean).slice(0,-1).join('/')||'.')
 function fileIcon(entry:WsEntry){return entry.type==='dir'?'folder':resourceKind(entry.path)==='image'?'image':resourceKind(entry.path)==='code'?'code':'file-lines'}
-function clearSearch(){query.value='';selected.value=''}
+function clearSearch(){query.value='';clearSelection()}
 const rows=computed(()=>{
   const candidates:WsEntry[]=query.value.trim()?searchWorkspaceResources(entries.value.filter(entry=>props.directory==='.'||entry.path.startsWith(props.directory+'/')),query.value).map(entry=>({...entry,type:'file' as const})):folderEntries.value
   const merged=mergeWorkspaceDownloads(candidates,props.directory==='.'?'':props.directory,props.chatId,downloads.value,awaitingDisk.value,!!query.value.trim())
   const tokens=query.value.trim().normalize('NFKC').toLowerCase().split(/\s+/).filter(Boolean)
   return merged.filter(entry=>!tokens.length||tokens.every(token=>entry.path.normalize('NFKC').toLowerCase().includes(token))).sort((a,b)=>a.type!==b.type?(a.type==='dir'?-1:1):(sort.value==='recent'?(b.mtimeMs||0)-(a.mtimeMs||0):sort.value==='size'?(b.size||0)-(a.size||0):0)||a.name.localeCompare(b.name,'zh'))
 })
-const visibleSelection=computed(()=>rows.value.some(entry=>entry.path===selected.value))
+const rowOrder=computed(()=>error.value||!!query.value.trim()&&indexError.value?[]:rows.value.map(entry=>entry.path))
 let generation=0,disposed=false,timer:ReturnType<typeof setTimeout>|undefined,unsubscribe:(()=>void)|undefined,offDownloads:(()=>void)|undefined,downloadRevision=0
 async function load(){
   if(!props.active)return
@@ -91,7 +97,27 @@ async function load(){
   catch{if(!disposed&&seq===generation)error.value=true}
   finally{if(!disposed&&seq===generation)loading.value=false}
 }
-function open(entry:WsEntry){selected.value=entry.path;if(entry.type==='dir')emit('browse',entry.path);else if(!entry.virtual&&(!entry.download||entry.download.state==='completed'))emit('preview',entry.path,props.chatId)}
+function canActivate(entry:WsEntry){return entry.type==='dir'||!entry.virtual&&(!entry.download||entry.download.state==='completed')}
+function focusRow(path:string){if(rows.value.some(entry=>entry.path===path))selection.value={...selection.value,current:path}}
+function focusCurrent(){
+  const path=selection.value.current
+  const button=path?[...list.value?.querySelectorAll<HTMLElement>('.file-manager-row')||[]].find(row=>row.dataset.filePath===path)?.querySelector<HTMLButtonElement>('.file-manager-entry'):undefined
+  button?.focus({preventScroll:true});button?.scrollIntoView({block:'nearest',inline:'nearest'})
+}
+function clearSelection(){selection.value=emptyFileManagerSelection();downloadContextMenu.value?.hide();menuDownloadId.value=''}
+function collectionClick(event:MouseEvent){if(event.target instanceof Element&&!event.target.closest('.file-manager-row,button,input,select,textarea')){clearSelection();collection.value?.focus({preventScroll:true})}}
+function selectRow(event:MouseEvent,entry:WsEntry){
+  if(!props.active||loading.value||!rowOrder.value.includes(entry.path)||!(event.target instanceof Element)||event.target.closest('.file-manager-reveal'))return
+  selection.value=selectFileManagerItem(rowOrder.value,selection.value,entry.path,{toggle:event.ctrlKey||event.metaKey,range:event.shiftKey})
+  focusCurrent()
+}
+function browse(path:string){if(!props.active||!props.chatId||path===props.directory)return;browseFocus={chatId:props.chatId,directory:path};emit('browse',path)}
+function activate(entry:WsEntry){
+  const current=rows.value.find(item=>item.path===entry.path)
+  if(!props.active||loading.value||!props.chatId||!current||!rowOrder.value.includes(current.path)||!canActivate(current))return
+  if(current.type==='dir')browse(current.path);else emit('preview',current.path,props.chatId)
+}
+function activateRow(event:MouseEvent,entry:WsEntry){if(event.ctrlKey||event.metaKey||event.shiftKey)return;event.preventDefault();event.stopPropagation();activate(entry)}
 function updateDownloads(items:BrowserDownloadEntry[]){
   const next=items.filter(item=>item.chatId===props.chatId),previous=downloads.value
   awaitingDisk.value=new Set([...awaitingDisk.value].filter(id=>next.some(item=>item.id===id)).concat(next.filter(item=>item.state==='completed'&&!previous.some(old=>old.id===item.id&&old.state==='completed'&&old.relPath===item.relPath)).map(item=>item.id)))
@@ -99,23 +125,76 @@ function updateDownloads(items:BrowserDownloadEntry[]){
   if(next.map(item=>`${item.id}:${item.state}:${item.relPath}`).sort().join('|')!==previous.map(item=>`${item.id}:${item.state}:${item.relPath}`).sort().join('|')){clearTimeout(timer);timer=setTimeout(()=>void load(),150)}
 }
 async function fetchDownloads(){const revision=downloadRevision,id=props.chatId;if(!id){updateDownloads([]);return}try{const items=await window.navora?.downloads.list(id);if(items&&!disposed&&revision===downloadRevision&&id===props.chatId)updateDownloads(items)}catch{ /* Keep files available if download status cannot be read. */ }}
-function downloadMenu(event:MouseEvent,entry:WsEntry){if(!entry.download)return;event.preventDefault();menuDownloadId.value=entry.download.id;downloadContextMenu.value?.show(event)}
-async function downloadAction(action:'pause'|'resume'|'cancel'|'remove'){const item=menuDownload.value;if(!item||!window.navora)return;try{const result=await window.navora.downloads[action](item.id);if(result&&!result.ok)emit('notify',('error' in result&&String(result.error))||'下载操作失败');downloadRevision++;await fetchDownloads()}catch{emit('notify','下载操作失败')}}
-async function stopDownloadTask(){const item=menuDownload.value;if(item?.source!=='tool'||!activeDownload(item))return;try{await window.navora?.agent.stop(item.chatId)}catch{emit('notify','停止任务失败')}}
-function onListKey(event:KeyboardEvent){
-  if(!(event.target as Element).classList.contains('file-manager-entry')||!['ArrowDown','ArrowUp','ArrowLeft','ArrowRight','Home','End'].includes(event.key))return
+function entryMenu(event:MouseEvent|KeyboardEvent,entry:WsEntry){
   event.preventDefault();event.stopPropagation()
-  const box=event.currentTarget as HTMLElement,buttons=[...box.querySelectorAll<HTMLButtonElement>('.file-manager-entry')],index=buttons.indexOf(event.target as HTMLButtonElement)
-  const columns=view.value==='grid'?getComputedStyle(box).gridTemplateColumns.split(' ').length:1
-  const next=event.key==='Home'?0:event.key==='End'?buttons.length-1:index+(event.key==='ArrowDown'?columns:event.key==='ArrowUp'?-columns:event.key==='ArrowRight'?1:-1)
-  const target=buttons[Math.max(0,Math.min(buttons.length-1,next))];target?.focus({preventScroll:true});target?.scrollIntoView({block:'nearest'})
+  if(!props.active||loading.value||!rowOrder.value.includes(entry.path))return
+  selection.value=selectedPaths.value.has(entry.path)?{...selection.value,current:entry.path}:selectFileManagerItem(rowOrder.value,selection.value,entry.path)
+  const chatId=props.chatId,download=downloads.value.find(item=>item.id===entry.download?.id&&item.chatId===chatId)||entry.download
+  if(!entry.virtual&&(!download||!activeDownload(download))){
+    const id=download?.id
+    void fileActions.show({chatId,path:entry.path,contextKey:menuContext.value},event,'context',id?{items:[{id:'download-remove',label:'移除下载状态',icon:'xmark'}],run:async()=>{
+      const current=downloads.value.find(item=>item.id===id&&item.chatId===chatId)
+      if(!current||activeDownload(current))throw Error('下载状态已变化，请重新打开菜单。')
+      const result=await window.navora!.downloads.remove(id,chatId);if(!result.ok)throw Error(result.error||'无法移除下载状态');await fetchDownloads()
+    }}:undefined);return
+  }
+  if(download){menuDownloadOwner=chatId;menuDownloadContext=menuContext.value;menuDownloadId.value=download.id;downloadContextMenu.value?.show(event)}
+}
+function directoryMenu(event:MouseEvent|KeyboardEvent){
+  if(event instanceof MouseEvent&&(event.target as Element)?.closest('.file-manager-row,button,input,select,textarea'))return
+  if(!props.chatId||!props.active)return
+  const chatId=props.chatId,directory=props.directory
+  void fileActions.show({chatId,path:directory,contextKey:menuContext.value},event,'context',{items:[{id:'refresh-folder',label:'刷新',icon:'arrow-rotate-right'}],run:()=>{if(props.chatId!==chatId||props.directory!==directory)throw Error('当前文件夹已变化，请重新打开菜单。');refreshAll()}})
+}
+function currentMenuDownload(){const item=menuDownload.value;return item&&props.active&&item.chatId===props.chatId&&menuDownloadContext===menuContext.value&&rows.value.some(entry=>entry.download?.id===item.id&&rowOrder.value.includes(entry.path))?item:undefined}
+async function downloadAction(action:'pause'|'resume'|'cancel'|'remove'){const item=currentMenuDownload();if(!item||!window.navora)return;try{const result=await window.navora.downloads[action](item.id,item.chatId);if(result&&!result.ok)emit('notify',('error' in result&&String(result.error))||'下载操作失败');downloadRevision++;await fetchDownloads()}catch{emit('notify','下载操作失败')}}
+async function stopDownloadTask(){const item=currentMenuDownload();if(item?.source!=='tool'||!activeDownload(item))return;try{await window.navora?.agent.stop(item.chatId)}catch{emit('notify','停止任务失败')}}
+function editingTarget(target:EventTarget|null){return target instanceof Element&&!!target.closest('input,textarea,select,[contenteditable=true]')}
+function onManagerKey(event:KeyboardEvent){
+  if(!props.active||event.defaultPrevented||event.isComposing||event.keyCode===229||editingTarget(event.target))return
+  if(event.key==='F5'&&!event.ctrlKey&&!event.metaKey&&!event.altKey){event.preventDefault();event.stopPropagation();if(!event.repeat)refreshAll()}
+  else if(event.altKey&&!event.ctrlKey&&!event.metaKey&&event.key==='ArrowUp'||event.key==='Backspace'&&!event.ctrlKey&&!event.metaKey&&!event.altKey){event.preventDefault();event.stopPropagation();if(!event.repeat&&props.directory!=='.')browse(parentDirectory.value)}
+}
+function onCollectionKey(event:KeyboardEvent){
+  if(!props.active||event.defaultPrevented||event.isComposing||event.keyCode===229||editingTarget(event.target)||event.target instanceof Element&&event.target.closest('.file-manager-reveal'))return
+  const menu=event.key==='ContextMenu'||event.key==='F10'&&event.shiftKey
+  if(menu){
+    const path=event.target instanceof Element?event.target.closest<HTMLElement>('[data-file-path]')?.dataset.filePath:undefined
+    const entry=rows.value.find(item=>item.path===path||!path&&selectedPaths.value.has(item.path)&&item.path===selection.value.current)
+    if(entry)entryMenu(event,entry);else directoryMenu(event)
+    return
+  }
+  if(event.key==='Escape'){event.preventDefault();event.stopPropagation();clearSelection();collection.value?.focus({preventScroll:true});return}
+  if(loading.value||!rowOrder.value.length)return
+  const modified=event.ctrlKey||event.metaKey
+  if(modified&&!event.altKey&&event.key.toLowerCase()==='a'){
+    event.preventDefault();event.stopPropagation();selection.value={paths:[...rowOrder.value],current:selection.value.current||rowOrder.value[0]||null,anchor:selection.value.anchor||rowOrder.value[0]||null};focusCurrent();return
+  }
+  if(event.altKey)return
+  if(event.key==='Enter'){
+    event.preventDefault();event.stopPropagation();if(event.repeat)return
+    const entry=rows.value.find(item=>item.path===selection.value.current&&selectedPaths.value.has(item.path));if(entry)activate(entry)
+    return
+  }
+  if(event.key===' '){event.preventDefault();event.stopPropagation();if(selection.value.current&&!event.repeat)selection.value=selectFileManagerItem(rowOrder.value,selection.value,selection.value.current,{toggle:modified,range:event.shiftKey});return}
+  if(!['ArrowDown','ArrowUp','ArrowLeft','ArrowRight','Home','End'].includes(event.key))return
+  event.preventDefault();event.stopPropagation()
+  const columns=view.value==='grid'&&list.value?Math.max(1,getComputedStyle(list.value).gridTemplateColumns.split(/\s+/).filter(Boolean).length):1
+  const movement=event.key==='Home'?'first':event.key==='End'?'last':event.key==='ArrowDown'?columns:event.key==='ArrowUp'?-columns:event.key==='ArrowRight'?1:-1
+  selection.value=moveFileManagerSelection(rowOrder.value,selection.value,movement,{toggle:modified,range:event.shiftKey});focusCurrent()
 }
 async function reveal(path:string){try{const result=await window.navora!.workspace.reveal(props.chatId,path);if(!result.ok)throw Error('reveal_failed')}catch{emit('notify','无法打开文件所在位置')}}
 function refreshAll(){void load();void refreshIndex(true)}
 function fileSize(size?:number){return size==null?'—':size<1024?`${size} B`:size<1048576?`${(size/1024).toFixed(1)} KB`:`${(size/1048576).toFixed(1)} MB`}
-watch(()=>[props.chatId,props.directory],()=>{generation++;folderEntries.value=[];query.value='';selected.value='';void load()},{immediate:true})
+watch(()=>[props.chatId,props.directory],()=>{generation++;clearSelection();folderEntries.value=[];query.value='';const target=browseFocus;void load().then(async()=>{await nextTick();if(!disposed&&props.active&&target&&target===browseFocus&&target.chatId===props.chatId&&target.directory===props.directory){browseFocus=undefined;collection.value?.focus({preventScroll:true})}})},{immediate:true})
 watch(()=>props.chatId,()=>{downloadRevision++;downloads.value=[];awaitingDisk.value=new Set();menuDownloadId.value='';void fetchDownloads()},{immediate:true})
-watch(()=>props.active,active=>{if(active)void load()})
+watch(()=>props.active,active=>{if(active)void load();else{generation++;loading.value=false;browseFocus=undefined;downloadContextMenu.value?.hide()}})
+watch(query,()=>clearSelection())
+watch(()=>rowOrder.value.join('\0'),()=>{
+  const focused=document.activeElement instanceof HTMLElement&&list.value?.contains(document.activeElement)?document.activeElement:null
+  selection.value=reconcileFileManagerSelection(rowOrder.value,selection.value)
+  if(focused)void nextTick(()=>{if(!disposed&&props.active&&!focused.isConnected&&document.activeElement===document.body)collection.value?.focus({preventScroll:true})})
+})
 onMounted(()=>{unsubscribe=window.navora?.workspace.onChanged(event=>{if(!props.active||event.chatId!==props.chatId)return;clearTimeout(timer);timer=setTimeout(()=>void load(),150)});offDownloads=window.navora?.downloads.onChanged(payload=>{downloadRevision++;updateDownloads(payload.downloads)})})
 onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(timer);unsubscribe?.();offDownloads?.()})
 defineExpose({refresh:refreshAll,openFolder:()=>reveal(props.directory)})
@@ -134,7 +213,7 @@ defineExpose({refresh:refreshAll,openFolder:()=>reveal(props.directory)})
 .file-manager-views{display:flex;flex-shrink:0;gap:2px;padding:3px;border:1px solid #e0e5ec;border-radius:7px;background:#f1f4f8}.file-manager-views button{display:grid;place-items:center;width:26px;height:24px;border-radius:4px;color:#95a1b1}.file-manager-views button[aria-pressed=true]{background:#fff;color:#57799e;box-shadow:0 1px 3px #23364d0c}.file-manager-views svg{width:13px;height:13px}
 .file-manager-collection{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;overflow:hidden;border:1px solid #e4e9f0;border-radius:9px;background:#fff}.file-manager-scroll{flex:1;min-height:0;min-width:0;overflow:auto;scrollbar-width:thin;scrollbar-gutter:stable;padding:0 6px 6px}
 .file-manager-columns,.file-manager-row{display:grid;grid-template-columns:minmax(110px,1fr) 76px 80px 106px 32px;align-items:center;gap:12px;min-width:0;padding:0 6px}.file-manager-columns{position:sticky;top:0;z-index:1;min-height:32px;margin-bottom:3px;border-bottom:1px solid #eaf0f5;background:#fff;font-size:11px;color:#77869a}.file-manager-columns>span:first-child{padding-left:6px}
-.file-manager-row{position:relative;isolation:isolate;overflow:hidden;box-sizing:border-box;height:38px;border-bottom:1px solid #f0f3f7;border-radius:5px;background:transparent;font-size:12px}.file-manager-row:last-child{border-bottom-color:transparent}.file-manager-row:hover{background:#f6f8fb}.file-manager-row.selected{background:#edf3f9;box-shadow:inset 2px 0 #8ba8c7}.file-manager-row.selected:hover{background:#e8f0f8}
+.file-manager-row{position:relative;isolation:isolate;overflow:hidden;box-sizing:border-box;height:38px;border-bottom:1px solid #f0f3f7;border-radius:5px;background:transparent;font-size:12px;user-select:none}.file-manager-row:last-child{border-bottom-color:transparent}.file-manager-row:hover{background:#f6f8fb}.file-manager-row.selected{background:#edf3f9;box-shadow:inset 2px 0 #8ba8c7}.file-manager-row.selected:hover{background:#e8f0f8}.file-manager-row.is-current:focus-within{outline:1px solid var(--navora-accent,#7296bd);outline-offset:-1px}
 .file-manager-entry{display:flex;align-items:center;gap:9px;width:100%;height:100%;min-width:0;padding:4px 6px;text-align:left}.file-manager-entry-icon{display:grid;place-items:center;flex:0 0 22px;height:22px;border-radius:5px;background:#f3f5f8;color:#8391a3}.file-manager-entry-icon[data-kind=folder]{background:#eaf0f7;color:#6e89a8}.file-manager-entry-icon svg{width:14px;height:14px}.file-manager-entry>span:not(.file-manager-entry-icon){display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}.file-manager-name-line{display:flex;align-items:center;gap:10px;min-width:0}.file-manager-name-line strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;font-weight:450;color:#40536b}.file-manager-row.selected strong{color:#345477}.file-manager-entry small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;color:#7d8b9d}.file-manager-entry[aria-disabled=true]{cursor:default}.file-manager-type,.file-manager-size,.file-manager-row time{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#7c899a;font-variant-numeric:tabular-nums}.file-manager-size{text-align:right}.file-manager-columns>span:nth-child(3){text-align:right}.manager-active-downloads{display:inline-flex;align-items:center;gap:4px;flex-shrink:0;font-size:10px;color:#7b91ab}.manager-active-downloads svg{width:12px;height:12px}
 .file-manager-reveal{opacity:0}.file-manager-row:is(:hover,:focus-within) .file-manager-reveal{opacity:1}.has-search .file-manager-row{height:46px}
 .file-manager-collection.grid-collection{border:0;background:transparent}.file-manager-scroll.is-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr));grid-auto-rows:104px;align-content:start;gap:10px;padding:1px 1px 12px;scrollbar-gutter:auto}.is-grid .file-manager-row,.has-search .is-grid .file-manager-row{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:minmax(0,1fr) 18px;gap:8px;height:104px;padding:12px;border:1px solid #e0e6ee;border-radius:9px;background:#fff}.is-grid .file-manager-row:hover{border-color:#cad7e5;background:#fafcfe}.is-grid .file-manager-row.selected{border-color:#a4bdd7;background:#f2f6fb;box-shadow:inset 0 0 0 1px #c5d6e7}.is-grid .file-manager-entry{grid-column:1/-1;grid-row:1;padding:0 24px 0 0;gap:10px}.is-grid .file-manager-entry-icon{flex-basis:30px;height:30px;border-radius:7px}.is-grid .file-manager-entry-icon svg{width:18px;height:18px}.is-grid .file-manager-type{grid-column:1;grid-row:2;display:block;font-size:10px}.is-grid .file-manager-size{grid-column:2;grid-row:2;font-size:10px}.is-grid time{display:none}.is-grid .file-manager-reveal{position:absolute;right:6px;top:6px}

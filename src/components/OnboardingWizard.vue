@@ -1,5 +1,5 @@
 <template>
-  <v-dialog
+  <BrowserContentDialog
     :model-value="modelValue"
     :fullscreen="isMobileLayout"
     :max-width="isMobileLayout ? undefined : 680"
@@ -229,11 +229,12 @@
       <p v-if="errorText" class="ob-error">{{ errorText }}</p>
     </div>
     <div v-else class="ob-card ob-loading">正在加载配置…</div>
-  </v-dialog>
+  </BrowserContentDialog>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import BrowserContentDialog from './BrowserContentDialog.vue'
 import {
   modesForPreset,
   type AppConfig,

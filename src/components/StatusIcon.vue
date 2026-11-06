@@ -8,12 +8,12 @@ const statusIcons:Record<string,string>={running:'circle-notch',thought:'lightbu
 </script>
 <style scoped>
 svg.status-glyph { width: 18px; height: 18px; display: inline-block; vertical-align: middle; flex: 0 0 auto; }
-.status-running { color: #3269ac; }
-.status-error { color: #b52b39; }
-.status-ask { color: #94600b; }
-.status-perm,.status-key { color: #6750a4; }
-.status-stopped { color: #626b78; }
-.status-success { color: #26744e; }
-.status-thought,.status-log { color:#7b8798; }
+.status-running { color: var(--navora-accent); }
+.status-error { color: var(--navora-danger); }
+.status-ask { color: var(--control-warning,var(--navora-accent)); }
+.status-perm,.status-key { color: var(--navora-accent); }
+.status-stopped { color: var(--navora-muted); }
+.status-success { color: var(--control-success,var(--navora-accent)); }
+.status-thought,.status-log { color:var(--navora-muted); }
 
 </style>

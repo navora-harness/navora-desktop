@@ -1,0 +1,48 @@
+{
+  "ok": true,
+  "checks": [
+    "Real back and forward history works; forward is hidden without a next entry",
+    "Annotation button sits after address; temporary browsing button removed",
+    "New browser tab keeps 220px slots in a spacious workspace"
+  ],
+  "samples": [
+    {
+      "label": "before-new-tab",
+      "host": 1380,
+      "strip": 444,
+      "slot": "220px",
+      "tabs": [
+        {
+          "title": "浏览器工具栏布局",
+          "width": 220
+        },
+        {
+          "title": "测试页面 /b",
+          "width": 220
+        }
+      ],
+      "tools": 30
+    },
+    {
+      "label": "after-new-tab",
+      "host": 1380,
+      "strip": 668,
+      "slot": "220px",
+      "tabs": [
+        {
+          "title": "浏览器工具栏布局",
+          "width": 220
+        },
+        {
+          "title": "测试页面 /b",
+          "width": 220
+        },
+        {
+          "title": "新标签页",
+          "width": 220
+        }
+      ],
+      "tools": 30
+    }
+  ]
+}

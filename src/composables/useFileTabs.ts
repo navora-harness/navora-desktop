@@ -2,15 +2,16 @@ import type {BrowserTreeSession,BrowserTreeWindow} from '@shared/types'
 import type {FileTransfer} from '@shared/file-windows'
 import {type BrowserTabState,type BrowserWorkspaceApi} from '@shared/browser-workspace'
 import {computed,onBeforeUnmount,ref,watch,type Ref} from 'vue'
-import {closeFileTab,emptyFileTabs,openFileTab,openBrowserTab,openSubchatTab,showFileWorkspace,removeFileOwner,type FileTab,type FileTabs} from '@shared/file-tabs'
+import {closeFileTab,emptyFileTabs,openFileTab,openBrowserTab,openSubchatTab,makeQuestionnaireTab,openQuestionnaireTab,showFileWorkspace,removeFileOwner,type FileTab,type FileTabs} from '@shared/file-tabs'
 import {applyWorkspaceBrowserSnapshot} from '@shared/workspace-browser-snapshot'
 import {WORKSPACE_TABS_STORAGE,restoreWorkspaces,persistWorkspaces} from '@shared/workspace-tabs-persistence'
+import {browserPagesByChat} from '@shared/browser-resource-sessions'
 
 type BrowserMetadata=Pick<BrowserTreeWindow,'desiredUrl'|'persistent'|'pinned'|'muted'|'manualMuted'|'muteReason'|'audible'|'order'>
 export function useFileTabs(viewer:Ref<string|null>,notify?:(message:string)=>void){
   const workspaces=ref(new Map<string,FileTabs>())
   const revisions=new Map<string,ReadonlyMap<string,number>>(),pendingCreates=new Map<string,Promise<void>>()
-  let disposed=false,pendingMove:{owner:string;id:string;before?:string;pageIds?:string[]}|null=null
+  let disposed=false,presentationRequest=0,pendingMove:{owner:string;id:string;before?:string;pageIds?:string[]}|null=null
   const read=(key:string)=>{try{return JSON.parse(localStorage.getItem(key)||'null')}catch{return null}}
   workspaces.value=restoreWorkspaces(read(WORKSPACE_TABS_STORAGE),read('navora.file-tabs.v1'))
   const current=computed(()=>workspaces.value.get(viewer.value||'')||emptyFileTabs())
@@ -35,10 +36,39 @@ export function useFileTabs(viewer:Ref<string|null>,notify?:(message:string)=>vo
   async function refresh(owner:string,resourceOwner=owner){
     try{const state=await api()?.tabState(resourceOwner);if(state)accept(owner,state);return state}catch{return undefined}
   }
-  function open(chatId:string,path:string){update(openFileTab(current.value,chatId,path))}
-  function openSubchats(parentChatId:string,selectedSubchatId?:string){update(openSubchatTab(stateFor(parentChatId),parentChatId,selectedSubchatId),parentChatId)}
-  function selectSubchat(key:string,selectedSubchatId:string|null){update({...current.value,tabs:current.value.tabs.map(tab=>tab.key===key&&tab.kind==='subchats'?{...tab,selectedSubchatId:selectedSubchatId||undefined}:tab)})}
+  function open(chatId:string,path:string){presentationRequest++;update(openFileTab(current.value,chatId,path))}
+  function openSubchats(parentChatId:string,selectedSubchatId?:string){presentationRequest++;update(openSubchatTab(stateFor(parentChatId),parentChatId,selectedSubchatId),parentChatId)}
+  function openQuestionnaire(questionnaire:{id:string;chatId:string;schemaRevision:number;title?:string}){
+    const owner=viewer.value
+    if(!owner||disposed)return false
+    let next:FileTabs
+    try{next=openQuestionnaireTab(stateFor(owner),{chatId:questionnaire.chatId,questionnaireId:questionnaire.id,questionnaireRevision:questionnaire.schemaRevision,questionnaireTitle:questionnaire.title})}
+    catch{report('标签页已达上限，请先关闭部分标签页。');return false}
+    presentationRequest++
+    // One presentation container across every chat workspace; answers belong to
+    // their own questionnaire record and never to this shared tab identity.
+    for(const [id,state]of workspaces.value)if(id!==owner){
+      const tabs=state.tabs.filter(tab=>tab.kind!=='questionnaire')
+      if(tabs.length!==state.tabs.length)update({...state,tabs,active:tabs.some(tab=>tab.key===state.active)?state.active:tabs[0]?.key||'',open:state.open&&tabs.length>0},id)
+    }
+    update(next,owner)
+    return true
+  }
+  function updateQuestionnaire(questionnaire:{id:string;chatId:string;schemaRevision:number;title?:string}){
+    for(const [owner,state]of workspaces.value){
+      let changed=false
+      const tabs=state.tabs.map(tab=>{
+        if(tab.kind!=='questionnaire'||tab.questionnaireId!==questionnaire.id||tab.chatId!==questionnaire.chatId)return tab
+        const next=makeQuestionnaireTab({chatId:questionnaire.chatId,questionnaireId:questionnaire.id,questionnaireRevision:questionnaire.schemaRevision,questionnaireTitle:questionnaire.title})
+        if(tab.title===next.title&&tab.questionnaireTitle===next.questionnaireTitle&&tab.questionnaireRevision===next.questionnaireRevision)return tab
+        changed=true;return next
+      })
+      if(changed)update({...state,tabs},owner)
+    }
+  }
+  function selectSubchat(key:string,selectedSubchatId:string|null){presentationRequest++;update({...current.value,tabs:current.value.tabs.map(tab=>tab.key===key&&tab.kind==='subchats'?{...tab,selectedSubchatId:selectedSubchatId||undefined}:tab)})}
   function openBrowser(afterKey?:string):Promise<void>{
+    presentationRequest++
     const owner=viewer.value,backend=api()
     if(!owner)return Promise.resolve()
     if(!backend){report('此操作需要桌面端浏览器。');return Promise.resolve()}
@@ -79,6 +109,7 @@ export function useFileTabs(viewer:Ref<string|null>,notify?:(message:string)=>vo
   }
   function removeOwner(owner:string){workspaces.value.delete(owner);revisions.delete(owner);for(const [viewer,versions]of revisions){const remaining=new Map(versions);remaining.delete(owner);revisions.set(viewer,remaining)}for(const [id,state] of workspaces.value)workspaces.value.set(id,removeFileOwner(state,owner))}
   function select(key:string){
+    presentationRequest++
     const owner=viewer.value,tab=current.value.tabs.find(tab=>tab.key===key)
     if(!owner||!tab)return
     update({...current.value,active:key,open:true})
@@ -103,6 +134,7 @@ export function useFileTabs(viewer:Ref<string|null>,notify?:(message:string)=>vo
     return pageId
   }
   async function close(key:string){
+    presentationRequest++
     const owner=viewer.value,tab=current.value.tabs.find(tab=>tab.key===key),backend=api()
     if(!owner||!tab)return
     if(tab.kind!=='browser'||!backend){update(closeFileTab(current.value,key));return}
@@ -116,8 +148,7 @@ export function useFileTabs(viewer:Ref<string|null>,notify?:(message:string)=>vo
   function syncBrowser(tree:BrowserTreeSession[]){
     const owner=viewer.value
     if(!owner)return
-    const groups=new Map<string,BrowserTreeWindow[]>()
-    for(const session of tree)groups.set(session.chatId,[...(groups.get(session.chatId)||[]),...session.windows])
+    const groups=browserPagesByChat(tree)
     const owners=new Set([owner,...groups.keys(),...stateFor(owner).tabs.filter(tab=>tab.kind==='browser').map(tab=>tab.chatId)])
     for(const resourceOwner of owners){
       const all=groups.get(resourceOwner),versions=all?.flatMap(page=>typeof page.tabRevision==='number'?[page.tabRevision]:[])||[]
@@ -130,12 +161,16 @@ export function useFileTabs(viewer:Ref<string|null>,notify?:(message:string)=>vo
   // This is an acknowledgement from onPresent, never another activate command.
   function present(pageId:string){const tab=current.value.tabs.find(tab=>tab.pageId===pageId);if(tab)update({...current.value,active:tab.key,open:true})}
   async function presentResource(pageId:string,resourceOwner:string){
-    const owner=viewer.value,backend=api();if(!owner||!backend)return
+    const request=++presentationRequest,owner=viewer.value,backend=api();if(!owner||!backend)return false
     const state=await backend.tabState(resourceOwner),page=state.pages.find(page=>page.windowId===pageId)
-    if(!page||disposed||viewer.value!==owner||page.presentation!=='embedded')return
-    if(!accept(owner,state))return
+    // A present notification acknowledges a previous native selection. Its late
+    // state read must not become a new activation over a newer tab/user intent.
+    if(request!==presentationRequest||!page||disposed||viewer.value!==owner||!state.embedded||state.activeId!==pageId||page.presentation!=='embedded')return false
+    if(!accept(owner,state))return false
     const previous=stateFor(owner),tab=previous.tabs.find(tab=>tab.kind==='browser'&&isPage(tab,page))
-    if(tab)update({...previous,active:tab.key,open:true},owner)
+    if(!tab)return false
+    update({...previous,active:tab.key,open:true},owner)
+    return true
   }
   function reorder(pageId:string,before?:string,owner=viewer.value,pageIds?:string[]){
     if(!owner||disposed)return
@@ -189,12 +224,13 @@ export function useFileTabs(viewer:Ref<string|null>,notify?:(message:string)=>vo
     const next=openFileTab(state,event.tab.chatId,event.tab.path),tabs=next.tabs.filter(tab=>tab.key!==event.tab.key),at=tabs.findIndex(tab=>tab.key===event.before)
     tabs.splice(at<0?tabs.length:at,0,event.tab);update({...next,tabs},event.viewerChatId)
   }
-  function hide(){update({...current.value,open:false})}
+  function hide(){presentationRequest++;update({...current.value,open:false})}
   function show(){if(viewer.value){if(!current.value.tabs.length)void openBrowser();else update(showFileWorkspace(current.value,viewer.value))}}
   function toggle(){if(current.value.open)hide();else show()}
   let timer:ReturnType<typeof setTimeout>|undefined
   function persist(){try{localStorage.setItem(WORKSPACE_TABS_STORAGE,JSON.stringify(persistWorkspaces(workspaces.value)))}catch{/* Storage is optional; file contents never enter storage. */}}
   watch(workspaces,()=>{clearTimeout(timer);timer=setTimeout(persist,150)},{deep:true})
-  onBeforeUnmount(()=>{disposed=true;clearTimeout(timer);persist()})
-  return {current,active,open,openBrowser,openSubchats,selectSubchat,updateBrowser,resolveBrowser,syncBrowser,present,presentResource,reorder,select,close,hide,show,toggle,removeOwner,transfer}
+  watch(viewer,()=>{presentationRequest++},{flush:'sync'})
+  onBeforeUnmount(()=>{disposed=true;presentationRequest++;clearTimeout(timer);persist()})
+  return {current,active,open,openBrowser,openSubchats,openQuestionnaire,updateQuestionnaire,selectSubchat,updateBrowser,resolveBrowser,syncBrowser,present,presentResource,reorder,select,close,hide,show,toggle,removeOwner,transfer}
 }

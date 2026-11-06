@@ -1,6 +1,10 @@
-# 浏览器 Agent 自动化（Electron cloudbypass.4）
+# 浏览器 Agent 自动化（Electron cloudbypass.8）
 
-Navora 固定使用 Electron `45.0.0-cloudbypass.4`，提供原生 DOM 快照、定向输入和 `dispatchInputSequence` 定时输入。此版本随 Windows x64 定制运行时发布；功能以实际 API 探测为准，其内部 `process.versions.electron` 仍可能显示上游的 `45.0.0-beta.5`。
+Navora 固定使用 Electron `45.0.0-cloudbypass.8`，提供原生 DOM 快照、定向输入、`dispatchInputSequence` 定时输入，以及逐页独立的后台输入隔离和渲染保活。此版本随 Windows x64 定制运行时发布；分发版本由包、运行时摘要与能力探测确认，内部 `process.versions.electron` 仍为上游的 `45.0.0-beta.5`。
+
+原生调用使用 `clickElement({selector|target,...})`、`setAutomationOptions`、`getAutomationState`、`resetAutomationOptions`；旧 `clickSelector` 和 `setVirtualCursorEnabled` 已退出。鼠标与触摸点在主视口使用 `position`，在 target 内使用 `offset`；Agent 工具现有 `x/y/from` 参数由宿主转换，几何结果与 `sendInputEvent` 保留原坐标格式。跨文档几何查询保留 `.target`；工具的旧 `agentInfo` 参数由宿主组合几何查询与快照，不再透传给原生查询。
+
+> 2026-11-06 光标补全：任务取得保护时先隐藏图形，成功指针回执后才显示；导航、几何或 reset 清除资格，隐藏不解除输入保护。enabled 只表示已启用，实际画面不由该值确认。已修复输入与导航并发时的取消等待，当前证据和首批完整回执后显示的限制见[实施记录](./cursor-first-position-and-handoff-implementation-2026-11-06.md)。
 
 ## 读取页面
 
@@ -35,21 +39,21 @@ Navora 固定使用 Electron `45.0.0-cloudbypass.4`，提供原生 DOM 快照、
 ```
 
 - 不传 `target` 时，`from/x/y` 都为顶层视口 CSS 坐标；传入 `target` 时，所有点都为相对同一目标元素的 CSS 偏移，支持 iframe 目标。不能混用两个坐标系。
-- 同一 WebContents 串行执行完整操作（定位、接近、提交、必要结果核对）；Flow 子调用复用作用域。首次无目标操作从 `(0,0)` 起步；首次目标操作没有可靠起点时从终点开始，需指定起点时传 `from`。导航、控制权变化、未保护间隙、外部输入、失败或取消清除位置缓存。出队后和真正派发前重验操作代次，不让旧队列进入新文档。
+- 同一 WebContents 串行执行完整操作（定位、接近、提交、必要结果核对）；Flow 子调用复用作用域。移动／点击只复用已确认的主视口位置；起点未知时先用单个原生事件建立终点，不假定从 `(0,0)` 开始。`from` 用于明确拖动起点，不能证明当前虚拟指针已在那里；目标局部点不建立主视口位置。导航、控制权变化、未保护间隙、外部输入、失败或取消清除位置缓存。出队后和真正派发前重验操作代次，不让旧队列进入新文档。
 - `motion.speedMultiplier` 大于 `1` 加速、小于 `1` 减速；`intervalMs` 控制事件采样间隔，与 `sampleRateHz` 二选一。`motion.holdMs` 只用于显式坐标点击的按下/释放停留时间。详细参数见 [轨迹生成器](pointer-trajectory.md)。
-- 普通 selector/ref 的 `browser_click` 默认先平滑移动，再调用原生目标中心点击，保留遮挡、失效引用和缩放检查；`browser_hover` 支持 ref、target 和 selector。主文档原生 target 的接近使用 CSS box-model 几何，不把带设备缩放的快照 `bounds` 当作输入坐标。
+- 普通 selector/ref 的 `browser_click` 默认先平滑移动，再调用原生目标中心点击，保留遮挡、失效引用和缩放检查；`browser_hover` 支持 ref、target 和 selector。主文档原生 target 的接近使用 CSS box-model 几何，不把带设备缩放的快照 `bounds` 当作输入坐标。主文档点击及悬停结束后，以隔离世界实际可信鼠标事件核对落点，只有操作／文档／几何代次均匹配且完整回执成功时才恢复起点；不能用预测中心或 target offset 代替确认。回执读取有 250ms 截止并响应取消，迟到结果不更新缓存。`motionApplied` 区分单点定位与实际多点、非零用时的移动，回执保留起点、规划步数、用时及已确认累计移动量；关闭平滑覆盖拖动前接近段，闭环轨迹也按实际移动计量。
 - iframe 原生 target 没有可靠的顶层 CSS 几何时，默认保留原生中心事件并返回 `motionApplied: false`，不猜测偏移。需要 iframe 轨迹时使用 `browser_mouse` 加新 target 和元素局部 `from/x/y`。旧 `iframeSelector` 保持兼容，使用可取消的闭合序列。普通中心点击不支持 `holdMs`，应改用显式坐标点击。
 - 运动参数省略时继承用户设置；对象覆盖单次运动字段；`motion: false` 关闭曲线插值，坐标操作仍用一个原生批次闭合按下/释放，不拆分拖动。
 - `down/up/wheel` 保留 target 参数，不接受轨迹参数。遗留按下、触摸开始会登记专属释放，在完整动作结束或取消时清理，不把持有状态带入下一次工具调用；持续鼠标拖动使用一次 `drag`。远程查看的 down/move/up 属于同一受管手势，断开时释放。
 - 返回计划步数、持续时间、原生派发数、停止位置、迟到统计和清理结果。原生中心点击采用独立接口，因此其 `dispatchedCount` 为 `null`，移动数量在 `movementDispatchedCount`，点击结果在 `clickDispatch`；不要把移动计数当作整个点击的派发计数。
 - 取消或部分失败不走备用路径、不自动重放；`browser_flow` 也会立即停止并保留失败汇总。已经派发的输入不可回滚，应读取页面结果后再决定后续动作。
-- `virtualCursor`、`virtualCursorImage`、`virtualCursorFrameRate` 分别表示实际方法探测结果；逐页状态中的 `cursorEnabled`、`inputProtected`、`nativeConfirmed` 表示原生启用确认，`cursorVisible` 仅表示已请求的图形显示状态。保存偏好、方法存在与肉眼看见光标是不同证据。
+- `automationOptions`、`automationState`、`automationReset` 和光标相关能力来自实际方法探测。逐页状态从 `getAutomationState` 回读 `isolateInput`、`inputProtected`、`keepRendering`、光标开关及 `rendering`；配置、视图可用、保活需求和实际新帧分别核对。`nativeConfirmed` 不表示肉眼已看见光标。
 
 ## 设置与控制权
 
-“设置 → 浏览器 → AI 自动化”提供显示虚拟光标、平滑移动、操作反馈与输入保护（默认开启），移动速度、自然/精确风格、采样间隔、刷新率与领航箭头/环形瞄点/精密十字三款专属光标。默认速度 `1`、采样间隔 `1000/120` 毫秒、绘制上限 `60 fps`。采样与绘制分别生效，不把 60 fps 解释成只发送 60 个输入点。
+“设置 → 浏览器 → AI 自动化”提供显示虚拟光标、平滑移动、操作反馈、移动速度、自然/精确风格、采样间隔、刷新率、光标样式与大小。后台独立操作在 Agent 控制页面期间始终开启。默认速度 `0.6`、采样间隔 `1000/120` 毫秒、绘制上限 `60 fps`。采样与绘制分别生效，不把 60 fps 解释成只发送 60 个输入点。
 
-配置由共享策略校验，旧字段缺失补默认且保留 `false`。设置页和 Agent 按变更叶子更新，策略合并后校验点数、时长和互斥采样参数。在途轨迹不因速度修改而被改写；原生模式热更新带版本，旧回调不能覆盖最后一次设置。显示与保护已解耦：隐藏图形时保留原生 enabled 并使用透明 NativeImage，明确设置 blockRealPointer/blockRealKeyboard；因此隐藏光标不解除保护。缺少自定义图像接口时拒绝受保护的隐藏模式，避免静默放开真实输入。
+配置由共享策略校验，设置页和 Agent 按变更叶子更新，策略合并后校验点数、时长和互斥采样参数。在途轨迹不因速度修改而被改写；原生模式热更新带版本，旧回调不能覆盖最后一次设置。Agent 租约期间统一启用 `isolateInput`、`blockRealPointer`、`blockRealKeyboard`、`keepRendering`；历史 `protect_input:false` 不会关闭这四项。隐藏光标直接设置 `virtualCursor.enabled:false`，不再依赖透明图片；隐藏图形不解除隔离、保护或后台保活。
 
 地址栏右端的 Agent 图标控制当前显示页面：左键在允许 AI 和人工操作之间切换，暂停状态下左键允许新的 AI 操作；右键、Shift+F10、菜单键、向下键或触控长按打开同一个详情面板。打开面板不改变控制权。面板显示当前页面、动作、实际光标与输入保护状态，提供暂停、恢复、故障处理及“自动化设置”入口。交还中保留详情入口并防止重复提交。
 
@@ -57,7 +61,7 @@ Navora 固定使用 Electron `45.0.0-cloudbypass.4`，提供原生 DOM 快照、
 
 Agent 任务首次获得某页操作权后，以 runId 持有该页租约，模型思考、工具间等待和权限确认期间保留原生输入保护；其它未持有页面不受影响。任务 finally 仅释放匹配 runId 的租约，旧任务不能释放新任务；无 runId 的兼容短调用仍只持有动作范围。真实鼠标移动/进入/离开不会触发接管，受保护期间的真实点击、滚轮与键盘由定制内核参数拦截，人工操作须使用宿主按钮显式交还。布局/缩放变化、页面转移和导航使旧坐标失效并要求新观察。工具栏固定 44px，网页外框预留 2px；已移除下方状态行与独立文字接管按钮，状态变化及下载入口显隐不改变原生网页矩形。批注为图标按钮，有内容时以小点提示。浏览器截图不绘制原生虚拟光标。
 
-无法确认按钮释放或解除保护时，图标显示告警，面板保留恢复说明，不重放输入，也不自动刷新或关闭页面。解除保护未确认可重试解除；清理未确认且已确认解除保护时，可由用户主动重新加载，提示未保存内容可能丢失，导航提交后才允许重新观察并恢复。原生 `clickSelector` 提交后没有取消信号，部分失败缺少 sequence 清理账本；关闭光标失败可能恢复旧阻断。`.4` 不能提供渲染无响应时仍可靠交还且保留页面的强保证。
+无法确认按钮释放或解除保护时，图标显示告警，面板保留恢复说明，不重放输入，也不自动刷新或关闭页面。完整交还使用 `resetAutomationOptions` 取消本通道任务、清理持有状态并释放长期配置，再核对实际状态；正常任务结束先结算已提交工作。清理或重置失败继续显示未确认，不能只因光标消失就宣布交还成功。解除保护未确认可重试解除；需要重新加载时仍由用户主动选择并保留未保存内容提示。
 
 Agent 与新批注使用当前网页的实际身份，不随标签多选或后台右键目标改变。下载汇总该网页所属对话；无记录时隐藏图标，活动下载以字节加权圆环显示，未知大小使用不定长环，完成记录保留到主动清除。更多菜单始终能打开同一下载列表。缺少对话身份的局部入口不会退回全局列表。
 
@@ -65,7 +69,7 @@ Agent、下载、更多、地址建议、连接信息和标签菜单互斥，并
 
 标准工具、别名、Flow、iframe、插件 `runTool`、显式 Registry 写方法和远程输入经过控制检查。受信任旧插件直接持有原始 `WebContents` / `Session` 的接口保留兼容，不属于强制隔离边界。已有页面作用域内不得再扩展到新页面，防止跨页嵌套死锁；多页操作应由独立的外层工具调用统一申请。
 
-完整设计与验收要求见 [自动化控制规划](browser-automation-control-plan.md)及[地址栏精简交付记录](browser-toolbar-compact-plan.md#交付记录2026-11-03)。
+完整设计与验收要求见 [自动化控制规划](已完成/browser-automation-control-plan.md)及[地址栏精简交付记录](已完成/browser-toolbar-compact-plan.md#交付记录2026-11-03)。
 
 ## 验证
 
@@ -88,6 +92,6 @@ Windows `.4` 实测覆盖可信移动与小数终点、速度与采样间隔、�
 
 - `dispatched` 不表示网页已接受输入；页面可能拦截事件或保持原状态，需重新读取确认。
 - 原生下拉框不会因定向点击而弹出；用键盘方向键选择并回读当前值。系统文件、颜色、日期和时间选择器不支持该输入通道；文件上传继续使用 `browser_upload`。
-- 版本 `.4` 发布包只提供 Windows x64；Linux 未验证，macOS/Linux 构建不应复用这个定制运行时。
+- 版本 `.8` 发布包只提供 Windows x64；macOS/Linux 构建不应复用这个定制运行时。完整跨 frame 光标连续性仍搁置；后台隔离不代表跨文档指针捕获或完整进入／退出事件链已通过。
 
-上游接口与完整限制：[Electron cloudbypass Agent 自动化说明](https://github.com/ChengHoward/edist/blob/main/AGENT.zh-CN.md)。
+上游接口与完整限制：[Electron cloudbypass .8 Agent 自动化说明](https://github.com/ChengHoward/edist/releases/download/v45.0.0-cloudbypass.8/AGENT-AUTOMATION.zh-CN.md)。上方带日期的 `.4` 验证记录保留为历史证据；本轮 `.8` 应用验证及发行边界见 [实施记录](./electron-8-automation-implementation-2026-11-05.md)。

@@ -30,11 +30,11 @@
 .navora-app :is(button,a,input,textarea,select,[tabindex]):focus-visible{outline:2px solid var(--control-focus);outline-offset:-2px}
 /* Composite controls draw one ring on their rounded container. Keep the
    independent buttons inside those controls keyboard-visible. */
-.navora-app :is(.global-resource-filter,.file-manager-search,.plugin-search,.library-search,.workspace-picker-search,.model-panel-search,.browser-address-bar,.address-bar,.browser-location,.omnibox) :is(input,textarea):focus-visible,
+.navora-app :is(.global-resource-filter,.file-manager-search,.plugin-search,.library-search,.workspace-picker-search,.model-panel-search,.docs-search,.browser-address-bar,.address-bar,.browser-location,.omnibox) :is(input,textarea):focus-visible,
 .navora-app .v-field :is(input,textarea):focus-visible,
 .navora-app .composer-document-editor .composer-richtext:focus-visible{outline:none}
-.navora-app :is(.global-resource-filter,.file-manager-search,.plugin-search,.library-search,.workspace-picker-search,.model-panel-search):focus-within{border-color:var(--control-focus);box-shadow:0 0 0 2px color-mix(in srgb,var(--control-focus) 14%,transparent)}
-@media(forced-colors:active){.navora-app :is(.global-resource-filter,.file-manager-search,.plugin-search,.library-search,.workspace-picker-search,.model-panel-search,.browser-address-bar,.composer-box,.v-field):focus-within{outline:2px solid Highlight;outline-offset:1px;box-shadow:none}}
+.navora-app :is(.global-resource-filter,.file-manager-search,.plugin-search,.library-search,.workspace-picker-search,.model-panel-search,.docs-search):focus-within{border-color:var(--control-focus);box-shadow:0 0 0 2px color-mix(in srgb,var(--control-focus) 14%,transparent)}
+@media(forced-colors:active){.navora-app :is(.global-resource-filter,.file-manager-search,.plugin-search,.library-search,.workspace-picker-search,.model-panel-search,.docs-search,.browser-address-bar,.composer-box,.v-field):focus-within{outline:2px solid Highlight;outline-offset:1px;box-shadow:none}}
 /* The menu owns its surface. Reset the library's important overlay material
    so nested backgrounds and shadows cannot leave a second rounded edge. */
 .v-menu.v-overlay>.v-overlay__content.ui-action-menu-overlay{padding:0;border:0;border-radius:12px;background:transparent!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;overflow:visible}
@@ -116,11 +116,17 @@
 .navora-app :is(.creator-back,.plugin-square,.settings-back){width:var(--control-height);height:var(--control-height);flex-shrink:0}
 .skill-dlg-card .skill-dlg-close{width:var(--control-height);height:var(--control-height);border-radius:6px}.skill-dlg-card .skill-dlg-close svg{width:14px;height:14px}
 .skill-dlg-card :is(.v-btn,.skill-more-btn){min-height:var(--control-height);font-size:12px;letter-spacing:0;border-radius:6px}.skill-dlg-card.is-mobile .skill-dlg-close{width:44px;height:44px}
-.app-toast.v-snackbar{margin:calc(52px + env(safe-area-inset-top,0px)) 12px 12px}
+.app-toast.v-snackbar{margin:12px 16px calc(16px + env(safe-area-inset-bottom,0px))}
 .app-toast .v-snackbar__wrapper{min-width:0;min-height:40px;max-width:min(420px,calc(100vw - 24px));border:1px solid #71849c26;border-radius:8px!important;background:#fff;box-shadow:0 4px 18px #23354b14}
-.app-toast .v-snackbar__content{padding:10px 12px;font-size:12px;line-height:1.6;letter-spacing:0;overflow-wrap:anywhere}
-/* These app notices contain text only; navigation underneath stays usable. */
-.app-toast.v-snackbar,.app-toast .v-snackbar__wrapper,.app-toast .v-snackbar__content{pointer-events:none}
+.app-toast .v-snackbar__content{padding:0;font-size:12px;line-height:1.6;letter-spacing:0;overflow-wrap:anywhere}
+/* Only the notice captures clicks; the rest of the window stays interactive. */
+.app-toast.v-snackbar{pointer-events:none}
+.app-toast .v-snackbar__wrapper,.app-toast .v-snackbar__content{pointer-events:auto}
+.app-toast-dismiss{display:flex;align-items:center;justify-content:space-between;gap:14px;width:100%;min-height:40px;padding:10px 12px;border:0;border-radius:inherit;background:transparent;color:inherit;font:inherit;text-align:start;cursor:pointer}
+.app-toast-dismiss>span{min-width:0;overflow-wrap:anywhere}
+.app-toast-dismiss>.app-icon{width:14px;height:14px;flex:0 0 14px;opacity:.7}
+.app-toast-dismiss:hover>.app-icon{opacity:1}
+.app-toast-dismiss:focus-visible{outline:2px solid currentColor;outline-offset:-3px}
 .plugin-import-menu button[role=menuitem],.skill-more-panel .skill-more-item{min-height:32px;padding:6px 10px;border-radius:6px;font-size:12px;line-height:20px}
 .v-dialog .v-card-title{font-size:16px;font-weight:600;line-height:24px;white-space:normal;overflow-wrap:anywhere}
 .v-dialog .v-card-actions{flex-wrap:wrap;gap:8px}.v-dialog .v-card-actions .v-btn{min-height:var(--control-height);font-size:12px;letter-spacing:0}

@@ -1,5 +1,6 @@
 import type {BrowserWorkspaceApi} from '../shared/browser-workspace'
 import type {NativeUiApi} from '../shared/native-ui'
+import type {QuestionnairesApi} from '../shared/questionnaire'
 import type {ComposerDocument,ComposerDraftOptions,ComposerSubmitInput,ComposerQueueEditOptions} from '../shared/composer-document'
 import type {ComposerSourcesApi,ComposerImportFile,ComposerExcerptInput} from '../shared/composer-sources'
 import type {FileWindowsApi,FileTransfer} from '../shared/file-windows'
@@ -7,7 +8,7 @@ import type {WorkspaceFileTab as FileTab} from '../shared/file-tabs'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AppConfig, AppConfigPatch } from '../shared/config'
 import type {SettingsCommit} from '../shared/settings-commit'
-import type {BrowserSessionUpdate,BrowserSessionManageAction,BrowserSessionManageResult} from '../shared/types'
+import type {BrowserSessionCreateOptions,BrowserSessionManageOptions,BrowserSessionUpdate,BrowserSessionManageAction,BrowserSessionManageResult} from '../shared/types'
 import type {
   AgentAskRequest,
   AgentAskResponse,
@@ -31,30 +32,40 @@ import type {
   SkillProposal,
 } from '../shared/types'
 import type { SkillDetail, SkillImportPreview, SkillRecord, SkillWriteInput } from '../shared/skills'
-import type { LiteratureApi, LiteratureSearchEvent, LiteratureSearchInput } from '../shared/literature-search'
 
 const workspaceInvoke=(name:string,...args:unknown[])=>ipcRenderer.invoke('navora:browser.workspace.'+name,...args)
 const api = {
+  questionnaires:{
+    list:(chatId?:string)=>ipcRenderer.invoke('navora:questionnaires.list',chatId),
+    get:id=>ipcRenderer.invoke('navora:questionnaires.get',id),
+    saveDraft:(id,input)=>ipcRenderer.invoke('navora:questionnaires.saveDraft',id,input),
+    submit:(id,input)=>ipcRenderer.invoke('navora:questionnaires.submit',id,input),
+    cancel:(id,reason)=>ipcRenderer.invoke('navora:questionnaires.cancel',id,reason),
+    attach:(id,questionId,files)=>ipcRenderer.invoke('navora:questionnaires.attach',id,questionId,files),
+    openAttachment:(id,attachmentId)=>ipcRenderer.invoke('navora:questionnaires.openAttachment',id,attachmentId),
+    revise:id=>ipcRenderer.invoke('navora:questionnaires.revise',id),
+    listTemplates:()=>ipcRenderer.invoke('navora:questionnaires.listTemplates'),
+    saveTemplate:(id,title)=>ipcRenderer.invoke('navora:questionnaires.saveTemplate',id,title),
+    deleteTemplate:id=>ipcRenderer.invoke('navora:questionnaires.deleteTemplate',id),
+    useTemplate:(id,chatId)=>ipcRenderer.invoke('navora:questionnaires.useTemplate',id,chatId),
+    onChanged:callback=>{const listener=(_event:Electron.IpcRendererEvent,record:Parameters<typeof callback>[0])=>callback(record);ipcRenderer.on('navora:questionnaires.changed',listener);return()=>{ipcRenderer.removeListener('navora:questionnaires.changed',listener)}},
+  } satisfies QuestionnairesApi,
   nativeUi:{
     capabilities:()=>ipcRenderer.invoke('navora:native-ui.capabilities'),
     popupMenu:input=>ipcRenderer.invoke('navora:native-ui.menu',input),
+    updateMenu:(id,patch)=>ipcRenderer.invoke('navora:native-ui.updateMenu',id,patch),
     closeMenu:id=>ipcRenderer.invoke('navora:native-ui.closeMenu',id),
     showPanel:input=>ipcRenderer.invoke('navora:native-ui.show',input),
     updatePanel:(id,session,patch)=>ipcRenderer.invoke('navora:native-ui.update',id,session,patch),
+    commandPanel:(id,session,command)=>ipcRenderer.invoke('navora:native-ui.command',id,session,command),
+    patchPanel:(id,session,operations,options)=>ipcRenderer.invoke('navora:native-ui.patch',id,session,operations,options),
     hidePanel:(id,session)=>ipcRenderer.invoke('navora:native-ui.hide',id,session),
     destroyPanel:(id,session)=>ipcRenderer.invoke('navora:native-ui.destroy',id,session),
     showPageInfo:(id,anchor,url)=>ipcRenderer.invoke('navora:native-ui.pageInfo',id,anchor,url),
+    onMenuOpened:callback=>{const listener=(_event:Electron.IpcRendererEvent,value:Parameters<typeof callback>[0])=>callback(value);ipcRenderer.on('navora:native-ui.menu-opened',listener);return ()=>{ipcRenderer.removeListener('navora:native-ui.menu-opened',listener)}},
+    onMenuControl:callback=>{const listener=(_event:Electron.IpcRendererEvent,value:Parameters<typeof callback>[0])=>callback(value);ipcRenderer.on('navora:native-ui.menu-control',listener);return ()=>{ipcRenderer.removeListener('navora:native-ui.menu-control',listener)}},
     onPanelEvent:callback=>{const listener=(_event:Electron.IpcRendererEvent,value:Parameters<typeof callback>[0])=>callback(value);ipcRenderer.on('navora:native-ui.event',listener);return ()=>{ipcRenderer.removeListener('navora:native-ui.event',listener)}},
   } satisfies NativeUiApi,
-  literature: {
-    search: (input: LiteratureSearchInput): Promise<{ searchId: string }> => ipcRenderer.invoke('navora:literature.search', input),
-    cancel: (searchId: string): Promise<void> => ipcRenderer.invoke('navora:literature.cancel', searchId),
-    onEvent: (callback: (event: LiteratureSearchEvent) => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, payload: LiteratureSearchEvent) => callback(payload)
-      ipcRenderer.on('navora:literature.event', listener)
-      return () => { ipcRenderer.removeListener('navora:literature.event', listener) }
-    },
-  } satisfies LiteratureApi,
   fileTabs:{
     open:(...args)=>ipcRenderer.invoke('navora:file-tabs.open',...args),
     state:()=>ipcRenderer.invoke('navora:file-tabs.state'),
@@ -97,6 +108,12 @@ const api = {
     }
   },
   app: {
+    startup: {
+      active: process.argv.includes('--navora-startup'),
+      shown: (): Promise<void> => ipcRenderer.invoke('navora:app.startup.shown'),
+      ready: (): Promise<boolean> => ipcRenderer.invoke('navora:app.startup.ready'),
+      complete: (): Promise<void> => ipcRenderer.invoke('navora:app.startup.complete'),
+    },
     platform: process.platform as string,
     nativeTitleBar: process.platform === 'win32' || process.platform === 'darwin',
     openSettings: (section: import('../shared/settings-navigation').SettingsSection = 'basic'): Promise<import('../shared/settings-navigation').SettingsOpenResult> => ipcRenderer.invoke('navora:app.settings.open', section),
@@ -116,13 +133,40 @@ const api = {
     info: (): Promise<AppInfo> => ipcRenderer.invoke('navora:app.info'),
     openExternal: (url: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke('navora:app.openExternal', url),
-    quit: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('navora:app.quit'),
+    openLink: (input: import('../shared/app-links').AppLinkRequest): Promise<import('../shared/app-links').AppLinkResult> =>
+      ipcRenderer.invoke('navora:app.openLink', input),
+    onLinkError: (callback:(error:string)=>void) => {
+      const listener=(_event:Electron.IpcRendererEvent,error:string)=>callback(error)
+      ipcRenderer.on('navora:app.link-error',listener)
+      return ()=>{ipcRenderer.removeListener('navora:app.link-error',listener)}
+    },
+    quitState: ():Promise<import('../shared/app-quit').AppQuitState> => ipcRenderer.invoke('navora:app.quitState'),
+    quit: (expectedRunningAgents?:number): Promise<import('../shared/app-quit').AppQuitResult> => expectedRunningAgents===undefined?ipcRenderer.invoke('navora:app.quit'):ipcRenderer.invoke('navora:app.quit',expectedRunningAgents),
+    onQuitRequested: (callback:(request:import('../shared/app-quit').AppQuitRequest)=>void) => {
+      const listener=(_event:Electron.IpcRendererEvent,request:import('../shared/app-quit').AppQuitRequest)=>callback(request)
+      ipcRenderer.on('navora:app.quit-requested',listener)
+      ipcRenderer.send('navora:app.quit-request-ready')
+      return ()=>{ipcRenderer.removeListener('navora:app.quit-requested',listener);ipcRenderer.send('navora:app.quit-request-unready')}
+    },
     minimize: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('navora:app.window.minimize'),
     toggleMaximize: (): Promise<{ ok: boolean; maximized?: boolean }> =>
       ipcRenderer.invoke('navora:app.window.toggleMaximize'),
     close: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('navora:app.window.close'),
     isMaximized: (): Promise<{ maximized: boolean }> =>
       ipcRenderer.invoke('navora:app.window.isMaximized'),
+    toggleFullscreen: ():Promise<import('../shared/types').AppFullscreenToggleResult> => ipcRenderer.invoke('navora:app.window.toggleFullscreen'),
+    isFullscreen: ():Promise<import('../shared/types').AppFullscreenState> => ipcRenderer.invoke('navora:app.window.isFullscreen'),
+    onFullscreen: (cb:(fullscreen:boolean)=>void) => {
+      const listener=(_e:Electron.IpcRendererEvent,fullscreen:boolean)=>cb(fullscreen===true)
+      ipcRenderer.on('navora:app.window.fullscreen',listener)
+      return ()=>{ipcRenderer.removeListener('navora:app.window.fullscreen',listener)}
+    },
+    windowMaterial: (): Promise<import('../shared/window-material').WindowMaterialState> => ipcRenderer.invoke('navora:app.window.material'),
+    onWindowMaterial: (callback: (state: import('../shared/window-material').WindowMaterialState) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, state: import('../shared/window-material').WindowMaterialState) => callback(state)
+      ipcRenderer.on('navora:app.window.material.changed', listener)
+      return () => { ipcRenderer.removeListener('navora:app.window.material.changed', listener) }
+    },
     onMaximized: (cb: (maximized: boolean) => void) => {
       const listener = (_e: Electron.IpcRendererEvent, maximized: boolean) => cb(Boolean(maximized))
       ipcRenderer.on('navora:app.window.maximized', listener)
@@ -217,8 +261,8 @@ const api = {
     ): Promise<ChatSession | null> => ipcRenderer.invoke('navora:agent.run', chatId, payload),
     retry: (chatId: string): Promise<ChatSession | null> =>
       ipcRenderer.invoke('navora:agent.retry', chatId),
-    stop: (chatId: string): Promise<{ ok: boolean }> =>
-      ipcRenderer.invoke('navora:agent.stop', chatId),
+    stop: (chatId: string,expectedRunId?:string): Promise<{ ok: boolean;error?:string }> =>
+      expectedRunId===undefined?ipcRenderer.invoke('navora:agent.stop',chatId):ipcRenderer.invoke('navora:agent.stop',chatId,expectedRunId),
     isRunning: (chatId: string): Promise<boolean> =>
       ipcRenderer.invoke('navora:agent.isRunning', chatId),
     onEvent: (cb: (ev: AgentEvent) => void) => {
@@ -285,12 +329,18 @@ const api = {
       find:(...args)=>workspaceInvoke('find',...args),stopFind:(...args)=>workspaceInvoke('stopFind',...args),
       onFindResult:(cb)=>{const listener=(_e:Electron.IpcRendererEvent,value:Parameters<typeof cb>[0])=>cb(value);ipcRenderer.on('navora:browser.find-result',listener);return ()=>ipcRenderer.removeListener('navora:browser.find-result',listener)},
       onFindShortcut:(cb)=>{const listener=(_e:Electron.IpcRendererEvent,value:Parameters<typeof cb>[0])=>cb(value);ipcRenderer.on('navora:browser.find-shortcut',listener);return ()=>ipcRenderer.removeListener('navora:browser.find-shortcut',listener)},
+      onPageMenuAction:(cb)=>{const listener=(_e:Electron.IpcRendererEvent,value:Parameters<typeof cb>[0])=>cb(value);ipcRenderer.on('navora:browser.page-menu',listener);return ()=>ipcRenderer.removeListener('navora:browser.page-menu',listener)},
       ensure:(...args)=>workspaceInvoke('ensure',...args),claimLayout:(pageId)=>workspaceInvoke('claimLayout',pageId),layout:(...args)=>workspaceInvoke('layout',...args),state:()=>workspaceInvoke('state'),preview:(pageId:string)=>workspaceInvoke('preview',pageId),
       tabState:chatId=>workspaceInvoke('tabState',chatId),tabAction:input=>workspaceInvoke('tabAction',input),
+      pageAddressAction:(...args)=>workspaceInvoke('pageAddressAction',...args),
+      setAlwaysOnTop:enabled=>workspaceInvoke('setAlwaysOnTop',enabled),
+      onAlwaysOnTop:cb=>{const listener=(_e:Electron.IpcRendererEvent,value:Parameters<typeof cb>[0])=>cb(value);ipcRenderer.on('navora:browser.always-on-top',listener);return ()=>ipcRenderer.removeListener('navora:browser.always-on-top',listener)},
       editState:id=>workspaceInvoke('editState',id),edit:(...args)=>workspaceInvoke('edit',...args),
       openSettings:id=>workspaceInvoke('openSettings',id),
       onOpenSettings:cb=>{const listener=(_e:Electron.IpcRendererEvent,payload:Parameters<typeof cb>[0])=>cb(payload);ipcRenderer.on('navora:browser.open-settings',listener);return ()=>ipcRenderer.removeListener('navora:browser.open-settings',listener)},
       onApplicationMenu:cb=>{const listener=(_e:Electron.IpcRendererEvent,payload:Parameters<typeof cb>[0])=>cb(payload);ipcRenderer.on('navora:app.menu-focus',listener);return ()=>ipcRenderer.removeListener('navora:app.menu-focus',listener)},
+      workspaceState:()=>workspaceInvoke('workspaceState'),activateTab:key=>workspaceInvoke('activateTab',key),reorderTabs:(...args)=>workspaceInvoke('reorderTabs',...args),
+      onWorkspaceChanged:cb=>{const listener=()=>cb();ipcRenderer.on('navora:browser.workspace-changed',listener);return ()=>ipcRenderer.removeListener('navora:browser.workspace-changed',listener)},
       command:(...args)=>workspaceInvoke('command',...args),detach:(id)=>workspaceInvoke('detach',id),attach:(id)=>workspaceInvoke('attach',id),
       beginDrag:(...args)=>workspaceInvoke('beginDrag',...args),endDrag:(...args)=>workspaceInvoke('endDrag',...args),drop:(token)=>workspaceInvoke('drop',token),dropTabs:token=>workspaceInvoke('dropTabs',token),
       beginAnnotation:(...args)=>workspaceInvoke('annotation.begin',...args),collectAnnotation:(...args)=>workspaceInvoke('annotation.collect',...args),
@@ -303,6 +353,7 @@ const api = {
       onAddressFocus:(cb)=>{const listener=(_e:Electron.IpcRendererEvent,id:string)=>cb(id);ipcRenderer.on('navora:browser.address-focus',listener);return ()=>{ipcRenderer.removeListener('navora:browser.address-focus',listener)}},
       onTabShortcut:(cb)=>{const listener=(_e:Electron.IpcRendererEvent,payload:Parameters<typeof cb>[0])=>cb(payload);ipcRenderer.on('navora:browser.tab-shortcut',listener);return ()=>ipcRenderer.removeListener('navora:browser.tab-shortcut',listener)},
       onPresent:(cb)=>{const listener=(_e:Electron.IpcRendererEvent,value:Parameters<typeof cb>[0])=>cb(value);ipcRenderer.on('navora:browser.present',listener);return ()=>{ipcRenderer.removeListener('navora:browser.present',listener)}},
+      onLayoutInvalidated:(cb)=>{const listener=(_e:Electron.IpcRendererEvent,value:Parameters<typeof cb>[0])=>cb(value);ipcRenderer.on('navora:browser.layout-invalidated',listener);return ()=>{ipcRenderer.removeListener('navora:browser.layout-invalidated',listener)}},
     } as BrowserWorkspaceApi,
     treeAll: (): Promise<BrowserTreeSession[]> => ipcRenderer.invoke('navora:browser.treeAll'),
     tree: (chatId: string): Promise<BrowserTreeSession[]> =>
@@ -311,16 +362,16 @@ const api = {
       ipcRenderer.invoke('navora:browser.windowCounts'),
     createSession: (
       chatId: string,
-      opts?: { persist?: boolean },
+      opts?: BrowserSessionCreateOptions,
     ): Promise<BrowserTreeSession> =>
       ipcRenderer.invoke('navora:browser.session.create', chatId, opts),
     closeSession: (sessionId: string): Promise<boolean> =>
       ipcRenderer.invoke('navora:browser.session.close', sessionId),
     updateSession:(sessionId:string,patch:BrowserSessionUpdate):Promise<BrowserTreeSession>=>ipcRenderer.invoke('navora:browser.session.update',sessionId,patch),
-    manageSession:(sessionId:string,action:BrowserSessionManageAction):Promise<BrowserSessionManageResult>=>ipcRenderer.invoke('navora:browser.session.manage',sessionId,action),
+    manageSession:(sessionId:string,action:BrowserSessionManageAction,options?:BrowserSessionManageOptions):Promise<BrowserSessionManageResult>=>ipcRenderer.invoke('navora:browser.session.manage',sessionId,action,options),
     createWindow: (
       sessionId: string,
-      opts?: { url?: string; show?: boolean },
+      opts?: { url?: string; show?: boolean;chatId?:string },
     ): Promise<BrowserTreeWindow> =>
       ipcRenderer.invoke('navora:browser.window.create', sessionId, opts),
     setVisible: (windowId: string, visible: boolean): Promise<boolean> =>
@@ -364,6 +415,7 @@ const api = {
       ipcRenderer.invoke('navora:remote.openWindow', windowId),
   },
   workspace: {
+    fileAction:(chatId:string,relative:string,action:import('../shared/workspace-file-actions').WorkspaceFileAction,options?:import('../shared/workspace-file-actions').WorkspaceFileActionOptions):Promise<import('../shared/workspace-file-actions').WorkspaceFileActionResult>=>ipcRenderer.invoke('navora:workspace.fileAction',chatId,relative,action,options),
     saveAs:(chatId:string,relPath:string):Promise<{ok:boolean;canceled?:boolean;error?:string}>=>ipcRenderer.invoke('navora:workspace.saveAs',chatId,relPath),
     resources:(chatId:string,refresh=false):Promise<import('../shared/workspace-resources').WorkspaceResourceSnapshot>=>ipcRenderer.invoke('navora:workspace.resources',chatId,refresh),
     hasFiles:(chatId:string):Promise<boolean>=>ipcRenderer.invoke('navora:workspace.hasFiles',chatId),
@@ -438,6 +490,8 @@ const api = {
     },
   },
   downloads: {
+    icon: (id: string, chatId?: string): Promise<string | undefined> =>
+      ipcRenderer.invoke('navora:downloads.icon', id, chatId),
     list: (chatId?: string): Promise<BrowserDownloadEntry[]> =>
       ipcRenderer.invoke('navora:downloads.list', chatId),
     clear: (chatId?: string): Promise<{ ok: true; removed: number }> =>
@@ -466,6 +520,10 @@ const api = {
     },
   } satisfies BrowserDownloadsApi,
   plugins: {
+    recoveryStatus: (): Promise<import('../shared/plugins').PluginRecoveryStatus> =>
+      ipcRenderer.invoke('navora:plugins.recoveryStatus'),
+    retryRecovery: (): Promise<{ ok: boolean; status: import('../shared/plugins').PluginRecoveryStatus; error?: string }> =>
+      ipcRenderer.invoke('navora:plugins.retryRecovery'),
     list: (): Promise<import('../shared/plugins').PluginRecord[]> =>
       ipcRenderer.invoke('navora:plugins.list'),
     get: (id: string): Promise<import('../shared/plugins').PluginRecord | null> =>

@@ -1,5 +1,6 @@
 import type {ChatSession,SubchatIndexItem,SubChatRunStatus} from './types'
 import {subchatAttemptSummary} from './subchat-runtime'
+export {subchatGlyph,subchatGlyphUrl} from './subchat-glyph'
 
 export const subchatStatusLabels:Record<SubChatRunStatus,string>={running:'进行中',done:'已完成',failed:'失败',cancelled:'已停止',interrupted:'已中断'}
 export function subchatSummary(chat:ChatSession):string{
@@ -15,11 +16,3 @@ export function subchatTime(item:SubchatIndexItem,now=Date.now()):string{
   const seconds=Math.max(0,Math.floor(((run.finishedAt??now)-run.startedAt)/1000))
   return seconds<60?`${seconds} 秒`:`${Math.floor(seconds/60)} 分 ${seconds%60} 秒`
 }
-/** Stable, local vector identity. Version 1 deliberately does not depend on a title or theme. */
-export function subchatGlyph(id:string):string{
-  let seed=2166136261;for(const char of `v1:${id}`)seed=Math.imul(seed^char.charCodeAt(0),16777619)>>>0
-  const hue=seed%360,kind=(seed>>>9)%3,count=6+(seed%3),rotation=(seed>>>16)%60
-  const shapes=Array.from({length:count},(_,i)=>{const angle=i*360/count;return kind===0?`<ellipse cx="16" cy="8.2" rx="3.2" ry="6.1" transform="rotate(${angle} 16 16)"/>`:kind===1?`<path d="M16 3 23 11 16 16 12 10Z" transform="rotate(${angle} 16 16)"/>`:`<path d="M16 2 20 11 16 16 12 11Z" transform="rotate(${angle} 16 16)"/>`}).join('')
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><g transform="rotate(${rotation} 16 16)" fill="hsl(${hue} 64% 63%)" fill-opacity=".83" stroke="hsl(${hue} 55% 36%)" stroke-width=".5">${shapes}</g><circle cx="16" cy="16" r="3" fill="hsl(${hue} 55% 35%)" stroke="white" stroke-width=".8"/></svg>`
-}
-export function subchatGlyphUrl(id:string):string{return `data:image/svg+xml,${encodeURIComponent(subchatGlyph(id))}`}

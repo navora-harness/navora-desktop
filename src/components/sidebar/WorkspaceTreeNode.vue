@@ -1,5 +1,5 @@
 <template>
-  <div class="ws-nodes" :role="depth === 0 ? 'tree' : 'group'" :aria-label="depth === 0 ? '工作区文件' : undefined">
+  <div class="ws-nodes" :role="depth === 0 ? 'tree' : 'group'" :aria-label="depth === 0 ? foldersOnly?'工作区文件夹':'工作区文件' : undefined">
     <div v-for="ent in entries" :key="ent.path" class="ws-item" :style="{'--tree-level':depth}">
       <button
         type="button"
@@ -8,7 +8,7 @@
         :tabindex="selected === ent.path || (!hasVisibleSelection && depth === 0 && entries[0]?.path === ent.path) ? 0 : -1"
         @focus="emit('select', ent, false)"
         :aria-level="depth + 1"
-        :aria-expanded="ent.type === 'dir' ? expanded.has(ent.path) : undefined"
+        :aria-expanded="canExpand(ent) ? expanded.has(ent.path) : undefined"
         :aria-selected="selected === ent.path"
         :data-depth="depth"
         :data-path="ent.path"
@@ -16,33 +16,35 @@
         @keydown="onKeydown($event, ent)"
         :class="{
           dir: ent.type === 'dir',
-          open: ent.type === 'dir' && expanded.has(ent.path),
+          open: canExpand(ent) && expanded.has(ent.path),
           selected: selected === ent.path,
           nested: depth > 0,
         }"
         :style="{ '--tree-indent': `${8 + depth * 16}px`, paddingLeft: `${8 + depth * 16}px` }"
         :title="ent.download ? `${ent.name}\n${downloadDetail(ent.download)}${ent.virtual ? '' : `\n${ent.path}`}` : ent.path"
         @click="emit('select', ent, true)"
-        @dblclick="ent.type === 'dir' ? emit('toggle', ent) : emit('open', ent)"
+        @dblclick="activate(ent)"
         @contextmenu.prevent="emit('menu', $event, ent)"
       >
         <span
-          v-if="ent.type === 'dir'"
+          v-if="canExpand(ent)"
           class="ws-twist"
+          :class="{'folder-disclosure':foldersOnly}"
+          :title="expanded.has(ent.path)?'收起文件夹':'展开文件夹'"
           @click.stop="emit('toggle', ent)"
         >
-          <AppIcon icon="chevron-right" />
+          <AppIcon :icon="expanded.has(ent.path)?'caret-down':'caret-right'" />
         </span>
         <span v-else class="ws-twist hidden" />
         <AppIcon
-          :icon="ent.type === 'dir' ? (expanded.has(ent.path) ? 'folder-open' : 'folder') : 'file'"
+          :icon="ent.type === 'dir' ? (canExpand(ent) && expanded.has(ent.path) ? 'folder-open' : 'folder') : 'file'"
           class="ws-icon"
         />
         <span class="tree-name">{{ ent.name }}</span>
         <FileDownloadIndicator v-if="ent.download" :download="ent.download" />
         <span v-if="ent.activeDownloads" class="file-download-status started" :title="`${ent.activeDownloads} 个文件正在下载`"><AppIcon icon="download" />{{ ent.activeDownloads }}</span>
       </button>
-      <div v-if="ent.type === 'dir' && expanded.has(ent.path)" class="ws-kids">
+      <div v-if="canExpand(ent) && expanded.has(ent.path)" class="ws-kids">
         <div v-if="loading.has(ent.path) && !(children[ent.path] || []).length" class="ws-hint">加载中…</div>
         <WorkspaceTreeNode
           v-if="(children[ent.path] || []).length"
@@ -52,12 +54,13 @@
           :children="children"
           :loading="loading"
           :selected="selected"
+          :folders-only="foldersOnly"
           @toggle="emit('toggle', $event)"
           @open="emit('open', $event)"
           @select="(entry,activate) => emit('select', entry, activate)"
           @menu="forwardMenu"
         />
-        <div v-else-if="!loading.has(ent.path)" class="ws-hint" :style="{ paddingLeft: `${28 + (depth + 1) * 16}px` }">空</div>
+        <div v-else-if="!foldersOnly&&!loading.has(ent.path)" class="ws-hint" :style="{ paddingLeft: `${28 + (depth + 1) * 16}px` }">空</div>
       </div>
     </div>
   </div>
@@ -78,6 +81,7 @@ const props = defineProps<{
   children: Record<string, WsEntry[]>
   loading: Set<string>
   selected: string
+  foldersOnly?: boolean
 }>()
 
 const hasVisibleSelection = computed(() => {
@@ -88,10 +92,18 @@ const emit = defineEmits<{
   toggle: [ent: WsEntry]
   open: [ent: WsEntry]
   select: [ent: WsEntry, activate?:boolean]
-  menu: [e: MouseEvent, ent: WsEntry]
+  menu: [e: MouseEvent|KeyboardEvent, ent: WsEntry]
 }>()
 
+function canExpand(ent:WsEntry){return ent.type==='dir'&&(!props.foldersOnly||!!props.children[ent.path]?.length)}
+function activate(ent:WsEntry){
+  if(ent.type==='dir'){emit('select',ent,true);if(canExpand(ent))emit('toggle',ent)}
+  else emit('open',ent)
+}
+
 async function onKeydown(event: KeyboardEvent, ent: WsEntry) {
+  if(event.isComposing)return
+  if(event.key==='ContextMenu'||event.key==='F10'&&event.shiftKey){event.preventDefault();event.stopPropagation();emit('menu',event,ent);return}
   const row = event.currentTarget as HTMLElement
   const tree = row.closest('[role="tree"]')
   const rows = [...(tree?.querySelectorAll<HTMLElement>('.tree-row') || [])].filter(el => el.checkVisibility())
@@ -101,20 +113,20 @@ async function onKeydown(event: KeyboardEvent, ent: WsEntry) {
   else if (event.key === 'ArrowUp') target = rows[Math.max(0, current - 1)]
   else if (event.key === 'Home') target = rows[0]
   else if (event.key === 'End') target = rows.at(-1)
-  else if (event.key === 'ArrowRight' && ent.type === 'dir') {
+  else if (event.key === 'ArrowRight' && canExpand(ent)) {
     if (!props.expanded.has(ent.path)) emit('toggle', ent)
     else target = rows[current + 1]
   } else if (event.key === 'ArrowLeft') {
-    if (ent.type === 'dir' && props.expanded.has(ent.path)) emit('toggle', ent)
+    if (canExpand(ent) && props.expanded.has(ent.path)) emit('toggle', ent)
     else target = rows.slice(0, current).reverse().find(el => Number(el.dataset.depth) < props.depth)
   } else if (event.key === 'Enter') {
-    ent.type === 'dir' ? emit('toggle', ent) : emit('open', ent)
+    activate(ent)
   } else return
   event.preventDefault()
   if (target) { target.focus({ preventScroll: true }); target.scrollIntoView({ block: 'nearest' }); }
   await nextTick()
 }
-function forwardMenu(e: MouseEvent, ent: WsEntry) {
+function forwardMenu(e: MouseEvent|KeyboardEvent, ent: WsEntry) {
   emit('menu', e, ent)
 }
 </script>
@@ -159,7 +171,10 @@ function forwardMenu(e: MouseEvent, ent: WsEntry) {
 .tree-row.nested::before { content:'';position:absolute;left:calc(var(--tree-indent) - 9px);top:50%;width:6px;height:1px;background:#dce3eb;pointer-events:none; }
 .tree-row { transition:background-color 140ms ease; }
 .ws-twist svg { width:10px;height:10px;transition:transform 140ms ease; }
-.tree-row.open > .ws-twist svg { transform:rotate(90deg); }
+
+.ws-twist.folder-disclosure{width:14px;height:14px;align-self:center;color:var(--navora-muted)}
+.ws-twist.folder-disclosure:hover{color:var(--navora-accent)}
+.ws-twist.folder-disclosure svg{width:12px;height:12px;transition:none}
 @media(prefers-reduced-motion:reduce) {
   .tree-row,.ws-twist svg { transition:none; }
 }

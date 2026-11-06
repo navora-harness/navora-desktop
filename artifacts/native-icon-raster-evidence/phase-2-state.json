@@ -1,0 +1,227 @@
+{
+  "anchorBounds": {
+    "height": 1,
+    "width": 1,
+    "x": 10,
+    "y": 10
+  },
+  "backgroundMaterial": "none",
+  "backgroundMaterialApplied": "none",
+  "bounds": {
+    "height": 83,
+    "width": 469,
+    "x": 2,
+    "y": 2
+  },
+  "contentBounds": {
+    "height": 55,
+    "width": 441,
+    "x": 16,
+    "y": 16
+  },
+  "contentHeight": 30,
+  "controls": [
+    {
+      "bounds": {
+        "height": 28,
+        "width": 26,
+        "x": 30,
+        "y": 30
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 26,
+          "width": 24,
+          "x": 31,
+          "y": 31
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "phase-0",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 28,
+        "width": 26,
+        "x": 60,
+        "y": 30
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 26,
+          "width": 24,
+          "x": 61,
+          "y": 31
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "phase-1",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 28,
+        "width": 26,
+        "x": 90,
+        "y": 30
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 26,
+          "width": 24,
+          "x": 91,
+          "y": 31
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "phase-2",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 28,
+        "width": 26,
+        "x": 120,
+        "y": 30
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 26,
+          "width": 24,
+          "x": 121,
+          "y": 31
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "phase-3",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 28,
+        "width": 26,
+        "x": 150,
+        "y": 30
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 26,
+          "width": 24,
+          "x": 151,
+          "y": 31
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "phase-4",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 28,
+        "width": 26,
+        "x": 180,
+        "y": 30
+      },
+      "focusRing": {
+        "bounds": {
+          "height": 26,
+          "width": 24,
+          "x": 181,
+          "y": 31
+        },
+        "haloInset": 1,
+        "haloThickness": 2,
+        "visible": false
+      },
+      "id": "phase-5",
+      "type": "iconButton"
+    },
+    {
+      "bounds": {
+        "height": 30,
+        "width": 417,
+        "x": 28,
+        "y": 28
+      },
+      "id": "phase-root",
+      "type": "column"
+    },
+    {
+      "bounds": {
+        "height": 28,
+        "width": 415,
+        "x": 30,
+        "y": 30
+      },
+      "id": "phase-row",
+      "type": "row"
+    }
+  ],
+  "destroyed": false,
+  "materialDwmBackdrop": 0,
+  "materialFallbackReason": "",
+  "nativeWindowsValid": true,
+  "parentWindowHandle": "4591048",
+  "scrollbar": {
+    "bounds": {
+      "height": 0,
+      "width": 0,
+      "x": 28,
+      "y": 28
+    },
+    "hovered": false,
+    "maximum": 0,
+    "placement": "gutter",
+    "position": 0,
+    "pressed": false,
+    "thumb": {
+      "height": 0,
+      "width": 0,
+      "x": 28,
+      "y": 28
+    },
+    "thumbPaintBounds": {
+      "height": 0,
+      "width": 4,
+      "x": 26,
+      "y": 28
+    },
+    "track": {
+      "height": 0,
+      "width": 0,
+      "x": 28,
+      "y": 28
+    },
+    "visible": false
+  },
+  "scrollbarPlacement": "gutter",
+  "shadowBounds": {
+    "height": 84,
+    "width": 471,
+    "x": 2,
+    "y": 2
+  },
+  "shadowVisible": true,
+  "shadowWindowHandle": "3935642",
+  "theme": {
+    "background": "#ffffff",
+    "fontFamily": "Segoe UI",
+    "fontSize": 13,
+    "mode": "light",
+    "text": "#263b55"
+  },
+  "viewportHeight": 31,
+  "visible": true,
+  "windowHandle": "1249118"
+}

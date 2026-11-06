@@ -65,27 +65,7 @@
       <v-spacer />
       <template v-if="displayProduct">
         <span v-if="displayProduct.installed && !hasUpdate" class="footer-installed">已安装</span>
-        <v-menu v-if="displayProduct.installed" location="top">
-          <template #activator="{ props: menuProps }">
-            <v-btn
-              icon
-              variant="text"
-              aria-label="更多"
-              :disabled="busy"
-              v-bind="menuProps"
-            >
-              <AppIcon icon="ellipsis-vertical" />
-            </v-btn>
-          </template>
-          <v-list density="compact" min-width="120">
-            <v-list-item
-              title="更改"
-              :disabled="!canChange"
-              @click="canChange && emit('change')"
-            />
-            <v-list-item title="卸载" base-color="error" @click="emit('uninstall')" />
-          </v-list>
-        </v-menu>
+        <ActionMenu v-if="displayProduct.installed" :label="`${displayProduct.name}的更多操作`" icon="ellipsis-vertical" location="top start" :disabled="busy||!modelValue||!product" :context-key="productMenuContext" :items="productMenuItems" @select="productMenuAction" />
         <v-btn
           v-if="hasUpdate"
           color="primary"
@@ -118,6 +98,7 @@ import { compareStoreVersions, latestPackageVersion, storeErrorText } from '@sha
 import SkillDialogShell from '../skills/SkillDialogShell.vue'
 import { renderMarkdown } from '@/utils/markdown'
 import PluginMarkdown from '../plugins/PluginMarkdown.vue'
+import ActionMenu, { type ActionMenuItem } from '../ActionMenu.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -166,6 +147,18 @@ const canChange = computed(
     displayProduct.value?.displayMode === 'suite' &&
     (displayProduct.value?.packages.length || 0) > 1,
 )
+
+const productMenuContext=computed(()=>JSON.stringify([props.modelValue,props.product?.kind,props.product?.productId,props.product?.installed?.packageId,props.product?.installed?.version]))
+const productMenuItems=computed<ActionMenuItem[]>(()=>[
+  {id:'change',label:'更改',disabled:!canChange.value},
+  {id:'uninstall',label:'卸载',icon:'trash',danger:true},
+])
+function productMenuAction(action:string) {
+  const target=props.product,shown=displayProduct.value
+  if(!props.modelValue||props.busy||!target?.installed||!shown||target.kind!==shown.kind||target.productId!==shown.productId||target.installed.packageId!==shown.installed?.packageId)return
+  if(action==='change'&&canChange.value)emit('change')
+  else if(action==='uninstall')emit('uninstall')
+}
 
 const docsEmptyText = computed(() => docsError.value || '暂无产品说明')
 

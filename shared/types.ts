@@ -82,8 +82,12 @@ export type ChatMessage = {
     turnId?: string
     /** Distinguishes execution narration from a completed answer after streaming ends. */
     phase?: 'progress' | 'final'
+    /** Explicit resource presentation; absence preserves legacy delivery associations. */
+    fileOutputs?: Array<{path:string;purpose:import('./workspace-resources').ResourcePurpose}>
+    resourcePurpose?: import('./workspace-resources').ResourcePurpose
     refs?: BrowserContextRef[]
     document?: ComposerDocument
+    taskConstraints?: import('./task-declarations').RuntimeTaskConstraints
     clientMessageId?: string
     [key: string]: unknown
   }
@@ -175,9 +179,11 @@ export type ChatSession = {
   pendingAsk?: AgentAskRequest
 }
 
-export type QueuedMessage = {modelIdentity?:import('./model-selection').ModelSelectionIdentity;id:string;content:string;refs?:BrowserContextRef[];document?:ComposerDocument;clientMessageId?:string;revision?:number;createdAt:number;error?:string}
+export type QueuedMessage = {modelIdentity?:import('./model-selection').ModelSelectionIdentity;id:string;content:string;refs?:BrowserContextRef[];document?:ComposerDocument;taskConstraints?:import('./task-declarations').RuntimeTaskConstraints;clientMessageId?:string;revision?:number;createdAt:number;error?:string}
 
 export type BrowserTreeWindow = {
+  /** Actual page/task origin, independent from a shared storage session. */
+  chatId?: string
   manualMuted?:boolean
   muteReason?:'manual'|'agent'
   desiredUrl?:string
@@ -217,15 +223,23 @@ export type BrowserTreeWindow = {
 }
 
 export type BrowserTreeSession = {
+  scope?: BrowserSessionScope
+  /** False only for the always-present, not-yet-created default storage entry. */
+  initialized?: boolean
   sessionId: string
   chatId: string
   sessionIndex: number
+  /** Stable profile-wide display number; independent of the storage partition index. */
+  displayIndex?: number
   partition: string
   persist: boolean
   name?: string
   isDefault?: boolean
   windows: BrowserTreeWindow[]
 }
+export type BrowserSessionScope = 'default' | 'temporary' | 'persistent'
+export type BrowserSessionCreateOptions = { scope?: BrowserSessionScope; persist?: boolean; ua?: string }
+export type BrowserSessionManageOptions = { chatId?: string; confirmedSharedImpact?: boolean }
 export type BrowserSessionUpdate = { name?: string; isDefault?: boolean }
 export type BrowserSessionManageAction = 'close-pages' | 'clear-data' | 'delete'
 export type BrowserSessionManageResult = { action: BrowserSessionManageAction; closedPages: number; remainingPages: number; deleted: boolean }
@@ -294,8 +308,10 @@ export type AgentAskRequest = {
   subChatTitle?: string
   /** For continue_rounds / multi-step forks */
   meta?: {
+    taskConstraints?:import('./task-declarations').RuntimeTaskConstraints
     roundsUsed?: number
     continueBy?: number
+    roundBudget?: import('./agent-progress-policy').AgentRoundBudget
     /** 1-based step index in a continuous / hierarchical fork chain */
     step?: number
     /** Total planned steps when known */
@@ -484,6 +500,7 @@ export type BrowserDownloadsChanged = {
 
 export type BrowserDownloadsApi = {
   list: (chatId?: string) => Promise<BrowserDownloadEntry[]>
+  icon?: (id: string, chatId?: string) => Promise<string | undefined>
   clear: (chatId?: string) => Promise<{ ok: true; removed: number }>
   remove: (id: string, chatId?: string) => Promise<{ ok: boolean; error?: string }>
   pause: (id: string, chatId?: string) => Promise<{ ok: boolean; error?: string }>
@@ -494,3 +511,5 @@ export type BrowserDownloadsApi = {
   onChanged: (cb: (payload: BrowserDownloadsChanged) => void) => () => void
 }
 
+export type AppFullscreenState={fullscreen:boolean}
+export type AppFullscreenToggleResult=AppFullscreenState&{ok:boolean}

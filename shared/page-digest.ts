@@ -4,6 +4,8 @@
  * a headline-oriented digest keeps analysis useful while reducing rejections.
  */
 
+import { compactPageBlocker } from './page-blocker'
+
 const NAV_NOISE =
   /^(subscribe|log in|sign in|menu|skip to content|cookie|accept all|the economist pro|weekly edition|world in brief|search|close|back to top)$/i
 
@@ -99,6 +101,74 @@ function compactStructuredPage(value: Record<string, unknown>, maxChars: number)
   return output
 }
 
+function nativeSnapshot(value: unknown): value is Record<string, unknown> & {elements: unknown[]; frames: unknown[]} {
+  return !!value && typeof value === 'object' && !Array.isArray(value) &&
+    Array.isArray((value as Record<string, unknown>).elements) && Array.isArray((value as Record<string, unknown>).frames) &&
+    typeof (value as Record<string, unknown>).complete === 'boolean'
+}
+
+function compactNativeSnapshot(value: Record<string, unknown> & {elements:unknown[];frames:unknown[]}, maxChars: number): Record<string, unknown> {
+  if (JSON.stringify(value).length <= maxChars) return value
+  const reasons=Array.isArray(value.truncationReasons)?value.truncationReasons.filter(reason=>typeof reason==='string'):[]
+  const coverage={complete:value.complete,truncated:value.truncated,truncationReasons:reasons,frameCount:value.frames.length,elementCount:value.elements.length}
+  const frames:Record<string,unknown>[]=[],elements:Record<string,unknown>[]=[]
+  const modelTruncation={reason:'MODEL_RESULT_BUDGET',omittedElements:value.elements.length,omittedFrames:value.frames.length,fieldsShortened:0}
+  const output={complete:false,truncated:true,truncationReasons:[...new Set([...reasons,'MODEL_RESULT_BUDGET'])],sourceCoverage:coverage,modelTruncation,frames,elements}
+  const frameKey=(item:Record<string,unknown>)=>`${item.processId}:${item.routingId}`
+  const frameMap=new Map(value.frames.filter(item=>item&&typeof item==='object').map(item=>[frameKey(item as Record<string,unknown>),item as Record<string,unknown>]))
+  const includedFrames=new Set<string>()
+  function compactRecord(raw:Record<string,unknown>, keys:readonly string[], limit=240) {
+    const result:Record<string,unknown>={}
+    const omitted:string[]=[]
+    for(const key of keys){
+      const field=raw[key]
+      if(field===undefined)continue
+      if(typeof field==='string'&&field.length>limit&&key!=='ref'){
+        // Input values and locators must never become plausible but false data.
+        if(['value','url','href','selector','ref'].includes(key)){omitted.push(key);continue}
+        result[key]=`${field.slice(0,limit)}…`;omitted.push(key)
+      }else result[key]=field
+    }
+    if(omitted.length)result.modelFieldsTruncated=omitted
+    return result
+  }
+  function elementRank(raw:Record<string,unknown>) {
+    const editable=/^(?:input|textarea|select)$/iu.test(String(raw.tagName))||/textbox|searchbox|combobox/iu.test(String(raw.role))
+    if(raw.visible!==false&&raw.focused===true)return 0
+    if(raw.visible!==false&&editable)return 1
+    if(raw.visible!==false&&(/button|link|checkbox|radio|menuitem/iu.test(String(raw.role))||/^(?:a|button)$/iu.test(String(raw.tagName))))return 2
+    return raw.visible!==false?3:editable?4:5
+  }
+  const candidates=value.elements.filter(item=>item&&typeof item==='object').map(item=>item as Record<string,unknown>).sort((a,b)=>elementRank(a)-elementRank(b))
+  let size=JSON.stringify(output).length
+  for(const raw of candidates){
+    const item=compactRecord(raw,['ref','target','backendNodeId','parentBackendNodeId','tagName','type','role','name','text','value','valueRedacted','labelText','description','placeholder','descriptionText','errorText','invalid','disabled','readOnly','checked','selected','expanded','focused','visible','bounds'])
+    if(Array.isArray(raw.options)){
+      item.options=raw.options.slice(0,6).filter(option=>option&&typeof option==='object').map(option=>compactRecord(option as Record<string,unknown>,['backendNodeId','label','text','value','selected','disabled'],120))
+      if(raw.options.length>6)item.optionsTruncated=true
+    }
+    const target=raw.target&&typeof raw.target==='object'?raw.target as Record<string,unknown>:null
+    const key=target?frameKey(target):'',rawFrame=frameMap.get(key)
+    const frame=rawFrame&&!includedFrames.has(key)?compactRecord(rawFrame,['processId','routingId','documentId','url','status','reason'],512):null
+    const cost=JSON.stringify(item).length+1+(frame?JSON.stringify(frame).length+1:0)
+    if(size+cost>maxChars-64)continue
+    elements.push(item);size+=cost
+    if(frame){frames.push(frame);includedFrames.add(key)}
+    if(item.modelFieldsTruncated||item.optionsTruncated)modelTruncation.fieldsShortened++
+  }
+  // Keep coverage for unselected/failed frames when space permits, rather than
+  // silently suggesting that selected elements represent the entire page.
+  for(const [key,raw] of frameMap){
+    if(includedFrames.has(key))continue
+    const frame=compactRecord(raw,['processId','routingId','documentId','url','status','reason'],512),cost=JSON.stringify(frame).length+1
+    if(size+cost>maxChars-64)continue
+    frames.push(frame);includedFrames.add(key);size+=cost
+  }
+  modelTruncation.omittedElements=value.elements.length-elements.length
+  modelTruncation.omittedFrames=value.frames.length-frames.length
+  return output
+}
+
 /**
  * Build a model-facing digest from page text (or return as-is if already short).
  */
@@ -156,7 +226,10 @@ export function prepareToolResultForModel(
     }
   } else if (obj.value && typeof obj.value === 'object' && !Array.isArray(obj.value)) {
     const v = obj.value as Record<string, unknown>
-    if ('headings' in v || 'links' in v || 'inputs' in v || 'entries' in v) {
+    if(nativeSnapshot(v)) {
+      obj.value=compactNativeSnapshot(v,budget)
+      if(obj.value!==v){obj.digested=true;obj.truncated=true;obj.modelTruncated=true}
+    } else if ('headings' in v || 'links' in v || 'inputs' in v || 'entries' in v) {
       obj.value = safe ? digestDomSummary(v, budget) : compactStructuredPage(v, budget)
       obj.digested = true
       if (safe) obj.safe_digest = true
@@ -173,9 +246,45 @@ export function prepareToolResultForModel(
 
 /** Always return valid JSON, even when an unusually large result exceeds its budget. */
 export function serializeToolResultForModel(result: unknown, maxChars: number, safe = false): string {
+  const blocker=result&&typeof result==='object'&&!Array.isArray(result)?compactPageBlocker((result as Record<string,unknown>).pageBlocker):undefined
+  if(blocker){
+    const source={...(result as Record<string,unknown>)}
+    delete source.pageBlocker
+    const reserved=JSON.stringify({pageBlocker:blocker}).length+2
+    if(reserved+300<=maxChars){
+      const body=JSON.parse(serializeToolResultForModel(source,maxChars-reserved,safe))
+      return JSON.stringify({...body,pageBlocker:blocker})
+    }
+    // Even the native empty-snapshot and generic shrink paths cannot erase a blocker.
+    const minimal={version:1,state:blocker.state,kind:blocker.kind,windowId:blocker.windowId,webContentsId:blocker.webContentsId,documentEpoch:blocker.documentEpoch,controlEpoch:blocker.controlEpoch,observationId:blocker.observationId,coverage:blocker.coverage,reasonCodes:blocker.reasonCodes,requiresUser:blocker.requiresUser,blocksInteraction:blocker.blocksInteraction,probeUsed:blocker.probeUsed}
+    const retained={ok:source.ok,error:source.error,truncated:true,pageBlocker:minimal,message:'Page blocker metadata retained; request a smaller page scope.'}
+    if(JSON.stringify(retained).length<=maxChars)return JSON.stringify(retained)
+    return JSON.stringify({ok:source.ok,truncated:true,pageBlocker:{version:1,state:'unknown',coverage:'unavailable',reasonCodes:['MODEL_RESULT_BUDGET'],observationId:blocker.observationId},error:'page_blocker_context_budget'})
+  }
   const prepared = prepareToolResultForModel(result, maxChars, safe)
   let serialized = JSON.stringify(prepared) ?? 'null'
   if (serialized.length <= maxChars) return serialized
+  if(prepared&&typeof prepared==='object'&&nativeSnapshot((prepared as Record<string,unknown>).value)){
+    const original=result as Record<string,unknown>,snapshot=original.value
+    if(nativeSnapshot(snapshot)){
+      // Do not send native refs/targets through generic recursive shortening.
+      // Oversized envelope fields (e.g. capabilities) are optional diagnostics.
+      const envelope:Record<string,unknown>={ok:original.ok,native:original.native,partial:original.partial,envelopeTruncated:true,modelTruncated:true}
+      for(const key of ['url','title','loading','waitTimedOut']){
+        const value=original[key]
+        if(typeof value==='string'&&value.length>512)continue
+        if(value!==undefined)envelope[key]=value
+      }
+      let budget=Math.max(0,maxChars-JSON.stringify(envelope).length-20)
+      for(let attempt=0;attempt<4;attempt++){
+        const value=compactNativeSnapshot(snapshot,budget)
+        serialized=JSON.stringify({...envelope,...(value!==snapshot?{truncated:true}:{}),value})
+        if(serialized.length<=maxChars)return serialized
+        budget=Math.max(0,budget-(serialized.length-maxChars)-64)
+      }
+      return JSON.stringify({ok:original.ok,truncated:true,modelTruncated:true,value:{complete:false,truncated:true,truncationReasons:['MODEL_RESULT_BUDGET'],elements:[],frames:[]},message:'Request agent_find or a smaller snapshot scope.'})
+    }
+  }
   const shrink = (value: unknown, limit: number, depth = 0): unknown => {
     if (typeof value === 'string') return value.length > limit ? `${value.slice(0, limit)}…` : value
     if (value === null || typeof value !== 'object') return value

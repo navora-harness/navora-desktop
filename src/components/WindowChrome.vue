@@ -1,5 +1,6 @@
 <template>
   <div class="win-chrome" role="toolbar" aria-label="窗口控制">
+    <button type="button" class="win-chrome-btn" :title="fullscreen?'退出全屏（F11）':'进入全屏（F11）'" :aria-label="fullscreen?'退出全屏':'进入全屏'" :aria-pressed="fullscreen" @mousedown.prevent.stop @click.prevent.stop="toggleFullscreen"><AppIcon :icon="fullscreen?'window-restore':'window-maximize'" /></button>
     <button
       type="button"
       class="win-chrome-btn"
@@ -37,7 +38,9 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 
 const maximized = ref(false)
+const fullscreen=ref(false)
 let offMax: (() => void) | null = null
+let offFullscreen:(()=>void)|undefined
 
 async function refresh() {
   const res = await window.navora?.app.isMaximized?.()
@@ -51,6 +54,7 @@ function minimize() {
 function toggleMaximize() {
   void window.navora?.app.toggleMaximize?.()
 }
+function toggleFullscreen(){void window.navora?.app.toggleFullscreen().then(state=>{fullscreen.value=state.fullscreen})}
 
 function closeWin() {
   void window.navora?.app.close?.()
@@ -58,6 +62,9 @@ function closeWin() {
 
 onMounted(() => {
   void refresh()
+  let received=false
+  offFullscreen=window.navora?.app.onFullscreen(value=>{received=true;fullscreen.value=value})
+  void window.navora?.app.isFullscreen().then(state=>{if(!received)fullscreen.value=state.fullscreen})
   offMax =
     window.navora?.app.onMaximized?.((v) => {
       maximized.value = v
@@ -65,6 +72,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  offFullscreen?.()
   offMax?.()
   offMax = null
 })

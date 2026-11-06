@@ -59,29 +59,7 @@
               更新
             </v-btn>
             <span v-else class="installed-label">已安装</span>
-            <v-menu v-if="p.installed" location="bottom end">
-              <template #activator="{ props: menuProps }">
-                <v-btn
-                  icon
-                  variant="text"
-                  size="small"
-                  class="skill-more-btn"
-                  aria-label="更多"
-                  :disabled="!!busy"
-                  v-bind="menuProps"
-                >
-                  <AppIcon icon="ellipsis-vertical" />
-                </v-btn>
-              </template>
-              <v-list density="compact" min-width="120">
-                <v-list-item
-                  title="更改"
-                  :disabled="!canChangeVariantFor(p)"
-                  @click="canChangeVariantFor(p) && openChange(p)"
-                />
-                <v-list-item title="卸载" base-color="error" @click="openUninstall(p)" />
-              </v-list>
-            </v-menu>
+            <ActionMenu v-if="p.installed" class="skill-more-btn" :label="`${p.name}的更多操作`" icon="ellipsis-vertical" :disabled="!!busy||!modelValue" :context-key="productMenuContext(p)" :items="productMenuItems(p)" @select="productMenuAction(p,$event)" />
           </template>
         </CatalogItemCard>
       </div>
@@ -128,6 +106,7 @@ import { useStoreUi } from '@/composables/useStoreUi'
 import CatalogItemCard from './CatalogItemCard.vue'
 import SkillDialogShell from '../skills/SkillDialogShell.vue'
 import SkillDeleteDialog from '../skills/SkillDeleteDialog.vue'
+import ActionMenu, { type ActionMenuItem } from '../ActionMenu.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -179,6 +158,18 @@ watch(lastInstalledAt, () => {
 
 function canChangeVariantFor(p: StoreCatalogProduct): boolean {
   return Boolean(p.installed) && p.displayMode === 'suite' && p.packages.length > 1
+}
+
+function productMenuContext(p:StoreCatalogProduct) { return JSON.stringify([props.modelValue,props.kind,p.kind,p.productId,p.installed?.packageId,p.installed?.version]) }
+function productMenuItems(p:StoreCatalogProduct):ActionMenuItem[] { return [
+  {id:'change',label:'更改',disabled:!canChangeVariantFor(p)},
+  {id:'uninstall',label:'卸载',icon:'trash',danger:true},
+] }
+function productMenuAction(p:StoreCatalogProduct,action:string) {
+  const current=products.value.find(item=>item.kind===p.kind&&item.productId===p.productId)
+  if(!props.modelValue||busy.value||!current?.installed||productMenuContext(current)!==productMenuContext(p))return
+  if(action==='change'&&canChangeVariantFor(current))openChange(current)
+  else if(action==='uninstall')openUninstall(current)
 }
 
 async function refresh() {

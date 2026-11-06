@@ -14,6 +14,7 @@ export class BrowserTabsService {
   private source(hostId:string,chatId:string){
     const host=this.hosts.getHost(hostId)
     if(!host||host.window.isDestroyed())throw Error('browser_host_unavailable')
+    if(host.closing)throw Error('browser_busy_wait_for_current_action')
     if(typeof chatId!=='string'||!this.chatExists(chatId))throw Error('browser_wrong_chat')
     if(!host.embedded&&this.hosts.hostPages(hostId).some(id=>this.hosts.pages.get(id)?.chatId!==chatId))throw Error('browser_chat_mismatch')
     return host
@@ -39,6 +40,7 @@ export class BrowserTabsService {
   private compatibleTarget(targetId:string,chatId:string){
     const target=this.hosts.getHost(targetId)
     if(!target||target.window.isDestroyed())throw Error('browser_host_unavailable')
+    if(target.closing)throw Error('browser_busy_wait_for_current_action')
     if(!target.embedded&&this.hosts.hostPages(targetId).some(id=>this.hosts.pages.get(id)?.chatId!==chatId))throw Error('browser_chat_mismatch')
     return target
   }
@@ -51,6 +53,7 @@ export class BrowserTabsService {
     this.compatibleTarget(targetId,chatId)
     if(sourceId===targetId)return
     const ordered=this.hosts.hostPages(sourceId).filter(id=>unique.includes(id)),sourceOrder=this.hosts.hostPages(sourceId),sourceActive=this.hosts.getHost(sourceId)?.active
+    const sourceTabs=this.hosts.hostTabs(sourceId).map(tab=>tab.key),sourceActiveTab=this.hosts.getHost(sourceId)?.activeTab,targetTabs=this.hosts.hostTabs(targetId).map(tab=>tab.key)
     const lock=async(index:number):Promise<void>=>{
       if(index<selected.length){await selected[index]!.automation.withTransfer(()=>lock(index+1));return}
       if(selected.some(page=>page.isDestroyed()||page.hostId!==sourceId))throw Error('browser_drag_stale')
@@ -60,7 +63,9 @@ export class BrowserTabsService {
       catch(error){
         for(const page of moved.reverse())if(!page.isDestroyed())this.hosts.transfer(page,sourceId,false,false)
         this.hosts.setOrder(sourceId,sourceOrder)
-        const active=sourceActive&&this.hosts.pages.get(sourceActive);if(active)this.hosts.activate(active)
+        this.hosts.restoreTabOrder(sourceId,sourceTabs);this.hosts.restoreTabOrder(targetId,targetTabs)
+        if(sourceActiveTab&&this.hosts.hostTabs(sourceId).some(tab=>tab.key===sourceActiveTab))this.hosts.activateTab(sourceId,sourceActiveTab)
+        else{const active=sourceActive&&this.hosts.pages.get(sourceActive);if(active)this.hosts.activate(active)}
         throw error
       }
     }
@@ -73,7 +78,7 @@ export class BrowserTabsService {
     for(const id of selected)this.page(hostId,chatId,id)
     return this.hosts.hostPages(hostId).filter(id=>selected.has(id))
   }
-  private create(hostId:string,input:BrowserTabCommandInput):BrowserPage{
+  private async create(hostId:string,input:BrowserTabCommandInput):Promise<BrowserPage>{
     const host=this.source(hostId,input.chatId),sourceId=input.pageId||host.active
     const source=input.pageId?this.page(hostId,input.chatId,input.pageId):sourceId&&this.hosts.pages.get(sourceId)?.chatId===input.chatId?this.page(hostId,input.chatId,sourceId):undefined
     if(input.key!==undefined&&(typeof input.key!=='string'||!/^browser:[\w-]{1,128}$/.test(input.key)))throw Error('invalid_browser_tab')
@@ -81,8 +86,11 @@ export class BrowserTabsService {
     if(existing){const page=this.page(hostId,input.chatId,existing.windowId);if(input.beforeId!==undefined){if(input.beforeId)this.page(hostId,input.chatId,input.beforeId);this.hosts.reorder(hostId,[page.id],input.beforeId)}return page}
     const url=browserAddress(input.url||'about:blank')
     if(url!=='about:blank'&&!isUrlAllowed(url,this.getConfig().browser.url_allowlist))throw Error('url_not_allowed')
-    const sessionId=source?this.registry.getWindowRecord(source.id)!.sessionId:this.registry.getTree(input.chatId)[0]?.sessionId||this.registry.createSession(input.chatId,{persist:true}).sessionId
-    const created=this.registry.createWindow(sessionId,{url,show:false,deferLoad:true}),record=this.registry.getWindowRecord(created.windowId)!,page=record.win
+    const sessionId=source?this.registry.getWindowRecord(source.id)!.sessionId:(await this.registry.resolveSession(input.chatId)).sessionId
+    this.source(hostId,input.chatId)
+    const duplicate=input.key?this.registry.getTree(input.chatId).flatMap(session=>session.windows).find(page=>page.tabKey===input.key):undefined
+    if(duplicate)return this.page(hostId,input.chatId,duplicate.windowId)
+    const created=this.registry.createWindow(sessionId,{chatId:input.chatId,url,show:false,deferLoad:true}),record=this.registry.getWindowRecord(created.windowId)!,page=record.win
     record.tabKey=input.key||`browser:${randomUUID()}`
     this.registry.markDesiredUrl(page.id,url)
     try{
@@ -99,7 +107,7 @@ export class BrowserTabsService {
     if(!input||typeof input!=='object'||typeof input.action!=='string')throw Error('invalid_browser_tab_command')
     const host=this.source(hostId,input.chatId),result:Omit<BrowserTabCommandResult,'state'>={}
     if(input.action==='new'){
-      const page=this.create(hostId,input);this.present(page,!!input.background);result.pageId=page.id
+      const page=await this.create(hostId,input);this.present(page,!!input.background);result.pageId=page.id
     }else if(input.action==='reopen'){
       const entry=this.registry.closedTab(input.chatId,input.closedId)
       if(!entry)throw Error('browser_no_closed_tabs')

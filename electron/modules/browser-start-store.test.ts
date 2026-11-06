@@ -56,3 +56,20 @@ test('invalid store bytes are retained and a new record can be saved',t=>{
   store.saveLink({title:'Recovered',url:'https://example.com'})
   assert.equal(new BrowserStartStore(file).state('chat').links.length,1)
 })
+
+test('a delayed address-row delete cannot remove a newer visit or another conversation',t=>{
+  const {store,file}=fixture(t),url='https://example.com/'
+  t.mock.method(Date,'now',()=>1700000000000)
+  store.visit({chatId:'one',url,title:'First'})
+  const old=store.state('one').history[0]!
+  store.visit({chatId:'one',url,title:'New visit'})
+  store.visit({chatId:'two',url,title:'Other conversation'})
+  assert.ok(store.state('one').history[0]!.visitedAt>old.visitedAt)
+  assert.throws(()=>store.clearHistory('one',url,old.visitedAt),/browser_history_changed/)
+  assert.equal(store.state('one').history[0]!.title,'New visit')
+  assert.throws(()=>store.clearHistory('one',undefined,old.visitedAt),/invalid_browser_history_entry/)
+  const latest=store.state('one').history[0]!
+  store.clearHistory('one',url,latest.visitedAt)
+  assert.equal(new BrowserStartStore(file).state('one').history.length,0)
+  assert.equal(store.state('two').history.length,1)
+})

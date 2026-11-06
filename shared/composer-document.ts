@@ -1,5 +1,6 @@
 import type {BrowserContextRef} from './types'
 import {Lexer,type Token} from 'marked'
+import {normalizeTaskDeclarations,retainTaskDeclarations,type TaskDeclarations} from './task-declarations'
 
 export type ComposerMark={type:string;attrs?:Record<string,unknown>}
 export type ComposerNode={type:string;attrs?:Record<string,unknown>;content?:ComposerNode[];text?:string;marks?:ComposerMark[]}
@@ -13,10 +14,10 @@ export type ComposerContextBlock={
   range?:{startLine?:number;endLine?:number;pageStart?:number;pageEnd?:number;selector?:string}
   version?:string|number
 }
-/** Version 1 remains readable; every normalized or newly created document uses 2. */
-export type ComposerDocument={schemaVersion:1|2;id:string;chatId:string;revision:number;updatedAt:number;content:ComposerNode[]}
+/** Old text/source documents remain readable; declaration metadata belongs to schema 3. */
+export type ComposerDocument={schemaVersion:1|2|3;id:string;chatId:string;revision:number;updatedAt:number;content:ComposerNode[];declarations?:unknown}
 export type ComposerCompiledContext={block:ComposerContextBlock;content:string}
-export type ComposerCompiledDocument={content:string;refs:BrowserContextRef[];contexts:ComposerCompiledContext[]}
+export type ComposerCompiledDocument={content:string;refs:BrowserContextRef[];contexts:ComposerCompiledContext[];declarations:TaskDeclarations}
 export type ComposerDraftOptions={updatedAt?:number;maxChars?:number;document?:ComposerDocument;baseRevision?:number}
 export type ComposerSubmitInput={content:string;refs?:BrowserContextRef[];document?:ComposerDocument;clientMessageId?:string;draftRevision?:number;modelIdentity?:import('./model-selection').ModelSelectionIdentity}
 export type ComposerQueueEditOptions={document?:ComposerDocument;baseRevision?:number}
@@ -69,7 +70,7 @@ function context(value:unknown):ComposerContextBlock{
 export function createComposerDocument(chatId:string,text=''):ComposerDocument{
   const content:ComposerNode[]=[]
   text.split(/\r?\n/).forEach((line,index)=>{if(index)content.push({type:'hardBreak'});if(line)content.push({type:'text',text:line})})
-  return {schemaVersion:2,id:randomId(),chatId,revision:0,updatedAt:Date.now(),content:[{type:'paragraph',...(content.length?{content}:{})}]}
+  return {schemaVersion:3,id:randomId(),chatId,revision:0,updatedAt:Date.now(),content:[{type:'paragraph',...(content.length?{content}:{})}]}
 }
 export function composerDocumentFromLegacy(chatId:string,text:string,refs:BrowserContextRef[]=[]):ComposerDocument{
   const doc=createComposerDocument(chatId,text)
@@ -107,7 +108,7 @@ export function composerDocumentFromLegacy(chatId:string,text:string,refs:Browse
 }
 export function normalizeComposerDocument(value:unknown,chatId?:string):ComposerDocument{
   const raw=record(value)
-  if(raw.schemaVersion!==1&&raw.schemaVersion!==2)throw Error('composer_document_version')
+  if(raw.schemaVersion!==1&&raw.schemaVersion!==2&&raw.schemaVersion!==3)throw Error('composer_document_version')
   const schemaVersion=raw.schemaVersion
   if(!Array.isArray(raw.content))throw Error('invalid_composer_document')
   const owner=string(raw.chatId,200)
@@ -143,7 +144,9 @@ export function normalizeComposerDocument(value:unknown,chatId?:string):Composer
     }
     return out
   }
-  const document:ComposerDocument={schemaVersion:2,id:string(raw.id,200),chatId:owner,revision,updatedAt,content:raw.content.map(value=>node(value,0))}
+  let declarations=retainTaskDeclarations(raw.declarations)
+  try{const known=normalizeTaskDeclarations(declarations);declarations=known.ids.length?known:undefined}catch{/* Retain future semantics intact; executable compilation rejects them. */}
+  const document:ComposerDocument={schemaVersion:3,id:string(raw.id,200),chatId:owner,revision,updatedAt,content:raw.content.map(value=>node(value,0)),...(declarations!==undefined?{declarations}:{})}
   // Bound source labels, link targets and other metadata as well as text nodes.
   if(JSON.stringify(document).length>4000000)throw Error('composer_document_too_large')
   return document
@@ -152,7 +155,10 @@ export function normalizeComposerDocument(value:unknown,chatId?:string):Composer
 /** Stable retry identity; timestamps are save metadata, while forked content needs its own key. */
 export function composerSubmissionKey(value:ComposerDocument):string{
   const document=normalizeComposerDocument(value)
-  const content=JSON.stringify([document.chatId,document.id,document.revision,document.content])
+  // Empty declarations retain the legacy client key so an old failed receipt
+  // can still be retried after upgrading; all semantics come from one identity.
+  const semantic=JSON.parse(composerSemanticIdentity(document)) as unknown[]
+  const content=JSON.stringify(semantic.length===5?semantic.slice(1):semantic)
   let left=0x811c9dc5,right=0x9e3779b9
   for(let index=0;index<content.length;index++){
     const code=content.charCodeAt(index)
@@ -163,7 +169,22 @@ export function composerSubmissionKey(value:ComposerDocument):string{
   return 'composer:'+document.id.slice(0,80).replace(/[^a-zA-Z0-9._-]/g,'_')+':'+document.revision+':'+fingerprint
 }
 
+/** Canonical identity shared by renderer keys and main-process queue receipts. */
+export function composerSemanticIdentity(value:ComposerDocument):string{
+  const document=normalizeComposerDocument(value),declarations=normalizeTaskDeclarations(document.declarations)
+  return JSON.stringify(['document',document.chatId,document.id,document.revision,document.content,...(declarations.ids.length?[declarations]:[])])
+}
+export function composerDocumentContentIdentity(value:ComposerDocument):string{
+  const document=normalizeComposerDocument(value)
+  return JSON.stringify([document.content,document.declarations??null])
+}
+export function composerDocumentsHaveSameContent(left:ComposerDocument,right:ComposerDocument){return composerDocumentContentIdentity(left)===composerDocumentContentIdentity(right)}
 export function compileComposerDocument(value:ComposerDocument):ComposerCompiledDocument{
+  const document=normalizeComposerDocument(value),declarations=normalizeTaskDeclarations(document.declarations)
+  return {...previewComposerDocument(document),declarations}
+}
+/** Non-executable text for draft storage and preview; never derives run authority. */
+export function previewComposerDocument(value:ComposerDocument):Omit<ComposerCompiledDocument,'declarations'>{
   const document=normalizeComposerDocument(value),refs:BrowserContextRef[]=[],contexts:ComposerCompiledContext[]=[],refIds=new Set<string>()
   const inline=(nodes:ComposerNode[]=[]):string=>nodes.map(node=>serialize(node)).join('')
   const blocks=(nodes:ComposerNode[]=[]):string=>nodes.map(node=>serialize(node)).join('\n\n')
@@ -204,11 +225,13 @@ export function composerDocumentText(document:ComposerDocument):string{
   const text=(nodes:ComposerNode[]):string=>nodes.map(node=>node.type==='text'?node.text||'':node.type==='hardBreak'?'\n':node.type==='contextInline'?String((node.attrs?.block as ComposerContextBlock)?.label||'来源'):text(node.content||[])+(node.type==='paragraph'?'\n':'')).join('')
   return text(document.content).trimEnd()
 }
-export function composerDocumentEmpty(document:ComposerDocument):boolean{const compiled=compileComposerDocument(document);return !compiled.content&&!compiled.refs.length}
+export function composerDocumentEmpty(document:ComposerDocument):boolean{const compiled=previewComposerDocument(document);return !compiled.content&&!compiled.refs.length}
+export function composerDocumentHasState(document:ComposerDocument):boolean{const preview=previewComposerDocument(document);if(preview.content||preview.refs.length||preview.contexts.length)return true;try{return normalizeTaskDeclarations(document.declarations).ids.length>0}catch{return document.declarations!==undefined}}
 export function mergeComposerDocuments(base:ComposerDocument,incoming:ComposerDocument):ComposerDocument{
   const left=normalizeComposerDocument(base),right=normalizeComposerDocument(incoming,left.chatId)
-  if(composerDocumentEmpty(left))return right
-  if(composerDocumentEmpty(right)||JSON.stringify(left.content)===JSON.stringify(right.content))return left
+  if(!composerDocumentHasState(left))return right
+  if(!composerDocumentHasState(right)||composerDocumentsHaveSameContent(left,right))return left
+  if(JSON.stringify(left.declarations??null)!==JSON.stringify(right.declarations??null))throw Error('composer_declarations_conflict')
   const ids=new Set<string>()
   const clone=(nodes:ComposerNode[]):ComposerNode[]=>nodes.map(node=>{const out={...node,content:node.content?clone(node.content):undefined};if(node.type==='contextBlock'||node.type==='contextInline'){const block=context(node.attrs?.block);if(ids.has(block.id))block.id=randomId();ids.add(block.id);out.attrs={...node.attrs,block}}return out})
   return {...left,revision:Math.max(left.revision,right.revision)+1,updatedAt:Date.now(),content:clone([...left.content,{type:'paragraph'},...right.content])}
@@ -218,6 +241,8 @@ export function mergeComposerDocuments(base:ComposerDocument,incoming:ComposerDo
 export function composerErrorMessage(error:unknown):string|undefined{
   const raw=error instanceof Error?error.message:String(error)
   if(/composer_document_version/.test(raw))return '草稿使用了此版本暂不支持的格式，请更新应用后恢复；原文档仍保留。'
+  if(/task_declarations_version|task_declaration_unknown|invalid_task_declarations/.test(raw))return '此任务声明暂不支持，原始声明已保留；请使用兼容版本恢复后发送。'
+  if(/composer_declarations_conflict/.test(raw))return '两份草稿的任务声明不同，不能自动合并；请分别保留并选择要使用的版本。'
   if(/composer_reference_range_requires_excerpt/.test(raw))return '选择行号或页码时，请改用可编辑摘录；尚未提取的范围不会作为整份文件发送。'
   if(/composer_images_budget_exceeded/.test(raw))return '图片超出当前发送预算，请移除部分图片或使用较小的图片。'
   if(/composer_file_too_large/.test(raw))return '单个导入文件不能超过 12 MB，请选择较小的文件。'

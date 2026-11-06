@@ -524,12 +524,12 @@
 :is(.skill-dlg-card,.ob-card) .v-field__input { min-height:40px; padding-top:8px; padding-bottom:8px; font-size:13px; }
 :is(.skill-dlg-card,.ob-card) .v-label { font-size:12px; }
 :is(.skill-dlg-card,.ob-card) :is(button,input,textarea,select):focus-visible { outline:2px solid var(--navora-accent); outline-offset:2px; }
-.skill-dlg-card .skill-dlg-head { padding:14px 18px; background:#fff; align-items:center; }
+.skill-dlg-card .skill-dlg-head { padding:14px 18px; background:var(--navora-surface); border-color:var(--navora-stroke); align-items:center; }
 .skill-dlg-card .skill-dlg-title { font-size:16px; font-weight:600; }
 .skill-dlg-card .skill-dlg-sub { font-size:12px; }
-.skill-dlg-card .skill-dlg-close { width:30px; height:30px; margin:0; border:1px solid #e1e5eb; border-radius:8px; color:#626d7b; }
+.skill-dlg-card .skill-dlg-close { width:30px; height:30px; margin:0; border:1px solid var(--navora-stroke); border-radius:8px; color:var(--navora-muted); }
 .skill-dlg-card .skill-dlg-close:disabled { opacity:.4; cursor:default; }
-.skill-dlg-card .skill-dlg-actions { padding:10px 16px !important; background:#fff; }
+.skill-dlg-card .skill-dlg-actions { padding:10px 16px !important; background:var(--navora-surface); border-color:var(--navora-stroke); }
 .navora-app .settings-page .advanced-toggle { display:flex; align-items:center; gap:7px; padding:5px 0; color:#626d7b; background:transparent; border:0; text-align:left; font-size:12px; cursor:pointer; }
 .navora-app .settings-page .advanced-toggle svg { width:10px; }
 .navora-app .settings-page .advanced-connection { padding:10px; background:#f7f8fa; border:1px solid #edf0f4; border-radius:8px; }

@@ -1,7 +1,7 @@
 <template>
   <template v-if="native.menusSupported.value">
     <button type="button" class="sidebar-more-trigger" :aria-label="`${label}更多操作`" :title="`${label}更多操作`" aria-haspopup="menu" :aria-expanded="nativeShell?.open||false" @click="nativeShell?.show($event)"><AppIcon icon="ellipsis" /></button>
-    <SidebarContextMenu ref="nativeShell"><slot /><button type="button" role="menuitem" :aria-label="hideAriaLabel||hideLabel" @click="emit('hide')"><AppIcon icon="window-minimize" /><span>{{hideLabel}}</span></button></SidebarContextMenu>
+    <SidebarContextMenu ref="nativeShell"><slot /><button type="button" role="menuitem" :aria-label="hideAriaLabel||hideLabel" @click="emit('hide')"><AppIcon icon="sidebar-hide" /><span>{{hideLabel}}</span></button></SidebarContextMenu>
   </template>
   <v-menu v-else v-model="open" location="bottom end" origin="auto" :offset="6" :close-on-content-click="true">
     <template #activator="{props:menuProps}">
@@ -11,7 +11,7 @@
     </template>
     <div class="sidebar-panel-menu" role="menu" :aria-label="`${label}操作`" @keydown.esc.stop="open=false" @keydown="onKey">
       <slot />
-      <button type="button" role="menuitem" :aria-label="hideAriaLabel || hideLabel" @click="emit('hide')"><AppIcon icon="window-minimize" /><span>{{ hideLabel }}</span></button>
+      <button type="button" role="menuitem" :aria-label="hideAriaLabel || hideLabel" @click="emit('hide')"><AppIcon icon="sidebar-hide" /><span>{{ hideLabel }}</span></button>
     </div>
   </v-menu>
 </template>

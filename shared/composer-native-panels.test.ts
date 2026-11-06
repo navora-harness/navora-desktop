@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import type {NativePanelContent} from './native-ui'
 import {composerNativeModelControlId,composerNativePanelContent,type ComposerNativePanelState} from './composer-native-panels'
+import {nativePanelNodes,nativePanelActionAllowed} from './native-ui-validation'
 
 function state():ComposerNativePanelState{return {
   modelOptions:[
@@ -18,7 +19,7 @@ const get=(node:NativePanelContent,id:string)=>controls(node).find(item=>item.id
 test('model filtering keeps surviving controls and the native search input identities stable',()=>{
   const initial=state(),full=composerNativePanelContent('model',initial),filtered=composerNativePanelContent('model',{...initial,modelQuery:'服务商乙'})
   const beta=composerNativeModelControlId('second::beta')
-  assert.equal(get(full,beta)?.text,'Beta');assert.equal(get(filtered,beta)?.text,'Beta')
+  assert.equal(get(full,`${beta}:label`)?.text,'Beta');assert.equal(get(filtered,`${beta}:label`)?.text,'Beta')
   assert.equal(get(filtered,'model:search')?.value,'服务商乙')
   assert.equal(get(filtered,composerNativeModelControlId('first::alpha')),undefined)
   assert.equal(get(filtered,'model:reasoning')?.value,'high')
@@ -59,6 +60,18 @@ test('custom model strings remain plain text and do not become URLs, markup or a
   const snapshot=state(),name='<script>doBad()</script> https://example.test/'+('x'.repeat(4000))
   snapshot.modelOptions[0]!.label=name;snapshot.modelOptions[0]!.key=name;snapshot.modelKey=name
   const content=composerNativePanelContent('model',snapshot),id=composerNativeModelControlId(name)
-  assert.ok(id.length<50);assert.equal(get(content,id)?.text,'✓  '+name)
+  assert.ok(id.length<50);assert.equal(get(content,`${id}:label`)?.text,'✓  '+name)
   assert.ok(controls(content).every(node=>!('image' in node)&&!('url' in node)&&!('html' in node)))
+})
+
+test('model search navigates enabled native rows while retaining a distinct selected model',()=>{
+  const content=composerNativePanelContent('model',state()),all=nativePanelNodes(content),id=composerNativeModelControlId('first::alpha')
+  assert.equal(all.get('model:search')?.navigationTarget,'model:list')
+  assert.equal(all.get('model:list')?.role,'listbox')
+  assert.equal(all.get(id)?.type,'item')
+  assert.equal(all.get(id)?.selected,true)
+  assert.equal(nativePanelActionAllowed(all,{id,type:'click'}),true)
+  assert.equal(nativePanelActionAllowed(all,{id,type:'contextMenu'}),false)
+  const busy=nativePanelNodes(composerNativePanelContent('model',{...state(),modelBusy:true}))
+  assert.equal(nativePanelActionAllowed(busy,{id,type:'click'}),false)
 })

@@ -6,11 +6,30 @@ import {
 } from '../../shared/browser-automation'
 import { invalidatePointerMotion } from './pointer-motion'
 import { createBrowserCursorImage } from './browser-native-cursor'
+import type { PageBlockerSummaryV1 } from '../../shared/page-blocker'
+
+export type BrowserAutomationDiagnostic = {
+  cause: 'control_changed' | 'document_changed' | 'geometry_changed' | 'run_cancelled' | 'page_destroyed' | 'renderer_gone' | 'native_cleanup_unconfirmed' | 'unknown'
+  stage: 'before_dispatch' | 'after_dispatch' | 'cleanup'
+  expectedEpoch?: number; actualEpoch?: number; expectedDocumentEpoch?: number; actualDocumentEpoch?: number
+  dispatched?: boolean; requiresObservation: boolean
+}
 
 export class BrowserAutomationError extends Error {
   lastResult?: BrowserAutomationState['lastResult']
-  constructor(readonly code: string, message = code) { super(message); this.name = 'BrowserAutomationError' }
+  pageBlocker?: PageBlockerSummaryV1
+  readonly diagnostic: BrowserAutomationDiagnostic
+  constructor(readonly code: string, message = code, diagnostic?: Partial<BrowserAutomationDiagnostic>) {
+    super(message); this.name = 'BrowserAutomationError'
+    const cause: BrowserAutomationDiagnostic['cause'] = code === 'browser_document_changed' ? 'document_changed' : code === 'browser_geometry_changed' ? 'geometry_changed' : code === 'browser_page_destroyed' ? 'page_destroyed' : code === 'renderer_gone' ? 'renderer_gone' : ['cleanup_unconfirmed','release_unconfirmed'].includes(code) ? 'native_cleanup_unconfirmed' : code === 'aborted' ? 'run_cancelled' : 'unknown'
+    this.diagnostic = { cause, stage: cause === 'native_cleanup_unconfirmed' ? 'cleanup' : 'before_dispatch', requiresObservation: true, ...diagnostic }
+  }
 }
+export type BrowserAutomationCleanupContext = {
+  /** The same operation's native input was cleared by a successful reset and readback. */
+  readonly nativeResetConfirmed: boolean
+}
+type BrowserAutomationCleanup = (context?: BrowserAutomationCleanupContext) => Promise<void>
 export type BrowserAutomationOperation = {
   readonly signal: AbortSignal
   readonly epoch: number
@@ -21,7 +40,7 @@ export type BrowserAutomationOperation = {
   /** Wait for submitted page work without interpreting a query/script failure as held input. */
   track<T>(action: () => Promise<T>): Promise<T>
   noteResult(result: unknown): void
-  registerCleanup(cleanup: () => Promise<void>): () => void
+  registerCleanup(cleanup: BrowserAutomationCleanup): () => void
   setActivity(activity: 'acting' | 'waiting', label?: string): Promise<void>
 }
 export type BrowserAutomationRunOptions = {
@@ -43,13 +62,17 @@ type ControllerOptions = {
   getManualControl?: () => boolean
   setManualControl?: (manual: boolean) => void
   getCursorImage?: typeof createBrowserCursorImage
+  /** Waiting diagnostics do not time out or cancel submitted native input. */
+  controlWaitWarningMs?: number
 }
 type CursorApi = {
-  setVirtualCursorEnabled?: (enabled: boolean, options?: { blockRealPointer: boolean; blockRealKeyboard: boolean }) => Promise<void>
+  setAutomationOptions?: (options: Electron.AutomationOptions) => Promise<void>
+  getAutomationState?: () => Electron.AutomationState
+  resetAutomationOptions?: () => Promise<void>
   setVirtualCursorFrameRate?: (fps: number) => void
   setVirtualCursorImage?: (image: import('electron').NativeImage | null, options?: { hotspot: import('electron').Point }) => void
 }
-type Active = { abort: AbortController; commits: Set<Promise<unknown>>; cleanups: Set<() => Promise<void>>; observedDocEpoch: number; accepting: boolean }
+type Active = { abort: AbortController; commits: Set<Promise<unknown>>; nativeCommits: Set<Promise<unknown>>; cleanups: Set<BrowserAutomationCleanup>; nativeResetConfirmed: boolean; observedDocEpoch: number; accepting: boolean; cleaning?: boolean; submittedInput?: boolean }
 export type BrowserManualSessionToken={id:string;generation:number;documentEpoch:number}
 type ManualSession={token:BrowserManualSessionToken;owner:BrowserAutomationState['owner'];manual:boolean;gated:boolean;leaseRunId?:string;runEnded:boolean}
 const controllers = new WeakMap<WebContents, BrowserAutomationController>()
@@ -79,6 +102,11 @@ export function getBrowserAutomationController(wc: WebContents, options?: Contro
   return controller
 }
 
+/** Observe only actual native pointer dispatches on an already-owned page. */
+export function withBrowserPointerInput<T>(wc: WebContents, action: () => Promise<T>, confirmed: (result: T) => boolean): Promise<T> {
+  return controllers.get(wc)?.pointerInput(action, confirmed) ?? action()
+}
+
 export class BrowserAutomationController {
   private state = createBrowserAutomationState()
   private options: ControllerOptions
@@ -90,29 +118,41 @@ export class BrowserAutomationController {
   private externalPending = new Set<Promise<unknown>>()
   private active?: Active
   private controlGeneration = 0
+  private nativeCancellationGeneration?: number
+  private nativeCancellationBarrier?: { generation: number; settled: Promise<void> }
   private gated = false
   private disposed = false
   private documentEpoch = 0
   private observationRequired = false
   private leaseRunId?: string
+  private cancelledRun?: { id: string; settled: Promise<void> }
   private cursorImageKey?: string
+  private cursorGeneration = 0
+  private cursorPositionValid = false
   private unsafeCleanup = false
   private stateRevision = 0
   private wasBusy = false
+  private controlWaitStartedAt?: number
+  private controlWaitTimer?: ReturnType<typeof setTimeout>
   private manualSession?:ManualSession
   private epochWatchers = new Set<() => void>()
   private listeners: { event: string; fn: (...args: any[]) => void }[] = []
+  private recheckPageBlocker?: () => Promise<PageBlockerSummaryV1>
+  private blockerRecheck?: Promise<PageBlockerSummaryV1>
 
   constructor(private wc: WebContents, options: ControllerOptions = {}) {
     this.options = options
     this.config = normalizeBrowserAutomation(options.getSettings?.() ?? settings)
     this.state.revision = revision
-    this.state.cursorAvailable = typeof (wc as unknown as CursorApi).setVirtualCursorEnabled === 'function'
-    this.state.cursorImageAvailable = typeof (wc as unknown as CursorApi).setVirtualCursorImage === 'function'
+    const api = wc as unknown as CursorApi
+    this.state.cursorAvailable = !!(api.setAutomationOptions && api.getAutomationState && api.resetAutomationOptions)
+    this.state.cursorImageAvailable = typeof api.setVirtualCursorImage === 'function'
     live.add(this)
     this.listen('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
+      this.invalidateCursorPosition()
       if (mainFrame === false || inPlace) return
       this.documentEpoch++
+      this.expirePageBlocker('DOCUMENT_CHANGED')
       // The current action may itself navigate; its native result must still settle.
       if (!this.active) this.observationRequired = true
       invalidatePointerMotion(wc)
@@ -130,9 +170,10 @@ export class BrowserAutomationController {
       }
       this.publish()
     })
-    this.listen('did-navigate-in-page', () => { this.documentEpoch++; invalidatePointerMotion(wc); this.publish() })
+    this.listen('did-navigate-in-page', () => { this.invalidateCursorPosition(); this.documentEpoch++; this.expirePageBlocker('DOCUMENT_CHANGED'); invalidatePointerMotion(wc); this.publish() })
     this.listen('render-process-gone', () => {
       this.documentEpoch++; this.unsafeCleanup = false
+      this.expirePageBlocker('RENDERER_GONE')
       this.invalidate('renderer_gone'); this.state.owner = 'paused'; this.state.activity = 'error'; this.state.error = 'renderer_gone'
       this.publish()
     })
@@ -153,6 +194,15 @@ export class BrowserAutomationController {
     this.listeners.push({ event, fn }); this.wc.on(event as any, fn)
   }
   private publish() {
+    const waiting=!this.disposed&&(this.state.activity==='handoff'||this.state.nativePending)
+    if(waiting&&this.controlWaitStartedAt===undefined){
+      this.controlWaitStartedAt=Date.now()
+      this.controlWaitTimer=setTimeout(()=>{this.controlWaitTimer=undefined;if(!this.disposed&&this.controlWaitStartedAt!==undefined)this.publish()},this.options.controlWaitWarningMs??15000)
+      this.controlWaitTimer.unref?.()
+    }else if(!waiting){
+      if(this.controlWaitTimer)clearTimeout(this.controlWaitTimer)
+      this.controlWaitTimer=undefined;this.controlWaitStartedAt=undefined
+    }
     const busy=this.isBusy(),becameIdle=this.wasBusy&&!busy
     this.wasBusy=busy
     this.stateRevision++; this.options.onChanged?.(this.snapshot())
@@ -164,16 +214,40 @@ export class BrowserAutomationController {
       stateRevision: this.stateRevision,
       needsObservation: this.observationRequired,
       leaseRunId: this.leaseRunId,
+      cursorRequested: this.config.show_virtual_cursor,
+      cursorPositionValid: this.cursorPositionValid,
+      ...(this.controlWaitStartedAt===undefined?{}:{controlWait:{
+        stage:this.state.nativePending?'native' as const:this.active?.commits.size?'submitted-input' as const:this.active?.cleaning?'cleanup' as const:this.active?'operation' as const:this.externalPending.size?'navigation' as const:'queued' as const,
+        startedAt:this.controlWaitStartedAt,elapsedMs:Math.max(0,Date.now()-this.controlWaitStartedAt),
+        overdue:Date.now()-this.controlWaitStartedAt>=(this.options.controlWaitWarningMs??15000),
+        committedInputs:this.active?.commits.size??0,pendingNavigation:this.externalPending.size,
+      }}),
       ...(this.options.getManualControl?.() && this.state.owner === 'ai' && this.state.activity !== 'handoff'
         && this.state.nativeConfirmed && !this.state.nativePending && !this.state.inputProtected ? { owner: 'user' as const } : {}),
     }
   }
   captureEpoch(): number { return this.state.epoch }
   captureDocumentEpoch(): number { return this.documentEpoch }
+  setPageBlocker(summary: PageBlockerSummaryV1, recheck: () => Promise<PageBlockerSummaryV1>): boolean {
+    if(this.disposed || summary.webContentsId !== this.wc.id || summary.documentEpoch !== this.documentEpoch || summary.controlEpoch !== this.state.epoch)return false
+    this.state.pageBlocker=summary;this.recheckPageBlocker=recheck;this.publish();return true
+  }
+  private expirePageBlocker(reason: string): void {
+    if(!this.state.pageBlocker)return
+    this.state.pageBlocker={...this.state.pageBlocker,...(this.state.pageBlocker.requiresUser?{previouslyBlockedAt:this.state.pageBlocker.observedAt}:{}),state:'unknown',requiresUser:false,blocksInteraction:'unknown',coverage:'unavailable',reasonCodes:[reason],documentEpoch:this.documentEpoch,controlEpoch:this.state.epoch,followup:'none',evidence:[]}
+  }
+  /** A user completion statement requests a fresh observation, never proof or replay. */
+  async recheckBlocker(): Promise<PageBlockerSummaryV1 | undefined> {
+    if(!this.recheckPageBlocker)return this.state.pageBlocker
+    if(!this.blockerRecheck)this.blockerRecheck=this.recheckPageBlocker().finally(()=>{this.blockerRecheck=undefined})
+    return this.blockerRecheck
+  }
   /** Actual viewport/zoom changes invalidate coordinates without granting control. */
   geometryChanged(): void {
     if (this.disposed) return
+    this.invalidateCursorPosition()
     this.advanceEpoch(); this.observationRequired = true
+    this.expirePageBlocker('GEOMETRY_CHANGED')
     this.active?.abort.abort(new BrowserAutomationError('browser_geometry_changed'))
     invalidatePointerMotion(this.wc); this.publish()
   }
@@ -191,7 +265,7 @@ export class BrowserAutomationController {
   }
   assertEpoch(epoch: number, options?: { readOnly?: boolean }): void {
     if (this.disposed || this.wc.isDestroyed()) throw new BrowserAutomationError('browser_page_destroyed')
-    if (epoch !== this.state.epoch) throw new BrowserAutomationError('browser_operation_invalidated')
+    if (epoch !== this.state.epoch) throw new BrowserAutomationError('browser_operation_invalidated','browser_operation_invalidated',{expectedEpoch:epoch,actualEpoch:this.state.epoch,actualDocumentEpoch:this.documentEpoch,dispatched:false})
     if (!options?.readOnly && (this.gated || this.state.owner !== 'ai' || this.options.getManualControl?.())) throw new BrowserAutomationError('browser_manual_control')
   }
   isBusy(): boolean { return !!this.active || this.externalPending.size > 0 || this.state.nativePending }
@@ -206,7 +280,7 @@ export class BrowserAutomationController {
       this.assertEpoch(epoch)
       if (this.leaseRunId && this.leaseRunId !== runId) throw new BrowserAutomationError('browser_page_in_use')
       this.leaseRunId = runId; this.state.activity = 'acting'; this.publish()
-      try { await this.syncNative(this.config.show_virtual_cursor, this.config.protect_input) }
+      try { await this.syncNative(this.config.show_virtual_cursor, true) }
       catch (error) {
         if (this.state.epoch === epoch) {
           try { await this.syncNative(false, false); this.leaseRunId = undefined; this.state.activity = 'error'; this.state.error = error instanceof Error ? error.message : String(error) }
@@ -245,6 +319,7 @@ export class BrowserAutomationController {
     for (const notify of watchers) { try { notify() } catch { /* One observer cannot keep old intents alive. */ } }
   }
   private invalidate(reason: string) {
+    this.invalidateCursorPosition(false)
     this.gated = true; this.controlGeneration++; this.advanceEpoch(); this.observationRequired = true
     this.active?.abort.abort(new BrowserAutomationError(reason))
     invalidatePointerMotion(this.wc)
@@ -254,36 +329,124 @@ export class BrowserAutomationController {
     this.controls = result.then(() => {}, () => {})
     return result
   }
-  private syncNative(enabled: boolean, protect: boolean): Promise<void> {
-    const operation = this.nativeTail.then(async () => {
-      if (this.disposed || this.wc.isDestroyed()) throw new BrowserAutomationError('browser_page_destroyed')
-      const api = this.wc as unknown as CursorApi
-      const nativeEnabled = enabled || protect
-      if (!api.setVirtualCursorEnabled) {
-        if (nativeEnabled) throw new BrowserAutomationError('virtual_cursor_unavailable')
-        this.state.cursorEnabled = false; this.state.inputProtected = false; this.state.nativeConfirmed = true
-        return
-      }
-      this.state.nativePending = true; this.publish()
-      try {
-        if (nativeEnabled) {
-          const imageKey = `${this.config.cursor_style}:${enabled}`
-          if (api.setVirtualCursorImage && (imageKey !== this.cursorImageKey || !this.state.cursorEnabled)) {
-            const cursor = await (this.options.getCursorImage ?? createBrowserCursorImage)(this.config.cursor_style, enabled)
-            api.setVirtualCursorImage.call(this.wc, cursor.image, { hotspot: cursor.hotspot })
-            this.cursorImageKey = imageKey
-          } else if (!api.setVirtualCursorImage && protect && !enabled) {
-            throw new BrowserAutomationError('virtual_cursor_image_unavailable')
+  private invalidateCursorPosition(hide = true): void {
+    this.cursorGeneration++; this.cursorPositionValid = false
+    if (hide && !this.disposed && this.state.cursorEnabled && this.state.inputProtected) {
+      // Only drawing changes. Navigation and layout invalidation must keep the
+      // task's isolation, rendering and real-input guards intact.
+      void this.syncNative(false, true).catch(() => {
+        if (!this.disposed) { this.state.nativeConfirmed = false; this.state.error = 'cursor_configuration_failed'; this.publish() }
+      })
+    }
+  }
+  /** A native mouse receipt establishes the compositor's converted position.
+   * Never infer one from a keyboard result, planned endpoint or DOM bounds.
+   * The first closed batch stays hidden until its receipt; it is not split or replayed. */
+  async pointerInput<T>(action: () => Promise<T>, confirmed: (result: T) => boolean): Promise<T> {
+    const generation = this.cursorGeneration
+    const result = await action()
+    if (confirmed(result) && generation === this.cursorGeneration && !this.disposed
+      && !this.gated && this.state.owner === 'ai' && !this.options.getManualControl?.() && this.state.inputProtected) {
+      this.cursorPositionValid = true
+      if (this.config.show_virtual_cursor && !this.state.cursorEnabled) {
+        try { await this.syncNative(true, true, this.controlGeneration) }
+        catch {
+          // A display failure cannot turn acknowledged input into an unknown
+          // delivery (or invite replay). Preserve the actual native receipt.
+          if (generation === this.cursorGeneration && !this.disposed) {
+            this.state.nativeConfirmed = false; this.state.error = 'cursor_configuration_failed'
           }
         }
-        api.setVirtualCursorFrameRate?.call(this.wc, this.config.cursor_fps)
-        // Always supply both flags: omission preserves the previous native mode.
-        await api.setVirtualCursorEnabled.call(this.wc, nativeEnabled, { blockRealPointer: protect, blockRealKeyboard: protect })
+      }
+      this.publish()
+    }
+    return result
+  }
+  private readNative(api: CursorApi): Electron.AutomationState {
+    if (!api.getAutomationState) throw new BrowserAutomationError('automation_api_unavailable')
+    const actual = api.getAutomationState.call(this.wc)
+    const rendering = actual.rendering as BrowserAutomationState['rendering']
+    this.state.isolateInput = actual.isolateInput
+    this.state.keepRendering = actual.keepRendering
+    this.state.inputProtected = actual.blockRealPointer === true && actual.blockRealKeyboard === true
+    this.state.cursorEnabled = actual.virtualCursor?.enabled === true
+    // enabled is a configuration receipt, not proof of pixels on the display.
+    this.state.cursorVisible = this.state.cursorEnabled ? undefined : false
+    this.state.rendering = rendering ? { ...rendering } : undefined
+    return actual
+  }
+  private confirmNative(api: CursorApi, enabled: boolean, protect: boolean, reset = false): void {
+    const actual = this.readNative(api)
+    if (actual.isolateInput !== protect || actual.blockRealPointer !== protect || actual.blockRealKeyboard !== protect
+      || actual.keepRendering !== protect || actual.virtualCursor?.enabled !== enabled
+      || (reset && actual.inputActive !== false)) {
+      throw new BrowserAutomationError('automation_configuration_unconfirmed')
+    }
+    if (protect && (!this.state.rendering?.viewAvailable || !this.state.rendering.keepAlive
+      || this.state.rendering.effectiveBackgroundThrottling !== false)) {
+      throw new BrowserAutomationError('automation_rendering_unavailable')
+    }
+    this.state.nativeConfirmed = true
+  }
+  private syncNative(enabled: boolean, protect: boolean, expectedGeneration?: number): Promise<void> {
+    const operation = this.nativeTail.then(async () => {
+      enabled = enabled && this.config.show_virtual_cursor && protect && this.cursorPositionValid
+      if (this.disposed || this.wc.isDestroyed()) throw new BrowserAutomationError('browser_page_destroyed')
+      if (expectedGeneration !== undefined && expectedGeneration !== this.controlGeneration) throw new BrowserAutomationError('browser_operation_invalidated')
+      const api = this.wc as unknown as CursorApi
+      this.state.nativePending = true; this.publish()
+      try {
+        if (!api.setAutomationOptions || !api.getAutomationState || !api.resetAutomationOptions) {
+          throw new BrowserAutomationError('automation_api_unavailable')
+        }
+        if (!protect) {
+          this.invalidateCursorPosition(false)
+          invalidatePointerMotion(this.wc, 'native_automation_reset')
+          // Callers drain submitted work before this full release. Reset clears
+          // focus, held input and long-lived rendering independently of drawing.
+          await api.resetAutomationOptions.call(this.wc)
+          this.cursorImageKey = undefined
+          this.confirmNative(api, false, false, true)
+        }
+        if (protect || enabled) {
+          const virtualCursor: Electron.AutomationVirtualCursorOptions = { enabled, frameRate: this.config.cursor_fps }
+          const imageKey = `${this.config.cursor_style}:${this.config.cursor_scale}`
+          if (enabled && api.setVirtualCursorImage && imageKey !== this.cursorImageKey) {
+            const cursor = await (this.options.getCursorImage ?? createBrowserCursorImage)(this.config.cursor_style, true, this.config.cursor_scale)
+            virtualCursor.image = cursor.image; virtualCursor.hotspot = cursor.hotspot
+          }
+          // Image creation is asynchronous; lifecycle invalidation wins even
+          // if it arrived after this native job began.
+          enabled = enabled && this.config.show_virtual_cursor && this.cursorPositionValid
+          virtualCursor.enabled = enabled
+          // An Agent lease always keeps focus, real input and rendering isolated;
+          // saved drawing and legacy input preferences cannot weaken ownership.
+          await api.setAutomationOptions.call(this.wc, {
+            isolateInput: protect, blockRealPointer: protect, blockRealKeyboard: protect,
+            keepRendering: protect, virtualCursor,
+          })
+          // The native configuration barrier can outlive a navigation/layout
+          // change. At that moment the last readback may still say disabled,
+          // so the invalidation listener could not have scheduled a hide.
+          if (enabled && (!this.cursorPositionValid || !this.config.show_virtual_cursor)) {
+            enabled = false
+            await api.setAutomationOptions.call(this.wc, {
+              isolateInput: protect, blockRealPointer: protect, blockRealKeyboard: protect,
+              keepRendering: protect, virtualCursor: {enabled:false, frameRate:this.config.cursor_fps},
+            })
+          }
+          this.confirmNative(api, enabled, protect)
+          if (enabled) this.cursorImageKey = imageKey
+        }
         if (this.disposed) return
-        this.state.cursorEnabled = nativeEnabled; this.state.cursorVisible = enabled; this.state.cursorStyle = this.config.cursor_style
-        this.state.inputProtected = protect; this.state.nativeConfirmed = true
+        this.state.cursorStyle = this.config.cursor_style
       } catch (error) {
-        if (!this.disposed) this.state.nativeConfirmed = false
+        if (!this.disposed) {
+          // A failed reset may have changed only part of the native state. Read
+          // what remains, but keep release unconfirmed even if flags look clear.
+          try { this.readNative(api) } catch { /* Preserve the last known state. */ }
+          this.state.nativeConfirmed = false
+        }
         throw error
       } finally {
         if (!this.disposed) { this.state.nativePending = false; this.publish() }
@@ -301,7 +464,8 @@ export class BrowserAutomationController {
     const warning = typeof value.deliveryWarning === 'string' ? value.deliveryWarning : ''
     const reason = typeof value.reason === 'string' ? value.reason : typeof value.error === 'string' ? value.error : warning || undefined
     const failed = value.ok === false || value.status === 'failed' || value.status === 'cancelled'
-    const unsafe = (cleanup?.failed ?? 0) > 0 || !!reason?.includes('PARTIAL_CLICK_SEQUENCE') || !!warning || (failed && value.dispatchedCount === null)
+    const expectedResetCancellation = reason === 'AUTOMATION_RESET' && this.nativeCancellationGeneration === this.controlGeneration
+    const unsafe = (cleanup?.failed ?? 0) > 0 || !!reason?.includes('PARTIAL_CLICK_SEQUENCE') || !!warning || (failed && value.dispatchedCount === null && !expectedResetCancellation)
     // A later successful child/cleanup must not hide an earlier partial delivery.
     if ((unsafe || !this.unsafeCleanup) && (typeof value.status === 'string' || reason || cleanup)) {
       this.state.lastResult = {
@@ -330,11 +494,11 @@ export class BrowserAutomationController {
       await admission
       this.assertEpoch(epoch, permissionOptions)
       if (guardsInput && this.leaseRunId && this.leaseRunId !== options.runId) throw new BrowserAutomationError('browser_page_in_use')
-      if (documentEpoch !== this.documentEpoch) throw new BrowserAutomationError('browser_document_changed')
+      if (documentEpoch !== this.documentEpoch) throw new BrowserAutomationError('browser_document_changed','browser_document_changed',{expectedDocumentEpoch:documentEpoch,actualDocumentEpoch:this.documentEpoch,expectedEpoch:epoch,actualEpoch:this.state.epoch,dispatched:false})
       if (options.signal?.aborted) throw new BrowserAutomationError('aborted')
       const abort = new AbortController()
       const signal = options.signal ? AbortSignal.any([options.signal, abort.signal]) : abort.signal
-      const active: Active = { abort, commits: new Set(), cleanups: new Set(), observedDocEpoch: documentEpoch, accepting: true }
+      const active: Active = { abort, commits: new Set(), nativeCommits: new Set(), cleanups: new Set(), nativeResetConfirmed: false, observedDocEpoch: documentEpoch, accepting: true }
       this.active = active; this.state.activeOperations = 1
       const previousActivity = this.state.activity
       const previousError = this.state.error
@@ -358,14 +522,16 @@ export class BrowserAutomationController {
         },
         commit: async native => {
           assertCurrent()
+          active.submittedInput=true
           const pending = native()
           active.commits.add(pending)
+          active.nativeCommits.add(pending)
           try { const result = await pending; this.noteResult(result); return result }
           catch (error) {
             this.noteResult({ status: 'failed', dispatchedCount: null, reason: error instanceof Error ? error.message : String(error) })
             throw error
           }
-          finally { active.commits.delete(pending) }
+          finally { active.commits.delete(pending); active.nativeCommits.delete(pending) }
         },
         setActivity: async (activity, label) => {
           assertCurrent()
@@ -381,7 +547,7 @@ export class BrowserAutomationController {
       try {
         if (guardsInput) {
           if (options.runId) this.leaseRunId = options.runId
-          await this.syncNative(this.config.show_virtual_cursor, this.config.protect_input)
+          await this.syncNative(this.config.show_virtual_cursor, true)
           nativeAcquired = true
         }
         assertCurrent()
@@ -395,11 +561,15 @@ export class BrowserAutomationController {
         // A caller timing out must not release protection while an uncancellable
         // native click it already committed is still queued or executing.
         await Promise.allSettled([...active.commits])
+        const cancellation = this.nativeCancellationBarrier
+        if (cancellation && cancellation.generation === this.controlGeneration) await cancellation.settled
+        active.cleaning=true;this.publish()
         for (const cleanup of [...active.cleanups]) {
-          try { await cleanup() }
+          try { await cleanup({ nativeResetConfirmed: active.nativeResetConfirmed }) }
           catch { this.unsafeCleanup = true; this.state.error = 'cleanup_unconfirmed'; this.observationRequired = true }
         }
         active.cleanups.clear()
+        active.cleaning=false
         this.active = undefined; this.state.activeOperations = 0
         if (!this.disposed && this.state.epoch === epoch && (!this.gated || !guardsInput)) {
           try {
@@ -428,7 +598,10 @@ export class BrowserAutomationController {
         this.publish()
       }
       if (failure) {
-        if (failure instanceof BrowserAutomationError && this.state.lastResult) failure.lastResult = structuredClone(this.state.lastResult)
+        if (failure instanceof BrowserAutomationError) {
+          Object.assign(failure.diagnostic,{expectedEpoch:epoch,actualEpoch:this.state.epoch,expectedDocumentEpoch:documentEpoch,actualDocumentEpoch:this.documentEpoch,...(failure.diagnostic.stage==='cleanup'?{}:{stage:active.submittedInput?'after_dispatch':'before_dispatch'}),...(active.submittedInput?{}:{dispatched:false})})
+          if(this.state.lastResult){failure.lastResult=structuredClone(this.state.lastResult);if((this.state.lastResult.dispatchedCount??0)>0||this.state.lastResult.status==='dispatched')failure.diagnostic.dispatched=true}
+        }
         throw failure
       }
       return result
@@ -443,17 +616,42 @@ export class BrowserAutomationController {
     this.state.activity = 'handoff'; this.state.handoffTarget = owner; this.state.label = '等待当前输入与清理完成'; this.publish()
     const controlGeneration = this.controlGeneration
     const pending = this.tail
+    this.nativeCancellationGeneration = controlGeneration
+    // Explicit stop/takeover must be able to cancel a submitted native queue
+    // even while another control job is waiting for that operation to settle.
+    // Native serialization and generation checks prevent a stale reset from
+    // reaching the next owner. The handoff still waits for all receipts/cleanup.
+    let nativeInputActive = false
+    try { nativeInputActive = (this.wc as unknown as CursorApi).getAutomationState?.call(this.wc).inputActive === true } catch { /* The release path reports unavailable state. */ }
+    const cancelNativeInput = !!this.active?.nativeCommits.size || nativeInputActive
+    const cancelledActive = this.active
+    const releasing = cancelNativeInput ? this.syncNative(false, false, controlGeneration).then(
+      () => {
+        // Keep local cleanup callbacks so adapters can forget their held-state
+        // ledgers, while avoiding a second native release after reset did it.
+        if (cancelledActive) cancelledActive.nativeResetConfirmed = true
+        return { ok: true as const }
+      }, error => ({ ok: false as const, error }),
+    ) : undefined
+    if (releasing) this.nativeCancellationBarrier = { generation: controlGeneration, settled: releasing.then(() => {}) }
     return this.serializeControl(async () => {
       await this.drain(pending)
       if (this.disposed || this.controlGeneration !== controlGeneration) return this.snapshot()
       try {
-        await this.syncNative(false, false)
+        if (releasing) {
+          const released = await releasing
+          if (!released.ok) throw released.error
+        } else await this.syncNative(false, false, controlGeneration)
+        // Legacy cleanup callbacks may have submitted releases after reset;
+        // verify their final native state before granting manual ownership.
+        this.confirmNative(this.wc as unknown as CursorApi, false, false, true)
         if (this.controlGeneration !== controlGeneration) return this.snapshot()
         this.state.owner = this.unsafeCleanup ? 'paused' : owner; this.state.activity = this.unsafeCleanup ? 'error' : 'idle'
         this.leaseRunId = undefined
         this.state.error = this.unsafeCleanup ? 'cleanup_unconfirmed' : undefined
       } catch {
         if (this.controlGeneration !== controlGeneration) return this.snapshot()
+        this.state.nativeConfirmed = false
         this.state.owner = 'paused'; this.state.activity = 'error'; this.state.error = 'release_unconfirmed'
       }
       if (!this.state.error) this.state.handoffTarget = undefined
@@ -464,6 +662,26 @@ export class BrowserAutomationController {
   takeControl(): Promise<BrowserAutomationState> { return this.handoff('user') }
   pause(): Promise<BrowserAutomationState> { return this.handoff('paused') }
   retryRelease(): Promise<BrowserAutomationState> { return this.handoff(this.state.handoffTarget ?? (this.state.owner === 'user' ? 'user' : 'paused')) }
+  /** Explicit Agent cancellation affects only the matching task's page lease. */
+  cancelRun(runId: string): Promise<void> {
+    if (!runId) return Promise.resolve()
+    if (this.cancelledRun?.id === runId) return this.cancelledRun.settled
+    if (this.manualSession?.leaseRunId === runId) {
+      this.manualSession.runEnded = true
+      this.publish()
+      return Promise.resolve()
+    }
+    if (this.leaseRunId !== runId) return Promise.resolve()
+    const settled = this.pause().then(state => {
+      if (!state.nativeConfirmed || state.inputProtected || state.isolateInput || state.keepRendering || state.error || state.activity === 'handoff') {
+        throw new BrowserAutomationError(state.error || 'release_unconfirmed')
+      }
+    })
+    // stop() and the run's finally share one cancellation barrier. A failed
+    // reset is retried only through explicit control recovery, never by finally.
+    this.cancelledRun = { id: runId, settled }
+    return settled
+  }
   finishRun(runId?: string): Promise<void> {
     if(this.manualSession&&(!this.manualSession.leaseRunId||this.manualSession.leaseRunId===runId))this.manualSession.runEnded=true
     if (this.leaseRunId && this.leaseRunId !== runId) return Promise.resolve()
@@ -483,7 +701,11 @@ export class BrowserAutomationController {
       this.publish()
     })
   }
-  resume(): Promise<BrowserAutomationState> {
+  async resume(): Promise<BrowserAutomationState> {
+    if(this.state.pageBlocker && this.state.pageBlocker.state !== 'not_observed' && !(this.state.pageBlocker.state==='confirmed'&&!this.state.pageBlocker.requiresUser)) {
+      const blocker=await this.recheckBlocker()
+      if(blocker?.state !== 'not_observed' && !(blocker?.state==='confirmed'&&!blocker.requiresUser))throw new BrowserAutomationError(blocker?.state==='confirmed'?'browser_page_blocked':'browser_page_unverified',blocker?.state==='confirmed'?'页面仍需本人处理，请完成后重新检查。':'尚未确认页面可以继续操作，请重新检查。')
+    }
     const controlGeneration = this.controlGeneration
     const pending = this.tail
     return this.serializeControl(async () => {
@@ -533,7 +755,7 @@ export class BrowserAutomationController {
       }
       try{
         const protect=session.owner==='ai'&&!session.manual&&!!session.leaseRunId
-        await this.syncNative(protect&&this.config.show_virtual_cursor,protect&&this.config.protect_input)
+        await this.syncNative(protect&&this.config.show_virtual_cursor,protect)
         if(token.generation!==this.controlGeneration||token.documentEpoch!==this.documentEpoch){
           await this.syncNative(false,false)
           this.manualSession=undefined
@@ -566,7 +788,7 @@ export class BrowserAutomationController {
     const generation = this.controlGeneration
     this.documentEpoch++; this.observationRequired = true
     if (this.leaseRunId && this.state.owner === 'ai' && !this.options.getManualControl?.() && !this.unsafeCleanup) {
-      try { await this.syncNative(this.config.show_virtual_cursor, this.config.protect_input) }
+      try { await this.syncNative(this.config.show_virtual_cursor, true) }
       catch { this.state.owner = 'paused'; this.state.activity = 'error'; this.state.error = 'protection_unconfirmed'; this.publish(); throw new BrowserAutomationError('protection_unconfirmed') }
       if (generation !== this.controlGeneration) return
     }
@@ -600,17 +822,21 @@ export class BrowserAutomationController {
     if (nextRevision <= (this.state.revision ?? -1)) return Promise.resolve(this.snapshot())
     const previous = this.config
     this.config = normalizeBrowserAutomation(next); this.state.revision = nextRevision
-    const modeChanged = previous.show_virtual_cursor !== next.show_virtual_cursor || previous.protect_input !== next.protect_input || previous.cursor_style !== next.cursor_style
+    const modeChanged = previous.show_virtual_cursor !== next.show_virtual_cursor || previous.cursor_style !== next.cursor_style || previous.cursor_scale !== next.cursor_scale
     const nativeChanged = modeChanged || previous.cursor_fps !== next.cursor_fps
     if (!nativeChanged) { this.publish(); return Promise.resolve(this.snapshot()) }
     if (!modeChanged) {
       // Drawing-rate updates do not mutate input guards or wait behind a long gesture.
-      try { (this.wc as unknown as CursorApi).setVirtualCursorFrameRate?.call(this.wc, next.cursor_fps) }
-      catch (error) { this.state.error = 'cursor_configuration_failed'; this.publish(); return Promise.reject(error) }
+      try {
+        const api = this.wc as unknown as CursorApi
+        if (!api.setVirtualCursorFrameRate) throw new BrowserAutomationError('automation_api_unavailable')
+        api.setVirtualCursorFrameRate.call(this.wc, next.cursor_fps)
+        const actual = this.readNative(api)
+        if (actual.virtualCursor.frameRate !== next.cursor_fps) throw new BrowserAutomationError('automation_configuration_unconfirmed')
+      }
+      catch (error) { this.state.nativeConfirmed = false; this.state.error = 'cursor_configuration_failed'; this.publish(); return Promise.reject(error) }
       this.publish(); return Promise.resolve(this.snapshot())
     }
-    const closing = previous.protect_input && !next.protect_input
-    if (closing) { this.invalidate('browser_settings_changed'); this.state.activity = 'handoff'; this.publish() }
     const controlGeneration = this.controlGeneration
     const pending = this.tail
     const applied = this.serializeControl(async () => {
@@ -618,7 +844,7 @@ export class BrowserAutomationController {
       if (this.disposed || nextRevision !== this.state.revision) return this.snapshot()
       try {
         const ownsInput = this.state.owner === 'ai' && !this.options.getManualControl?.() && (!!this.leaseRunId || this.state.activity !== 'idle')
-        await this.syncNative(ownsInput && this.config.show_virtual_cursor, !!this.leaseRunId && ownsInput && this.config.protect_input)
+        await this.syncNative(ownsInput && this.config.show_virtual_cursor, !!this.leaseRunId && ownsInput)
         if (nextRevision !== this.state.revision || this.controlGeneration !== controlGeneration) return this.snapshot()
         if (this.state.owner === 'ai' && !this.unsafeCleanup) this.gated = false
         this.state.activity = this.unsafeCleanup ? 'error' : this.state.owner === 'ai' ? 'waiting' : 'idle'
@@ -641,7 +867,9 @@ export class BrowserAutomationController {
     this.listeners = []; this.state.owner = 'paused'; this.state.activity = 'error'; this.state.error = 'browser_page_destroyed'
     this.leaseRunId = undefined
     this.state.cursorVisible = false
-    this.state.cursorEnabled = false; this.state.inputProtected = false; this.state.nativePending = false; this.state.nativeConfirmed = true
+    this.state.cursorEnabled = false; this.state.inputProtected = false; this.state.isolateInput = false; this.state.keepRendering = false
+    this.state.rendering = { viewAvailable: false, keepAlive: false, requestedBackgroundThrottling: true, effectiveBackgroundThrottling: true }
+    this.state.nativePending = false; this.state.nativeConfirmed = true
     this.publish()
   }
 }

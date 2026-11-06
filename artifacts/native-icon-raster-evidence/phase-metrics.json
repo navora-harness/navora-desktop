@@ -1,0 +1,186 @@
+[
+  {
+    "phaseDIP": 0,
+    "icons": [
+      {
+        "id": "phase-0",
+        "edgeEnergyPerInk": 0.362395,
+        "ink": 170.369
+      },
+      {
+        "id": "phase-1",
+        "edgeEnergyPerInk": 0.372525,
+        "ink": 258.088
+      },
+      {
+        "id": "phase-2",
+        "edgeEnergyPerInk": 0.256207,
+        "ink": 326.318
+      },
+      {
+        "id": "phase-3",
+        "edgeEnergyPerInk": 0.363089,
+        "ink": 132.677
+      },
+      {
+        "id": "phase-4",
+        "edgeEnergyPerInk": 0.364422,
+        "ink": 119.834
+      },
+      {
+        "id": "phase-5",
+        "edgeEnergyPerInk": 0.363179,
+        "ink": 120.189
+      },
+      {
+        "id": "phase-root",
+        "edgeEnergyPerInk": 0.334361,
+        "ink": 1127.475
+      },
+      {
+        "id": "phase-row",
+        "edgeEnergyPerInk": 0.334361,
+        "ink": 1127.475
+      }
+    ],
+    "meanSharpness": 0.343817
+  },
+  {
+    "phaseDIP": 1,
+    "icons": [
+      {
+        "id": "phase-0",
+        "edgeEnergyPerInk": 0.3718,
+        "ink": 171.507
+      },
+      {
+        "id": "phase-1",
+        "edgeEnergyPerInk": 0.37282,
+        "ink": 256.853
+      },
+      {
+        "id": "phase-2",
+        "edgeEnergyPerInk": 0.257952,
+        "ink": 325.235
+      },
+      {
+        "id": "phase-3",
+        "edgeEnergyPerInk": 0.365118,
+        "ink": 132.968
+      },
+      {
+        "id": "phase-4",
+        "edgeEnergyPerInk": 0.371897,
+        "ink": 118.76
+      },
+      {
+        "id": "phase-5",
+        "edgeEnergyPerInk": 0.359112,
+        "ink": 121.037
+      },
+      {
+        "id": "phase-root",
+        "edgeEnergyPerInk": 0.337017,
+        "ink": 1126.359
+      },
+      {
+        "id": "phase-row",
+        "edgeEnergyPerInk": 0.337017,
+        "ink": 1126.359
+      }
+    ],
+    "meanSharpness": 0.346592
+  },
+  {
+    "phaseDIP": 2,
+    "icons": [
+      {
+        "id": "phase-0",
+        "edgeEnergyPerInk": 0.375058,
+        "ink": 172.359
+      },
+      {
+        "id": "phase-1",
+        "edgeEnergyPerInk": 0.366142,
+        "ink": 256.47
+      },
+      {
+        "id": "phase-2",
+        "edgeEnergyPerInk": 0.2531,
+        "ink": 328.258
+      },
+      {
+        "id": "phase-3",
+        "edgeEnergyPerInk": 0.363844,
+        "ink": 133.207
+      },
+      {
+        "id": "phase-4",
+        "edgeEnergyPerInk": 0.365678,
+        "ink": 120.106
+      },
+      {
+        "id": "phase-5",
+        "edgeEnergyPerInk": 0.363329,
+        "ink": 120.009
+      },
+      {
+        "id": "phase-root",
+        "edgeEnergyPerInk": 0.334057,
+        "ink": 1130.41
+      },
+      {
+        "id": "phase-row",
+        "edgeEnergyPerInk": 0.334057,
+        "ink": 1130.41
+      }
+    ],
+    "meanSharpness": 0.344408
+  },
+  {
+    "phaseDIP": 3,
+    "icons": [
+      {
+        "id": "phase-0",
+        "edgeEnergyPerInk": 0.365688,
+        "ink": 171.253
+      },
+      {
+        "id": "phase-1",
+        "edgeEnergyPerInk": 0.366172,
+        "ink": 257.419
+      },
+      {
+        "id": "phase-2",
+        "edgeEnergyPerInk": 0.250776,
+        "ink": 328.783
+      },
+      {
+        "id": "phase-3",
+        "edgeEnergyPerInk": 0.363927,
+        "ink": 132.834
+      },
+      {
+        "id": "phase-4",
+        "edgeEnergyPerInk": 0.360944,
+        "ink": 121.046
+      },
+      {
+        "id": "phase-5",
+        "edgeEnergyPerInk": 0.37132,
+        "ink": 118.645
+      },
+      {
+        "id": "phase-root",
+        "edgeEnergyPerInk": 0.332239,
+        "ink": 1129.982
+      },
+      {
+        "id": "phase-row",
+        "edgeEnergyPerInk": 0.332239,
+        "ink": 1129.982
+      }
+    ],
+    "meanSharpness": 0.342913
+  }
+]

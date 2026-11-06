@@ -1,0 +1,2877 @@
+{
+  "ok": false,
+  "error": "Error: Timed out: right-click directly opens native annotation editor without another guest click",
+  "stack": "Error: Timed out: right-click directly opens native annotation editor without another guest click\n    at until (file:///C:/Users/43798/AppData/Local/Temp/navora-native-annotations-U2k3En/entry.mjs:391:9)\n    at async file:///C:/Users/43798/AppData/Local/Temp/navora-native-annotations-U2k3En/entry.mjs:717:11",
+  "checks": [
+    "annotation-list-and-counter-removed-from-browser-toolbar",
+    "point-selection-opens-native-editor-with-live-unchanged-view-and-no-preview",
+    "textarea-submit-saves-annotation-without-chat-card-or-composer-reference",
+    "continuous-annotation-retains-page-form-and-live-instance",
+    "HTML-header-list-left-of-summary-search-status-details-keeps-clear-of-live-View",
+    "card-edit-reopens-hidden-unmounted-workspace-and-retains-request-until-browser-editor-mounts",
+    "chat-card-edit-retains-overlength-emoji-draft-and-reopens-it-intact",
+    "unsaved-target-remains-in-list-and-continues-intact",
+    "card-details-support-cancel-and-confirm-delete-without-list-panel-or-agent-messages",
+    "expanded-workspace-blocks-floating-and-restores-saved-preference",
+    "light-dark-and-narrow-chat-cards-and-real-native-editor-captured-with-live-view-retained"
+  ],
+  "errors": [],
+  "requests": [
+    {
+      "id": "annotation-editor:406fd98f-44b7-45f2-8ecd-f464d4721c8c",
+      "content": {
+        "id": "annotation-editor-root",
+        "type": "column",
+        "width": 420,
+        "gap": 8,
+        "children": [
+          {
+            "id": "annotation-comment",
+            "type": "textarea",
+            "height": 54,
+            "width": 396,
+            "placeholder": "添加评论…",
+            "accessibleName": "添加评论",
+            "invalid": false,
+            "submitOnEnter": true,
+            "maxLength": 0,
+            "scrollbarPlacement": "gutter",
+            "disabled": false,
+            "style": {
+              "borderless": true,
+              "paddingTop": 6,
+              "paddingBottom": 6,
+              "paddingLeft": 2,
+              "paddingRight": 2
+            },
+            "value": ""
+          },
+          {
+            "id": "annotation-actions",
+            "type": "row",
+            "gap": 8,
+            "height": 32,
+            "children": [
+              {
+                "id": "annotation-discard",
+                "type": "button",
+                "text": "放弃",
+                "variant": "plain",
+                "disabled": false
+              },
+              {
+                "id": "annotation-spacer",
+                "type": "text",
+                "text": "",
+                "flex": 1
+              },
+              {
+                "id": "annotation-keep",
+                "type": "button",
+                "text": "收起",
+                "variant": "plain",
+                "disabled": false
+              },
+              {
+                "id": "annotation-save",
+                "type": "button",
+                "text": "确认",
+                "variant": "default",
+                "disabled": true
+              }
+            ]
+          }
+        ]
+      },
+      "anchor": {
+        "x": 922,
+        "y": 335.5,
+        "width": 1,
+        "height": 1
+      },
+      "icons": {},
+      "theme": {
+        "mode": "light",
+        "background": "#feffff",
+        "text": "#263c50",
+        "muted": "#5c7185",
+        "accent": "#3d6f96",
+        "border": "#d7e3ed",
+        "fontFamily": "Segoe UI",
+        "fontSize": 13
+      },
+      "contextKey": "[\"win_ec0898c4b2\",\"target_0839e78c-bd26-49f9-9c4f-98ad15f67aee\"]",
+      "sourcePageId": "win_ec0898c4b2",
+      "focusMode": "input",
+      "role": "editor",
+      "radius": 14,
+      "contentInset": 12,
+      "scrollbarPlacement": "gutter",
+      "placement": "bottom-start",
+      "dismissOnEscape": true,
+      "dismissOnOutsideClick": true
+    },
+    {
+      "id": "annotation-editor:c0d86809-dd86-4f0a-add8-a18058a5eecb",
+      "content": {
+        "id": "annotation-editor-root",
+        "type": "column",
+        "width": 420,
+        "gap": 8,
+        "children": [
+          {
+            "id": "annotation-comment",
+            "type": "textarea",
+            "height": 54,
+            "width": 396,
+            "placeholder": "添加评论…",
+            "accessibleName": "添加评论",
+            "invalid": false,
+            "submitOnEnter": true,
+            "maxLength": 0,
+            "scrollbarPlacement": "gutter",
+            "disabled": false,
+            "style": {
+              "borderless": true,
+              "paddingTop": 6,
+              "paddingBottom": 6,
+              "paddingLeft": 2,
+              "paddingRight": 2
+            },
+            "value": ""
+          },
+          {
+            "id": "annotation-actions",
+            "type": "row",
+            "gap": 8,
+            "height": 32,
+            "children": [
+              {
+                "id": "annotation-discard",
+                "type": "button",
+                "text": "放弃",
+                "variant": "plain",
+                "disabled": false
+              },
+              {
+                "id": "annotation-spacer",
+                "type": "text",
+                "text": "",
+                "flex": 1
+              },
+              {
+                "id": "annotation-keep",
+                "type": "button",
+                "text": "收起",
+                "variant": "plain",
+                "disabled": false
+              },
+              {
+                "id": "annotation-save",
+                "type": "button",
+                "text": "确认",
+                "variant": "default",
+                "disabled": true
+              }
+            ]
+          }
+        ]
+      },
+      "anchor": {
+        "x": 882,
+        "y": 535.5,
+        "width": 1,
+        "height": 1
+      },
+      "icons": {},
+      "theme": {
+        "mode": "light",
+        "background": "#feffff",
+        "text": "#263c50",
+        "muted": "#5c7185",
+        "accent": "#3d6f96",
+        "border": "#d7e3ed",
+        "fontFamily": "Segoe UI",
+        "fontSize": 13
+      },
+      "contextKey": "[\"win_ec0898c4b2\",\"target_f47afa91-d441-4c64-9f71-4fefe433aa9c\"]",
+      "sourcePageId": "win_ec0898c4b2",
+      "focusMode": "input",
+      "role": "editor",
+      "radius": 14,
+      "contentInset": 12,
+      "scrollbarPlacement": "gutter",
+      "placement": "bottom-start",
+      "dismissOnEscape": true,
+      "dismissOnOutsideClick": true
+    },
+    {
+      "id": "annotation-editor:97f562b4-98b1-4ead-b4dc-aa374073290c",
+      "content": {
+        "id": "annotation-editor-root",
+        "type": "column",
+        "width": 420,
+        "gap": 8,
+        "children": [
+          {
+            "id": "annotation-comment",
+            "type": "textarea",
+            "height": 54,
+            "width": 396,
+            "placeholder": "添加评论…",
+            "accessibleName": "添加评论",
+            "accessibleDescription": "页面已变化，意见仍关联原位置。",
+            "invalid": false,
+            "submitOnEnter": true,
+            "maxLength": 0,
+            "scrollbarPlacement": "gutter",
+            "disabled": false,
+            "style": {
+              "borderless": true,
+              "paddingTop": 6,
+              "paddingBottom": 6,
+              "paddingLeft": 2,
+              "paddingRight": 2
+            },
+            "value": "第一行批注\n第二行 😀"
+          },
+          {
+            "id": "annotation-status",
+            "type": "text",
+            "text": "页面已变化，意见仍关联原位置。",
+            "singleLine": true,
+            "muted": true,
+            "fontSize": 12,
+            "tooltip": "页面已变化，意见仍关联原位置。"
+          },
+          {
+            "id": "annotation-actions",
+            "type": "row",
+            "gap": 8,
+            "height": 32,
+            "children": [
+              {
+                "id": "annotation-spacer",
+                "type": "text",
+                "text": "",
+                "flex": 1
+              },
+              {
+                "id": "annotation-keep",
+                "type": "button",
+                "text": "收起",
+                "variant": "plain",
+                "disabled": false
+              },
+              {
+                "id": "annotation-save",
+                "type": "button",
+                "text": "确认",
+                "variant": "default",
+                "disabled": false
+              }
+            ]
+          }
+        ]
+      },
+      "anchor": {
+        "x": 922,
+        "y": 335.5,
+        "width": 1,
+        "height": 1
+      },
+      "icons": {},
+      "theme": {
+        "mode": "light",
+        "background": "#feffff",
+        "text": "#263c50",
+        "muted": "#5c7185",
+        "accent": "#3d6f96",
+        "border": "#d7e3ed",
+        "fontFamily": "Segoe UI",
+        "fontSize": 13
+      },
+      "contextKey": "[\"win_ec0898c4b2\",\"ann_0839e78c-bd26-49f9-9c4f-98ad15f67aee\"]",
+      "sourcePageId": "win_ec0898c4b2",
+      "focusMode": "input",
+      "role": "editor",
+      "radius": 14,
+      "contentInset": 12,
+      "scrollbarPlacement": "gutter",
+      "placement": "bottom-start",
+      "dismissOnEscape": true,
+      "dismissOnOutsideClick": true
+    },
+    {
+      "id": "annotation-editor:23e6910d-4f47-49fb-9b74-bdb1153d4758",
+      "content": {
+        "id": "annotation-editor-root",
+        "type": "column",
+        "width": 420,
+        "gap": 8,
+        "children": [
+          {
+            "id": "annotation-comment",
+            "type": "textarea",
+            "height": 180,
+            "width": 396,
+            "placeholder": "添加评论…",
+            "accessibleName": "添加评论",
+            "accessibleDescription": "4008 / 4000，请缩短后确认",
+            "invalid": true,
+            "submitOnEnter": true,
+            "maxLength": 0,
+            "scrollbarPlacement": "gutter",
+            "disabled": false,
+            "style": {
+              "borderless": true,
+              "paddingTop": 6,
+              "paddingBottom": 6,
+              "paddingLeft": 2,
+              "paddingRight": 2
+            },
+            "value": "字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字😀\n保留超限草稿"
+          },
+          {
+            "id": "annotation-status",
+            "type": "text",
+            "text": "4008 / 4000，请缩短后确认",
+            "singleLine": true,
+            "muted": false,
+            "fontSize": 12,
+            "tooltip": "4008 / 4000，请缩短后确认"
+          },
+          {
+            "id": "annotation-actions",
+            "type": "row",
+            "gap": 8,
+            "height": 32,
+            "children": [
+              {
+                "id": "annotation-spacer",
+                "type": "text",
+                "text": "",
+                "flex": 1
+              },
+              {
+                "id": "annotation-keep",
+                "type": "button",
+                "text": "收起",
+                "variant": "plain",
+                "disabled": false
+              },
+              {
+                "id": "annotation-save",
+                "type": "button",
+                "text": "确认",
+                "variant": "default",
+                "disabled": true
+              }
+            ]
+          }
+        ]
+      },
+      "anchor": {
+        "x": 922,
+        "y": 335.5,
+        "width": 1,
+        "height": 1
+      },
+      "icons": {},
+      "theme": {
+        "mode": "light",
+        "background": "#feffff",
+        "text": "#263c50",
+        "muted": "#5c7185",
+        "accent": "#3d6f96",
+        "border": "#d7e3ed",
+        "fontFamily": "Segoe UI",
+        "fontSize": 13
+      },
+      "contextKey": "[\"win_ec0898c4b2\",\"ann_0839e78c-bd26-49f9-9c4f-98ad15f67aee\"]",
+      "sourcePageId": "win_ec0898c4b2",
+      "focusMode": "input",
+      "role": "editor",
+      "radius": 14,
+      "contentInset": 12,
+      "scrollbarPlacement": "gutter",
+      "placement": "bottom-start",
+      "dismissOnEscape": true,
+      "dismissOnOutsideClick": true
+    },
+    {
+      "id": "annotation-editor:7d9f16c3-ddbe-4abd-85b6-4950e88664dc",
+      "content": {
+        "id": "annotation-editor-root",
+        "type": "column",
+        "width": 420,
+        "gap": 8,
+        "children": [
+          {
+            "id": "annotation-comment",
+            "type": "textarea",
+            "height": 54,
+            "width": 396,
+            "placeholder": "添加评论…",
+            "accessibleName": "添加评论",
+            "invalid": false,
+            "submitOnEnter": true,
+            "maxLength": 0,
+            "scrollbarPlacement": "gutter",
+            "disabled": false,
+            "style": {
+              "borderless": true,
+              "paddingTop": 6,
+              "paddingBottom": 6,
+              "paddingLeft": 2,
+              "paddingRight": 2
+            },
+            "value": ""
+          },
+          {
+            "id": "annotation-actions",
+            "type": "row",
+            "gap": 8,
+            "height": 32,
+            "children": [
+              {
+                "id": "annotation-discard",
+                "type": "button",
+                "text": "放弃",
+                "variant": "plain",
+                "disabled": false
+              },
+              {
+                "id": "annotation-spacer",
+                "type": "text",
+                "text": "",
+                "flex": 1
+              },
+              {
+                "id": "annotation-keep",
+                "type": "button",
+                "text": "收起",
+                "variant": "plain",
+                "disabled": false
+              },
+              {
+                "id": "annotation-save",
+                "type": "button",
+                "text": "确认",
+                "variant": "default",
+                "disabled": true
+              }
+            ]
+          }
+        ]
+      },
+      "anchor": {
+        "x": 882,
+        "y": 535.5,
+        "width": 1,
+        "height": 1
+      },
+      "icons": {},
+      "theme": {
+        "mode": "light",
+        "background": "#feffff",
+        "text": "#263c50",
+        "muted": "#5c7185",
+        "accent": "#3d6f96",
+        "border": "#d7e3ed",
+        "fontFamily": "Segoe UI",
+        "fontSize": 13
+      },
+      "contextKey": "[\"win_ec0898c4b2\",\"target_2cf036e9-fd79-45cc-8cea-cb7144b0a0c6\"]",
+      "sourcePageId": "win_ec0898c4b2",
+      "focusMode": "input",
+      "role": "editor",
+      "radius": 14,
+      "contentInset": 12,
+      "scrollbarPlacement": "gutter",
+      "placement": "bottom-start",
+      "dismissOnEscape": true,
+      "dismissOnOutsideClick": true
+    },
+    {
+      "id": "annotation-editor:a94b35a5-dc1c-4dd6-9f4f-1a742cc70b94",
+      "content": {
+        "id": "annotation-editor-root",
+        "type": "column",
+        "width": 420,
+        "gap": 8,
+        "children": [
+          {
+            "id": "annotation-comment",
+            "type": "textarea",
+            "height": 54,
+            "width": 396,
+            "placeholder": "添加评论…",
+            "accessibleName": "添加评论",
+            "invalid": false,
+            "submitOnEnter": true,
+            "maxLength": 0,
+            "scrollbarPlacement": "gutter",
+            "disabled": false,
+            "style": {
+              "borderless": true,
+              "paddingTop": 6,
+              "paddingBottom": 6,
+              "paddingLeft": 2,
+              "paddingRight": 2
+            },
+            "value": "未完成的批注草稿 😀"
+          },
+          {
+            "id": "annotation-actions",
+            "type": "row",
+            "gap": 8,
+            "height": 32,
+            "children": [
+              {
+                "id": "annotation-discard",
+                "type": "button",
+                "text": "放弃",
+                "variant": "plain",
+                "disabled": false
+              },
+              {
+                "id": "annotation-spacer",
+                "type": "text",
+                "text": "",
+                "flex": 1
+              },
+              {
+                "id": "annotation-keep",
+                "type": "button",
+                "text": "收起",
+                "variant": "plain",
+                "disabled": false
+              },
+              {
+                "id": "annotation-save",
+                "type": "button",
+                "text": "确认",
+                "variant": "default",
+                "disabled": false
+              }
+            ]
+          }
+        ]
+      },
+      "anchor": {
+        "x": 882,
+        "y": 535.5,
+        "width": 1,
+        "height": 1
+      },
+      "icons": {},
+      "theme": {
+        "mode": "light",
+        "background": "#feffff",
+        "text": "#263c50",
+        "muted": "#5c7185",
+        "accent": "#3d6f96",
+        "border": "#d7e3ed",
+        "fontFamily": "Segoe UI",
+        "fontSize": 13
+      },
+      "contextKey": "[\"win_ec0898c4b2\",\"target_2cf036e9-fd79-45cc-8cea-cb7144b0a0c6\"]",
+      "sourcePageId": "win_ec0898c4b2",
+      "focusMode": "input",
+      "role": "editor",
+      "radius": 14,
+      "contentInset": 12,
+      "scrollbarPlacement": "gutter",
+      "placement": "bottom-start",
+      "dismissOnEscape": true,
+      "dismissOnOutsideClick": true
+    },
+    {
+      "id": "annotation-editor:6f413122-3d40-4290-a4f2-4d7188fabcd4",
+      "content": {
+        "id": "annotation-editor-root",
+        "type": "column",
+        "width": 420,
+        "gap": 8,
+        "children": [
+          {
+            "id": "annotation-comment",
+            "type": "textarea",
+            "height": 54,
+            "width": 396,
+            "placeholder": "添加评论…",
+            "accessibleName": "添加评论",
+            "accessibleDescription": "页面已变化，意见仍关联原位置。",
+            "invalid": false,
+            "submitOnEnter": true,
+            "maxLength": 0,
+            "scrollbarPlacement": "gutter",
+            "disabled": false,
+            "style": {
+              "borderless": true,
+              "paddingTop": 6,
+              "paddingBottom": 6,
+              "paddingLeft": 2,
+              "paddingRight": 2
+            },
+            "value": "修改后的批注\n仍保留 😀"
+          },
+          {
+            "id": "annotation-status",
+            "type": "text",
+            "text": "页面已变化，意见仍关联原位置。",
+            "singleLine": true,
+            "muted": true,
+            "fontSize": 12,
+            "tooltip": "页面已变化，意见仍关联原位置。"
+          },
+          {
+            "id": "annotation-actions",
+            "type": "row",
+            "gap": 8,
+            "height": 32,
+            "children": [
+              {
+                "id": "annotation-spacer",
+                "type": "text",
+                "text": "",
+                "flex": 1
+              },
+              {
+                "id": "annotation-keep",
+                "type": "button",
+                "text": "收起",
+                "variant": "plain",
+                "disabled": false
+              },
+              {
+                "id": "annotation-save",
+                "type": "button",
+                "text": "确认",
+                "variant": "default",
+                "disabled": false
+              }
+            ]
+          }
+        ]
+      },
+      "anchor": {
+        "x": 1235,
+        "y": 337.0338645418327,
+        "width": 1,
+        "height": 1
+      },
+      "icons": {},
+      "theme": {
+        "mode": "dark",
+        "background": "#2b4053",
+        "text": "#e8f1f9",
+        "muted": "#a9c0d4",
+        "accent": "#9cc7e9",
+        "border": "#435f75",
+        "fontFamily": "Segoe UI",
+        "fontSize": 13
+      },
+      "contextKey": "[\"win_ec0898c4b2\",\"ann_0839e78c-bd26-49f9-9c4f-98ad15f67aee\"]",
+      "sourcePageId": "win_ec0898c4b2",
+      "focusMode": "input",
+      "role": "editor",
+      "radius": 14,
+      "contentInset": 12,
+      "scrollbarPlacement": "gutter",
+      "placement": "bottom-start",
+      "dismissOnEscape": true,
+      "dismissOnOutsideClick": true
+    }
+  ],
+  "updates": [
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "accessibleDescription": "页面已变化，意见仍关联原位置。",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-status",
+          "type": "text",
+          "text": "页面已变化，意见仍关联原位置。",
+          "singleLine": true,
+          "muted": true,
+          "fontSize": 12,
+          "tooltip": "页面已变化，意见仍关联原位置。"
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "accessibleDescription": "页面已变化，意见仍关联原位置。",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-status",
+          "type": "text",
+          "text": "页面已变化，意见仍关联原位置。",
+          "singleLine": true,
+          "muted": true,
+          "fontSize": 12,
+          "tooltip": "页面已变化，意见仍关联原位置。"
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "accessibleDescription": "页面已变化，意见仍关联原位置。",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-status",
+          "type": "text",
+          "text": "页面已变化，意见仍关联原位置。",
+          "singleLine": true,
+          "muted": true,
+          "fontSize": 12,
+          "tooltip": "页面已变化，意见仍关联原位置。"
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 180,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "accessibleDescription": "4008 / 4000，请缩短后确认",
+          "invalid": true,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-status",
+          "type": "text",
+          "text": "4008 / 4000，请缩短后确认",
+          "singleLine": true,
+          "muted": false,
+          "fontSize": 12,
+          "tooltip": "4008 / 4000，请缩短后确认"
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 180,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "accessibleDescription": "4008 / 4000，请缩短后确认",
+          "invalid": true,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-status",
+          "type": "text",
+          "text": "4008 / 4000，请缩短后确认",
+          "singleLine": true,
+          "muted": false,
+          "fontSize": 12,
+          "tooltip": "4008 / 4000，请缩短后确认"
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 180,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "accessibleDescription": "4008 / 4000，请缩短后确认",
+          "invalid": true,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-status",
+          "type": "text",
+          "text": "4008 / 4000，请缩短后确认",
+          "singleLine": true,
+          "muted": false,
+          "fontSize": 12,
+          "tooltip": "4008 / 4000，请缩短后确认"
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 180,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "accessibleDescription": "4008 / 4000，请缩短后确认",
+          "invalid": true,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-status",
+          "type": "text",
+          "text": "4008 / 4000，请缩短后确认",
+          "singleLine": true,
+          "muted": false,
+          "fontSize": 12,
+          "tooltip": "4008 / 4000，请缩短后确认"
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 180,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "accessibleDescription": "4008 / 4000，请缩短后确认",
+          "invalid": true,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-status",
+          "type": "text",
+          "text": "4008 / 4000，请缩短后确认",
+          "singleLine": true,
+          "muted": false,
+          "fontSize": 12,
+          "tooltip": "4008 / 4000，请缩短后确认"
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "accessibleDescription": "页面已变化，意见仍关联原位置。",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-status",
+          "type": "text",
+          "text": "页面已变化，意见仍关联原位置。",
+          "singleLine": true,
+          "muted": true,
+          "fontSize": 12,
+          "tooltip": "页面已变化，意见仍关联原位置。"
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "accessibleDescription": "页面已变化，意见仍关联原位置。",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-status",
+          "type": "text",
+          "text": "页面已变化，意见仍关联原位置。",
+          "singleLine": true,
+          "muted": true,
+          "fontSize": 12,
+          "tooltip": "页面已变化，意见仍关联原位置。"
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "accessibleDescription": "页面已变化，意见仍关联原位置。",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": true,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-status",
+          "type": "text",
+          "text": "页面已变化，意见仍关联原位置。",
+          "singleLine": true,
+          "muted": true,
+          "fontSize": 12,
+          "tooltip": "页面已变化，意见仍关联原位置。"
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": true
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "保存中…",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-discard",
+              "type": "button",
+              "text": "放弃",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "accessibleDescription": "页面已变化，意见仍关联原位置。",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-status",
+          "type": "text",
+          "text": "页面已变化，意见仍关联原位置。",
+          "singleLine": true,
+          "muted": true,
+          "fontSize": 12,
+          "tooltip": "页面已变化，意见仍关联原位置。"
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "accessibleDescription": "页面已变化，意见仍关联原位置。",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-status",
+          "type": "text",
+          "text": "页面已变化，意见仍关联原位置。",
+          "singleLine": true,
+          "muted": true,
+          "fontSize": 12,
+          "tooltip": "页面已变化，意见仍关联原位置。"
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "accessibleDescription": "页面已变化，意见仍关联原位置。",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-status",
+          "type": "text",
+          "text": "页面已变化，意见仍关联原位置。",
+          "singleLine": true,
+          "muted": true,
+          "fontSize": 12,
+          "tooltip": "页面已变化，意见仍关联原位置。"
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "annotation-editor-root",
+      "type": "column",
+      "width": 420,
+      "gap": 8,
+      "children": [
+        {
+          "id": "annotation-comment",
+          "type": "textarea",
+          "height": 54,
+          "width": 396,
+          "placeholder": "添加评论…",
+          "accessibleName": "添加评论",
+          "accessibleDescription": "页面已变化，意见仍关联原位置。",
+          "invalid": false,
+          "submitOnEnter": true,
+          "maxLength": 0,
+          "scrollbarPlacement": "gutter",
+          "disabled": false,
+          "style": {
+            "borderless": true,
+            "paddingTop": 6,
+            "paddingBottom": 6,
+            "paddingLeft": 2,
+            "paddingRight": 2
+          }
+        },
+        {
+          "id": "annotation-status",
+          "type": "text",
+          "text": "页面已变化，意见仍关联原位置。",
+          "singleLine": true,
+          "muted": true,
+          "fontSize": 12,
+          "tooltip": "页面已变化，意见仍关联原位置。"
+        },
+        {
+          "id": "annotation-actions",
+          "type": "row",
+          "gap": 8,
+          "height": 32,
+          "children": [
+            {
+              "id": "annotation-spacer",
+              "type": "text",
+              "text": "",
+              "flex": 1
+            },
+            {
+              "id": "annotation-keep",
+              "type": "button",
+              "text": "收起",
+              "variant": "plain",
+              "disabled": false
+            },
+            {
+              "id": "annotation-save",
+              "type": "button",
+              "text": "确认",
+              "variant": "default",
+              "disabled": false
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

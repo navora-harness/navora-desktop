@@ -12,10 +12,11 @@
           <button v-for="row in rows" :key="row.key" type="button" class="plugin-result" :class="{selected:selectedKey===row.key}" :data-plugin-key="row.key" :aria-pressed="selectedKey===row.key" :title="row.name" @click="select(row.key)">
             <span class="plugin-result-icon"><AppIcon icon="puzzle-piece" /></span><span class="plugin-result-copy"><strong>{{ row.name }}</strong><small>{{ row.description || row.local?.id || row.product?.productId }}</small></span><span class="plugin-result-state" :class="{failed:!!row.local?.error,enabled:row.local?.enabled && !row.local.error}">{{ row.local ? row.local.error?'异常':row.local.enabled?'启用':'停用' : row.product?.installed?'已安装':'商店' }}</span>
           </button>
-          <div v-if="!rows.length" class="plugin-list-empty" role="status">{{ loading || (mode!=='installed' && storeLoading) ? '正在读取插件…' : query ? '没有匹配的插件' : mode==='store' ? storeError?'暂时无法连接商店':'商店暂无插件' : '尚未安装插件' }}</div>
+          <div v-if="!rows.length" class="plugin-list-empty" role="status">{{ recovery.blocked && mode==='installed' ? '恢复后显示已安装插件' : loading || (mode!=='installed' && storeLoading) ? '正在读取插件…' : query ? '没有匹配的插件' : mode==='store' ? storeError?'暂时无法连接商店':'商店暂无插件' : '尚未安装插件' }}</div>
         </div>
         <footer class="plugin-sidebar-actions">
-          <v-menu location="top start"><template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" :disabled="!!busy" class="plugin-import-action"><AppIcon icon="file-import" />导入插件<AppIcon icon="chevron-down" /></button></template><div class="plugin-import-menu" role="menu"><button type="button" role="menuitem" :disabled="!!busy" @click="prepareImport('zip')">安装 ZIP</button><button type="button" role="menuitem" :disabled="!!busy" @click="prepareImport('directory')">外链文件夹</button></div></v-menu>
+          <button v-if="importNative.menusSupported.value&&!importNativeFailed" type="button" :disabled="!!busy||!active" class="plugin-import-action" aria-haspopup="menu" :aria-expanded="importNativeOpen" @click="showImportMenu"><AppIcon icon="file-import" />导入插件<AppIcon icon="chevron-down" /></button>
+          <v-menu v-else v-model="importDomOpen" location="top start"><template #activator="{props:menuProps}"><button v-bind="menuProps" type="button" :disabled="!!busy||!active" class="plugin-import-action"><AppIcon icon="file-import" />导入插件<AppIcon icon="chevron-down" /></button></template><div class="plugin-import-menu" role="menu"><button type="button" role="menuitem" :disabled="!!busy" @click="prepareImport('zip')">安装 ZIP</button><button type="button" role="menuitem" :disabled="!!busy" @click="prepareImport('directory')">外链文件夹</button></div></v-menu>
           <button type="button" class="plugin-square" title="创建插件" aria-label="创建插件" :disabled="!!busy" @click="emit('create')"><AppIcon icon="plus" /></button>
         </footer>
       </div>
@@ -30,6 +31,13 @@
       </div>
     </header>
     <div ref="detailScroll" class="plugin-detail-scroll">
+      <section v-if="recovery.blocked" class="plugin-recovery" role="alert" aria-label="插件安装恢复">
+        <h2>插件安装需要恢复</h2>
+        <p>上次安装未能安全完成，插件已暂停加载。请先释放磁盘空间、关闭占用插件文件的程序，并确认插件目录可写，然后重试。</p>
+        <p v-if="recovery.issues.some(issue=>issue.kind==='invalid')">有安装记录无法验证，已保留备份和诊断。重试后仍无法恢复时，请复制诊断联系支持。</p>
+        <ul v-if="recovery.issues.length"><li v-for="reason in recoveryReasons" :key="reason">{{ reason }}</li></ul>
+        <div><button type="button" class="plugin-primary" :disabled="!!busy" @click="retryRecovery">{{ busy==='recovery'?'正在恢复…':'重试恢复' }}</button><button type="button" :disabled="!!busy" @click="copyRecovery">复制诊断</button></div>
+      </section>
       <section v-if="manageOpen" class="plugin-batch-workspace">
         <header><div><h2>已安装插件</h2><p>筛选、批量卸载和查看加载状态</p></div><button type="button" class="plugin-square" aria-label="关闭插件管理列表" title="返回插件详情" :disabled="!!busy" @click="manageOpen=false"><AppIcon icon="xmark" /></button></header>
         <div v-if="batchMode" class="plugin-batch-toolbar"><button type="button" :disabled="!!busy" @click="selectVisible">{{ batchAllSelected?'取消选择当前结果':'全选当前结果' }}</button><span>已选 {{ batchSelected.size }}<span v-if="selectedOutsideFilter">（筛选外 {{ selectedOutsideFilter }}）</span></span><button type="button" class="plugin-danger" :disabled="!!busy || !batchSelected.size" @click="deleteBatch=records.filter(record=>batchSelected.has(record.id))">卸载 {{ batchSelected.size || '' }}</button></div>
@@ -40,7 +48,7 @@
         <div class="plugin-detail-actions">
           <label v-if="local" class="plugin-enable-action"><input type="checkbox" role="switch" class="surface-toggle" :checked="local.enabled" :aria-checked="local.enabled" :aria-label="`${local.enabled?'停用':'启用'} ${local.name}`" :disabled="!!busy || (!!local.error && !local.enabled)" @change="toggleEnabled(local,($event.target as HTMLInputElement).checked)" /><span>{{ local.enabled?'已启用':'启用插件' }}</span></label>
           <button v-if="product && (!product.installed || productHasUpdate(product))" type="button" class="plugin-primary" :disabled="!!busy || loading || !localLoaded" @click="install(product.installed?'update':'install')"><AppIcon icon="download" />{{ product.installed?'更新插件':'安装插件' }}</button>
-          <ActionMenu v-if="local" label="插件更多操作" :disabled="!!busy" :items="pluginActions" @select="pluginAction" />
+          <ActionMenu v-if="local" label="插件更多操作" :disabled="!!busy||!active" :context-key="pluginMenuContext" :items="pluginActions" @select="pluginAction" />
           <span v-if="busy" class="plugin-action-status" role="status">正在处理…</span>
         </div>
         <div v-if="local?.error" class="plugin-detail-error" role="alert"><strong>插件加载失败</strong><pre>{{ local.error }}</pre><button type="button" :disabled="!!busy" @click="reload">重新加载</button></div>
@@ -52,7 +60,7 @@
         <section v-else-if="detailTab==='tools'" class="plugin-tools"><h3>插件工具<span v-if="local">{{ local.tools.length }}</span></h3><div v-if="local?.tools.length" class="plugin-tool-grid"><code v-for="tool in local.tools" :key="tool"><AppIcon icon="wrench" />{{ tool }}</code></div><p v-else class="plugin-docs-empty">{{ !local?'安装并启用后可查看工具':local.error?'修复加载错误后可查看工具':!local.enabled?'启用插件后可查看注册的工具':'此插件未注册工具' }}</p></section>
         <section v-else class="plugin-versions"><h3>版本信息</h3><template v-if="product"><section v-for="pkg in product.packages" :key="pkg.id" class="plugin-package"><h4>{{ pkg.name }}<span v-if="product.installed?.packageId===pkg.id">本机已安装 {{ product.installed.version }}</span></h4><p>{{ pkg.description || pkg.id }}</p><div v-for="version in sortedVersions(pkg)" :key="version.version" class="plugin-version-row"><strong>v{{ version.version }}</strong><span>{{ version.status==='yanked'?'已下架':version.publishedAt?new Date(version.publishedAt).toLocaleDateString():'可用' }}</span><span v-if="version.minHostVersion">需要桌面版 {{ version.minHostVersion }}+</span></div></section></template><dl v-else class="plugin-metadata"><div><dt>当前版本</dt><dd>{{ local?.version || '未提供版本' }}</dd></div><div><dt>来源</dt><dd>{{ local ? pluginLibrarySource(local).label : '' }}</dd></div></dl></section>
       </article>
-      <div v-else class="plugin-detail-empty"><span class="plugin-hero-icon"><AppIcon icon="puzzle-piece" /></span><h2>{{ query?'没有匹配的插件':'让工作流多一种可能' }}</h2><p>{{ query?'试试插件名称、用途或工具名称。':'从左侧选择插件，查看说明和可用工具。' }}</p><div><button type="button" class="plugin-primary" @click="query='';selectMode('store')">浏览插件商店</button><button type="button" @click="emit('create')">创建插件</button></div></div>
+      <div v-else-if="!recovery.blocked" class="plugin-detail-empty"><span class="plugin-hero-icon"><AppIcon icon="puzzle-piece" /></span><h2>{{ query?'没有匹配的插件':'让工作流多一种可能' }}</h2><p>{{ query?'试试插件名称、用途或工具名称。':'从左侧选择插件，查看说明和可用工具。' }}</p><div><button type="button" class="plugin-primary" @click="query='';selectMode('store')">浏览插件商店</button><button type="button" @click="emit('create')">创建插件</button></div></div>
     </div>
     <PluginImportDialog v-model="importOpen" :preview="importPreview" :saving="busy==='import'" @confirm="confirmImport" />
     <SkillDeleteDialog :model-value="!!deleteTarget" kicker="插件" entity-label="插件" :action-verb="deleteTarget?.kind==='linked'?'取消外链':'卸载'" subtitle="请确认要移除的插件" :skill-id="deleteTarget?.id" :name="deleteTarget?.name" :description="deleteTarget?.description" :saving="busy==='delete'" @update:model-value="!$event && (deleteTarget=null)" @cancel="deleteTarget=null" @confirm="removePlugin" />
@@ -64,7 +72,10 @@
 import {useMobileLayout} from '@/composables/useMobileLayout'
 import {computed,nextTick,onBeforeUnmount,onMounted,ref,watch} from 'vue'
 import ActionMenu from '../ActionMenu.vue'
-import type {PluginImportOptions,PluginImportPreview,PluginRecord} from '@shared/plugins'
+import {useNativeUi} from '@/composables/useNativeUi'
+import type {NativeMenuItem} from '@shared/native-ui'
+import {requestBrowserChromeOpen} from '@shared/browser-chrome-events'
+import type {PluginImportOptions,PluginImportPreview,PluginRecord,PluginRecoveryStatus} from '@shared/plugins'
 import {compareStoreVersions,latestPackageVersion,type StoreCatalogPackage,type StoreCatalogProduct} from '@shared/store'
 import {currentPluginProducts,pluginWorkspaceEntries,type PluginWorkspaceMode} from '@shared/plugin-workspace'
 import {pluginLibrarySource} from '@shared/plugin-library'
@@ -85,6 +96,12 @@ const modes:Array<{id:PluginWorkspaceMode;label:string;icon:string}>=[{id:'searc
 const mode=ref<PluginWorkspaceMode>('installed'),query=ref(''),selectedKey=ref(''),detailTab=ref('overview')
 const detailTabs=[{id:'overview',label:'概览'},{id:'tools',label:'工具'},{id:'versions',label:'版本'}]
 const records=ref<PluginRecord[]>([]),products=ref<StoreCatalogProduct[]>([]),loading=ref(false),storeLoading=ref(false),listError=ref(''),storeError=ref(''),busy=ref('')
+const recovery=ref<PluginRecoveryStatus>({blocked:false,recovered:0,issues:[]})
+const recoveryReasons=computed(()=>[...new Set(recovery.value.issues.map(issue=>recoveryReason(issue.error)))])
+const importNative=useNativeUi(),importNativeOpen=ref(false),importNativeFailed=ref(false),importDomOpen=ref(false)
+const importMenuId=`plugin-import-${crypto.randomUUID()}`
+const importMenuItems:NativeMenuItem[]=[{id:'zip',label:'安装 ZIP',icon:'file-import'},{id:'directory',label:'外链文件夹',icon:'folder-open'}]
+let importMenuGeneration=0
 const searchInput=ref<HTMLInputElement|null>(null),detailScroll=ref<HTMLElement|null>(null)
 const modeLabel=computed(()=>modes.find(item=>item.id===mode.value)!.label)
 const rows=computed(()=>pluginWorkspaceEntries(records.value,products.value,mode.value,query.value))
@@ -92,13 +109,14 @@ const selected=computed(()=>rows.value.find(row=>row.key===selectedKey.value))
 const product=computed(()=>selected.value?.product || (selected.value?.local ? currentPluginProducts(products.value,records.value).find(product=>product.packages.some(pkg=>pkg.id===selected.value!.local!.id)) : undefined))
 const local=computed(()=>selected.value?.local || records.value.find(record=>record.id===product.value?.installed?.packageId))
 const protectedPlugin=(record:PluginRecord)=>record.bundled || record.kind==='bundled'
+const pluginMenuContext=computed(()=>JSON.stringify([props.active,selectedKey.value,local.value?.id,local.value?.path,local.value?.version,product.value?.kind,product.value?.productId,product.value?.installed?.packageId]))
 const pluginActions=computed(()=>[
   ...(product.value?.installed&&product.value.displayMode==='suite'&&product.value.packages.length>1?[{id:'variant',label:'更换变体',icon:'layer-group'}]:[]),
   {id:'export',label:'导出插件',icon:'file-export'},
   {id:'path',label:'复制路径',icon:'copy'},
   ...(local.value&&!protectedPlugin(local.value)?[{id:'remove',label:local.value.kind==='linked'?'取消外链…':'卸载插件…',icon:'trash',danger:true,divider:true}]:[])
 ])
-function pluginAction(action:string){if(busy.value||!local.value)return;if(action==='export')void exportPlugin(local.value);else if(action==='path')void copyPath(local.value.path);else if(action==='variant')void install('change');else if(action==='remove')deleteTarget.value=local.value}
+function pluginAction(action:string){if(!props.active||busy.value||!local.value)return;if(action==='export')void exportPlugin(local.value);else if(action==='path')void copyPath(local.value.path);else if(action==='variant')void install('change');else if(action==='remove'&&!protectedPlugin(local.value))deleteTarget.value=local.value}
 const docsHtml=ref(''),docsError=ref(''),docsLoading=ref(false)
 const importOpen=ref(false),importPreview=ref<PluginImportPreview|null>(null),importPath=ref(''),deleteTarget=ref<PluginRecord|null>(null)
 const remembered=new Map<PluginWorkspaceMode,string>()
@@ -109,6 +127,25 @@ const batchAllSelected=computed(()=>visibleRemovable.value.length>0&&visibleRemo
 const selectedOutsideFilter=computed(()=>[...batchSelected.value].filter(id=>!visibleIds.value.includes(id)).length)
 let listGeneration=0,storeGeneration=0,docsGeneration=0,disposed=false,storeLoaded=false,localLoaded=false
 let unsubscribePlugins:(()=>void)|undefined,unsubscribeStore:(()=>void)|undefined
+
+function closeImportMenu(){importMenuGeneration++;importDomOpen.value=false;importNativeOpen.value=false;void importNative.closeMenu()}
+async function showImportMenu(event:MouseEvent){
+  if(disposed||!props.active||busy.value)return
+  if(importNativeOpen.value){closeImportMenu();return}
+  const trigger=event.currentTarget as HTMLElement,generation=++importMenuGeneration,context=JSON.stringify([props.active,props.sidebarTarget,mode.value])
+  const current=()=>!disposed&&props.active&&!busy.value&&generation===importMenuGeneration&&context===JSON.stringify([props.active,props.sidebarTarget,mode.value])
+  importNativeOpen.value=true
+  try{
+    const result=await importNative.popupMenu(importMenuItems,trigger,{placement:'top-start',contextKey:`${importMenuId}:${context}`})
+    if(!current())return
+    importNativeOpen.value=false
+    if(!result.supported){importNativeFailed.value=true;await nextTick();if(current())importDomOpen.value=true;return}
+    if(result.selectedId==='zip'||result.selectedId==='directory')void prepareImport(result.selectedId)
+  }catch{if(current()){importNativeFailed.value=true;await nextTick();if(current())importDomOpen.value=true}}
+  finally{if(generation===importMenuGeneration)importNativeOpen.value=false}
+}
+watch([()=>props.active,()=>props.sidebarTarget,mode,busy],closeImportMenu)
+watch(importDomOpen,value=>{if(value)requestBrowserChromeOpen(importMenuId)})
 
 watch(rows,value=>{if(!value.some(row=>row.key===selectedKey.value))selectedKey.value=value[0]?.key || ''},{immediate:true})
 watch(manageOpen,visible=>{if(!visible)setBatchMode(false)})
@@ -128,7 +165,10 @@ function toggleFromLibrary(id:string,enabled:boolean){const record=records.value
 function exportFromLibrary(id:string){const record=records.value.find(record=>record.id===id);if(record)void exportPlugin(record)}
 async function removeBatch(){const items=deleteBatch.value.filter(record=>!protectedPlugin(record));if(!items.length)return;await perform('delete-batch',async()=>{const result=await window.navora!.plugins.removeMany(items.map(record=>record.id));if(!result.removed?.length)throw Error(result.error||'卸载失败');const failed=new Set(result.failed||[]);deleteBatch.value=items.filter(record=>failed.has(record.id));await loadLocal();emit('notify',failed.size?`已卸载 ${result.removed.length} 个，失败 ${failed.size} 个`:`已卸载 ${result.removed.length} 个插件`,failed.size?'warning':'success')})}
 function onListKey(event:KeyboardEvent){if(!['ArrowUp','ArrowDown','Home','End'].includes(event.key))return;const buttons=[...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('.plugin-result')];const index=buttons.indexOf(document.activeElement as HTMLButtonElement);if(index<0)return;event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?buttons.length-1:Math.max(0,Math.min(buttons.length-1,index+(event.key==='ArrowDown'?1:-1)));buttons[next]?.focus();buttons[next]?.click()}
-async function loadLocal(){const generation=++listGeneration;loading.value=true;listError.value='';try{if(!window.navora?.plugins)throw Error('unsupported');const list=await window.navora.plugins.list();if(disposed||generation!==listGeneration)return;records.value=list;localLoaded=true}catch{if(!disposed&&generation===listGeneration)listError.value='插件列表读取失败，已保留现有内容'}finally{if(!disposed&&generation===listGeneration)loading.value=false}}
+async function loadLocal(){const generation=++listGeneration;loading.value=true;listError.value='';try{if(!window.navora?.plugins)throw Error('unsupported');const [list,status]=await Promise.all([window.navora.plugins.list(),window.navora.plugins.recoveryStatus()]);if(disposed||generation!==listGeneration)return;records.value=list;recovery.value=status;localLoaded=true}catch{if(!disposed&&generation===listGeneration)listError.value='插件列表读取失败，已保留现有内容'}finally{if(!disposed&&generation===listGeneration)loading.value=false}}
+function recoveryReason(code:string){return ({ENOSPC:'磁盘空间不足',EDQUOT:'磁盘配额已用尽',EACCES:'插件目录访问权限不足',EPERM:'文件被占用或操作被系统拒绝',EBUSY:'插件文件正在使用',EIO:'磁盘读写失败',invalid_install_journal:'安装记录无法验证，已保留诊断',install_recovery_required:'上次恢复未完成，可以重试',install_rollback_failed:'安装回退未完成，已保留备份，请解除故障后重试',plugin_reload_failed:'插件重新加载失败，请检查目录权限后重试'} as Record<string,string>)[code]||'恢复未完成，请检查文件占用和目录权限'}
+async function retryRecovery(){await perform('recovery',async()=>{const result=await window.navora!.plugins.retryRecovery();recovery.value=result.status;await loadLocal();if(result.ok)emit('notify','插件恢复完成','success');else if(result.error!=='install_recovery_required')throw Error(result.error||'恢复失败')})}
+async function copyRecovery(){try{await navigator.clipboard.writeText(JSON.stringify(recovery.value,null,2));emit('notify','已复制恢复诊断','success')}catch{emit('notify','复制失败','error')}}
 async function loadStore(){const generation=++storeGeneration;storeLoading.value=true;storeError.value='';try{const result=await window.navora?.store?.list({kind:'plugin'});if(disposed||generation!==storeGeneration)return;if(!result?.ok)throw Error(result?.error||'store_list_failed');products.value=result.products||[];storeLoaded=true}catch{if(!disposed&&generation===storeGeneration)storeError.value='无法连接插件商店，已安装插件仍可使用'}finally{if(!disposed&&generation===storeGeneration)storeLoading.value=false}}
 async function refresh(){await Promise.allSettled([loadLocal(),...(mode.value!=='installed'?[loadStore()]:[])])}
 async function loadDocs(){const generation=++docsGeneration,entry=selected.value,record=local.value;docsHtml.value='';docsError.value='';docsLoading.value=false;if(!entry)return;const catalog=product.value;const pkg=catalog?.packages.find(pkg=>pkg.id===catalog.installed?.packageId)||catalog?.packages.find(pkg=>latestPackageVersion(pkg)?.hasReadme)||catalog?.packages[0];const version=latestPackageVersion(pkg);const localDocs=record?.hasReadme;if(!localDocs&&!version?.hasReadme)return;docsLoading.value=true;try{const result=localDocs?await window.navora!.plugins.readReadme(record!.id):await window.navora!.store.readDocs({kind:'plugin',packageId:pkg!.id,version:version?.version});if(disposed||generation!==docsGeneration)return;if(!result.ok)throw Error(result.error||'readme_not_found');docsHtml.value=renderMarkdown(result.markdown||'')}catch{if(!disposed&&generation===docsGeneration)docsError.value='说明读取失败'}finally{if(!disposed&&generation===docsGeneration)docsLoading.value=false}}
@@ -143,12 +183,13 @@ async function copyPath(path:string){try{await navigator.clipboard.writeText(pat
 async function prepareImport(kind:'directory'|'zip'){await perform('parse',async()=>{const result=await window.navora!.plugins.pickParse(kind);if(result.canceled)return;if(!result.ok||!result.preview)throw Error(result.error||'导入失败');importPreview.value=result.preview;importPath.value=result.path||result.preview.sourcePath;importOpen.value=true})}
 async function confirmImport(options:PluginImportOptions){if(!importPath.value)return;await perform('import',async()=>{const result=await window.navora!.plugins.import(importPath.value,options);if(!result.ok)throw Error(result.error||'导入失败');importOpen.value=false;await loadLocal();query.value='';await selectMode('installed');if(result.plugin)selectedKey.value=`local:${result.plugin.id}`;emit('notify','插件已导入','success')})}
 async function removePlugin(){const target=deleteTarget.value;if(!target||protectedPlugin(target))return;await perform('delete',async()=>{const result=await window.navora!.plugins.remove(target.id);if(!result.ok)throw Error(result.error||'卸载失败');deleteTarget.value=null;await loadLocal();emit('notify',target.kind==='linked'?'已取消外链':'插件已卸载','success')})}
-onMounted(()=>{unsubscribePlugins=window.navora?.plugins?.onChanged(payload=>{++listGeneration;loading.value=false;records.value=payload.plugins;localLoaded=true;listError.value=''});unsubscribeStore=onInstalled(()=>{void loadLocal();if(storeLoaded)void loadStore()})})
-onBeforeUnmount(()=>{disposed=true;++listGeneration;++storeGeneration;++docsGeneration;unsubscribePlugins?.();unsubscribeStore?.()})
+onMounted(()=>{unsubscribePlugins=window.navora?.plugins?.onChanged(()=>{void loadLocal()});unsubscribeStore=onInstalled(()=>{void loadLocal();if(storeLoaded)void loadStore()})})
+onBeforeUnmount(()=>{disposed=true;closeImportMenu();++listGeneration;++storeGeneration;++docsGeneration;unsubscribePlugins?.();unsubscribeStore?.()})
 defineExpose({refresh,manage:toggleManage})
 </script>
 
 <style scoped>
+.plugin-recovery{margin:20px clamp(15px,3vw,40px);padding:18px;border:1px solid var(--navora-stroke,#d6dfeb);border-radius:9px;background:var(--navora-surface,#f8fafc);color:var(--navora-ink,#344153);font-size:13px;line-height:1.7}.plugin-recovery h2{font-size:15px;margin:0 0 8px}.plugin-recovery p{margin:6px 0}.plugin-recovery ul{padding-left:20px}.plugin-recovery>div{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.plugin-recovery button{padding:7px 12px;border:1px solid var(--navora-stroke,#cbd5e2);border-radius:6px}
 .plugin-workspace{container-type:inline-size;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;background:#fff;color:#344153;height:100%}
 .plugin-batch-workspace{padding:28px clamp(15px,3vw,40px);max-width:1200px;margin:auto}.plugin-batch-workspace>header{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:18px}.plugin-batch-workspace h2{font-size:20px;font-weight:600}.plugin-batch-workspace header p{font-size:12px;color:#8591a2;margin-top:6px}.plugin-batch-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:12px;font-size:12px;padding:12px;border:1px solid #d6dfeb;background:#f8fafc;border-radius:8px}.plugin-batch-toolbar>button{border:1px solid #cbd5e2;padding:6px 10px;border-radius:6px}.plugin-batch-toolbar>span{color:#8190a3}.plugin-batch-toolbar .plugin-danger{margin-left:auto;color:#ab5e68}
 button,input{font:inherit}button{cursor:pointer}button:disabled{opacity:.45;cursor:default}button{transition:background-color 140ms ease,color 140ms ease,border-color 140ms ease}button:focus-visible,input:focus-visible{outline:2px solid #6686b0;outline-offset:2px}button:not(:disabled):hover{background:#e8edf4;color:#304f77}

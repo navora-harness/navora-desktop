@@ -25,7 +25,7 @@
     <div v-if="exitState.phase!=='idle'" class="settings-exit-status" :class="{'needs-decision':exitState.phase==='decision'}" role="status" aria-live="polite"><span>{{ exitState.message }}</span><template v-if="exitState.phase==='decision'"><button type="button" class="ui-button" @click="exitGuard.decide('retry')">{{ exitState.reason==='failed'?'重试并返回':'继续等待' }}</button><button type="button" class="ui-button" @click="exitGuard.decide('leave')">保留草稿并返回</button><button type="button" class="ui-button" @click="exitGuard.decide('stay')">留在设置</button></template></div>
     <div v-if="cfg" class="shell" :inert="exitState.phase!=='idle'">
       <Teleport :to="navigationTarget || 'body'" :disabled="!navigationTarget">
-      <nav class="nav settings-navigation">
+      <nav class="nav settings-navigation" aria-label="设置分类">
         <div ref="navListEl" class="nav-list">
           <button
             v-for="item in navItems"
@@ -35,19 +35,18 @@
             :disabled="exitState.phase!=='idle'"
             :class="{ active: tab === item.value }"
             :aria-current="tab === item.value ? 'page' : undefined"
+            :title="item.desc"
             aria-controls="settings-content"
             @click="selectTab(item.value)"
           >
             <AppIcon :icon="item.icon" class="settings-nav-icon" />
             <span class="nav-label">{{ item.title }}</span>
-            <span v-if="!mobile" class="nav-desc">{{ item.desc }}</span>
           </button>
         </div>
         <div class="nav-foot">
-          <button type="button" class="nav-item nav-guide" @click="openOnboarding">
+          <button type="button" class="nav-item nav-guide" title="模型、工作区、权限与远程连接" @click="openOnboarding">
             <AppIcon icon="circle-question" class="settings-nav-icon" />
             <span class="nav-label">开始引导</span>
-            <span v-if="!mobile" class="nav-desc">模型 · 工作区 · 权限 · 远程</span>
           </button>
         </div>
       </nav>
@@ -85,6 +84,26 @@
               </div>
               <p class="appearance-hint">选择后自动保存，并同步到所有已打开的窗口。</p>
             </div>
+            <div class="card mt-3 glyph-style-card">
+              <h3 class="card-title">会话标识样式</h3>
+              <div class="glyph-style-options" role="radiogroup" aria-label="会话标识样式">
+                <button v-for="style in SUBCHAT_GLYPH_STYLES" :key="style.id" type="button" role="radio" class="glyph-style-option" :data-glyph-style="style.id" :aria-checked="resolveSubchatGlyphStyle(cfg.app.subchat_glyph_style)===style.id" :tabindex="resolveSubchatGlyphStyle(cfg.app.subchat_glyph_style)===style.id?0:-1" :disabled="saving" @click="selectGlyphStyle(style.id)" @keydown="onGlyphStyleKey($event,style.id)">
+                  <span class="glyph-style-samples" aria-hidden="true"><img v-for="seed in glyphPreviewSeeds" :key="seed" :src="subchatGlyphUrl(seed,style.id)" alt="" /></span>
+                  <span class="glyph-style-title">{{ style.name }}<span v-if="resolveSubchatGlyphStyle(cfg.app.subchat_glyph_style)===style.id" class="glyph-style-selected" aria-hidden="true"><AppIcon icon="check" /></span></span>
+                  <span class="glyph-style-description">{{ style.description }}</span>
+                </button>
+              </div>
+              <p class="appearance-hint">同一子对话的图案固定，切换样式后所有位置同步更新。</p>
+            </div>
+            <div class="card mt-3">
+              <div class="switch-row">
+                <div>
+                  <div class="switch-title">窗口透明与模糊</div>
+                  <div class="switch-hint">{{ windowMaterialHint }}</div>
+                </div>
+                <v-switch v-model="cfg.app.window_acrylic" hide-details color="primary" :disabled="saving || !windowMaterialSupported" aria-label="窗口透明与模糊" />
+              </div>
+            </div>
           </section>
           <!-- 基本 -->
           <section v-if="tab === 'basic'" class="section">
@@ -113,10 +132,6 @@
 
             <div class="card mt-3">
               <h3 class="card-title">对话与标题</h3>
-              <div class="switch-row">
-                <div><div class="switch-title">运行中直接插入消息</div><div class="switch-hint">关闭时加入队列</div></div>
-                <v-switch aria-label="运行中直接插入消息" v-model="cfg.app.running_message_mode" true-value="insert" false-value="queue" color="primary" hide-details density="compact" />
-              </div>
               <div class="switch-row">
                 <div>
                   <div class="switch-title">回复后显示后续操作建议</div>
@@ -243,7 +258,7 @@
                       variant="outlined"
                       density="compact"
                       color="primary"
-                      base-color="#c5d0db"
+                      base-color="var(--appearance-composer-edge)"
                       class="navora-select provider-add-select"
                       :menu-props="selectMenuProps"
                       hide-details
@@ -335,7 +350,7 @@
                       variant="outlined"
                       density="comfortable"
                       color="primary"
-                      base-color="#c5d0db"
+                      base-color="var(--appearance-composer-edge)"
                     />
 
                     </div></DisclosureTransition>
@@ -360,7 +375,7 @@
                     variant="outlined"
                     density="comfortable"
                     color="primary"
-                    base-color="#c5d0db"
+                    base-color="var(--appearance-composer-edge)"
                     hint="单次任务上限（4～80）"
                     persistent-hint
                   />
@@ -373,7 +388,7 @@
                     variant="outlined"
                     density="comfortable"
                     color="primary"
-                    base-color="#c5d0db"
+                    base-color="var(--appearance-composer-edge)"
                     hint="继续时追加（4～40）"
                     persistent-hint
                   />
@@ -389,13 +404,14 @@
               <h2>浏览器</h2>
               <p>AI 自动化、窗口行为与页面加载</p>
             </header>
+            <div class="card browser-link-settings">
+              <h3 class="card-title">打开网页链接</h3>
+              <v-select :model-value="resolveBrowserLinkOpenMode(cfg.browser.link_open_mode)" :items="browserLinkOpenOptions" label="链接打开方式" aria-label="链接打开方式" variant="outlined" density="comfortable" hide-details :menu-props="selectMenuProps" @update:model-value="selectBrowserLinkOpenMode" />
+              <p class="appearance-hint">用于聊天和文件中的网页链接，不改变 Agent 正在操作的页面。</p>
+            </div>
             <div class="card browser-automation-settings">
               <h3 class="card-title">AI 自动化</h3>
               <p class="switch-hint">AI 使用这里的默认方式操作页面。你可以随时在浏览器工具栏暂停或接管。</p>
-              <div class="switch-row">
-                <div><div class="switch-title">AI Agent 操作时自动静音</div><div class="switch-hint">默认开启，仅在 Agent 使用该页面期间静音；结束或接管后恢复，保留手动静音选择</div></div>
-                <v-switch aria-label="AI Agent 操作时自动静音" v-model="cfg.browser.automation.auto_mute" color="primary" hide-details density="compact" />
-              </div>
               <div class="switch-row" title="显示 AI 实际派发的光标位置，不移动系统鼠标">
                 <div><div class="switch-title">显示虚拟光标</div><div class="switch-hint">显示 AI 实际派发的光标位置；隐藏光标仍保留输入保护</div></div>
                 <v-switch aria-label="显示虚拟光标" v-model="cfg.browser.automation.show_virtual_cursor" color="primary" hide-details density="compact" />
@@ -409,16 +425,17 @@
                 <v-switch aria-label="显示 AI 操作反馈" v-model="cfg.browser.automation.show_control_feedback" color="primary" hide-details density="compact" />
               </div>
               <div class="switch-row">
-                <div><div class="switch-title">防止操作相互干扰</div><div class="switch-hint automation-protection-hint">AI 持有控制权时保护页面键鼠输入，点击「接管」后交还给你；移入鼠标不打断任务</div></div>
-                <v-switch aria-label="防止操作相互干扰" v-model="cfg.browser.automation.protect_input" color="primary" hide-details density="compact" />
+                <div><div class="switch-title">后台独立操作</div><div class="switch-hint automation-protection-hint">AI 控制页面期间始终隔离键鼠输入并保持后台运行，你可以继续使用其他软件；点击「接管」后交还页面</div></div>
+                <span class="switch-title" data-automation-isolation-state>始终开启</span>
               </div>
               <div class="cursor-style-heading"><h3>虚拟光标样式</h3><p>{{ cfg.browser.automation.show_virtual_cursor?'显示 AI 的实际操作位置，不移动系统鼠标。':'开启显示后使用所选样式；现在也可以预选。' }}</p></div>
+              <BrowserCursorSizeControl :model-value="cfg.browser.automation.cursor_scale" :cursor-style="cfg.browser.automation.cursor_style" @update:model-value="selectCursorScale" />
               <BrowserCursorCards :model-value="cfg.browser.automation.cursor_style" @update:model-value="selectCursorStyle" />
               <p v-if="cursorRuntimeIssue" class="cursor-runtime-note" role="status">{{ cursorRuntimeIssue }}<button type="button" class="ui-button" @click="refreshCursorRuntime">刷新状态</button></p>
 <div class="automation-speed" :class="{'is-disabled':!cfg.browser.automation.smooth_pointer}">
-                <div class="automation-speed-heading"><label for="automation-speed">移动速度</label><output>{{ (speedPreview ?? cfg.browser.automation.speed_multiplier).toFixed(2) }}×</output></div>
+                <div class="automation-speed-heading"><label for="automation-speed">移动速度 <small>默认 0.6×</small></label><output>{{ (speedPreview ?? cfg.browser.automation.speed_multiplier).toFixed(2) }}×</output></div>
                 <input id="automation-speed" aria-label="移动速度" type="range" min="0.5" max="2" step="0.05" :disabled="!cfg.browser.automation.smooth_pointer"  :value="speedPreview ?? cfg.browser.automation.speed_multiplier" @input="speedPreview=Number(($event.target as HTMLInputElement).value)" @change="commitSpeed" />
-                <div class="automation-speed-labels"><span>从容 0.5×</span><span>标准 1×</span><span>快速 2×</span></div>
+                <div class="automation-speed-labels"><span>从容 0.5×</span><span>快速 2×</span></div>
               </div>
               <button type="button" class="advanced-toggle automation-advanced-toggle" :aria-expanded="advancedAutomation" @click="advancedAutomation=!advancedAutomation"><AppIcon :icon="advancedAutomation?'chevron-down':'chevron-right'" />高级：移动风格与采样</button>
               <DisclosureTransition><div v-if="advancedAutomation" class="automation-advanced-fields">
@@ -440,7 +457,7 @@
                   variant="outlined"
                   density="comfortable"
                   color="primary"
-                  base-color="#c5d0db"
+                  base-color="var(--appearance-composer-edge)"
                   class="navora-select"
                   :menu-props="selectMenuProps"
                   hide-details
@@ -456,7 +473,7 @@
                   variant="outlined"
                   density="comfortable"
                   color="primary"
-                  base-color="#c5d0db"
+                  base-color="var(--appearance-composer-edge)"
                   @update:model-value="onUaTextChange"
                 />
                 <v-text-field
@@ -468,7 +485,7 @@
                   variant="outlined"
                   density="comfortable"
                   color="primary"
-                  base-color="#c5d0db"
+                  base-color="var(--appearance-composer-edge)"
                 />
               <SettingsGroupActions v-bind="groupProps('identity')" @save="saveGroup('identity')" @cancel="cancelGroup('identity')" />
 </div></DisclosureTransition>
@@ -508,7 +525,7 @@
                   variant="outlined"
                   density="comfortable"
                   color="primary"
-                  base-color="#c5d0db"
+                  base-color="var(--appearance-composer-edge)"
                 />
                 <v-text-field
                   v-model.number="cfg.browser.action_timeout_ms"
@@ -522,7 +539,7 @@
                   variant="outlined"
                   density="comfortable"
                   color="primary"
-                  base-color="#c5d0db"
+                  base-color="var(--appearance-composer-edge)"
                 />
               </div>
               <div class="switch-block">
@@ -553,7 +570,7 @@
                   variant="outlined"
                   density="comfortable"
                   color="primary"
-                  base-color="#c5d0db"
+                  base-color="var(--appearance-composer-edge)"
                 />
               </div>
             <SettingsGroupActions v-bind="groupProps('waits')" @save="saveGroup('waits')" @cancel="cancelGroup('waits')" />
@@ -568,7 +585,7 @@
                 variant="outlined"
                 density="comfortable"
                 color="primary"
-                base-color="#c5d0db"
+                base-color="var(--appearance-composer-edge)"
                 hint="留空表示不限制；支持域名、通配符或完整 URL"
                 persistent-hint
               />
@@ -601,8 +618,9 @@
                 variant="outlined"
                 density="comfortable"
                 color="primary"
-                base-color="#c5d0db"
+                base-color="var(--appearance-composer-edge)"
                 class="navora-select perm-preset"
+                :disabled="presetConfirming || saving"
                 :menu-props="selectMenuProps"
                 hide-details
                 @update:model-value="onPresetChange"
@@ -629,7 +647,7 @@
                   density="compact"
                   variant="outlined"
                   color="primary"
-                  base-color="#c5d0db"
+                  base-color="var(--appearance-composer-edge)"
                   hide-details
                   class="navora-select perm-select"
                   :menu-props="selectMenuProps"
@@ -1093,7 +1111,7 @@
                   hide-details
                   variant="outlined"
                   color="primary"
-                  base-color="#c5d0db"
+                  base-color="var(--appearance-composer-edge)"
                   class="ask-timeout-field"
                   style="max-width: 140px"
                   :disabled="!cfg.fork_decision.enabled || askTimeoutUnlimited"
@@ -1246,7 +1264,7 @@
                   hide-details
                   variant="outlined"
                   color="primary"
-                  base-color="#c5d0db"
+                  base-color="var(--appearance-composer-edge)"
                   class="ask-timeout-field"
                   style="max-width: 120px"
                   :disabled="!cfg.subchat.enabled"
@@ -1260,46 +1278,40 @@
           <section v-if="tab === 'about'" class="section">
             <header class="section-head">
               <h2>关于</h2>
-              <p>版本与运行环境</p>
+              <p>应用版本与浏览器内核</p>
             </header>
             <div class="card about-card">
-              <div class="about-name">Navora</div>
-              <div class="about-tag">AI Agent Browser</div>
+              <div class="about-product"><img src="/app-icon.png" alt="" draggable="false"/><div><h3 class="about-name">{{ info?.name || 'Navora' }}</h3><p class="about-tag">AI Agent Browser</p></div></div>
+              <div v-if="info" class="about-version"><span>应用版本</span><strong data-about-version>{{ info.version }}</strong><span v-if="info.portable" class="about-portable">便携版</span></div>
               <dl v-if="info" class="about-dl">
                 <div>
-                  <dt>版本</dt>
-                  <dd>{{ info.version }}</dd>
+                  <dt>Electron</dt>
+                  <dd>{{ info.electron }}</dd>
                 </div>
                 <div>
-                  <dt>浏览器内核</dt>
+                  <dt>Chromium</dt>
                   <dd>{{ info.chrome }}</dd>
                 </div>
-                <div class="span-all">
-                  <dt>数据目录</dt>
-                  <dd class="path">{{ info.dataRoot }}</dd>
-                </div>
-                <div v-if="typeof info.portable === 'boolean'">
-                  <dt>运行模式</dt>
-                  <dd>{{ info.portable ? '便携版' : '安装版' }}</dd>
-                </div>
               </dl>
-              <p class="about-note">架构说明见 docs/architecture-plan.md</p>
+              <p v-else class="about-note" role="status">正在读取版本信息…</p>
             </div>
           </section>
         </div>
       </div>
     </div>
 
+    <SettingsPermissionConfirm ref="permissionConfirm" :active="tab==='permissions' && exitState.phase==='idle'" />
     <v-snackbar
       v-model="toast.show"
       :color="toast.color"
       :timeout="2200"
-      location="top end"
+      location="bottom end"
+      :transition="false"
       variant="tonal"
       class="app-toast"
       :z-index="10000"
     >
-      {{ toast.text }}
+      <button type="button" class="app-toast-dismiss" :aria-label="`${toast.text}，点击关闭提示`" @click="toast.show=false"><span>{{ toast.text }}</span><AppIcon icon="xmark" /></button>
     </v-snackbar>
   </div>
 </template>
@@ -1307,23 +1319,28 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useTheme } from 'vuetify'
+import {useWindowMaterialState} from '@/composables/useWindowMaterialState'
 import { useRouter } from 'vue-router'
 import SettingsGroupActions from '@/components/SettingsGroupActions.vue'
+import SettingsPermissionConfirm from '@/components/SettingsPermissionConfirm.vue'
 import { SETTINGS_GROUPS, projectSettingsGroup, settingsGroupDirty, validateSettingsGroup, settingsPath, setSettingsPath, type SettingsGroup } from '@shared/settings-groups'
 import { createSettingsCommit, type SettingsCommit } from '@shared/settings-commit'
 import AppearancePreview from '@/components/AppearancePreview.vue'
 import BrowserCursorCards from '@/components/BrowserCursorCards.vue'
+import BrowserCursorSizeControl from '@/components/BrowserCursorSizeControl.vue'
 import type {BrowserCursorStyle} from '@shared/browser-cursor'
 import {createSettingsExitGuard,type SettingsExitState} from '@shared/settings-navigation'
 import { rebaseSettingsDraft } from '@shared/settings-draft'
 import { normalizeBrowserAutomation } from '@shared/browser-automation'
 import { APPEARANCE_THEMES, APPEARANCE_MODES, resolveAppearanceTheme, resolveAppearanceMode, appearancePalette } from '@shared/appearance'
+import {SUBCHAT_GLYPH_STYLES,resolveSubchatGlyphStyle,subchatGlyphUrl,type SubchatGlyphStyle} from '@shared/subchat-glyph'
 import { settingsDraftSession, settingsCredentialDrafts } from '@/composables/settingsDraftSession'
 import ProviderConnectionFields from '@/components/ProviderConnectionFields.vue'
 import ModelCatalogEditor from '@/components/ModelCatalogEditor.vue'
 import DisclosureTransition from '@/components/motion/DisclosureTransition'
 import {
   createDefaultConfig,
+  resolveBrowserLinkOpenMode,
   createDefaultForkDecision,
   FORK_ASK_TIMEOUT_DEFAULT_MS,
   FORK_ASK_TIMEOUT_LIMITED_MS,
@@ -1360,6 +1377,19 @@ import SkillExportDialog from '../components/skills/SkillExportDialog.vue'
 import SkillDeleteDialog from '../components/skills/SkillDeleteDialog.vue'
 import { useOnboarding } from '../composables/useOnboarding'
 import { useStoreUi } from '../composables/useStoreUi'
+
+const hostMaterial=useWindowMaterialState()
+const windowMaterialSupported=computed(()=>hostMaterial.value?.supported===true)
+const windowMaterialHint=computed(()=>{
+  if(window.navora?.app.platform==='web')return '请在桌面端设置窗口透明与模糊。'
+  const state=hostMaterial.value
+  if(!state)return '暂时无法确认当前系统支持，已使用实色。'
+  if(!state.supported)return state.supportReason==='system_unknown'?'暂时无法确认当前系统支持，已使用实色。':'当前系统不支持窗口透明与模糊，已使用实色。'
+  if(['high_contrast','forced_colors','reduced_transparency','system_unknown'].includes(state.reason))return '系统当前限制透明效果，暂时使用实色；开关会保留你的偏好。'
+  if(state.reason==='tone_mismatch')return '应用外观与系统不一致，暂时使用实色；开关会保留你的偏好。'
+  if(state.reason==='native_error')return '当前使用实色；开关会保留你的透明效果偏好。'
+  return '为标题栏和停靠侧栏显示系统半透明背景，配色跟随应用外观。'
+})
 
 const props = withDefaults(
   defineProps<{
@@ -1404,6 +1434,7 @@ watch(()=>props.initialTab,value=>{if(value&&value!==tab.value)selectTab(value)}
 const contentEl = ref<HTMLElement | null>(null)
 const navListEl = ref<HTMLElement | null>(null)
 const cfg = ref<AppConfig | null>(null)
+const permissionConfirm=ref<InstanceType<typeof SettingsPermissionConfirm>|null>(null),presetConfirming=ref(false)
 const appearanceUi = useTheme()
 const appearanceOptions = computed(() => APPEARANCE_THEMES.map(theme =>
   appearancePalette(theme.id, cfg.value?.app.appearance_mode, appearanceUi.current.value.dark),
@@ -1600,7 +1631,7 @@ const remoteStatus = ref<{
 
 const navItems = [
   { value: 'basic', title: '基本', icon: 'sliders', desc: '窗口 · 对话 · 展示' },
-  { value: 'appearance', title: '外观', icon: 'sliders', desc: '配色 · 窗口层次' },
+  { value: 'appearance', title: '外观', icon: 'palette', desc: '配色 · 窗口层次' },
   { value: 'model', title: '模型', icon: 'microchip', desc: 'LLM 接入' },
   { value: 'browser', title: '浏览器', icon: 'browser', desc: 'UA 与超时' },
   { value: 'workspace', title: '工作区', icon: 'folder-open', desc: '文件目录' },
@@ -2420,12 +2451,20 @@ function permLabel(key: string) {
   return PERM_LABELS[key] || key
 }
 
-function onPresetChange(preset: PermissionPreset) {
-  if (!cfg.value) return
-  if (preset === 'open' && cfg.value.permissions.preset !== 'open' && !window.confirm('放手预设会允许 Agent 自动执行更多文件、网络和浏览器操作。将用于新对话及继承默认设置的空对话。确认切换？')) return
-  cfg.value.permissions.preset = preset
+async function onPresetChange(preset: PermissionPreset) {
+  if (!cfg.value || presetConfirming.value || saving.value) return
+  const target=cfg.value,previous=JSON.stringify(target.permissions)
+  if(preset==='open'&&target.permissions.preset!=='open'){
+    presetConfirming.value=true
+    let confirmed=false
+    try{confirmed=await permissionConfirm.value?.ask()||false}finally{presetConfirming.value=false}
+    if(!confirmed)return
+    // A refreshed draft or another window's settings must not be overwritten by an old choice.
+    if(cfg.value!==target||JSON.stringify(target.permissions)!==previous){showToast('权限设置已变化，请重新选择预设。');return}
+  }
+  target.permissions.preset = preset
   if (preset !== 'custom') {
-    cfg.value.permissions.modes = modesForPreset(preset)
+    target.permissions.modes = modesForPreset(preset)
   }
 }
 
@@ -2445,6 +2484,8 @@ function readInstantPrefs(c: AppConfig) {
   return {
     appearance_theme: resolveAppearanceTheme(c.app.appearance_theme).id,
     appearance_mode: resolveAppearanceMode(c.app.appearance_mode),
+    subchat_glyph_style: resolveSubchatGlyphStyle(c.app.subchat_glyph_style),
+    window_acrylic: c.app.window_acrylic !== false,
     close_to_tray: c.app.close_to_tray,
     show_main_on_start: c.app.show_main_on_start !== false,
     running_message_mode: c.app.running_message_mode,
@@ -2456,6 +2497,7 @@ function readInstantPrefs(c: AppConfig) {
     collapse_tool_runs: c.app.collapse_tool_runs !== false,
     collapse_run_logs: c.app.collapse_run_logs !== false,
     show_agent_windows: c.browser.show_agent_windows,
+    link_open_mode: resolveBrowserLinkOpenMode(c.browser.link_open_mode),
     block_window_open: c.browser.block_window_open,
     log_datadome_telemetry: c.browser.log_datadome_telemetry === true,
     wait_load: c.browser.wait.load,
@@ -2477,6 +2519,8 @@ function applyInstantPrefs(target: AppConfig, source: AppConfig) {
   const s = readInstantPrefs(source)
   target.app.appearance_theme = s.appearance_theme
   target.app.appearance_mode = s.appearance_mode
+  target.app.subchat_glyph_style = s.subchat_glyph_style
+  target.app.window_acrylic = s.window_acrylic
   target.app.close_to_tray = s.close_to_tray
   target.app.show_main_on_start = s.show_main_on_start
   target.app.running_message_mode = s.running_message_mode
@@ -2488,6 +2532,7 @@ function applyInstantPrefs(target: AppConfig, source: AppConfig) {
   target.app.collapse_tool_runs = s.collapse_tool_runs
   target.app.collapse_run_logs = s.collapse_run_logs
   target.browser.show_agent_windows = s.show_agent_windows
+  target.browser.link_open_mode = s.link_open_mode
   target.browser.block_window_open = s.block_window_open
   target.browser.log_datadome_telemetry = s.log_datadome_telemetry
   target.browser.wait.load = s.wait_load
@@ -2602,12 +2647,25 @@ function selectAppearanceTheme(id: typeof APPEARANCE_THEMES[number]['id']) {
   schedulePersistInstantPrefs()
 }
 
+const glyphPreviewSeeds=['identity-preview-fern','identity-preview-paper','identity-preview-tide','identity-preview-star','identity-preview-moss']
+const browserLinkOpenOptions=[{title:'软件内新建窗口',value:'window'},{title:'软件内新建标签页',value:'tab'},{title:'系统默认浏览器',value:'external'}]
+function selectGlyphStyle(style:SubchatGlyphStyle){if(!cfg.value)return;cfg.value.app.subchat_glyph_style=style;schedulePersistInstantPrefs()}
+function onGlyphStyleKey(event:KeyboardEvent,style:SubchatGlyphStyle){
+  if(event.isComposing||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(event.key))return
+  event.preventDefault();event.stopPropagation()
+  const options=SUBCHAT_GLYPH_STYLES,index=options.findIndex(item=>item.id===style),next=event.key==='Home'?0:event.key==='End'?options.length-1:(index+(event.key==='ArrowLeft'||event.key==='ArrowUp'?-1:1)+options.length)%options.length
+  const selected=options[next]!.id;selectGlyphStyle(selected)
+  void nextTick(()=>document.querySelector<HTMLButtonElement>(`[data-glyph-style="${selected}"]`)?.focus({preventScroll:true}))
+}
+function selectBrowserLinkOpenMode(value:unknown){if(!cfg.value)return;cfg.value.browser.link_open_mode=resolveBrowserLinkOpenMode(value);schedulePersistInstantPrefs()}
+
 function selectAppearanceMode(mode: typeof APPEARANCE_MODES[number]['id']) {
   if (!cfg.value) return
   cfg.value.app.appearance_mode = mode
   schedulePersistInstantPrefs()
 }
 function selectCursorStyle(style:BrowserCursorStyle){if(!cfg.value)return;cfg.value.browser.automation.cursor_style=style;schedulePersistInstantPrefs()}
+function selectCursorScale(scale:number){if(!cfg.value)return;cfg.value.browser.automation.cursor_scale=scale;schedulePersistInstantPrefs()}
 
 watch(instantPrefsKey, (next, prev) => {
   if (hydrating.value || !prev || next === prev) return
@@ -2974,7 +3032,7 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   overflow: hidden;
   background:
     radial-gradient(1200px 480px at 10% -10%, rgba(27, 79, 114, 0.08), transparent 60%),
-    #eef2f5;
+    var(--navora-stroke, #eef2f5);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -2982,7 +3040,7 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   height: min(88vh, 920px);
   max-height: calc(100vh - 48px);
   border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--navora-stroke);
   box-shadow:
     0 28px 72px rgba(8, 18, 28, 0.28),
     0 8px 24px rgba(8, 18, 28, 0.12);
@@ -2999,8 +3057,8 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   justify-content: space-between;
   gap: 16px;
   padding: 14px 28px;
-  border-bottom: 1px solid #d9e2ea;
-  background: rgba(255, 255, 255, 0.92);
+  border-bottom: 1px solid var(--navora-stroke, #d9e2ea);
+  background: var(--navora-header);
   backdrop-filter: blur(8px);
 }
 .top-left {
@@ -3019,14 +3077,14 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   flex-shrink: 0;
 }
 .back-btn {
-  color: #1b4f72 !important;
+  color: var(--navora-accent, #1b4f72) !important;
 }
 .close-btn {
   width: 40px;
   height: 40px;
   min-width: 40px !important;
   padding: 0 !important;
-  color: #1b4f72 !important;
+  color: var(--navora-accent, #1b4f72) !important;
 }
 .close-btn :deep(svg) {
   width: 1.35rem;
@@ -3036,13 +3094,13 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   margin: 0;
   font-size: 1.2rem;
   font-weight: 700;
-  color: #15202b;
+  color: var(--navora-ink, #15202b);
   line-height: 1.2;
 }
 .top-sub {
   margin: 2px 0 0;
   font-size: 0.75rem;
-  color: #7a8a99;
+  color: var(--navora-muted, #7a8a99);
 }
 .save-btn {
   min-width: 68px;
@@ -3069,10 +3127,10 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   display: flex;
   flex-direction: column;
   gap: 0;
-  padding: 10px;
-  border-radius: 12px;
-  border: 1px solid #d5dee7;
-  background: #fff;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--navora-stroke, #d5dee7);
+  background: var(--navora-sidebar, #f5f7f9);
   align-self: stretch;
   min-height: 0;
   max-height: 100%;
@@ -3081,19 +3139,19 @@ function guardWindowExit(event: BeforeUnloadEvent) {
 .nav-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   flex: 1 1 auto;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba(27, 79, 114, 0.28) transparent;
+  scrollbar-color: color-mix(in srgb, var(--navora-muted) 45%, transparent) transparent;
 }
 .nav-list::-webkit-scrollbar {
   width: 6px;
 }
 .nav-list::-webkit-scrollbar-thumb {
-  background: rgba(27, 79, 114, 0.28);
+  background: color-mix(in srgb, var(--navora-muted) 45%, transparent);
   border-radius: 999px;
 }
 .nav-foot {
@@ -3101,41 +3159,73 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   flex-direction: column;
   gap: 4px;
   flex-shrink: 0;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid #e6edf3;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--navora-stroke, #e6edf3);
 }
 .nav-item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
   width: 100%;
-  padding: 10px 12px;
+  min-height: 38px;
+  padding: 8px 12px;
   border: 0;
   border-radius: 8px;
   background: transparent;
+  color: var(--navora-muted, #627181);
   text-align: left;
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition: background-color 130ms ease, color 130ms ease;
 }
-.nav-item:hover {
-  background: #f3f7fa;
+.nav-item:hover:not(:disabled) {
+  background: var(--control-hover, #e9edf2);
 }
 .nav-item.active {
-  background: #e8f1f7;
+  background: var(--control-selected, #e8f1f7);
+  color: var(--navora-accent, #1b4f72);
+}
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 16px;
+  border-radius: 999px;
+  background: currentColor;
+  transform: translateY(-50%);
+}
+.nav-item:focus-visible {
+  outline: 2px solid var(--control-focus, #1b4f72);
+  outline-offset: -2px;
+}
+.nav-item:disabled {
+  cursor: default;
+  opacity: .5;
+}
+.settings-nav-icon {
+  display: block;
+  width: 17px;
+  height: 17px;
+  justify-self: center;
+  color: inherit;
 }
 .nav-label {
-  font-size: 0.92rem;
-  font-weight: 600;
-  color: #1b2834;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  color: inherit;
 }
 .nav-item.active .nav-label {
-  color: #1b4f72;
-}
-.nav-desc {
-  font-size: 0.72rem;
-  color: #8a97a5;
+  color: inherit;
+  font-weight: 600;
 }
 
 .panel {
@@ -3144,8 +3234,8 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   display: flex;
   flex-direction: column;
   border-radius: 12px;
-  border: 1px solid #d5dee7;
-  background: #fff;
+  border: 1px solid var(--navora-stroke, #d5dee7);
+  background: var(--navora-surface, #fff);
   overflow: hidden;
 }
 .content {
@@ -3162,18 +3252,18 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   margin: 0;
   font-size: 1.15rem;
   font-weight: 700;
-  color: #15202b;
+  color: var(--navora-ink, #15202b);
 }
 .section-head p {
   margin: 4px 0 0;
   font-size: 0.82rem;
-  color: #7a8a99;
+  color: var(--navora-muted, #7a8a99);
 }
 
 .card {
-  border: 1px solid #e4ebf1;
+  border: 1px solid var(--navora-stroke, #e4ebf1);
   border-radius: 10px;
-  background: #fafcfd;
+  background: var(--appearance-well, #fafcfd);
   padding: 16px 18px;
   margin-bottom: 14px;
 }
@@ -3181,7 +3271,7 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   margin: 0 0 12px;
   font-size: 0.8rem;
   font-weight: 700;
-  color: #5d6d7e;
+  color: var(--navora-muted, #5d6d7e);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -3206,7 +3296,7 @@ function guardWindowExit(event: BeforeUnloadEvent) {
 }
 .remote-url {
   padding-top: 8px;
-  border-top: 1px solid #e6edf3;
+  border-top: 1px solid var(--navora-stroke, #e6edf3);
 }
 .form-grid .span-2 {
   grid-column: 1 / -1;
@@ -3230,9 +3320,9 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   min-width: 140px;
 }
 .provider-tool-btn {
-  border: 1px solid #c5d0db;
-  background: #fff;
-  color: #1b2834;
+  border: 1px solid var(--navora-stroke, #c5d0db);
+  background: var(--navora-surface, #fff);
+  color: var(--navora-ink, #1b2834);
   border-radius: 8px;
   padding: 6px 10px;
   font-size: 0.78rem;
@@ -3240,16 +3330,16 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   white-space: nowrap;
 }
 .provider-tool-btn:hover:not(:disabled) {
-  border-color: #1b4f72;
-  color: #1b4f72;
+  border-color: var(--navora-accent, #1b4f72);
+  color: var(--navora-accent, #1b4f72);
 }
 .provider-tool-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 .provider-tool-btn.danger {
-  color: #a94442;
-  border-color: #e0b4b4;
+  color: var(--control-danger, #a94442);
+  border-color: var(--navora-stroke, #e0b4b4);
 }
 .provider-list {
   list-style: none;
@@ -3257,7 +3347,7 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   padding: 0;
   max-height: 360px;
   overflow: auto;
-  border: 1px solid #e2e8ee;
+  border: 1px solid var(--navora-stroke, #e2e8ee);
   border-radius: 10px;
 }
 .provider-list-item {
@@ -3266,18 +3356,18 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
-  border-bottom: 1px solid #eef2f5;
+  border-bottom: 1px solid var(--navora-stroke, #eef2f5);
   cursor: pointer;
 }
 .provider-list-item:last-child {
   border-bottom: 0;
 }
 .provider-list-item:hover {
-  background: #f5f8fb;
+  background: var(--control-hover, #f5f8fb);
 }
 .provider-list-item.active {
-  background: #eaf2f8;
-  box-shadow: inset 3px 0 0 #1b4f72;
+  background: var(--control-selected, #eaf2f8);
+  box-shadow: inset 3px 0 0 var(--navora-accent, #1b4f72);
 }
 .provider-list-main {
   min-width: 0;
@@ -3288,11 +3378,11 @@ function guardWindowExit(event: BeforeUnloadEvent) {
 .provider-list-label {
   font-size: 0.86rem;
   font-weight: 600;
-  color: #1b2834;
+  color: var(--navora-ink, #1b2834);
 }
 .provider-list-model {
   font-size: 0.72rem;
-  color: #6a7a88;
+  color: var(--navora-muted, #6a7a88);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3308,20 +3398,20 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   font-size: 0.66rem;
   padding: 1px 6px;
   border-radius: 999px;
-  background: #edf1f5;
-  color: #5d6d7e;
+  background: var(--control-selected, #edf1f5);
+  color: var(--navora-muted, #5d6d7e);
 }
 .provider-badge.default {
-  background: #d6e6f2;
-  color: #1b4f72;
+  background: var(--control-selected, #d6e6f2);
+  color: var(--navora-accent, #1b4f72);
 }
 .provider-badge.ok {
-  background: #dceee0;
-  color: #1e6b45;
+  background: color-mix(in srgb, var(--control-success) 12%, var(--navora-surface));
+  color: var(--control-success, #1e6b45);
 }
 .provider-badge.miss {
-  background: #f5e6e4;
-  color: #a94442;
+  background: color-mix(in srgb, var(--control-danger) 12%, var(--navora-surface));
+  color: var(--control-danger, #a94442);
 }
 .provider-edit-head {
   display: flex;
@@ -3341,7 +3431,7 @@ function guardWindowExit(event: BeforeUnloadEvent) {
 
 .switch-block {
   margin-top: 4px;
-  border-top: 1px solid #e8eef4;
+  border-top: 1px solid var(--navora-stroke, #e8eef4);
 }
 .switch-block .switch-row:first-child {
   padding-top: 12px;
@@ -3352,12 +3442,12 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   justify-content: space-between;
   gap: 20px;
   padding: 10px 0;
-  border-bottom: 1px solid #e8eef4;
+  border-bottom: 1px solid var(--navora-stroke, #e8eef4);
 }
 .switch-row-nested {
   margin-left: 12px;
   padding-left: 12px;
-  border-left: 2px solid #e2eaf1;
+  border-left: 2px solid var(--navora-stroke, #e2eaf1);
 }
 .field-row {
   display: flex;
@@ -3376,12 +3466,12 @@ function guardWindowExit(event: BeforeUnloadEvent) {
 .switch-title {
   font-size: 0.9rem;
   font-weight: 550;
-  color: #1b2834;
+  color: var(--navora-ink, #1b2834);
 }
 .switch-hint {
   margin-top: 2px;
   font-size: 0.75rem;
-  color: #8a97a5;
+  color: var(--navora-muted, #8a97a5);
 }
 
 .perm-toolbar {
@@ -3396,7 +3486,7 @@ function guardWindowExit(event: BeforeUnloadEvent) {
 .perm-toolbar-hint {
   margin: 0;
   font-size: 0.78rem;
-  color: #8a97a5;
+  color: var(--navora-muted, #8a97a5);
   line-height: 1.4;
 }
 
@@ -3414,27 +3504,27 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   padding: 8px 10px;
   font-size: 0.72rem;
   font-weight: 700;
-  color: #8a97a5;
+  color: var(--navora-muted, #8a97a5);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  border-bottom: 1px solid #e4ebf1;
+  border-bottom: 1px solid var(--navora-stroke, #e4ebf1);
 }
 .perm-row {
   padding: 7px 10px;
   border-radius: 8px;
 }
 .perm-row:hover {
-  background: #f3f7fa;
+  background: var(--control-hover, #f3f7fa);
 }
 .perm-label {
   font-size: 0.88rem;
   font-weight: 500;
-  color: #1b2834;
+  color: var(--navora-ink, #1b2834);
 }
 .perm-id {
   font-family: ui-monospace, Consolas, monospace;
   font-size: 0.72rem;
-  color: #8a97a5;
+  color: var(--navora-muted, #8a97a5);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3467,7 +3557,7 @@ function guardWindowExit(event: BeforeUnloadEvent) {
 .skill-more-btn {
   flex-shrink: 0;
   margin-top: -4px;
-  color: #5d6d7e !important;
+  color: var(--navora-muted, #5d6d7e) !important;
 }
 .proposal-row {
   display: flex;
@@ -3475,7 +3565,7 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   justify-content: space-between;
   gap: 12px;
   padding: 10px 0;
-  border-bottom: 1px solid #e4ebf1;
+  border-bottom: 1px solid var(--navora-stroke, #e4ebf1);
 }
 .proposal-row:last-child {
   border-bottom: 0;
@@ -3489,16 +3579,16 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
 .skill-dropzone.skill-drop-active {
-  border-color: #1b4f72;
-  box-shadow: 0 0 0 3px rgba(27, 79, 114, 0.14);
-  background: #f3f8fc;
+  border-color: var(--navora-accent, #1b4f72);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--navora-accent) 14%, transparent);
+  background: var(--control-selected, #f3f8fc);
 }
 .skill-drop-hint {
   margin-top: 12px;
   padding: 10px 12px;
   border-radius: 8px;
-  background: #1b4f72;
-  color: #fff;
+  background: var(--navora-accent, #1b4f72);
+  color: var(--appearance-on-accent, #fff);
   font-size: 0.86rem;
   text-align: center;
 }
@@ -3520,7 +3610,7 @@ function guardWindowExit(event: BeforeUnloadEvent) {
 .skill-name {
   font-size: 0.95rem;
   font-weight: 650;
-  color: #15202b;
+  color: var(--navora-ink, #15202b);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -3529,7 +3619,7 @@ function guardWindowExit(event: BeforeUnloadEvent) {
 .skill-id {
   margin-top: 2px;
   font-size: 0.72rem;
-  color: #8a97a5;
+  color: var(--navora-muted, #8a97a5);
   font-family: ui-monospace, Consolas, monospace;
 }
 .skill-actions {
@@ -3540,41 +3630,44 @@ function guardWindowExit(event: BeforeUnloadEvent) {
 }
 .skill-desc {
   font-size: 0.85rem;
-  color: #5d6d7e;
+  color: var(--navora-muted, #5d6d7e);
   line-height: 1.45;
   white-space: pre-wrap;
 }
 .skill-flag {
   margin-top: 8px;
   font-size: 0.75rem;
-  color: #1b4f72;
+  color: var(--navora-accent, #1b4f72);
 }
 .about-name {
-  font-size: 1.4rem;
-  font-weight: 750;
-  color: #15202b;
+  margin:0;
+  font-size: 22px;
+  font-weight: 650;
+  color: var(--navora-ink, #15202b);
 }
 .about-tag {
-  margin-top: 2px;
-  font-size: 0.85rem;
-  color: #5d6d7e;
+  margin:3px 0 0;
+  font-size: 13px;
+  color: var(--navora-muted, #5d6d7e);
 }
 .about-dl {
-  margin: 18px 0 0;
+  margin: 0;
+  padding-top:18px;
+  border-top:1px solid var(--navora-stroke);
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(2,minmax(0,1fr));
   gap: 14px 18px;
 }
 .about-dl dt {
   font-size: 0.72rem;
-  color: #8a97a5;
+  color: var(--navora-muted, #8a97a5);
   margin-bottom: 2px;
 }
 .about-dl dd {
   margin: 0;
-  font-size: 0.92rem;
-  color: #1b2834;
-  font-weight: 550;
+  font-size: 12px;
+  color: var(--navora-ink, #1b2834);
+  font-weight: 450;
 }
 .about-dl .span-all {
   grid-column: 1 / -1;
@@ -3582,8 +3675,14 @@ function guardWindowExit(event: BeforeUnloadEvent) {
 .about-note {
   margin: 16px 0 0;
   font-size: 0.8rem;
-  color: #8a97a5;
+  color: var(--navora-muted, #8a97a5);
 }
+.about-product{display:flex;align-items:center;gap:14px}
+.about-product>img{width:48px;height:48px;flex:0 0 48px;object-fit:contain}
+.about-version{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin:24px 0 20px}
+.about-version>span:first-child{width:100%;color:var(--navora-muted);font-size:12px}
+.about-version>strong{font-size:23px;line-height:1.3;font-weight:600;letter-spacing:-.3px;color:var(--navora-ink);overflow-wrap:anywhere}
+.about-portable{padding:3px 8px;border:1px solid var(--navora-stroke);border-radius:6px;font-size:11px;color:var(--navora-muted)}
 .path {
   word-break: break-all;
   font-family: ui-monospace, Consolas, monospace;
@@ -3598,7 +3697,7 @@ function guardWindowExit(event: BeforeUnloadEvent) {
 .content :deep(.v-field) {
   border-radius: 8px;
   font-size: 0.875rem;
-  background: #fff;
+  background: var(--navora-surface, #fff);
 }
 .content :deep(input),
 .content :deep(textarea) {
@@ -3606,7 +3705,7 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   -webkit-user-select: text;
 }
 .perm-select :deep(.v-field) {
-  background: #fff;
+  background: var(--navora-surface, #fff);
 }
 
 .settings-page.is-mobile.is-embedded {
@@ -3639,7 +3738,7 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   padding: 8px 10px 10px;
   border-radius: 0;
   border: none;
-  border-bottom: 1px solid #d9e2ea;
+  border-bottom: 1px solid var(--navora-stroke, #d9e2ea);
   overflow: hidden;
 }
 .settings-page.is-mobile .nav-list {
@@ -3661,24 +3760,31 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   margin: 0;
   padding: 0 0 0 8px;
   border: none;
-  border-left: 1px solid #e6edf3;
+  border-left: 1px solid var(--navora-stroke, #e6edf3);
 }
 .settings-page.is-mobile .nav-item {
+  display: flex;
   flex: 0 0 auto;
   width: auto;
   min-height: 36px;
   padding: 8px 12px;
   align-items: center;
   justify-content: center;
-  border: 1px solid #d5dee7;
+  border: 1px solid var(--navora-stroke, #d5dee7);
   border-radius: 999px;
-  background: #f7fafc;
+  background: var(--appearance-well, #f7fafc);
+}
+.settings-page.is-mobile .nav-item.active::before {
+  display: none;
+}
+.settings-page.is-mobile .settings-nav-icon {
+  display: none;
 }
 .settings-page.is-mobile .nav-item.active {
-  background: #1b4f72;
+  background: var(--navora-accent, #1b4f72);
 }
 .settings-page.is-mobile .nav-item.active .nav-label {
-  color: #fff;
+  color: var(--appearance-on-accent, #fff);
 }
 .settings-page.is-mobile .nav-guide {
   background: transparent;
@@ -3729,7 +3835,7 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   grid-template-columns: 1fr;
   gap: 6px;
   padding: 12px 8px;
-  border-bottom: 1px solid #eef2f5;
+  border-bottom: 1px solid var(--navora-stroke, #eef2f5);
   border-radius: 0;
 }
 .settings-page.is-mobile .perm-id {
@@ -3745,33 +3851,33 @@ function guardWindowExit(event: BeforeUnloadEvent) {
 
 
 .skill-batch-check.on {
-  color: #1b4f72;
+  color: var(--navora-accent, #1b4f72);
 }
 .skill-card.skill-batch-mode {
   cursor: pointer;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
 .skill-card.skill-batch-mode:hover {
-  border-color: #b7c9d8;
+  border-color: var(--navora-stroke, #b7c9d8);
 }
 .skill-card.skill-batch-selected {
-  border-color: #1b4f72;
-  box-shadow: 0 0 0 2px rgba(27, 79, 114, 0.12);
-  background: #f3f8fc;
+  border-color: var(--navora-accent, #1b4f72);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--navora-accent) 12%, transparent);
+  background: var(--control-selected, #f3f8fc);
 }
 .skill-batch-count {
   margin-left: auto;
   font-size: 0.8rem;
   font-weight: 650;
-  color: #8a97a5;
+  color: var(--navora-muted, #8a97a5);
   padding: 4px 10px;
   border-radius: 999px;
-  background: #eef3f7;
+  background: var(--control-selected, #eef3f7);
   white-space: nowrap;
 }
 .skill-batch-count.ready {
-  color: #1b4f72;
-  background: #e3eef7;
+  color: var(--navora-accent, #1b4f72);
+  background: var(--control-selected, #e3eef7);
 }
 .list-toolbar {
   display: flex;
@@ -3790,13 +3896,13 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   margin: 0;
   font-size: 0.92rem;
   font-weight: 650;
-  color: #15202b;
+  color: var(--navora-ink, #15202b);
   letter-spacing: 0.01em;
   flex: 1;
   min-width: 0;
 }
 .list-batch-btn {
-  color: #5d6d7e !important;
+  color: var(--navora-muted, #5d6d7e) !important;
   width: 34px !important;
   height: 34px !important;
 }
@@ -3827,17 +3933,27 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #9aa8b5;
+  color: var(--navora-muted, #9aa8b5);
   font-size: 1.05rem;
 }
 /* Adapt to the available pane, including a wide navigation rail. */
-.section-head h2{font-size:16px;font-weight:600;line-height:1.5}.section-head p{font-size:12px;line-height:1.6}.card{border-color:#e0e6ee;border-radius:9px}.card-title{font-size:12px;font-weight:600;letter-spacing:0;text-transform:none}
+.section-head h2{font-size:16px;font-weight:600;line-height:1.5}.section-head p{font-size:12px;line-height:1.6}.card{border-color:var(--navora-stroke, #e0e6ee);border-radius:9px}.card-title{font-size:12px;font-weight:600;letter-spacing:0;text-transform:none}
 .automation-speed{margin:16px 0 18px;padding:14px 0 0;border-top:1px solid var(--navora-stroke)}
+.glyph-style-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}
+.glyph-style-option{display:flex;flex-direction:column;gap:9px;min-width:0;padding:13px 12px;border:1px solid var(--appearance-stroke,var(--navora-stroke));border-radius:10px;background:var(--appearance-surface,var(--navora-surface));color:var(--navora-ink);text-align:left;cursor:pointer;transition:background-color 140ms ease,border-color 140ms ease}
+.glyph-style-option:hover:not(:disabled){border-color:var(--appearance-composer-edge,var(--navora-accent));background:var(--appearance-well,var(--control-hover))}
+.glyph-style-option[aria-checked=true]{border-color:var(--navora-accent);background:color-mix(in srgb,var(--control-selected) 50%,var(--navora-surface));box-shadow:inset 0 0 0 1px var(--navora-accent)}
+.glyph-style-option:focus-visible{outline:2px solid var(--navora-accent);outline-offset:3px}.glyph-style-option:disabled{opacity:.6;cursor:default}
+.glyph-style-samples{display:flex;align-items:center;gap:9px;min-height:32px}.glyph-style-samples img{display:block;width:27px;height:27px;flex:none}.glyph-style-title{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;font-weight:600;line-height:20px}.glyph-style-selected{display:grid;place-items:center;width:18px;height:18px;border-radius:5px;background:var(--navora-accent);color:var(--navora-surface)}.glyph-style-selected svg{width:12px;height:12px}.glyph-style-description{font-size:11px;line-height:1.6;color:var(--navora-muted)}
+.browser-link-settings .appearance-hint{margin-top:10px}
+@container(max-width:700px){.glyph-style-options{grid-template-columns:repeat(2,minmax(0,1fr))}.glyph-style-samples{gap:7px}.glyph-style-samples img{width:25px;height:25px}}
+@container(max-width:430px){.glyph-style-options{grid-template-columns:minmax(0,1fr)}}
+@media(prefers-reduced-motion:reduce){.glyph-style-option{transition:none}}
 .automation-speed-heading{display:flex;justify-content:space-between;gap:12px;color:var(--navora-ink);font-size:12px}
 .automation-speed-heading output{font-variant-numeric:tabular-nums;color:var(--navora-accent);font-weight:600}
+.automation-speed-heading small{margin-left:7px;font-size:10px;color:var(--navora-muted);font-weight:400}
 .automation-speed input{display:block;width:100%;height:24px;margin:8px 0 3px;accent-color:var(--navora-accent);cursor:pointer}
 .automation-speed-labels{position:relative;height:16px;color:var(--navora-muted);font-size:10px}
-.automation-speed-labels>span:nth-child(2){position:absolute;left:33.333%;transform:translateX(-50%)}
 .automation-speed-labels>span:last-child{position:absolute;right:0}
 .automation-speed.is-disabled{opacity:.5}.automation-speed.is-disabled input{cursor:default}
 .automation-advanced-toggle{margin-top:8px}
@@ -3854,8 +3970,8 @@ function guardWindowExit(event: BeforeUnloadEvent) {
 @container(max-width:560px){
   .settings-page.external-navigation:not(.is-mobile)>.top{display:grid;grid-template-columns:minmax(0,1fr);height:auto!important;min-height:44px;padding:0!important;gap:0}
   .settings-page.external-navigation:not(.is-mobile)>.top>.top-left{min-height:44px;padding:4px var(--workspace-caption-reserve,12px) 4px 12px}
-  .settings-page.external-navigation:not(.is-mobile)>.top>.top-actions{min-width:0;min-height:40px;justify-content:flex-end;padding:4px 12px;border-top:1px solid #edf0f5;background:#fbfcfd}
-  .top-sub{display:none}.top-titles{flex:1}.top-titles h1{font-size:13px;line-height:20px}.settings-page.is-mobile .nav-item{border-radius:6px;padding:6px 10px;min-height:32px}.settings-page.is-mobile .nav-item.active{background:var(--control-selected);border-color:#cbd9e8}.settings-page.is-mobile .nav-item.active .nav-label{color:#42658e}
+  .settings-page.external-navigation:not(.is-mobile)>.top>.top-actions{min-width:0;min-height:40px;justify-content:flex-end;padding:4px 12px;border-top:1px solid var(--navora-stroke, #edf0f5);background:var(--appearance-well, #fbfcfd)}
+  .top-sub{display:none}.top-titles{flex:1}.top-titles h1{font-size:13px;line-height:20px}.settings-page.is-mobile .nav-item{border-radius:6px;padding:6px 10px;min-height:32px}.settings-page.is-mobile .nav-item.active{background:var(--control-selected);border-color:var(--navora-stroke, #cbd9e8)}.settings-page.is-mobile .nav-item.active .nav-label{color:var(--navora-accent, #42658e)}
 }
 </style>
 
@@ -3868,7 +3984,7 @@ function guardWindowExit(event: BeforeUnloadEvent) {
 .skill-more-panel {
   min-width: 148px;
   padding: 6px;
-  background: #fff;
+  background: var(--navora-surface, #fff);
 }
 .skill-more-item {
   display: flex;
@@ -3879,13 +3995,13 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: #314556;
+  color: var(--navora-ink, #314556);
   font-size: 0.88rem;
   text-align: left;
   cursor: pointer;
 }
 .skill-more-item:hover {
-  background: #f3f7fa;
+  background: var(--control-hover, #f3f7fa);
 }
 .skill-more-item:disabled,
 .skill-more-item[disabled] {
@@ -3898,10 +4014,10 @@ function guardWindowExit(event: BeforeUnloadEvent) {
   background: transparent;
 }
 .skill-more-item.danger {
-  color: #c0392b;
+  color: var(--control-danger, #c0392b);
 }
 .skill-more-item.danger:hover {
-  background: #fdecea;
+  background: color-mix(in srgb, var(--control-danger) 12%, var(--navora-surface));
 }
 .settings-titlebar-spacer{height:44px;min-height:44px;flex:0 0 44px}
 :global(.navora-app .shell.frameless:not(.mobile-layout) .settings-titlebar-spacer){height:56px;min-height:56px;flex-basis:56px}</style>

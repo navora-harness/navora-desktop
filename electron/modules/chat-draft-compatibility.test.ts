@@ -32,3 +32,33 @@ test('queued documents with unknown versions stay paused and retain their origin
     store.flushChat('chat-a');assert.deepEqual(f.read().queuedMessages[0].document,raw)
   }finally{f.cleanup()}
 })
+
+test('declarations-only drafts survive restart and legacy text updates preserve their execution stage',()=>{
+  const f=fixture();try{f.seed({...chat(),draftRevision:0,draft:''});const store=new ChatStore(f.root),document={...createComposerDocument('chat-a'),declarations:{version:1,ids:['plan']}}
+    store.setDraft('chat-a','',{document,baseRevision:0});store.flushAll()
+    const reloaded=new ChatStore(f.root),saved=reloaded.get('chat-a')!;assert.equal(saved.draft,undefined);assert.deepEqual(saved.draftDocument?.declarations,document.declarations)
+    const edited=reloaded.setDraft('chat-a','旧客户端编辑正文',{baseRevision:saved.draftRevision})!;assert.deepEqual(edited.draftDocument?.declarations,document.declarations)
+    const oldRevision=edited.draftRevision!,next={...edited.draftDocument!,revision:oldRevision+1,declarations:{version:1,ids:['automation']}}
+    reloaded.setDraft('chat-a',edited.draft!,{document:next,baseRevision:oldRevision})
+    reloaded.clearDraftRevision('chat-a',oldRevision);assert.deepEqual(reloaded.get('chat-a')?.draftDocument?.declarations,next.declarations)
+  }finally{f.cleanup()}
+})
+
+test('equal text with different declarations does not bypass CAS or coalesce recovery copies',()=>{
+  const f=fixture();try{f.seed({...chat(),draftRevision:0,draft:''});const store=new ChatStore(f.root),document={...createComposerDocument('chat-a','同样正文'),declarations:{version:1,ids:['plan']}}
+    store.setDraft('chat-a','同样正文',{document,baseRevision:0})
+    const alternative={...document,declarations:{version:1,ids:['automation']}}
+    const conflicted=store.setDraft('chat-a','同样正文',{document:alternative,baseRevision:0})!
+    assert.ok(conflicted.draftConflict);assert.deepEqual(conflicted.draftDocument?.declarations,document.declarations)
+    store.recoverDraft('chat-a',document,'send_failed');assert.equal(store.get('chat-a')?.draftRecoveries?.length,2)
+    assert.deepEqual(conflicted.draftRecoveries?.[0].document.declarations,alternative.declarations)
+  }finally{f.cleanup()}
+})
+
+test('future declaration metadata remains recoverable through saves without authorizing execution',()=>{
+  const f=fixture();try{f.seed({...chat(),draftRevision:0,draft:''});const store=new ChatStore(f.root),document={...createComposerDocument('chat-a','原文'),declarations:{version:99,ids:['future'],extra:{keep:true}}}
+    store.setDraft('chat-a','原文',{document,baseRevision:0});store.flushAll()
+    const loaded=new ChatStore(f.root);assert.deepEqual(loaded.get('chat-a')?.draftDocument?.declarations,document.declarations)
+    loaded.setDraft('chat-a','编辑',{baseRevision:loaded.get('chat-a')?.draftRevision});assert.deepEqual(loaded.get('chat-a')?.draftDocument?.declarations,document.declarations)
+  }finally{f.cleanup()}
+})

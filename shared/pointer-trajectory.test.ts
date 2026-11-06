@@ -348,9 +348,9 @@ test('native sequence adapter preserves fractional coordinates, offsets, and sam
   ]
   const before = JSON.stringify(points)
   const sequence = toPointerInputSequence(points)
-  assert.deepEqual(sequence, points.map((point) => ({ kind: 'mouse', type: 'mouseMoved', ...point })))
+  assert.deepEqual(sequence, points.map((point) => ({ kind: 'mouse', type: 'mouseMoved', position: {x:point.x,y:point.y}, atMs:point.atMs })))
   for (const step of sequence) {
-    assert.deepEqual(Object.keys(step).sort(), ['atMs', 'kind', 'type', 'x', 'y'])
+    assert.deepEqual(Object.keys(step).sort(), ['atMs', 'kind', 'position', 'type'])
   }
   assert.equal(JSON.stringify(points), before)
   assert.notEqual(sequence[0], points[0])
@@ -360,7 +360,7 @@ test('native sequence adapter accepts both native coordinate and timeline limits
   assert.deepEqual(toPointerInputSequence([
     { x: -1000000, y: 1000000, atMs: 0 },
     { x: 1000000, y: -1000000, atMs: 60000 },
-  ]).at(-1), { kind: 'mouse', type: 'mouseMoved', x: 1000000, y: -1000000, atMs: 60000 })
+  ]).at(-1), { kind: 'mouse', type: 'mouseMoved', position: {x: 1000000, y: -1000000}, atMs: 60000 })
   const full = Array.from({ length: 10000 }, (_, atMs) => ({ x: 0, y: 0, atMs }))
   assert.equal(toPointerInputSequence(full).length, 10000)
 })
@@ -400,6 +400,6 @@ test('generated trajectories adapt without changing their timeline or mutating t
   const before = JSON.stringify(points)
   const steps = toPointerInputSequence(points)
   assert.equal(steps.length, points.length)
-  assert.deepEqual(steps.map(({ x, y, atMs }) => ({ x, y, atMs })), points)
+  assert.deepEqual(steps.map(({ position, atMs }) => ({ ...position, atMs })), points)
   assert.equal(JSON.stringify(points), before)
 })

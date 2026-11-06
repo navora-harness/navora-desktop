@@ -41,3 +41,11 @@ test('all themes keep hover text readable and distinguish hover from idle and se
     assert.notEqual(palette.hoverBorder,palette.stroke)
   }
 })
+
+test('theme-aware status colors and text on accent remain readable in both modes', () => {
+  for (const theme of APPEARANCE_THEMES) for (const mode of ['light', 'dark'] as const) {
+    const palette = appearancePalette(theme.id, mode, false)
+    assert.ok(contrast(palette.onAccent, palette.accent) >= 4.5, theme.id + ' ' + mode + ' accent text')
+    for (const name of ['danger', 'success', 'warning'] as const) assert.ok(contrast(palette[name], palette.surface) >= 4.5, theme.id + ' ' + mode + ' ' + name)
+  }
+})

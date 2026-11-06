@@ -2,40 +2,46 @@
   <div ref="anchor" class="browser-address-bar" :class="{'is-focused':focused,'has-suggestions':open}" @keydown.esc.stop.prevent="siteInfoOpen=false">
     <button v-if="siteSecurity" ref="siteTrigger" type="button" class="address-site-info" :class="siteSecurity" :aria-label="`${siteSecurityTitle}，点击查看连接信息`" :aria-expanded="siteInfoOpen || undefined" aria-haspopup="dialog" :title="siteFailure?'网站信息暂不可用，请在页面加载完成后重试':'查看连接信息'" @pointerdown.prevent.stop @click.stop="toggleSiteInfo"><AppIcon :icon="siteSecurityIcon" /></button>
     <AppIcon v-else :icon="focused || url==='about:blank'?'magnifying-glass':'globe'" class="address-leading" />
-    <section v-if="siteInfoOpen && siteSecurity" class="address-site-popover" role="dialog" aria-label="连接安全信息" @pointerdown.stop>
+    <section v-if="siteInfoOpen && siteSecurity" ref="sitePanel" class="address-site-popover" role="dialog" aria-label="连接安全信息" @pointerdown.stop>
       <header><span class="address-site-state-icon" :class="siteSecurity"><AppIcon :icon="siteSecurityIcon" /></span><div><strong>{{ siteSecurityTitle }}</strong><small>{{ siteHost }}</small></div><button type="button" aria-label="关闭连接信息" @click="siteInfoOpen=false"><AppIcon icon="xmark" /></button></header>
       <p>{{ siteSecurityDescription }}</p>
       <div class="address-site-protocol"><span>连接方式</span><strong>{{ siteSecurity==='secure'?'HTTPS 加密':siteSecurity==='certificate-error'?'证书验证失败':'HTTP 未加密' }}</strong></div>
     </section>
-    <input v-show="!selectionLabel" ref="input" v-model="draft" :disabled="!!selectionLabel" role="combobox" aria-label="浏览器地址" :title="native.error.value?'地址建议暂不可用，可直接按 Enter 访问':undefined" placeholder="搜索或输入网址" maxlength="8192" autocomplete="off" spellcheck="false" :aria-expanded="open" :aria-controls="domSuggestionsOpen?listId:undefined" :aria-activedescendant="domSuggestionsOpen&&selected>=0?`${listId}-${selected}`:undefined" :data-browser-address-composing="composing" @compositionstart="composing=true" @compositionend="composing=false" @focus="focusInput" @blur="blurInput" @input="onInput" @keydown="keydown" />
+    <input v-show="!selectionLabel" ref="input" v-model="draft" :disabled="!!selectionLabel" role="combobox" aria-label="浏览器地址" :title="native.error.value?'地址建议暂不可用，可直接按 Enter 访问':undefined" placeholder="搜索或输入网址" maxlength="8192" autocomplete="off" spellcheck="false" :aria-expanded="domSuggestionsOpen||native.open.value||nativePending" :aria-controls="domSuggestionsOpen?listId:undefined" :aria-activedescendant="domSuggestionsOpen&&selected>=0?`${listId}-${selected}`:undefined" :data-browser-address-composing="composing" @compositionstart="startComposition" @compositionend="endComposition" @focus="focusInput" @blur="blurInput" @input="onInput" @keydown="keydown" />
     <span v-if="selectionLabel" class="address-selection-label" role="status">{{ selectionLabel }}</span>
     <slot name="notice" />
     <slot name="actions" />
     <Teleport to="body">
-      <div v-if="domSuggestionsOpen" :id="listId" class="browser-address-suggestions" role="listbox" aria-label="地址建议" :style="popupStyle" @pointerdown.prevent>
-        <button v-for="(item,index) in choices" :id="`${listId}-${index}`" :key="`${item.kind}:${item.url}`" type="button" role="option" :aria-selected="selected===index" :class="{'is-selected':selected===index}" tabindex="-1" @pointermove="selected=index" @click="go(item.url)"><AppIcon :icon="choiceIcon(item.kind)" /><span><strong>{{ item.title }}</strong><small>{{ item.kind==='input'?'按 Enter 打开':browserDisplayAddress(item.url) }}</small></span><AppIcon icon="arrow-right" class="address-go-icon" /></button>
+      <div v-if="domSuggestionsOpen" :id="listId" ref="suggestionPanel" class="browser-address-suggestions" role="listbox" aria-label="地址建议" :style="popupStyle" @pointerdown.prevent>
+        <div v-for="(item,index) in choices" :id="`${listId}-${index}`" :key="`${item.kind}:${item.url}`" class="address-suggestion-row" role="option" :aria-selected="selected===index" :class="{'is-selected':selected===index}" @pointermove="selected=index">
+          <button class="address-suggestion-open" type="button" tabindex="-1" @click="go(item.url)"><AppIcon :icon="choiceIcon(item.kind)" /><span><strong>{{ item.title }}</strong><small>{{ item.kind==='input'?'按 Enter 打开':browserDisplayAddress(item.url) }}</small></span><AppIcon icon="arrow-right" class="address-go-icon" /></button>
+          <button v-if="historyVisit(item)" type="button" class="address-suggestion-delete" tabindex="-1" aria-label="删除此历史记录" :disabled="isDeleting(item)" @click.stop="deleteHistory(item)"><AppIcon icon="xmark" /></button>
+        </div>
+        <p v-if="deletionError" class="address-delete-error" role="status">{{ deletionError }}</p>
       </div>
     </Teleport>
   </div>
 </template>
 <script setup lang="ts">
 import {computed,nextTick,onBeforeUnmount,onMounted,ref,watch} from 'vue'
+import {useSafeBrowserPopup} from '@/utils/browser-popup-placement'
 import AppIcon from './icons/AppIcon.vue'
-import {browserDisplayAddress,browserInputTarget,browserSuggestions,type BrowserStartState} from '@shared/browser-start'
+import {browserDisplayAddress,browserInputTarget,browserSuggestions,type BrowserStartState,type BrowserVisit} from '@shared/browser-start'
 import type {BrowserLoadError} from '@shared/browser-workspace'
 import type {BrowserAutomationState} from '@shared/browser-automation'
 import {BROWSER_CHROME_OPEN,requestBrowserChromeOpen} from '@shared/browser-chrome-events'
 import {NATIVE_UI_OPEN} from '@shared/native-ui'
-import {browserAddressNativePanel} from '@shared/browser-native-panels'
+import {browserAddressHistoryKey,browserAddressNativePanel,browserNativeId,type BrowserNativeAddressChoice} from '@shared/browser-native-panels'
 import {useNativePanel,useNativeUi} from '@/composables/useNativeUi'
-const props=defineProps<{url:string;pageId?:string;state:BrowserStartState;active:boolean;loadError?:BrowserLoadError;automation?:BrowserAutomationState;showFeedback?:boolean;selectionLabel?:string}>()
-const emit=defineEmits<{navigate:[input:string];focused:[value:boolean];open:[value:boolean];domOpen:[value:boolean]}>()
+const props=defineProps<{url:string;pageId?:string;chatId?:string;state:BrowserStartState;active:boolean;loadError?:BrowserLoadError;automation?:BrowserAutomationState;showFeedback?:boolean;selectionLabel?:string}>()
+const emit=defineEmits<{navigate:[input:string];focused:[value:boolean];open:[value:boolean];domOpen:[value:boolean];historyChanged:[]}>()
 const input=ref<HTMLInputElement>(),anchor=ref<HTMLElement>(),focused=ref(false),typed=ref(false),dismissed=ref(false),selected=ref(-1),draft=ref(browserDisplayAddress(props.url)),popupStyle=ref<Record<string,string>>({}),siteInfoOpen=ref(false),listId=`browser-address-${crypto.randomUUID()}`
-const composing=ref(false),chromeId=`address-${listId}`
-const siteTrigger=ref<HTMLButtonElement>(),nativePending=ref(false),nativeUnavailable=ref(false),siteFailure=ref(false)
+const composing=ref(false),inputIntent=ref(false),editRevision=ref(0),chromeId=`address-${listId}`
+const deleting=ref(new Set<string>()),removedHistory=ref(new Set<string>()),deletionError=ref('')
+const siteTrigger=ref<HTMLButtonElement>(),nativePending=ref(false),nativeUnavailable=ref(false),siteFailure=ref(false),suggestionWidth=ref(500),suggestionHeight=ref(360)
 const nativeUi=useNativeUi()
-const native=useNativePanel({key:chromeId,sourcePageId:()=>props.pageId,contextKey:()=>`${props.pageId}:${props.active}`,onAction:action=>{if(action.type!=='click'||!props.active)return;const url=nativePresentation.value.actions.get(action.id);if(url!==undefined)go(url)},onDismissed:()=>{dismissed.value=true},onClosed:()=>{dismissed.value=true}})
-let suggestionGeneration=0,siteGeneration=0,siteNativeOpening=false
+const native=useNativePanel({key:chromeId,sourcePageId:()=>props.pageId,contextKey:()=>browserNativeId('address-context',`${props.chatId}:${props.pageId}:${props.active}:${props.url}`),onAction:action=>{if(action.type!=='click'||!open.value||composing.value)return;const visit=nativePresentation.value.deletions.get(action.id);if(visit){void deleteHistory({...visit,kind:'history'});return}const url=nativePresentation.value.actions.get(action.id);if(url!==undefined)go(url)},onDismissed:()=>{dismissed.value=true},onClosed:()=>{dismissed.value=true}})
+let suggestionGeneration=0,siteGeneration=0,siteNativeOpening=false,disposed=false
 let resizeObserver:ResizeObserver|undefined
 const siteSecurity=computed(()=>{
   if(props.loadError&&props.loadError.code<=-200&&props.loadError.code>=-299)return 'certificate-error'
@@ -45,44 +51,78 @@ const siteSecurityIcon=computed(()=>siteSecurity.value==='secure'?'lock':siteSec
 const siteSecurityTitle=computed(()=>siteSecurity.value==='secure'?'HTTPS 连接':siteSecurity.value==='certificate-error'?'证书验证失败':'连接不安全')
 const siteSecurityDescription=computed(()=>siteSecurity.value==='secure'?'地址使用 HTTPS。当前兼容界面无法读取已提交文档的证书与实际连接状态；请勿仅根据地址判断网站安全。':siteSecurity.value==='certificate-error'?'浏览器检测到网页证书错误，请谨慎继续访问。':siteSecurity.value==='insecure'?'此网页使用 HTTP，传输内容未加密，请勿在此提交敏感信息。':'')
 const siteHost=computed(()=>{try{return new URL(props.url).host}catch{return ''}})
-const matches=computed(()=>browserSuggestions({links:[],history:props.state.history},typed.value?draft.value:''))
+const matches=computed(()=>inputIntent.value&&draft.value.trim()?browserSuggestions({links:[],history:props.state.history.filter(visit=>!removedHistory.value.has(browserAddressHistoryKey(visit)))},draft.value):[])
 const choiceIcon=(kind:string)=>({history:'clock',input:'magnifying-glass'}[kind]||'globe')
 const choices=computed(()=>{
-  const result=matches.value.map(row=>({url:row.url,title:row.title,kind:row.kind as 'link'|'history'|'input'}))
-  if(typed.value&&draft.value.trim()){
+  const result:BrowserNativeAddressChoice[]=matches.value.map(row=>({...row,kind:row.kind as 'link'|'history'|'input'}))
+  if(inputIntent.value&&draft.value.trim()){
     let search=true;try{search=browserInputTarget(draft.value).startsWith('https://www.bing.com/search?q=')}catch{/* Invalid schemes are rejected by navigation. */}
     result.unshift({url:draft.value,title:`${search?'搜索':'访问'} ${draft.value.trim()}`,kind:'input'})
   }
   return result
 })
-const open=computed(()=>props.active&&!props.selectionLabel&&focused.value&&!dismissed.value&&choices.value.length>0)
-const nativePresentation=computed(()=>browserAddressNativePanel(choices.value,selected.value))
+const open=computed(()=>props.active&&!props.selectionLabel&&!composing.value&&focused.value&&inputIntent.value&&!!draft.value.trim()&&!dismissed.value&&choices.value.length>0)
+const nativePresentation=computed(()=>browserAddressNativePanel(choices.value,selected.value,{width:suggestionWidth.value,maxHeight:suggestionHeight.value,query:inputIntent.value?draft.value:'',contextKey:`${props.chatId}:${props.pageId}:${props.url}:${editRevision.value}:${draft.value}`,chatId:props.chatId,deleting:deleting.value,deletionError:deletionError.value}))
 const domSuggestionsOpen=computed(()=>open.value&&!native.open.value&&!nativePending.value&&nativeUnavailable.value)
+const suggestionPanel=ref<HTMLElement>(),sitePanel=ref<HTMLElement>()
+useSafeBrowserPopup(()=>domSuggestionsOpen.value?suggestionPanel.value:null,()=>{dismissed.value=true})
+useSafeBrowserPopup(()=>siteInfoOpen.value?sitePanel.value:null,()=>{siteInfoOpen.value=false})
 watch(open,async value=>{if(value)await showSuggestions();else{suggestionGeneration++;nativePending.value=false;void native.hide()}})
 watch([domSuggestionsOpen,siteInfoOpen,native.open],([dom,site,visible])=>{emit('open',dom||site||visible);emit('domOpen',dom||site)},{flush:'sync'})
 watch(nativePresentation,value=>{if(native.open.value)void native.update(value.content)})
 watch(()=>props.url,url=>{if(!focused.value&&!typed.value)draft.value=browserDisplayAddress(url)})
-watch(()=>[props.url,props.pageId,props.loadError?.code],()=>{siteGeneration++;siteInfoOpen.value=false;siteFailure.value=false})
+watch(()=>[props.url,props.pageId,props.chatId,props.loadError?.code],()=>{closePopovers();siteFailure.value=false})
+watch(()=>[props.pageId,props.chatId],()=>{typed.value=false;draft.value=browserDisplayAddress(props.url);removedHistory.value=new Set();deletionError.value=''})
 watch(()=>props.active,active=>{if(!active){dismissed.value=true;siteInfoOpen.value=false;input.value?.blur()}})
 watch(()=>props.selectionLabel,()=>closePopovers())
-watch(choices,(rows,previous)=>{if(selected.value>=0){const url=previous?.[selected.value]?.url;selected.value=rows.findIndex(row=>row.url===url)}})
+watch(choices,(rows,previous)=>{if(selected.value>=0){const oldIndex=selected.value,row=previous?.[oldIndex],index=rows.findIndex(item=>item.kind===row?.kind&&item.url===row?.url);selected.value=index>=0?index:rows.length?Math.min(oldIndex,rows.length-1):-1}},{flush:'sync'})
 function position(){
   if(!open.value)return
   const r=anchor.value?.getBoundingClientRect(),panel=anchor.value?.closest('.browser-tab-panel')?.getBoundingClientRect();if(!r||!panel)return
-  const pad=8,gap=7,width=Math.max(0,Math.min(520,panel.width-pad*2,innerWidth-pad*2))
+  const pad=8,gap=7,width=Math.max(100,Math.min(r.width,panel.width-pad*2,innerWidth-pad*2,900))
+  suggestionWidth.value=width
   const left=Math.max(pad,Math.min(r.left,panel.right-width-pad,innerWidth-width-pad))
   const below=Math.max(0,innerHeight-pad-r.bottom-gap),above=Math.max(0,r.top-gap-pad)
   const upwards=below<Math.min(160,above)&&above>below,height=Math.min(360,upwards?above:below)
+  suggestionHeight.value=Math.max(48,height-8)
   popupStyle.value={position:'fixed',left:`${left}px`,width:`${width}px`,maxHeight:`${height}px`,
     ...(upwards?{bottom:`${Math.max(pad,innerHeight-r.top+gap)}px`}:{top:`${Math.max(pad,Math.min(r.bottom+gap,innerHeight-pad-height))}px`})}
 }
-function focusInput(){requestBrowserChromeOpen(chromeId);siteInfoOpen.value=false;focused.value=true;dismissed.value=false;selected.value=-1;if(!typed.value)draft.value=props.url==='about:blank'?'':props.url;emit('focused',true);position();if(!typed.value)void nextTick(()=>input.value?.select())}
+function focusInput(){requestBrowserChromeOpen(chromeId);siteInfoOpen.value=false;focused.value=true;inputIntent.value=false;editRevision.value++;dismissed.value=false;selected.value=-1;if(!typed.value)draft.value=props.url==='about:blank'?'':props.url;emit('focused',true);if(!typed.value)void nextTick(()=>input.value?.select())}
 function coordinateChrome(){if(!native.open.value&&!nativePending.value)requestBrowserChromeOpen(chromeId)}
-function onInput(){coordinateChrome();siteInfoOpen.value=false;typed.value=true;dismissed.value=false;selected.value=-1;position()}
+function onInput(event?:Event){if(composing.value||(event instanceof InputEvent&&event.isComposing))return;coordinateChrome();siteInfoOpen.value=false;typed.value=true;inputIntent.value=true;editRevision.value++;dismissed.value=false;selected.value=-1;deletionError.value='';position()}
+function startComposition(){composing.value=true;editRevision.value++;selected.value=-1}
+function endComposition(){composing.value=false;onInput()}
+function historyVisit(choice:BrowserNativeAddressChoice):BrowserVisit|undefined {
+  if(choice.kind!=='history'||!props.chatId||choice.chatId!==props.chatId||!choice.url.trim()||!Number.isSafeInteger(choice.visitedAt))return
+  return props.state.history.find(visit=>visit.chatId===props.chatId&&visit.url===choice.url&&visit.visitedAt===choice.visitedAt)
+}
+function isDeleting(choice:BrowserNativeAddressChoice){const visit=historyVisit(choice);return !!visit&&deleting.value.has(browserAddressHistoryKey(visit))}
+async function deleteHistory(choice:BrowserNativeAddressChoice){
+  if(!open.value||composing.value)return
+  const visit=historyVisit(choice),api=window.navora?.browser.workspace
+  if(!visit||!api)return
+  const key=browserAddressHistoryKey(visit);if(deleting.value.has(key))return
+  const revision=editRevision.value,pageId=props.pageId,chatId=visit.chatId
+  const current=()=>!disposed&&props.active&&props.pageId===pageId&&props.chatId===chatId&&editRevision.value===revision
+  deleting.value=new Set([...deleting.value,key]);deletionError.value=''
+  try{
+    // URL is mandatory here: omitting it would clear the entire conversation history.
+    await api.clearBrowserHistory(chatId,visit.url,visit.visitedAt)
+    if(!disposed&&props.pageId===pageId&&props.chatId===chatId){removedHistory.value=new Set([...removedHistory.value,key]);emit('historyChanged')}
+  }catch{
+    if(current())deletionError.value='未能删除，请点击该记录的删除按钮重试。'
+  }finally{
+    deleting.value=new Set([...deleting.value].filter(value=>value!==key))
+    // The address field is never rewritten or refocused by a history mutation.
+    // A newer user selection must survive even when its query text is unchanged.
+  }
+}
 async function showSuggestions(){
   const generation=++suggestionGeneration,pageId=props.pageId
   nativePending.value=true;nativeUnavailable.value=false
-  const shown=!!anchor.value&&await native.show(nativePresentation.value.content,anchor.value,{placement:'bottom-start',focusMode:'none'}).catch(()=>false)
+  position()
+  const shown=!!anchor.value&&await native.show(nativePresentation.value.content,anchor.value,{placement:'bottom-start',focusMode:'none',contentInset:4,scrollbarPlacement:'gutter'}).catch(()=>false)
   if(generation!==suggestionGeneration||!open.value||pageId!==props.pageId){if(shown)void native.hide();return}
   nativeUnavailable.value=!shown&&!native.supported.value;nativePending.value=false
   if(shown)void native.update(nativePresentation.value.content)
@@ -99,19 +139,21 @@ async function toggleSiteInfo(){
   siteFailure.value=!shown&&native.supported.value
   siteInfoOpen.value=!shown&&!native.supported.value
 }
-function blurInput(){focused.value=false;emit('focused',false);if(!typed.value)draft.value=browserDisplayAddress(props.url)}
-function go(value:string){dismissed.value=true;typed.value=false;emit('navigate',value);input.value?.blur()}
+function blurInput(){focused.value=false;inputIntent.value=false;editRevision.value++;selected.value=-1;emit('focused',false);if(!typed.value)draft.value=browserDisplayAddress(props.url)}
+function go(value:string){dismissed.value=true;inputIntent.value=false;typed.value=false;emit('navigate',value);input.value?.blur()}
 function keydown(event:KeyboardEvent){
-  if(event.isComposing||event.keyCode===229)return
+  if(composing.value||event.isComposing||event.keyCode===229)return
   if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+    if(!open.value)return
     coordinateChrome()
-    event.preventDefault();event.stopPropagation();dismissed.value=false
+    event.preventDefault();event.stopPropagation()
     const count=choices.value.length;if(count)selected.value=selected.value<0?(event.key==='ArrowUp'?count-1:0):(selected.value+(event.key==='ArrowDown'?1:-1)+count)%count
     void nextTick(()=>document.getElementById(`${listId}-${selected.value}`)?.scrollIntoView({block:'nearest'}))
-  }else if(event.key==='Enter'){event.preventDefault();event.stopPropagation();go(selected.value>=0?choices.value[selected.value]?.url||draft.value:draft.value)}
+  }else if(event.key==='Delete'&&event.shiftKey&&open.value&&selected.value>=0&&choices.value[selected.value]&&historyVisit(choices.value[selected.value]!)){event.preventDefault();event.stopPropagation();void deleteHistory(choices.value[selected.value]!)}
+  else if(event.key==='Enter'){event.preventDefault();event.stopPropagation();go(open.value&&selected.value>=0?choices.value[selected.value]?.url||draft.value:draft.value)}
   else if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(open.value)dismissed.value=true;else input.value?.blur()}
 }
-function closePopovers(){suggestionGeneration++;siteGeneration++;dismissed.value=true;siteInfoOpen.value=false;void native.hide()}
+function closePopovers(){suggestionGeneration++;siteGeneration++;inputIntent.value=false;editRevision.value++;selected.value=-1;dismissed.value=true;siteInfoOpen.value=false;void native.hide()}
 function otherChrome(event:Event){if((event as CustomEvent<string>).detail!==chromeId)closePopovers()}
 function nativeChrome(event:Event){const id=(event as CustomEvent<{id:string}>).detail?.id;if(id!==native.id&&!(siteNativeOpening&&id===`page-info:${props.pageId}`))closePopovers()}
 function focusAddress(){const field=input.value;if(!field||field.disabled)return;const already=document.activeElement===field;field.focus();if(already)focusInput()}
@@ -126,7 +168,7 @@ onMounted(()=>{
   if(anchor.value){resizeObserver.observe(anchor.value);const panel=anchor.value.closest('.browser-tab-panel');if(panel)resizeObserver.observe(panel)}
 })
 function onOutsidePointerDown(event:PointerEvent){if(siteInfoOpen.value&&anchor.value&&!anchor.value.contains(event.target as Node))siteInfoOpen.value=false}
-onBeforeUnmount(()=>{closePopovers();resizeObserver?.disconnect();window.removeEventListener(BROWSER_CHROME_OPEN,otherChrome);window.removeEventListener(NATIVE_UI_OPEN,nativeChrome);document.removeEventListener('pointerdown',onOutsidePointerDown,true);window.removeEventListener('resize',position);window.removeEventListener('scroll',position,true);emit('open',false);emit('domOpen',false)})
+onBeforeUnmount(()=>{disposed=true;closePopovers();resizeObserver?.disconnect();window.removeEventListener(BROWSER_CHROME_OPEN,otherChrome);window.removeEventListener(NATIVE_UI_OPEN,nativeChrome);document.removeEventListener('pointerdown',onOutsidePointerDown,true);window.removeEventListener('resize',position);window.removeEventListener('scroll',position,true);emit('open',false);emit('domOpen',false)})
 </script>
 <style scoped>
 .browser-address-bar{position:relative;display:flex;align-items:center;gap:5px;flex:1;box-sizing:border-box;min-width:100px;height:var(--browser-address-height,36px);padding:0 3px 0 6px;border:1px solid var(--navora-stroke);border-radius:10px;background:var(--navora-background);color:var(--navora-ink)}.browser-address-bar.is-focused{border-color:var(--navora-accent);background:var(--navora-surface);box-shadow:0 0 0 1px color-mix(in srgb,var(--navora-accent) 18%,transparent)}.address-leading{width:14px;height:14px;color:var(--navora-muted)}.address-site-info{display:grid;place-items:center;width:22px;height:24px;flex:0 0 22px;border-radius:6px;color:#788595}.address-site-info.secure{color:#37805a}.address-site-info.insecure{color:#a8742c}.address-site-info.certificate-error{color:#bd4545}.address-site-info:hover{background:var(--control-hover)}.address-site-info:focus-visible{outline:2px solid var(--control-focus)}.address-site-info>.app-icon{width:15px;height:15px}input{flex:1;min-width:0;width:0;outline:none!important;border:0;background:transparent;color:inherit;font-size:12px;height:100%;padding:0}input::placeholder{color:var(--navora-muted)}
@@ -140,8 +182,11 @@ onBeforeUnmount(()=>{closePopovers();resizeObserver?.disconnect();window.removeE
 .address-automation-badge{display:flex;align-items:center;gap:4px;flex:0 0 auto;max-width:70px;padding:3px 5px;border-radius:5px;background:var(--control-selected);color:var(--navora-accent);font-size:10px;line-height:14px;white-space:nowrap}
 .address-automation-badge>.app-icon{width:12px;height:12px}.address-automation-badge.is-warning{background:var(--navora-background);color:var(--control-danger,#b65045)}
 @container(max-width:420px){.address-automation-badge>span{display:none}.address-automation-badge{padding:3px}}
-.browser-address-bar :deep(.browser-agent-trigger){width:28px;height:28px;flex-basis:28px;border-radius:7px}.browser-address-bar :deep(.browser-agent-trigger>.app-icon){width:18px;height:18px}.browser-address-bar :deep(.browser-agent-trigger::before){inset:0}
+.browser-address-bar :deep(.browser-agent-trigger){--browser-agent-icon-size:18px;width:28px;height:28px;flex-basis:28px;border-radius:7px}.browser-address-bar :deep(.browser-agent-trigger::before){inset:0}
 @media(prefers-reduced-motion:reduce){.browser-address-bar{transition:none}}
+</style>
+<style>
+.browser-address-suggestions .address-suggestion-row{display:flex;align-items:center;gap:2px;border-radius:7px}.browser-address-suggestions .address-suggestion-open{flex:1;width:0;min-width:0}.browser-address-suggestions .address-suggestion-delete{display:grid;place-items:center;flex:0 0 26px;width:26px;height:28px;margin-right:4px;padding:0;color:var(--navora-muted)}.browser-address-suggestions .address-suggestion-delete>.app-icon{width:13px;height:13px}.browser-address-suggestions .address-suggestion-delete:hover:not(:disabled){background:var(--control-hover);color:var(--navora-ink)}.browser-address-suggestions .address-suggestion-delete:disabled{opacity:.4;cursor:wait}.browser-address-suggestions .address-delete-error{margin:0;padding:6px 10px;color:var(--control-danger,#b65045);font-size:11px;line-height:1.5}
 </style>
 <style scoped>
 .browser-address-bar{transition:background-color 140ms ease,border-color 140ms ease,box-shadow 140ms ease}

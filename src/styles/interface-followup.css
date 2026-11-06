@@ -12,31 +12,61 @@
 .navora-app .main-shell.sidebar-floating:not(.mobile-layout)>.content-surface>aside.sidebar{position:absolute;inset:6px auto 8px 8px;z-index:30;box-sizing:border-box;width:calc(var(--sidebar-width,312px) - 52px);max-width:calc(100% - 16px);padding:0 10px 8px 12px;border:1px solid var(--navora-stroke);border-radius:14px;background:var(--navora-sidebar);box-shadow:0 12px 32px #17253424;visibility:visible;pointer-events:auto}
 .navora-app .main-shell.sidebar-floating.sidebar-collapsed:not(.mobile-layout)>.content-surface>aside.sidebar{visibility:hidden;pointer-events:none;opacity:0}
 .navora-app .main-shell .window-titlebar-brand{margin-right:7px;gap:7px}
-.navora-app .main-shell .window-sidebar-toggle{width:30px;height:30px;flex:none;margin-right:10px;-webkit-app-region:no-drag;color:var(--navora-muted)}
+.navora-app .main-shell .window-sidebar-toggle{--appearance-local-hover:var(--appearance-hover)!important;width:30px;height:30px;flex:none;margin-right:10px;-webkit-app-region:no-drag;color:var(--navora-muted);background:transparent!important;border-color:transparent!important;box-shadow:none!important;transform:none!important;transition:none}
 .navora-app .main-shell .window-sidebar-toggle .app-icon{width:18px;height:18px}
 .navora-app .main-shell .window-titlebar .application-menu-trigger{padding-inline:9px}
 .navora-app .main-shell .window-sidebar-toggle{margin-left:10px;margin-right:0}.rail-context-check{margin-left:auto;min-width:14px;color:var(--navora-accent)}
 .workspace-expand-preview{position:absolute;z-index:5;top:60px;left:50%;transform:translateX(-50%);max-width:calc(100% - 24px);padding:8px 12px;border:1px solid var(--navora-stroke);border-radius:8px;background:var(--navora-surface);color:var(--navora-ink);box-shadow:0 3px 14px #17253415;font-size:12px;white-space:nowrap;pointer-events:none}
 .subchat-workspace-trigger{position:relative;gap:3px!important;width:auto!important;padding:0 6px!important}.subchat-workspace-trigger>span{font-size:10px;line-height:1;color:var(--navora-muted)}
-.subchat-workspace-trigger .subchat-unread-dot{width:5px;height:5px;border-radius:50%;background:var(--navora-accent)}.subchat-workspace-trigger .subchat-pending-count{color:var(--navora-accent);font-weight:650}
-.navora-app .main-shell .messages{gap:14px;padding:18px 24px 28px}
-.navora-app .main-shell .messages>.msg{width:min(960px,100%);max-width:960px;min-width:0;margin:0}
+.subchat-workspace-trigger .subchat-pending-count{color:var(--navora-accent);font-weight:650}
+.navora-app .main-shell .messages{gap:10px;padding:18px 24px 24px}
+.navora-app .main-shell .messages:has(+ .conversation-outline){scrollbar-width:none;padding-right:44px}
+.navora-app .main-shell .messages:has(+ .conversation-outline)::-webkit-scrollbar{display:none;width:0}
+.navora-app .main-shell .messages>.msg{width:min(860px,100%);max-width:860px;min-width:0;margin:0}
+.navora-app .main-shell .messages>.conversation-process-toggle{width:min(860px,100%);max-width:860px;align-self:center}
 .navora-app .main-shell .messages>.msg.assistant{padding:0;border:0;background:transparent;box-shadow:none}
 .navora-app .main-shell .messages .msg.assistant .msg-row{gap:0}
 .navora-app .main-shell .messages .msg.assistant .msg-main{min-width:0;width:100%;max-width:100%;padding:0}
-.navora-app .main-shell .messages .msg.assistant .msg-body.md{padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;color:var(--navora-ink);font-size:16px;line-height:1.75}
+.navora-app .main-shell .messages .msg.assistant .msg-body.md{padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;color:var(--navora-ink);font-size:15px;line-height:1.7}
+.navora-app .main-shell .messages .msg.assistant[data-message-phase=progress] .msg-body.md{font-size:14px;line-height:1.65;color:var(--navora-muted)}
+.navora-app .main-shell .messages .msg.assistant .msg-md-content :is(p,ul,ol){margin-block:8px}
+.navora-app .main-shell .messages .msg.assistant .msg-md-content :is(h1,h2,h3,h4){margin-top:16px;margin-bottom:8px;line-height:1.4}
+.navora-app .main-shell .messages .msg.assistant .msg-md-content table{font-size:13px}
 .navora-app .main-shell .messages .msg.assistant .msg-md-content>:first-child{margin-top:0}
 .navora-app .main-shell .messages .msg.assistant .msg-md-content>:last-child{margin-bottom:0}
 .navora-app .main-shell .messages .transcript-tool{padding:0;background:transparent;border:0;box-shadow:none}
 .navora-app .main-shell .messages .transcript-tool .transcript-activity{margin:0}
-.navora-app .main-shell .messages .transcript-tool>.subchat-link{padding:3px 0;font-size:14px;line-height:1.75;color:var(--navora-muted)}
-.navora-app .main-shell .messages .transcript-tool>.subchat-link img{width:20px;height:20px;margin-right:2px}
+.navora-app .main-shell .messages .transcript-tool .transcript-activity-trigger{min-height:26px;gap:7px;font-size:12px;line-height:1.5}
+.navora-app .main-shell .messages .transcript-tool .transcript-activity-trigger>.app-icon{width:15px;height:15px}
 .navora-app .main-shell .messages .msg.log .msg-avatar,.navora-app .main-shell .messages .msg.log .msg-role{display:none}
 .navora-app .main-shell .messages .msg.log .msg-row{gap:0}
 .navora-app .main-shell .messages .msg.log .msg-main{width:100%;max-width:100%}
-.navora-app .main-shell .messages .msg.log .activity-trigger{padding-left:0;font-size:14px;max-width:100%;color:var(--navora-muted)}
-.navora-app .main-shell .messages .msg.log .activity-trigger .log-kind-chip{background:transparent;border:0;padding:0;font-size:12px;color:var(--navora-muted)}
-.navora-app .main-shell .messages .msg.log .activity-trigger .log-card-text{font-size:14px;line-height:1.65;color:inherit}
-.transcript-reasoning{margin-bottom:12px;font-size:13px;color:var(--navora-muted)}.transcript-reasoning summary{cursor:pointer}.transcript-reasoning pre{max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;padding:10px 14px;background:var(--navora-background);border-radius:8px;margin-top:8px}
+.navora-app .main-shell .messages .msg.log .log-card{border:0;background:transparent;box-shadow:none;border-radius:6px}
+.navora-app .main-shell .messages .msg.log .activity-trigger{padding:3px 0;gap:7px;font-size:12px;max-width:100%;min-height:24px;color:var(--navora-muted)}
+.navora-app .main-shell .messages .msg.log .activity-trigger .log-kind-chip{background:transparent;border:0;padding:0;min-width:0;font-size:11px;color:var(--navora-muted)}
+.navora-app .main-shell .messages .msg.log .activity-trigger .log-card-text{font-size:12px;line-height:1.5;color:inherit}
+.navora-app .main-shell .messages .msg.log .activity-trigger .status-glyph{width:14px;height:14px}
+.navora-app .main-shell .messages .msg.log.tone-error .activity-trigger{color:var(--navora-danger,#b05246)}
+.navora-app .main-shell .messages .inchat-card.ask>.msg-row{gap:8px}
+.navora-app .main-shell .messages .inchat-card.ask .msg-avatar{width:26px;height:26px;background:transparent;color:var(--navora-accent)}
+.navora-app .main-shell .messages .inchat-card.ask .msg-main{padding:12px 14px;border:1px solid var(--navora-stroke);border-radius:10px;background:var(--navora-surface);box-shadow:none}
+.navora-app .main-shell .messages .inchat-card.ask .msg-role{font-size:11px;margin-bottom:4px;color:var(--navora-muted)}
+.navora-app .main-shell .messages .inchat-card.ask .inchat-title{font-size:14px;font-weight:600;line-height:1.5;color:var(--navora-ink)}
+.navora-app .main-shell .messages .inchat-card.ask :is(.inchat-body,.inchat-meta){font-size:12px;line-height:1.6;color:var(--navora-muted)}
+.navora-app .main-shell .messages .inchat-card.ask .ask-options{margin-top:9px;gap:6px}
+.navora-app .main-shell .messages .inchat-card.ask .ask-opt{padding:8px 10px;border-radius:7px;font-size:12px;font-weight:500}
+.navora-app .main-shell .composer-send.stop{width:34px;height:34px;background:transparent;border:1px solid var(--navora-stroke);border-radius:11px;color:var(--navora-muted)}
+.navora-app .main-shell .composer-send.stop:hover{background:var(--control-hover);color:var(--navora-danger,#b05246)}
+.navora-app .main-shell .messages .transcript-reasoning{font-size:12px;color:var(--navora-muted)}
+.navora-app .main-shell .messages .transcript-reasoning>.transcript-activity-trigger{min-height:26px;gap:7px;font-size:12px;line-height:1.5}
+.navora-app .main-shell .messages .transcript-reasoning>.transcript-activity-trigger>.app-icon{width:15px;height:15px}
+.transcript-reasoning .reasoning-detail{white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto;line-height:1.7}
 @media(max-width:600px){.navora-app .main-shell .messages{padding-inline:16px}.navora-app .main-shell .messages .msg.assistant .msg-body.md{font-size:15px}}
 @media(prefers-reduced-motion:reduce){.navora-app .main-shell.sidebar-floating>.content-surface>aside.sidebar{transition:none}}
+.navora-app .main-shell .sidebar .chat-list>.chat-date-group{display:flex;flex-direction:column;flex:0 0 auto;min-width:0;gap:2px;padding-top:12px}
+.navora-app .main-shell .sidebar .chat-list>.chat-date-group:first-child{padding-top:0}
+.navora-app .main-shell .sidebar .chat-date-group>.chat-date-label{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:10px;min-height:32px;box-sizing:border-box;margin:0;padding:6px 8px;background:var(--navora-sidebar);font-size:11px;font-weight:600;line-height:20px;letter-spacing:.02em;font-variant-numeric:tabular-nums;user-select:text}
+.navora-app .main-shell .sidebar .chat-date-label>span{flex:0 0 auto}
+.navora-app .main-shell .sidebar .chat-date-group>.chat-date-label::after{content:'';flex:1;min-width:12px;height:1px;background:var(--navora-stroke);opacity:.8}
+.navora-app .main-shell .sidebar .chat-list .chat-item-title{font-size:13px;font-weight:400;line-height:22px}
+.navora-app .main-shell .sidebar .chat-list .chat-item.active .chat-item-title{font-weight:600}

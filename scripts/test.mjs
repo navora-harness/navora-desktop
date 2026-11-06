@@ -12,7 +12,9 @@ function collect(dir) {
     return entry.isDirectory() ? collect(file) : entry.name.endsWith('.test.ts') ? [file] : []
   })
 }
+const filters = process.argv.slice(2)
 const entries = ['shared', 'electron/modules'].flatMap((dir) => collect(path.join(root, dir)))
+  .filter(file => !filters.length || filters.some(filter => path.basename(file).includes(filter)))
 if (!entries.length) throw new Error('No tests found')
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'navora-tests-'))
 try {

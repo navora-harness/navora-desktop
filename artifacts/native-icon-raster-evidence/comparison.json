@@ -1,0 +1,341 @@
+{
+  "devicePixelRatio": 1.75,
+  "rows": [
+    {
+      "name": "magnifying-glass",
+      "scale": 1,
+      "size": 16,
+      "differences": 0,
+      "oldSoft": 71,
+      "directSoft": 71
+    },
+    {
+      "name": "magnifying-glass",
+      "scale": 1.25,
+      "size": 20,
+      "differences": 0,
+      "oldSoft": 98,
+      "directSoft": 98
+    },
+    {
+      "name": "magnifying-glass",
+      "scale": 1.5,
+      "size": 24,
+      "differences": 0,
+      "oldSoft": 114,
+      "directSoft": 114
+    },
+    {
+      "name": "magnifying-glass",
+      "scale": 1.75,
+      "size": 28,
+      "differences": 0,
+      "oldSoft": 146,
+      "directSoft": 146
+    },
+    {
+      "name": "magnifying-glass",
+      "scale": 2,
+      "size": 32,
+      "differences": 0,
+      "oldSoft": 167,
+      "directSoft": 167
+    },
+    {
+      "name": "magnifying-glass",
+      "scale": 2.1875,
+      "size": 35,
+      "differences": 0,
+      "oldSoft": 188,
+      "directSoft": 188
+    },
+    {
+      "name": "magnifying-glass",
+      "scale": 2.625,
+      "size": 42,
+      "differences": 0,
+      "oldSoft": 192,
+      "directSoft": 192
+    },
+    {
+      "name": "comments",
+      "scale": 1,
+      "size": 16,
+      "differences": 0,
+      "oldSoft": 88,
+      "directSoft": 88
+    },
+    {
+      "name": "comments",
+      "scale": 1.25,
+      "size": 20,
+      "differences": 0,
+      "oldSoft": 157,
+      "directSoft": 157
+    },
+    {
+      "name": "comments",
+      "scale": 1.5,
+      "size": 24,
+      "differences": 0,
+      "oldSoft": 164,
+      "directSoft": 164
+    },
+    {
+      "name": "comments",
+      "scale": 1.75,
+      "size": 28,
+      "differences": 0,
+      "oldSoft": 217,
+      "directSoft": 217
+    },
+    {
+      "name": "comments",
+      "scale": 2,
+      "size": 32,
+      "differences": 0,
+      "oldSoft": 196,
+      "directSoft": 196
+    },
+    {
+      "name": "comments",
+      "scale": 2.1875,
+      "size": 35,
+      "differences": 0,
+      "oldSoft": 264,
+      "directSoft": 264
+    },
+    {
+      "name": "comments",
+      "scale": 2.625,
+      "size": 42,
+      "differences": 0,
+      "oldSoft": 285,
+      "directSoft": 285
+    },
+    {
+      "name": "globe",
+      "scale": 1,
+      "size": 16,
+      "differences": 0,
+      "oldSoft": 87,
+      "directSoft": 87
+    },
+    {
+      "name": "globe",
+      "scale": 1.25,
+      "size": 20,
+      "differences": 0,
+      "oldSoft": 157,
+      "directSoft": 157
+    },
+    {
+      "name": "globe",
+      "scale": 1.5,
+      "size": 24,
+      "differences": 0,
+      "oldSoft": 160,
+      "directSoft": 160
+    },
+    {
+      "name": "globe",
+      "scale": 1.75,
+      "size": 28,
+      "differences": 0,
+      "oldSoft": 206,
+      "directSoft": 206
+    },
+    {
+      "name": "globe",
+      "scale": 2,
+      "size": 32,
+      "differences": 0,
+      "oldSoft": 193,
+      "directSoft": 193
+    },
+    {
+      "name": "globe",
+      "scale": 2.1875,
+      "size": 35,
+      "differences": 0,
+      "oldSoft": 246,
+      "directSoft": 246
+    },
+    {
+      "name": "globe",
+      "scale": 2.625,
+      "size": 42,
+      "differences": 0,
+      "oldSoft": 321,
+      "directSoft": 321
+    },
+    {
+      "name": "xmark",
+      "scale": 1,
+      "size": 16,
+      "differences": 0,
+      "oldSoft": 64,
+      "directSoft": 64
+    },
+    {
+      "name": "xmark",
+      "scale": 1.25,
+      "size": 20,
+      "differences": 0,
+      "oldSoft": 61,
+      "directSoft": 61
+    },
+    {
+      "name": "xmark",
+      "scale": 1.5,
+      "size": 24,
+      "differences": 0,
+      "oldSoft": 64,
+      "directSoft": 64
+    },
+    {
+      "name": "xmark",
+      "scale": 1.75,
+      "size": 28,
+      "differences": 0,
+      "oldSoft": 140,
+      "directSoft": 140
+    },
+    {
+      "name": "xmark",
+      "scale": 2,
+      "size": 32,
+      "differences": 0,
+      "oldSoft": 156,
+      "directSoft": 156
+    },
+    {
+      "name": "xmark",
+      "scale": 2.1875,
+      "size": 35,
+      "differences": 0,
+      "oldSoft": 176,
+      "directSoft": 176
+    },
+    {
+      "name": "xmark",
+      "scale": 2.625,
+      "size": 42,
+      "differences": 0,
+      "oldSoft": 216,
+      "directSoft": 216
+    },
+    {
+      "name": "arrow-up",
+      "scale": 1,
+      "size": 16,
+      "differences": 0,
+      "oldSoft": 46,
+      "directSoft": 46
+    },
+    {
+      "name": "arrow-up",
+      "scale": 1.25,
+      "size": 20,
+      "differences": 0,
+      "oldSoft": 72,
+      "directSoft": 72
+    },
+    {
+      "name": "arrow-up",
+      "scale": 1.5,
+      "size": 24,
+      "differences": 0,
+      "oldSoft": 82,
+      "directSoft": 82
+    },
+    {
+      "name": "arrow-up",
+      "scale": 1.75,
+      "size": 28,
+      "differences": 0,
+      "oldSoft": 96,
+      "directSoft": 96
+    },
+    {
+      "name": "arrow-up",
+      "scale": 2,
+      "size": 32,
+      "differences": 0,
+      "oldSoft": 68,
+      "directSoft": 68
+    },
+    {
+      "name": "arrow-up",
+      "scale": 2.1875,
+      "size": 35,
+      "differences": 0,
+      "oldSoft": 127,
+      "directSoft": 127
+    },
+    {
+      "name": "arrow-up",
+      "scale": 2.625,
+      "size": 42,
+      "differences": 0,
+      "oldSoft": 145,
+      "directSoft": 145
+    },
+    {
+      "name": "arrow-down",
+      "scale": 1,
+      "size": 16,
+      "differences": 0,
+      "oldSoft": 46,
+      "directSoft": 46
+    },
+    {
+      "name": "arrow-down",
+      "scale": 1.25,
+      "size": 20,
+      "differences": 0,
+      "oldSoft": 72,
+      "directSoft": 72
+    },
+    {
+      "name": "arrow-down",
+      "scale": 1.5,
+      "size": 24,
+      "differences": 0,
+      "oldSoft": 82,
+      "directSoft": 82
+    },
+    {
+      "name": "arrow-down",
+      "scale": 1.75,
+      "size": 28,
+      "differences": 0,
+      "oldSoft": 96,
+      "directSoft": 96
+    },
+    {
+      "name": "arrow-down",
+      "scale": 2,
+      "size": 32,
+      "differences": 0,
+      "oldSoft": 68,
+      "directSoft": 68
+    },
+    {
+      "name": "arrow-down",
+      "scale": 2.1875,
+      "size": 35,
+      "differences": 0,
+      "oldSoft": 127,
+      "directSoft": 127
+    },
+    {
+      "name": "arrow-down",
+      "scale": 2.625,
+      "size": 42,
+      "differences": 0,
+      "oldSoft": 146,
+      "directSoft": 146
+    }
+  ]
+}

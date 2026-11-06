@@ -1,3 +1,4 @@
+import type {TaskDeclarationId} from '@shared/task-declarations'
 import type {SelectionBookmark} from '@tiptap/pm/state'
 import type {ComposerContextBlock} from '@shared/composer-document'
 
@@ -11,6 +12,7 @@ export type ComposerEditorHandle={
   getCommandState:()=>Record<ComposerEditorCommand,boolean>;executeCommand:(command:ComposerEditorCommand)=>Promise<boolean>
   openLinkEditor:()=>boolean;removeLink:()=>boolean;updateContext:(id:string,patch:{block?:ComposerContextBlock;text?:string})=>boolean
   /** Remove only the most recent live slash command; cancellation leaves it literal. */
+  toggleDeclaration:(id:TaskDeclarationId)=>boolean
   consumeAttachmentTrigger:()=>boolean
   cancelAttachmentTrigger:()=>void
 }

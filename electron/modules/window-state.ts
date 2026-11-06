@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { screen, type BrowserWindow, type Rectangle } from 'electron'
 import { ensureDir } from '../data-root'
+import {fullscreenRestoreState} from './window-fullscreen'
 
 export type MainWindowState = {
   width: number
@@ -79,8 +80,10 @@ export function saveWindowState(dataRoot: string, state: MainWindowState): void 
 }
 
 export function captureWindowState(win: BrowserWindow): MainWindowState {
+  const restore=fullscreenRestoreState(win)
+  if(restore)return {...restore.bounds,maximized:restore.maximized}
   const maximized = win.isMaximized()
-  const bounds = maximized ? win.getNormalBounds() : win.getBounds()
+  const bounds = maximized || win.isFullScreen() ? win.getNormalBounds() : win.getBounds()
   return {
     width: bounds.width,
     height: bounds.height,

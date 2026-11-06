@@ -1,6 +1,7 @@
 import {app,type BrowserWindow} from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
+import {registerWindowFullscreen} from './window-fullscreen'
 
 export function resolveWindowIcon(platform:string):string|undefined{
   const filename=platform==='win32'?'app-icon.ico':'app-icon.png'
@@ -31,6 +32,7 @@ export function detachedWindowChrome(platform:string){
   return mainWindowChrome(platform)
 }
 export function wireDetachedWindowChrome(win:BrowserWindow){
+  registerWindowFullscreen(win)
   const update=()=>{if(!win.isDestroyed())win.webContents.send('navora:app.window.maximized',win.isMaximized())}
   win.on('maximize',update);win.on('unmaximize',update)
 }

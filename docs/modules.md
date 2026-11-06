@@ -9,7 +9,7 @@
 | 文档版本 | 1.3 |
 | 日期 | 2026-09-11 |
 | 对应代码 | `package.json`（产品名 Navora；仓库 `navora-desktop`） |
-| 相关文档 | [`architecture-plan.md`](./architecture-plan.md)、[`README.md`](../README.md) |
+| 相关文档 | [`architecture-plan.md`](./已完成/architecture-plan.md)、[`README.md`](../README.md) |
 | 关联仓库 | [`navora-plugin-sdk`](https://github.com/navora-harness/navora-plugin-sdk)、[`navora-plugins`](https://github.com/navora-harness/navora-plugins) |
 | 变更 | §9 风险项 **R1–R6 / R8–R9 已落地**；**R10 Chat 防抖写盘 + 下载/下载列表 IPC 节流**已落地；§3.4 插件 zip/外链已落地；**§12 插件签名方案搁置（仅文档）** |
 

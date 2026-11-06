@@ -1,5 +1,5 @@
 <template>
-  <div class="chat-md-wrap">
+  <div class="chat-md-wrap" :data-chat-id="chatId">
     <div
       class="msg-body md"
       :class="{ shimmer, 'has-footer': Boolean($slots.footer) }"
@@ -9,6 +9,8 @@
         class="msg-md-content"
         v-html="html"
         @click="onClick"
+        @contextmenu="onFileContext"
+        @keydown="onFileKey"
       />
       <div v-if="$slots.footer" class="msg-body-footer">
         <slot name="footer" />
@@ -20,11 +22,15 @@
         :key="item.path"
         type="button"
         class="msg-media-item"
-        :title="item.path"
+        :class="{'is-inline-file':!inlineMedia}"
+        :title="filePaths.displayPath(chatId,item.path)"
         @click="emit('openFile',item.path)"
+        @contextmenu="fileActions.show({chatId,path:item.path},$event)"
+        @keydown.shift.f10="fileActions.show({chatId,path:item.path},$event)"
       >
-        <img :src="item.url" :alt="item.path" loading="lazy" />
-        <span>{{ item.path }}</span>
+        <img v-if="inlineMedia&&item.url" :src="item.url" :alt="item.path" loading="lazy" />
+        <AppIcon v-else icon="image" />
+        <span>{{ item.path.split(/[\\/]/).at(-1)||item.path }}</span>
       </button>
     </div>
   </div>
@@ -34,6 +40,10 @@
 import { onMounted, ref, watch } from 'vue'
 import { renderMarkdown } from '@/utils/markdown'
 import {workspaceLinkPath} from '@shared/file-tabs'
+import AppIcon from './icons/AppIcon.vue'
+import {decorateWorkspaceLinks} from '@/utils/workspace-file-links'
+import {useWorkspaceFileActions} from '@/composables/useWorkspaceFileActions'
+import {useWorkspaceFilePaths} from '@/composables/useWorkspaceFilePaths'
 import {
   extractWorkspaceImagePathsFromText,
   isHttpOrDataUrl,
@@ -45,6 +55,8 @@ const props = defineProps<{
   chatId: string
   content: string
   shimmer?: boolean
+  artifactPaths?: string[]
+  inlineMedia?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -56,12 +68,14 @@ const emit = defineEmits<{
 const rootRef = ref<HTMLElement | null>(null)
 const html = ref('')
 const fallbackMedia = ref<Array<{ path: string; url: string }>>([])
+const filePaths=useWorkspaceFilePaths(()=>[props.chatId])
 let hydrateSeq = 0
+const fileActions=useWorkspaceFileActions({open:(path,chatId)=>{if(chatId!==props.chatId){emit('notify','来源对话已切换，请重新打开文件。');return}emit('openFile',path)},notify:text=>emit('notify',text)})
 
 watch(
-  () => [props.chatId, props.content] as const,
+  () => [props.chatId, props.content,props.inlineMedia,filePaths.workspaceRoot(props.chatId)] as const,
   () => {
-    html.value = renderMarkdown(props.content || '')
+    html.value = decorateWorkspaceLinks(renderMarkdown(props.content || ''),props.inlineMedia,filePaths.workspaceRoot(props.chatId))
   },
   { immediate: true },
 )
@@ -71,6 +85,12 @@ async function hydrateImages(): Promise<void> {
   const root = rootRef.value
   const chatId = props.chatId
   if (!root || !chatId) return
+  if(!props.inlineMedia){
+    const linked=new Set([...root.querySelectorAll<HTMLElement>('[data-workspace-path]')].map(element=>element.dataset.workspacePath))
+    const artifacts=new Set(props.artifactPaths||[])
+    fallbackMedia.value=[...new Set(extractWorkspaceImagePathsFromText(props.content||''))].filter(path=>!linked.has(path)&&!artifacts.has(path)).map(path=>({path,url:''}))
+    return
+  }
 
   const hydrated = new Set<string>()
   const imgs = [...root.querySelectorAll('img')]
@@ -119,7 +139,7 @@ async function hydrateImages(): Promise<void> {
 }
 
 watch(
-  () => [html.value, props.chatId, props.content] as const,
+  () => [html.value, props.chatId, props.content,props.artifactPaths,props.inlineMedia] as const,
   () => {
     void hydrateImages()
   },
@@ -132,6 +152,7 @@ onMounted(() => {
 
 function onClick(e: MouseEvent) {
   const t = e.target
+  if(t instanceof Element){const link=t.closest<HTMLElement>('[data-workspace-path]');if(link){e.preventDefault();const path=workspaceLinkPath(link.dataset.workspacePath||'');if(path)emit('openFile',path);else emit('notify','文件链接无效或不在工作区内');return}}
   if(t instanceof Element){
     const anchor=t.closest('a'),href=anchor?.getAttribute('href')||''
     if(anchor&&href&&!/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(href)){
@@ -149,9 +170,14 @@ function onClick(e: MouseEvent) {
   if(looksLikeWorkspaceImagePath(path)){emit('openFile',path);return}
   emit('openMedia', { src, alt: t.alt || t.getAttribute('data-src') || '' })
 }
+function onFileContext(event:MouseEvent){const link=(event.target as Element)?.closest<HTMLElement>('[data-workspace-path]'),path=workspaceLinkPath(link?.dataset.workspacePath||'');if(path)void fileActions.show({chatId:props.chatId,path},event)}
+function onFileKey(event:KeyboardEvent){const link=(event.target as Element)?.closest<HTMLElement>('[data-workspace-path]'),path=workspaceLinkPath(link?.dataset.workspacePath||'');if(!path)return;if(event.key==='F10'&&event.shiftKey)void fileActions.show({chatId:props.chatId,path},event);else if(event.key==='Enter'||event.key===' '){event.preventDefault();emit('openFile',path)}}
 </script>
 
 <style scoped>
+.msg-md-content :deep(.chat-file-link){display:inline-flex;align-items:center;gap:5px;max-width:100%;vertical-align:baseline;text-decoration:none;overflow-wrap:anywhere}
+.msg-md-content :deep(.chat-file-link-icon){width:14px;height:14px;flex:none;color:var(--navora-muted)}
+.msg-md-content :deep(.chat-file-link:focus-visible){outline:2px solid var(--navora-accent);outline-offset:3px;border-radius:3px}
 .chat-md-wrap {
   display: grid;
   gap: 8px;
@@ -258,9 +284,15 @@ function onClick(e: MouseEvent) {
 }
 .msg-body.md :deep(a) {
   color: #1b4f72;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration-line: none;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
   word-break: break-all;
+}
+.msg-body.md :deep(a:hover),
+.msg-body.md :deep(a:focus-visible) {
+  text-decoration-line: underline;
 }
 .msg-body.md :deep(.md-table-scroll) {
   width: 100%;
@@ -353,6 +385,10 @@ function onClick(e: MouseEvent) {
   display: grid;
   gap: 8px;
 }
+.msg-media-item.is-inline-file{display:inline-flex;align-items:center;gap:5px;width:fit-content;max-width:100%;border:0;border-radius:4px;background:transparent;color:var(--navora-accent);font:inherit;font-size:13px;cursor:pointer}
+.msg-media-item.is-inline-file .app-icon{width:14px;height:14px;color:var(--navora-muted)}
+.msg-media-item.is-inline-file span{padding:0;color:inherit;font-size:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msg-media-item.is-inline-file:is(:hover,:focus-visible) span{text-decoration:underline dashed;text-underline-offset:3px}
 .msg-media-item {
   display: grid;
   gap: 6px;

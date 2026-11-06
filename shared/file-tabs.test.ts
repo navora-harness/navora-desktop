@@ -1,6 +1,32 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {emptyFileTabs,openFileTab,openBrowserTab,showFileWorkspace,closeFileTab,restoreFileTabs,persistedFileTabs,makeFileTab,workspaceLinkPath,removeFileOwner,type FileTabs,type FileTab} from './file-tabs'
+import {makeQuestionnaireTab,openQuestionnaireTab} from './file-tabs'
+
+test('questionnaires reuse one stable tab while preserving surrounding files and owner metadata',()=>{
+  const files=openFileTab(openFileTab(emptyFileTabs(),'first','before.md'),'first','after.md')
+  const first=openQuestionnaireTab(files,{chatId:'first',questionnaireId:'question-1',questionnaireRevision:1})
+  const replaced=openQuestionnaireTab(first,{chatId:'second',questionnaireId:'question-2',questionnaireRevision:2})
+  assert.equal(replaced.tabs.length,3)
+  assert.equal(replaced.active,'questionnaire')
+  assert.deepEqual(replaced.tabs.slice(0,2),files.tabs)
+  assert.deepEqual(replaced.tabs[2],makeQuestionnaireTab({chatId:'second',questionnaireId:'question-2',questionnaireRevision:2}))
+  assert.deepEqual(restoreFileTabs(replaced),replaced)
+  assert.throws(()=>makeQuestionnaireTab({chatId:'../bad',questionnaireId:'q'}))
+  assert.throws(()=>makeQuestionnaireTab({chatId:'owner',questionnaireId:'q',questionnaireRevision:-1}))
+})
+
+test('singleton replacement works at the tab limit and restore strips unsupported questionnaire capabilities',()=>{
+  let state=openQuestionnaireTab(emptyFileTabs(),{chatId:'owner',questionnaireId:'first'})
+  for(let i=0;i<31;i++)state=openFileTab(state,'owner',`${i}.txt`)
+  const replaced=openQuestionnaireTab(state,{chatId:'owner',questionnaireId:'second'})
+  assert.equal(replaced.tabs.length,32)
+  const restored=restoreFileTabs({open:true,active:'questionnaire',tabs:[{...replaced.tabs[0],pinned:true,pageId:'foreign-native-page',url:'https://example.test'},{...replaced.tabs[0],questionnaireId:'duplicate'}]})
+  assert.equal(restored.tabs.length,1)
+  assert.equal(restored.tabs[0]?.pinned,undefined)
+  assert.equal(restored.tabs[0]?.pageId,undefined)
+  assert.equal(restored.tabs[0]?.url,undefined)
+})
 test('file tabs reuse paths, distinguish resource owners and close to a neighbouring tab',()=>{
   let state=openFileTab(emptyFileTabs(),'a','folder/report.md')
   state=openFileTab(state,'a','./folder\\report.md');assert.equal(state.tabs.length,1)

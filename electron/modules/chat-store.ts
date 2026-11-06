@@ -12,7 +12,7 @@ import type {
 import {interruptedSubchatRun} from '../../shared/subchat-runtime'
 import { ensureDir } from '../data-root'
 import { localChatTitle } from '../../shared/chat-title'
-import {composerDocumentFromLegacy,compileComposerDocument,normalizeComposerDocument,createComposerDocument,type ComposerDocument,type ComposerDraftOptions} from '../../shared/composer-document'
+import {composerDocumentFromLegacy,previewComposerDocument,normalizeComposerDocument,createComposerDocument,composerDocumentHasState,composerDocumentsHaveSameContent,type ComposerDocument,type ComposerDraftOptions} from '../../shared/composer-document'
 
 /** Coalesce frequent chat writes (agent tool cards, drafts) off the main hot path. */
 const PERSIST_DEBOUNCE_MS = 100
@@ -80,7 +80,11 @@ export class ChatStore {
 
   /** Compact JSON (no pretty-print) — much cheaper for long sessions. */
   private writeNow(chat: ChatSession): void {
-    fs.writeFileSync(this.fileOf(chat.id), JSON.stringify(chat), 'utf8')
+    const target=this.fileOf(chat.id),temporary=path.join(this.dir,`.${chat.id}.${randomUUID()}.tmp`)
+    // A crash during a large receipt write must not truncate the last complete
+    // transcript. Rename only after the new JSON has been fully written.
+    try{fs.writeFileSync(temporary,JSON.stringify(chat),'utf8');fs.renameSync(temporary,target)}
+    finally{if(fs.existsSync(temporary))fs.unlinkSync(temporary)}
   }
 
   private clearPersistTimer(chatId: string): void {
@@ -426,7 +430,8 @@ export class ChatStore {
     if (!chat) return null
     if(chat.draftUnsupportedDocument!==undefined)throw Error('composer_document_version')
     const incoming=opts?.document?normalizeComposerDocument(opts.document,chatId):composerDocumentFromLegacy(chatId,String(text??''))
-    const next=compileComposerDocument(incoming).content
+    if(!opts?.document&&chat.draftDocument?.declarations!==undefined)incoming.declarations=JSON.parse(JSON.stringify(chat.draftDocument.declarations))
+    const next=previewComposerDocument(incoming).content
     const at =
       typeof opts?.updatedAt === 'number' && Number.isFinite(opts.updatedAt)
         ? Math.floor(opts.updatedAt)
@@ -435,12 +440,12 @@ export class ChatStore {
     const prevAt = chat.draftUpdatedAt || 0
     const revision=chat.draftRevision||0
     if(opts?.baseRevision!==undefined&&(!Number.isSafeInteger(opts.baseRevision)||opts.baseRevision<0))throw Error('invalid_draft_revision')
-    if(chat.draftDocument&&incoming.revision<=revision&&JSON.stringify(chat.draftDocument.content)===JSON.stringify(incoming.content)&&chat.draftDocument.id===incoming.id){
+    if(chat.draftDocument&&incoming.revision<=revision&&composerDocumentsHaveSameContent(chat.draftDocument,incoming)&&chat.draftDocument.id===incoming.id){
       if(chat.draftConflict&&opts?.baseRevision===revision){delete chat.draftConflict;this.persist(chat,'defer')}
       return chat
     }
-    const followsClear=opts?.baseRevision===chat.draftClearedFromRevision&&!prev&&(incoming.id!==chat.draftDocument?.id||incoming.revision>(opts?.baseRevision??-1))
-    if((opts?.baseRevision!==undefined&&opts.baseRevision!==revision&&!followsClear)||(opts?.baseRevision===undefined&&at<prevAt&&next!==prev)){
+    const followsClear=opts?.baseRevision===chat.draftClearedFromRevision&&(!chat.draftDocument||!composerDocumentHasState(chat.draftDocument))&&(incoming.id!==chat.draftDocument?.id||incoming.revision>(opts?.baseRevision??-1))
+    if((opts?.baseRevision!==undefined&&opts.baseRevision!==revision&&!followsClear)||(opts?.baseRevision===undefined&&at<prevAt&&(!chat.draftDocument?next!==prev:!composerDocumentsHaveSameContent(chat.draftDocument,incoming)))){
       const recovery=this.recoverDraft(chatId,incoming,'conflict')
       if(recovery)chat.draftConflict={recoveryId:recovery.id,expectedRevision:opts?.baseRevision??revision,actualRevision:revision}
       this.persist(chat,'immediate')
@@ -457,7 +462,7 @@ export class ChatStore {
 
   recoverDraft(chatId:string,document:ComposerDocument,reason:'conflict'|'send_failed'){
     const chat=this.chats.get(chatId);if(!chat)return null
-    const normalized=normalizeComposerDocument(document,chatId),existing=chat.draftRecoveries?.find(entry=>entry.document.id===normalized.id&&entry.document.revision===normalized.revision&&JSON.stringify(entry.document.content)===JSON.stringify(normalized.content))
+    const normalized=normalizeComposerDocument(document,chatId),existing=chat.draftRecoveries?.find(entry=>entry.document.id===normalized.id&&entry.document.revision===normalized.revision&&composerDocumentsHaveSameContent(entry.document,normalized))
     if(existing)return existing
     const recovery={id:randomUUID(),document:normalized,createdAt:Date.now(),reason}
     chat.draftRecoveries=[...(chat.draftRecoveries||[]),recovery].slice(-20)

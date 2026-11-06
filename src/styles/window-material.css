@@ -1,0 +1,27 @@
+/* This marker means the host requested Acrylic after observable support checks.
+   It never asserts that DWM is actually drawing blur. Content surfaces stay opaque. */
+:root[data-navora-theme][data-navora-window-material="acrylic"],
+:root[data-navora-theme][data-navora-window-material="acrylic"] :is(body,#app,.navora-app,.v-application__wrap){background:transparent!important}
+
+:root[data-navora-theme][data-navora-window-material="acrylic"][data-navora-window-role="main"] .navora-app .shell.main-shell,
+:root[data-navora-theme][data-navora-window-material="acrylic"][data-navora-window-role="main"] .navora-app .shell.main-shell:not(.mobile-layout)>.content-surface{background:transparent!important}
+
+/* Paint only outside the rounded content surface, including its corner gaps.
+   Clip the spread to the bottom/right frame so titlebar and rail tint once. */
+:root[data-navora-theme][data-navora-window-material="acrylic"][data-navora-window-role="main"] .navora-app .shell.main-shell:not(.mobile-layout)>.content-surface{box-shadow:0 0 0 var(--navora-content-radius,12px) var(--window-material-chrome)!important;clip-path:inset(0 calc(-1 * var(--navora-frame-inset,7px)) calc(-1 * var(--navora-frame-inset,7px)) 0)}
+
+/* The tint follows the app even when Windows uses the opposite tone. It is a
+   translucent host surface over Acrylic, not a synthetic blur or a guest theme. */
+:root[data-navora-theme][data-navora-window-material="acrylic"][data-navora-window-role="main"] .navora-app .shell.main-shell>:is(.window-titlebar,.activity-rail){background:var(--window-material-chrome)!important;color:var(--appearance-ink)!important}
+:root[data-navora-theme][data-navora-window-material="acrylic"] .navora-app .activity-rail :is(button,.sidebar-icon-btn){color:var(--appearance-ink)!important}
+
+/* Only the docked resource panel is tinted. Floating panels remain opaque. */
+:root[data-navora-theme][data-navora-window-material="acrylic"][data-navora-window-role="main"] .navora-app .shell.main-shell:not(.mobile-layout):not(.sidebar-floating)>.content-surface>aside.sidebar{background:var(--window-material-sidebar)!important}
+:root[data-navora-theme][data-navora-window-material="acrylic"][data-navora-window-role="main"] .navora-app .shell.main-shell>.content-surface>.main{background:var(--appearance-surface)!important}
+
+:root[data-navora-theme][data-navora-window-material="acrylic"] .navora-app :is(.browser-host-page,.file-host-page){background:transparent!important}
+:root[data-navora-theme][data-navora-window-material="acrylic"] .navora-app :is(.browser-host-tabs,.detached-window-bar){background:var(--window-material-chrome)!important}
+/* These are often the same element; nested tab strips inherit to avoid tinting twice. */
+:root[data-navora-theme][data-navora-window-material="acrylic"] .navora-app .detached-window-bar :is(.browser-host-tabs,.file-host-tabs){background:transparent!important}
+:root[data-navora-theme][data-navora-window-material="acrylic"] .navora-app .browser-tab-toolbar{background:var(--appearance-header)!important}
+:root[data-navora-theme][data-navora-window-material="acrylic"] .navora-app .file-host-content{background:var(--appearance-surface)!important}

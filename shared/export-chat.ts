@@ -1,6 +1,7 @@
 import type { ChatMessage, ChatSession } from './types'
 import {executionSummary,transcriptBlocks} from './message-presentation'
 import {conversationSources} from './conversation-resources'
+import {taskDeclarationsLabel} from './task-declarations'
 import { resolveToolDisplay } from './tool-display'
 
 function pad(n: number): string {
@@ -79,6 +80,8 @@ export function formatChatAsMarkdown(chat: ChatSession): string {
   const render=(message:ChatMessage,process=false)=>{
     const heading=process&&message.role==='assistant'?'进展':roleHeading(message.role,message.meta)
     lines.push(`${process?'####':'###'} ${heading} · ${formatExportTimestamp(message.createdAt)}`,'')
+    const declarationLabel=message.role==='user'?taskDeclarationsLabel(message.meta?.taskConstraints?.declarations??message.meta?.document?.declarations):''
+    if(declarationLabel)lines.push('任务声明：'+declarationLabel,'')
     const content=(message.content||'').trimEnd()
     if(content)lines.push(message.role==='tool'?fence(content):content,'')
     if(message.role==='tool'&&message.meta){

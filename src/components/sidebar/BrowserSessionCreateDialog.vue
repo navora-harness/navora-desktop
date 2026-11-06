@@ -1,10 +1,10 @@
 <template>
-  <v-dialog v-model="open" max-width="440" :persistent="busy">
+  <BrowserContentDialog v-model="open" max-width="440" :persistent="busy">
     <v-card class="session-create-dialog">
-      <v-card-title>新建浏览器会话</v-card-title>
+      <v-card-title>新建独立浏览会话</v-card-title>
       <v-card-text>
         <p class="session-owner">所属对话：{{ ownerTitle || '当前对话' }}</p>
-        <v-text-field v-model="name" label="会话名称（可选）" maxlength="80" autofocus variant="outlined" density="comfortable" hide-details @keydown.enter="create" />
+        <v-text-field v-model="name" label="浏览会话名称（可选）" maxlength="80" autofocus variant="outlined" density="comfortable" hide-details @keydown.enter="create" />
         <fieldset class="storage-options"><legend>网站数据</legend>
           <label><input v-model="persist" type="radio" :value="true" :disabled="busy||!!createdSession" /><span>保留会话数据<small>Cookie 和站点存储可跨重启保留，不保证网站登录仍有效。</small></span></label>
           <label><input v-model="persist" type="radio" :value="false" :disabled="busy||!!createdSession" /><span>临时会话<small>退出应用后不保留此会话。</small></span></label>
@@ -13,10 +13,11 @@
       </v-card-text>
       <v-card-actions><v-spacer /><v-btn :disabled="busy" @click="open=false">取消</v-btn><v-btn color="primary" :loading="busy" :disabled="!chatId" @click="create()">创建并打开页面</v-btn></v-card-actions>
     </v-card>
-  </v-dialog>
+  </BrowserContentDialog>
 </template>
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import BrowserContentDialog from '../BrowserContentDialog.vue'
 import type { BrowserTreeSession } from '@shared/types'
 const props = defineProps<{ modelValue: boolean; chatId: string; ownerTitle?: string }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; created: [session: BrowserTreeSession] }>()

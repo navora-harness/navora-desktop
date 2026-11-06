@@ -134,6 +134,7 @@ export async function editablePaste(
   target: EditableTarget,
   start: number,
   end: number,
+  canApply?:()=>boolean,
 ): Promise<boolean> {
   let text = ''
   try {
@@ -141,6 +142,7 @@ export async function editablePaste(
   } catch {
     return false
   }
+  if(canApply&&!canApply())return false
   if (target.kind === 'input' || target.kind === 'textarea') {
     if (target.el.readOnly) return false
     replaceInputRange(target.el, start, end, text)

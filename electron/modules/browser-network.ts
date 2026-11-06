@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto'
 import type { Session } from 'electron'
 import type { AppConfig } from '../../shared/config'
 import { sanitizeRequestHeadersForUa } from '../../shared/user-agent'
+import {isUrlAllowed} from '../../shared/url-allowlist'
+import {BrowserNetworkScopes,FETCH_SCOPE_HEADER,type NetworkScopeOptions,type NetworkRequestOwner} from './browser-network-scope'
 import {
-  DATADOME_URL_PATTERNS,
   appendDatadomeTelemetry,
   bodyFromUploadData,
   isDatadomeUrl,
@@ -17,10 +18,12 @@ export type NetworkRule = {
   kind: NetworkRuleKind
   urlPattern: string
   headers?: Record<string, string>
+  chatId?:string
 }
 
 /** Buffered network observation (observe rules + response capture). */
 export type NetworkLogEntry = {
+  chatId?:string
   id: string
   ts: number
   url: string
@@ -47,6 +50,7 @@ type UaGuard = {
 }
 
 type PendingObserve = {
+  chatId?:string
   entryId: string
   ruleId: string
   url: string
@@ -82,15 +86,18 @@ export class BrowserNetworkManager {
   private getConfig: () => AppConfig
   private getSes: (sessionId: string) => Session | null
   private getLogDir: () => string
+  private scopes:BrowserNetworkScopes
 
   constructor(
     getConfig: () => AppConfig,
     getSes: (sessionId: string) => Session | null,
     getLogDir: () => string = () => '',
+    options:NetworkScopeOptions={},
   ) {
     this.getConfig = getConfig
     this.getSes = getSes
     this.getLogDir = getLogDir
+    this.scopes=new BrowserNetworkScopes(options)
   }
 
   /** Ensure listeners applied (e.g. right after session create for DD telemetry). */
@@ -106,8 +113,10 @@ export class BrowserNetworkManager {
     }
   }
 
-  list(sessionId: string): NetworkRule[] {
-    return [...(this.bySession.get(sessionId)?.rules || [])]
+  list(sessionId: string,chatId?:string): NetworkRule[] {
+    const scope=this.apiScope(sessionId,chatId)
+    if(scope===null)return[]
+    return (this.bySession.get(sessionId)?.rules || []).filter(rule=>(rule.chatId||'')===scope).map(rule=>({...rule,headers:rule.headers?{...rule.headers}:undefined}))
   }
 
   getLog(
@@ -118,13 +127,18 @@ export class BrowserNetworkManager {
       status?: number
       includePending?: boolean
     },
+    chatId?:string,
   ): NetworkLogEntry[] {
+    const scope=this.apiScope(sessionId,chatId)
+    if(scope===null)return[]
     const st = this.bySession.get(sessionId)
     if (!st) return []
-    let rows = [...st.log]
+    let rows = st.log.filter(entry=>(entry.chatId||'')===scope)
     if (opts?.includePending) {
       for (const p of st.pending.values()) {
+        if((p.chatId||'')!==scope)continue
         rows.push({
+          chatId:p.chatId,
           id: p.entryId,
           ts: p.ts,
           url: p.url,
@@ -155,10 +169,11 @@ export class BrowserNetworkManager {
     return rows.map((e) => ({ ...e, requestHeaders: e.requestHeaders ? { ...e.requestHeaders } : undefined, responseHeaders: e.responseHeaders ? { ...e.responseHeaders } : undefined }))
   }
 
-  clearLog(sessionId: string): void {
+  clearLog(sessionId: string,chatId?:string): void {
+    const scope=this.apiScope(sessionId,chatId,true)!
     const st = this.ensure(sessionId)
-    st.log = []
-    st.pending.clear()
+    st.log=st.log.filter(entry=>(entry.chatId||'')!==scope)
+    for(const [id,entry] of st.pending)if((entry.chatId||'')===scope)st.pending.delete(id)
   }
 
   /**
@@ -181,17 +196,19 @@ export class BrowserNetworkManager {
     this.reapply(sessionId)
   }
 
-  clear(sessionId: string): void {
+  clear(sessionId: string,chatId?:string): void {
+    const scope=this.apiScope(sessionId,chatId,true)!
     const st = this.ensure(sessionId)
-    st.rules = []
-    st.pending.clear()
+    st.rules=st.rules.filter(rule=>(rule.chatId||'')!==scope)
+    for(const [id,entry] of st.pending)if((entry.chatId||'')===scope)st.pending.delete(id)
     this.reapply(sessionId)
   }
 
-  remove(sessionId: string, ruleId: string): boolean {
+  remove(sessionId: string, ruleId: string,chatId?:string): boolean {
+    const scope=this.apiScope(sessionId,chatId,true)!
     const st = this.ensure(sessionId)
     const n = st.rules.length
-    st.rules = st.rules.filter((r) => r.id !== ruleId)
+    st.rules = st.rules.filter((r) => r.id !== ruleId||(r.chatId||'')!==scope)
     if (st.rules.length === n) return false
     this.reapply(sessionId)
     return true
@@ -200,13 +217,16 @@ export class BrowserNetworkManager {
   add(
     sessionId: string,
     rule: Omit<NetworkRule, 'id'> & { id?: string },
+    chatId?:string,
   ): NetworkRule {
+    const scope=this.apiScope(sessionId,chatId,true)!
     const st = this.ensure(sessionId)
     const full: NetworkRule = {
       id: rule.id || `nr_${randomUUID().slice(0, 8)}`,
       kind: rule.kind,
       urlPattern: rule.urlPattern,
-      headers: rule.headers,
+      headers: rule.headers?{...rule.headers}:undefined,
+      ...(scope?{chatId:scope}:{}),
     }
     st.rules.push(full)
     this.reapply(sessionId)
@@ -214,6 +234,7 @@ export class BrowserNetworkManager {
   }
 
   disposeSession(sessionId: string): void {
+    this.scopes.dispose(sessionId)
     const ses = this.getSes(sessionId)
     if (ses) {
       try {
@@ -227,6 +248,57 @@ export class BrowserNetworkManager {
       }
     }
     this.bySession.delete(sessionId)
+  }
+
+  async withFetchScope<T>(sessionId:string,chatId:string,url:string,method:string,signal:AbortSignal|undefined,action:(headers:Record<string,string>,signal:AbortSignal)=>Promise<T>):Promise<T>{
+    this.touch(sessionId)
+    if(!this.getSes(sessionId))throw Error('browser_session_not_found')
+    if(!this.fetchUrlAllowed(url))throw Error('url_not_allowed')
+    if(this.ensure(sessionId).rules.some(rule=>rule.chatId===chatId&&rule.kind==='block'&&matchLoose(url,rule.urlPattern)))throw Error('network_rule_blocked')
+    return this.scopes.withFetchScope(sessionId,chatId,url,method,signal,action)
+  }
+
+  async withSharedManagement<T>(sessionId:string,signal:AbortSignal|undefined,action:()=>Promise<T>,timeoutMs=3000):Promise<T>{
+    this.touch(sessionId)
+    if(!this.getSes(sessionId))throw Error('browser_session_not_found')
+    return this.scopes.withManagement(sessionId,signal,action,timeoutMs)
+  }
+
+  cancelChat(sessionId:string,chatId:string){this.scopes.cancelChat(sessionId,chatId)}
+
+  removeChatScope(sessionId:string,chatId:string){
+    if(!chatId)throw Error('network_scope_required')
+    this.scopes.cancelChat(sessionId,chatId)
+    this.clear(sessionId,chatId)
+    this.clearLog(sessionId,chatId)
+  }
+
+  coverage(sessionId:string){
+    const scoped=this.scopes.scoped||this.scopes.isShared(sessionId),dedicated=this.scopes.hasDedicatedPrincipalContract(sessionId)
+    return {scope:scoped?'chat':'legacy-session',
+      sources:scoped?['owned-page','scoped-fetch',...(dedicated?['registered-dedicated-session-principal']:[])]:['legacy-session'],
+      unattributed:!scoped?'legacy-session-rules':dedicated?'registered-session-owner-only-when-webContentsId-absent':'application-baseline-only-no-chat-rules-or-logs',
+      baseline:'application-url-allowlist',complete:false}
+  }
+
+  private apiScope(sessionId:string,chatId?:string,write=false):string|null {
+    if(chatId)return chatId
+    if(this.scopes.scoped||this.scopes.isShared(sessionId)){
+      if(write)throw Error('network_scope_required')
+      return null
+    }
+    return ''
+  }
+
+  private rulesFor(state:SessionNetState,owner:NetworkRequestOwner|null) {
+    if(owner)return state.rules.filter(rule=>rule.chatId===owner.chatId)
+    if(this.scopes.scoped)return[]
+    return state.rules.filter(rule=>!rule.chatId)
+  }
+
+  private fetchUrlAllowed(url:string){
+    try{if(!['http:','https:'].includes(new URL(url).protocol))return false}catch{return false}
+    return isUrlAllowed(url,this.getConfig().browser.url_allowlist)
   }
 
   private ensure(sessionId: string): SessionNetState {
@@ -259,6 +331,7 @@ export class BrowserNetworkManager {
     if (!pending) return
     st.pending.delete(electronId)
     const entry: NetworkLogEntry = {
+      chatId:pending.chatId,
       id: pending.entryId,
       ts: pending.ts,
       url: pending.url,
@@ -286,6 +359,7 @@ export class BrowserNetworkManager {
         appendDatadomeTelemetry(logDir, {
           ts: new Date(pending.ts).toISOString(),
           sessionId,
+          chatId:pending.chatId,
           url: pending.url,
           method: pending.method,
           resourceType: pending.resourceType,
@@ -309,147 +383,71 @@ export class BrowserNetworkManager {
     const ses = this.getSes(sessionId)
     if (!ses) return
     const st = this.ensure(sessionId)
-
-    ses.webRequest.onBeforeRequest(null as never)
-    ses.webRequest.onBeforeSendHeaders(null as never)
-    ses.webRequest.onHeadersReceived(null as never)
-    ses.webRequest.onCompleted(null as never)
-    ses.webRequest.onErrorOccurred(null as never)
-    st.pending.clear()
-
-    const blocks = st.rules.filter((r) => r.kind === 'block')
-    const observes = st.rules.filter((r) => r.kind === 'observe')
-    const modifies = st.rules.filter((r) => r.kind === 'modify')
-    const ddTelemetry = !!this.getConfig().browser.log_datadome_telemetry
-
-    if (blocks.length || observes.length || ddTelemetry) {
-      const urls = [
-        ...blocks.map((r) => r.urlPattern),
-        ...observes.map((r) => r.urlPattern),
-        ...(ddTelemetry ? [...DATADOME_URL_PATTERNS] : []),
-      ]
-      ses.webRequest.onBeforeRequest({ urls }, (details, callback) => {
-        const block = blocks.find((r) => matchLoose(details.url, r.urlPattern))
-        if (block) {
-          this.pushLog(sessionId, {
-            id: `blk_${details.id}`,
-            ts: Date.now(),
-            url: details.url,
-            method: details.method,
-            resourceType: details.resourceType,
-            ruleId: block.id,
-            action: 'block',
-          })
-          callback({ cancel: true })
-          return
-        }
-        const obs = observes.find((r) => matchLoose(details.url, r.urlPattern))
-        const ddHit = ddTelemetry && isDatadomeUrl(details.url)
-        if (obs || ddHit) {
-          const upload = (details as { uploadData?: UploadChunk[] }).uploadData
-          const body = bodyFromUploadData(upload)
-          st.pending.set(details.id, {
-            entryId: `obs_${details.id}_${randomUUID().slice(0, 6)}`,
-            ruleId: obs?.id || 'datadome_auto',
-            url: details.url,
-            method: details.method,
-            resourceType: details.resourceType,
-            ts: Date.now(),
-            requestBodyText: body.bodyText,
-            requestBodyBytes: body.bodyBytes,
-            requestBodyBase64: body.bodyBase64,
-            bodyTruncated: body.truncated,
-          })
-        }
-        callback({})
-      })
+    // Rules/settings are read at each callback. Rebinding a live Session would
+    // discard in-flight identity and observe state, especially during redirects.
+    if(st.applied)return
+    const capture=(details:{id:number;url:string;method:string;resourceType:string;uploadData?:UploadChunk[]},owner:NetworkRequestOwner|null)=>{
+      if(!owner&&(this.scopes.scoped||this.scopes.isShared(sessionId)))return
+      const rules=this.rulesFor(st,owner),observe=rules.find(rule=>rule.kind==='observe'&&matchLoose(details.url,rule.urlPattern))
+      const telemetry=this.getConfig().browser.log_datadome_telemetry&&isDatadomeUrl(details.url)
+      if(!observe&&!telemetry)return
+      const existing=st.pending.get(details.id)
+      if(existing&&existing.url===details.url)return
+      const body=bodyFromUploadData(details.uploadData)
+      st.pending.set(details.id,{entryId:`obs_${details.id}_${randomUUID().slice(0,6)}`,ruleId:observe?.id||'datadome_auto',url:details.url,method:details.method,resourceType:details.resourceType,ts:Date.now(),
+        ...(owner?{chatId:owner.chatId}:{}),requestBodyText:body.bodyText,requestBodyBytes:body.bodyBytes,requestBodyBase64:body.bodyBase64,bodyTruncated:body.truncated})
     }
-
-    const needSendHeaders = Boolean(
-      st.uaGuard || modifies.length || observes.length || ddTelemetry,
-    )
-    if (needSendHeaders) {
-      const filter =
-        (observes.length || ddTelemetry) && !st.uaGuard && !modifies.length
-          ? {
-              urls: [
-                ...observes.map((r) => r.urlPattern),
-                ...(ddTelemetry ? [...DATADOME_URL_PATTERNS] : []),
-              ],
-            }
-          : undefined
-      const handler = (
-        details: {
-          id: number
-          url: string
-          method: string
-          resourceType: string
-          requestHeaders: Record<string, string>
-        },
-        callback: (response: { requestHeaders?: Record<string, string> }) => void,
-      ) => {
-        const headers = { ...(details.requestHeaders as Record<string, string>) }
-        if (st.uaGuard?.ua) {
-          sanitizeRequestHeadersForUa(headers, st.uaGuard.ua, st.uaGuard.initHeader)
-        }
-        const rule = modifies.find((r) => matchLoose(details.url, r.urlPattern))
-        if (rule?.headers) {
-          for (const [k, v] of Object.entries(rule.headers)) {
-            headers[k] = v
-          }
-          this.pushLog(sessionId, {
-            id: `mod_${details.id}_${randomUUID().slice(0, 6)}`,
-            ts: Date.now(),
-            url: details.url,
-            method: details.method,
-            resourceType: details.resourceType,
-            ruleId: rule.id,
-            action: 'modify',
-            requestHeaders: redactHeaders(headers),
-          })
-        }
-        const pending = st.pending.get(details.id)
-        if (pending) {
-          pending.requestHeaders = redactHeaders(headers)
-        }
-        callback({ requestHeaders: headers })
+    const block=(details:{id:number;url:string;method:string;resourceType:string},owner:NetworkRequestOwner|null)=>{
+      const rule=this.rulesFor(st,owner).find(item=>item.kind==='block'&&matchLoose(details.url,item.urlPattern))
+      if(!rule)return false
+      this.pushLog(sessionId,{id:`blk_${details.id}`,ts:Date.now(),url:details.url,method:details.method,resourceType:details.resourceType,ruleId:rule.id,action:'block',...(owner?{chatId:owner.chatId}:{})})
+      return true
+    }
+    ses.webRequest.onBeforeRequest({urls:['<all_urls>']},(details,callback)=>{
+      if(!isUrlAllowed(details.url,this.getConfig().browser.url_allowlist)){callback({cancel:true});return}
+      const request=this.scopes.start(sessionId,details)
+      if(request.cancel||block(details,request.owner)){callback({cancel:true});return}
+      capture(details,request.owner)
+      callback({})
+    })
+    ses.webRequest.onBeforeSendHeaders((details,callback)=>{
+      const headers={...details.requestHeaders}
+      let request:{cancel:boolean;owner:NetworkRequestOwner|null}
+      try{request=this.scopes.beforeHeaders(sessionId,details,headers)}catch{callback({cancel:true,requestHeaders:stripScopeHeaders(headers)});return}
+      if(request.cancel||!isUrlAllowed(details.url,this.getConfig().browser.url_allowlist)||block(details,request.owner)){callback({cancel:true,requestHeaders:stripScopeHeaders(headers)});return}
+      // A host fetch is identified only now; check every hop, not just the
+      // original URL, before any scoped header modification reaches the server.
+      if(request.owner?.source==='host'&&!this.fetchUrlAllowed(details.url)){
+        callback({cancel:true,requestHeaders:stripScopeHeaders(headers)});return
       }
-      if (filter) ses.webRequest.onBeforeSendHeaders(filter, handler)
-      else ses.webRequest.onBeforeSendHeaders(handler)
-    }
-
-    if (observes.length || ddTelemetry) {
-      const urls = [
-        ...observes.map((r) => r.urlPattern),
-        ...(ddTelemetry ? [...DATADOME_URL_PATTERNS] : []),
-      ]
-      ses.webRequest.onHeadersReceived({ urls }, (details, callback) => {
-        if (st.pending.has(details.id)) {
-          this.finalizeObserve(sessionId, details.id, {
-            statusCode: details.statusCode,
-            responseHeaders: details.responseHeaders as Record<string, string | string[]>,
-          })
-        }
-        callback({ cancel: false, responseHeaders: details.responseHeaders })
-      })
-
-      ses.webRequest.onCompleted({ urls }, (details) => {
-        if (!st.pending.has(details.id)) return
-        this.finalizeObserve(sessionId, details.id, {
-          statusCode: details.statusCode,
-        })
-      })
-
-      ses.webRequest.onErrorOccurred({ urls }, (details) => {
-        if (!st.pending.has(details.id)) return
-        this.finalizeObserve(sessionId, details.id, {
-          error: details.error || 'net_error',
-        })
-      })
-    }
-
-    st.applied = true
+      if(st.uaGuard?.ua)sanitizeRequestHeadersForUa(headers,st.uaGuard.ua,st.uaGuard.initHeader)
+      const rule=this.rulesFor(st,request.owner).find(item=>item.kind==='modify'&&matchLoose(details.url,item.urlPattern))
+      if(rule?.headers){
+        for(const [key,value] of Object.entries(rule.headers))headers[key]=value
+        stripScopeHeaders(headers)
+        this.pushLog(sessionId,{id:`mod_${details.id}_${randomUUID().slice(0,6)}`,ts:Date.now(),url:details.url,method:details.method,resourceType:details.resourceType,ruleId:rule.id,action:'modify',requestHeaders:redactHeaders(headers),...(request.owner?{chatId:request.owner.chatId}:{})})
+      }
+      stripScopeHeaders(headers)
+      capture(details,request.owner)
+      const pending=st.pending.get(details.id)
+      if(pending)pending.requestHeaders=redactHeaders(headers)
+      callback({requestHeaders:headers})
+    })
+    ses.webRequest.onHeadersReceived({urls:['<all_urls>']},(details,callback)=>{
+      this.finalizeObserve(sessionId,details.id,{statusCode:details.statusCode,responseHeaders:details.responseHeaders as Record<string,string|string[]>})
+      callback({cancel:false,responseHeaders:details.responseHeaders})
+    })
+    ses.webRequest.onCompleted({urls:['<all_urls>']},details=>{
+      this.finalizeObserve(sessionId,details.id,{statusCode:details.statusCode})
+      this.scopes.finish(sessionId,details.id)
+    })
+    ses.webRequest.onErrorOccurred({urls:['<all_urls>']},details=>{
+      this.finalizeObserve(sessionId,details.id,{error:details.error||'net_error'})
+      this.scopes.finish(sessionId,details.id)
+    })
+    st.applied=true
   }
+
 }
 
 function flattenHeaders(raw: Record<string, string | string[]>): Record<string, string> {
@@ -472,6 +470,11 @@ function redactHeaders(headers: Record<string, string>): Record<string, string> 
     }
   }
   return out
+}
+
+function stripScopeHeaders(headers:Record<string,string>){
+  for(const key of Object.keys(headers))if(key.toLowerCase()===FETCH_SCOPE_HEADER)delete headers[key]
+  return headers
 }
 
 function matchLoose(url: string, pattern: string): boolean {

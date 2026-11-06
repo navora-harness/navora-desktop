@@ -1,0 +1,17 @@
+{
+  "width": 1379,
+  "messages": {
+    "width": 512,
+    "scrollWidth": 512
+  },
+  "cards": [
+    {
+      "width": 394,
+      "height": 155.890625,
+      "scrollWidth": 392,
+      "clientWidth": 392,
+      "background": "rgb(254, 255, 255)",
+      "color": "rgb(38, 60, 80)"
+    }
+  ]
+}

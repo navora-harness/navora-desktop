@@ -9,6 +9,7 @@
 import type { WebContents, WebFrameMain } from 'electron'
 import { hasQuerySelectorDeep, querySelectorDeep, hasQuerySelectorAcrossDocuments, querySelectorAcrossDocuments } from './deep-dom'
 import { dispatchTrustedClick } from './trusted-input'
+import { withBrowserPointerInput } from './browser-automation-controller'
 import { assertBrowserInputCurrent, commitTrustedInput, currentBrowserInputOperation } from './browser-input-context'
 
 export type IframeClickOpts = {
@@ -47,6 +48,7 @@ export type IframeClickResult = {
   status?: string
   dispatchedCount?: number | null
   cleanup?: { dispatched: number; failed: number }
+  dispatch?: Electron.AgentDispatchResult
 }
 
 function assertCurrent(wc: WebContents, signal?: AbortSignal): void {
@@ -172,9 +174,9 @@ async function trustedClickAt(wc: WebContents, x: number, y: number, signal?: Ab
     const combined = signal && operation ? AbortSignal.any([signal, operation.signal]) : signal ?? operation?.signal
     let result: Record<string, unknown>
     try { result = await commitTrustedInput(wc, () => api.dispatchInputSequence!([
-      { kind: 'mouse', type: 'mouseMoved', x, y, atMs: 0, buttons: 0 },
-      { kind: 'mouse', type: 'mousePressed', x, y, atMs: 0, button: 'left', buttons: 1, clickCount: 1 },
-      { kind: 'mouse', type: 'mouseReleased', x, y, atMs: 10, button: 'left', buttons: 0, clickCount: 1 },
+      { kind: 'mouse', type: 'mouseMoved', position: {x, y}, atMs: 0, buttons: 0 },
+      { kind: 'mouse', type: 'mousePressed', position: {x, y}, atMs: 0, button: 'left', buttons: 1, clickCount: 1 },
+      { kind: 'mouse', type: 'mouseReleased', position: {x, y}, atMs: 10, button: 'left', buttons: 0, clickCount: 1 },
     ], { signal: combined, timeoutMs: 3000 })) } catch (error) {
       const failed = { status: combined?.aborted ? 'cancelled' : 'failed', reason: 'INPUT_SEQUENCE_REJECTED', dispatchedCount: null }
       operation?.noteResult(failed)
@@ -373,6 +375,18 @@ export async function clickInIframe(
       if (native && native.width > 0 && native.height > 0) {
         const x = native.x + native.width / 2
         const y = native.y + native.height / 2
+        if (native.target && typeof wc.clickElement === 'function') {
+          try {
+            const dispatch = await commitTrustedInput(wc, () => withBrowserPointerInput(wc, () => wc.clickElement({target:native.target!,button:'left',clickCount:1,scrollIntoView:true}), result => result.status === 'dispatched' && !result.deliveryWarning))
+            currentBrowserInputOperation(wc)?.noteResult(dispatch)
+            return {ok:dispatch.status==='dispatched',dispatch,method:'iframe-native-selector',iframeSelector,innerSelector,x,y,iframe:box,
+              ...(dispatch.status==='dispatched'?{}:{error:dispatch.reason||'iframe_target_click_failed'})}
+          } catch(error) {
+            const result={ok:false,status:'failed',dispatchedCount:null,error:'iframe_target_click_rejected',detail:error instanceof Error?error.message:String(error)}
+            currentBrowserInputOperation(wc)?.noteResult(result)
+            return result
+          }
+        }
         const input = await trustedClickAt(wc, x, y, opts.signal)
         return {...input,method:'iframe-native-selector',iframeSelector,innerSelector,x,y,iframe:box}
       }

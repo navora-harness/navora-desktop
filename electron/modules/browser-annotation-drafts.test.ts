@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import {ANNOTATION_DRAFT_LIMIT} from '../../shared/browser-annotation-limits'
 import {BrowserAnnotationDraftStore} from './browser-annotation-drafts'
 import {createAnnotationDrafts} from '../../src/composables/annotationDrafts'
 import type {BrowserAnnotation,BrowserDraftInput,BrowserWorkspaceApi} from '../../shared/browser-workspace'
@@ -28,7 +29,7 @@ test('annotation drafts survive service restart and remain isolated by chat',t=>
   assert.deepEqual(restored.list('other'),[])
   assert.equal(fs.existsSync(files.resolve('chat','browser-annotations/drafts/ann_one.json.tmp')),false)
   assert.throws(()=>store.write('chat','../outside',0,input('bad')),/invalid_annotation_id/)
-  assert.throws(()=>store.write('chat','ann_bad',0,input('x'.repeat(4001))),/invalid_annotation_draft/)
+  assert.throws(()=>store.write('chat','ann_bad',0,input('x'.repeat(ANNOTATION_DRAFT_LIMIT+1))),/invalid_annotation_draft/)
 })
 
 test('in-flight edits retain the newest sequence and another window needs the latest draft version',t=>{
@@ -175,4 +176,13 @@ test('a failed disk write never advertises a retained copy or discards the local
   assert.equal(panel.state(note).retained,false)
   await assert.rejects(panel.reload(note),/disk_full/)
   assert.equal(panel.read(note)?.text,'unsaved local text')
+})
+
+
+test('overflow multiline drafts preserve emoji and text through restart and conflicts',t=>{
+  const {store,files}=fixture(t),text='中'.repeat(3999)+'😀\n第二行'+ 'a'.repeat(12000)
+  store.write('chat','ann_long',0,input(text))
+  assert.equal(new BrowserAnnotationDraftStore(files).list('chat')[0]!.text,text)
+  assert.throws(()=>store.write('chat','ann_long',0,input(text+'冲突','two')),/annotation_draft_conflict/)
+  assert.equal(new BrowserAnnotationDraftStore(files).recovery('chat').copies[0]!.text,text+'冲突')
 })

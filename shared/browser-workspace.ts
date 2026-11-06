@@ -3,6 +3,7 @@ export type BrowserLayoutResult={
   status:'applied'|'deferred'|'stale';pageId:string|null;owner:string;generation:number;hostGeneration:number
   visible:boolean;reason?:'busy'|'inactive'|'owner'|'generation'|'unavailable'|'apply-failed'
 }
+export type BrowserLayoutInvalidation={pageId:string;owner:string;hostGeneration:number;reason:'resize'|'show'|'restore'|'focus'}
 export type BrowserPresentation = 'embedded' | 'detached'
 export type BrowserLoadError = {code:number;url:string;description:string}
 export type BrowserFindResult = {pageId:string;token:string;requestId:number;matches:number;activeMatchOrdinal:number;finalUpdate:boolean}
@@ -82,10 +83,14 @@ export type BrowserAnnotationPhase='armed'|'dragging'|'target-ready'|'passthroug
 export type BrowserAnnotationTarget={id:string;chatId:string;pageId:string;sessionId:string;selection:BrowserSelection;screenshotPath:string;comment:string;version:number;editorId:string;sequence:number;createdAt:number;updatedAt:number;conflictOf?:string}
 export type BrowserAnnotationResult = {annotation?:BrowserAnnotation;target?:BrowserAnnotationTarget;phase?:BrowserAnnotationPhase;annotationSessionId?:string;cancelled?:boolean;manualControl?:boolean;restored?:boolean}
 export type BrowserWorkspaceApi={
+  workspaceState:()=>Promise<import('./detached-workspace').DetachedWorkspaceState>
+  activateTab:(key:string)=>Promise<import('./detached-workspace').DetachedWorkspaceState>
+  reorderTabs:(keys:string[],beforeKey?:string|null)=>Promise<import('./detached-workspace').DetachedWorkspaceState>
+  onWorkspaceChanged:(cb:()=>void)=>()=>void
   startPage:(chatId:string)=>Promise<import('./browser-start').BrowserStartState>
   saveQuickLink:(chatId:string,input:{id?:string;title:string;url:string})=>Promise<import('./browser-start').BrowserQuickLink>
   removeQuickLink:(chatId:string,id:string)=>Promise<void>
-  clearBrowserHistory:(chatId:string,url?:string)=>Promise<void>
+  clearBrowserHistory:(chatId:string,url?:string,visitedAt?:number)=>Promise<void>
   onStartChanged:(cb:(chatId?:string)=>void)=>()=>void
   annotationDrafts:(chatId:string)=>Promise<BrowserAnnotationDraft[]>
   writeAnnotationDraft:(chatId:string,id:string,version:number,input:BrowserDraftInput)=>Promise<BrowserAnnotationDraft>
@@ -95,13 +100,17 @@ export type BrowserWorkspaceApi={
   stopFind:(pageId:string,token:string)=>Promise<void>
   onFindResult:(cb:(result:BrowserFindResult)=>void)=>()=>void
   onFindShortcut:(cb:(value:{pageId:string;action:'open'|'close'})=>void)=>()=>void
+  onPageMenuAction:(cb:(value:{pageId:string;action:'annotate'|'error';target?:BrowserAnnotationTarget;message?:string})=>void)=>()=>void
   preview:(pageId:string)=>Promise<string|null>
   ensure:(chatId:string,key:string,url?:string)=>Promise<string>
   claimLayout:(pageId:string)=>Promise<string>
   layout:(pageId:string|null,bounds:BrowserRect|null,owner?:string,generation?:number)=>Promise<BrowserLayoutResult>
-  state:()=>Promise<{hostId:string;embedded:boolean;pages:import('./types').BrowserTreeSession[]}>
+  state:()=>Promise<{hostId:string;embedded:boolean;alwaysOnTop?:boolean;pages:import('./types').BrowserTreeSession[]}>
+  setAlwaysOnTop:(enabled:boolean)=>Promise<{hostId:string;enabled:boolean}>
+  onAlwaysOnTop:(cb:(state:{hostId:string;enabled:boolean})=>void)=>()=>void
   tabState:(chatId:string)=>Promise<BrowserTabState>
   tabAction:(input:BrowserTabCommandInput)=>Promise<BrowserTabCommandResult>
+  pageAddressAction:(context:import('./browser-page-address').BrowserPageAddressContext|import('./browser-page-address').BrowserPageAddressContext[],action:import('./browser-page-address').BrowserPageAddressAction)=>Promise<void>
   editState:(pageId:string)=>Promise<BrowserEditState>
   edit:(pageId:string,command:BrowserEditCommand)=>Promise<void>
   openSettings:(pageId:string)=>Promise<void>
@@ -117,18 +126,19 @@ export type BrowserWorkspaceApi={
   beginAnnotation:(chatId:string,pageId:string,kind:'auto'|'element'|'region')=>Promise<void>
   collectAnnotation:(chatId:string,pageId:string)=>Promise<BrowserAnnotationResult>
   cancelAnnotation:(chatId:string,pageId:string)=>Promise<boolean>
-  annotationMode:(chatId:string,pageId:string,mode:'armed'|'passthrough')=>Promise<void>
-  annotationTargets:(chatId:string,pageId:string)=>Promise<BrowserAnnotationTarget[]>
+  annotationMode:(chatId:string,pageId:string,mode:'armed'|'passthrough',expectedTargetId?:string)=>Promise<void>
+  annotationTargets:(chatId:string,pageId?:string)=>Promise<BrowserAnnotationTarget[]>
   writeAnnotationTarget:(chatId:string,id:string,version:number,input:{text:string;editorId:string;sequence:number})=>Promise<BrowserAnnotationTarget>
   commitAnnotationTarget:(chatId:string,pageId:string,id:string,version:number)=>Promise<BrowserAnnotation>
   discardAnnotationTarget:(chatId:string,pageId:string,id:string,version:number)=>Promise<void>
   annotations:(chatId:string)=>Promise<BrowserAnnotation[]>
   updateAnnotation:(chatId:string,id:string,revision:number,patch:{comment?:string;taskState?:BrowserAnnotation['taskState']})=>Promise<BrowserAnnotation>
   removeAnnotation:(chatId:string,id:string)=>Promise<void>
-  presentAnnotation:(chatId:string,id:string)=>Promise<import('./types').BrowserContextRef>
+  presentAnnotation:(chatId:string,id:string,options?:{revealPage?:boolean})=>Promise<import('./types').BrowserContextRef>
   locateAnnotation:(chatId:string,id:string)=>Promise<boolean>
   compareAnnotation:(chatId:string,id:string)=>Promise<BrowserAnnotationComparison>
   onPresent:(cb:(value:{chatId:string;pageId:string;hidden?:boolean;annotation?:import('./types').BrowserContextRef})=>void)=>()=>void
+  onLayoutInvalidated:(cb:(value:BrowserLayoutInvalidation)=>void)=>()=>void
   onAddressFocus:(cb:(pageId:string)=>void)=>()=>void
   onTabShortcut:(cb:(payload:{pageId:string;action:BrowserTabAction})=>void)=>()=>void
 }

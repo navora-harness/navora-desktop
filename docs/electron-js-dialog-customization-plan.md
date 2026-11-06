@@ -1,5 +1,26 @@
 # Electron 魔改计划：JS 对话框（alert / confirm / prompt / beforeunload）
 
+<!-- planning-completion-review:2026-11-06 -->
+## 完成情况复核（2026-11-06）
+
+**当前状态：部分完成。** 本节依据现有源码、实施记录和报告复核；下文旧日期状态保留历史含义，当前完成范围以本节为准。
+
+- [x] **已完成**｜截至 2026-11-06：alert／confirm／prompt 的原生 Handler、事件与超时基础已实现并由宿主消费。
+- [ ] **保留事项**｜beforeunload 的公开 Handler／事件／超时完整链路仍缺实际可达与验收证据；不得将四类 P0 一并勾完。
+
+证据：[js-dialog-host.ts](./../electron/modules/js-dialog-host.ts)；[current-state.md](./current-state.md)。
+<!-- /planning-completion-review:2026-11-06 -->
+
+
+<!-- planning-obsolescence:2026-11-06 -->
+> **【部分过时】标记日期：2026-11-06；原文/演进日期：正文未署日，最早可证 2026-10-30 已入库。**
+> **过时范围：**旧 Electron 41/.3 目标版本、缺失原生接口时回退 CDP，以及用旧 P0 状态概括四类对话框均已完整实现的解释。
+> **当前依据/保留范围：**实际宿主为 native-only，alert/confirm/prompt 已接入；beforeunload 的公开 Handler/事件/超时完整链路仍缺证明，继续作为有效待办。
+> **接续证据：**[js-dialog-host.ts](../electron/modules/js-dialog-host.ts)；[js-dialog-electron-api-plan.md](./js-dialog-electron-api-plan.md)；[planning-status-and-next-work-2026-11-04.md](./planning-status-and-next-work-2026-11-04.md)。
+<!-- /planning-obsolescence:2026-11-06 -->
+
+> 2026-11-05 规划整理核对：**部分完成**。alert/confirm/prompt 的 Handler/事件/超时已实现；本机内核源码中 beforeunload 仍走独立 will-prevent-unload 路径，发行包完整 Handler 链也缺验收证明，原 P0 四类范围不能标全部完成。 状态与归档口径见[规划状态总览](./planning-status-and-next-work-2026-11-04.md)。
+
 > 历史内核设计。原表中的 Electron 41 是当时目标；当前宿主使用 45.0.0-cloudbypass.3 Windows x64 运行时，JS 对话框按能力探测优先使用原生 Handler，缺失时降级。当前行为与验证边界见 [当前功能](./current-state.md)，全部文档见 [导航](./README.md)。
 
 | 项 | 内容 |

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   createDefaultBrowserAutomation, normalizeBrowserAutomation, mergeBrowserAutomation,
-  resolvePointerMotion, createBrowserAutomationState,
+  resolvePointerMotion, createBrowserAutomationState, BROWSER_CURSOR_STYLES,
 } from './browser-automation'
 
 test('legacy automation preferences receive fresh defaults without replacing explicit false', () => {
@@ -15,6 +15,18 @@ test('legacy automation preferences receive fresh defaults without replacing exp
   assert.equal(createDefaultBrowserAutomation().show_virtual_cursor, true)
 })
 
+test('retired auto-mute values are discarded while saved cursor and input preferences survive', () => {
+  const preferences = { ...createDefaultBrowserAutomation(), show_virtual_cursor: false, cursor_style: 'precision-cross' as const, speed_multiplier: 1.25 }
+  for (const auto_mute of [true, false, undefined, 'true', null]) {
+    const saved = { ...preferences, auto_mute }
+    assert.deepEqual(normalizeBrowserAutomation(saved), preferences)
+    assert.deepEqual(mergeBrowserAutomation(saved, { protect_input: false }), { ...preferences, protect_input: false })
+    assert.deepEqual(mergeBrowserAutomation(preferences, { auto_mute }), preferences)
+    assert.equal(Object.hasOwn(saved, 'auto_mute'), true)
+  }
+  assert.equal(Object.hasOwn(createDefaultBrowserAutomation(), 'auto_mute'), false)
+})
+
 test('automation preferences reject invalid shapes, unknown fields, coercion and unsupported numeric values', () => {
   const invalid: unknown[] = [null, true, [], new Date(), { owner: 'user' }, { typo: undefined },
     ...['show_virtual_cursor', 'show_control_feedback', 'protect_input', 'smooth_pointer'].map(key => ({ [key]: 'false' })),
@@ -23,17 +35,28 @@ test('automation preferences reject invalid shapes, unknown fields, coercion and
     ...[0, -1, NaN, Infinity, '1'].map(speed_multiplier => ({ speed_multiplier })),
     ...[0, -1, NaN, Infinity, 60001, '8'].map(interval_ms => ({ interval_ms })),
     ...[-1, NaN, Infinity, 1001, 59.5, '60'].map(cursor_fps => ({ cursor_fps })),
+    ...[0, 0.74, 2.01, NaN, Infinity, '1'].map(cursor_scale => ({ cursor_scale })),
   ]
   for (const value of invalid) assert.throws(() => normalizeBrowserAutomation(value))
   assert.equal(normalizeBrowserAutomation({ cursor_fps: 0 }).cursor_fps, 0)
   assert.equal(normalizeBrowserAutomation({ interval_ms: 0.125 }).interval_ms, 0.125)
 })
 
-test('custom cursor preference migrates old settings and accepts the three shipped designs', () => {
-  assert.equal(normalizeBrowserAutomation({}).cursor_style, 'navora-arrow')
-  for (const cursor_style of ['navora-arrow', 'focus-ring', 'precision-cross'] as const) {
+test('custom cursor preference defaults to Windows blue glow and preserves existing style choices', () => {
+  assert.equal(normalizeBrowserAutomation({}).cursor_style, createDefaultBrowserAutomation().cursor_style)
+  assert.equal(normalizeBrowserAutomation({}).cursor_style, 'windows-glow')
+  assert.equal(normalizeBrowserAutomation({ cursor_style: 'focus-ring' }).cursor_scale, 1)
+  for (const cursor_style of BROWSER_CURSOR_STYLES) {
     assert.equal(mergeBrowserAutomation(createDefaultBrowserAutomation(), { cursor_style }).cursor_style, cursor_style)
   }
+})
+
+test('cursor size patches persist without changing movement or input protection preferences', () => {
+  const before = createDefaultBrowserAutomation()
+  for (const cursor_scale of [0.75, 1, 1.25, 1.5, 1.75, 2]) {
+    assert.deepEqual(mergeBrowserAutomation(before, { cursor_scale }), { ...before, cursor_scale })
+  }
+  assert.equal(before.cursor_scale, 1)
 })
 
 test('leaf patches preserve unrelated preferences and never mutate the previous settings', () => {
@@ -51,7 +74,7 @@ test('leaf patches preserve unrelated preferences and never mutate the previous 
 test('saved natural and precise profiles supply usable movement settings without injecting click dwell', () => {
   const defaults = createDefaultBrowserAutomation()
   assert.deepEqual(resolvePointerMotion(defaults), {
-    timing: 'lognormal', curvature: 0.12, jitterPx: 0.35, speedMultiplier: 1, intervalMs: 1000 / 120,
+    timing: 'lognormal', curvature: 0.12, jitterPx: 0.35, speedMultiplier: 0.6, intervalMs: 1000 / 120,
   })
   const precise = resolvePointerMotion({ ...defaults, pointer_profile: 'precise', speed_multiplier: 1.1, interval_ms: 12 })
   assert.notEqual(precise, false)
@@ -105,4 +128,11 @@ test('shared idle state starts without claiming active native protection', () =>
   assert.equal(first.inputProtected, false)
   first.owner = 'user'
   assert.equal(createBrowserAutomationState().owner, 'ai')
+})
+
+test('new defaults slow movement while existing explicit speeds remain intact and one-call overrides are bounded',()=>{
+  assert.equal(normalizeBrowserAutomation({}).speed_multiplier,0.6)
+  assert.equal(normalizeBrowserAutomation({speed_multiplier:1}).speed_multiplier,1)
+  for(const speedMultiplier of [0.09,4.01])assert.throws(()=>resolvePointerMotion(createDefaultBrowserAutomation(),{speedMultiplier}))
+  for(const speedMultiplier of [0.1,4])assert.ok(resolvePointerMotion(createDefaultBrowserAutomation(),{speedMultiplier}))
 })

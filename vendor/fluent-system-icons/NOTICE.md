@@ -10,6 +10,7 @@ Navora's workspace expand/restore pair, R2 attach icon, workspace count control 
 
 ## Asset mapping
 
+- palette: color (Regular 16px/20px; source SVGs retained in color/)
 - comments: chat
 - folder-open: folder_open
 - browser: window

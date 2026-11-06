@@ -4,8 +4,8 @@
       <header class="dock-header">
         <h2 :id="`dock-label-${panel.id}`" class="dock-label">{{ panel.label }}</h2>
         <div :id="`dock-actions-${panel.id}`" class="dock-panel-actions" />
-        <button type="button" class="ui-icon-button" :aria-label="pinned?'切换为悬浮侧栏':'固定侧栏'" :title="pinned?(floating?'当前窗口较窄，侧栏临时悬浮；点击保持悬浮':'切换为悬浮侧栏'):'固定侧栏'" :aria-pressed="pinned" @click="emit('pin')"><AppIcon :icon="pinned?'thumbtack':'workspace-attach'" /></button>
-        <button type="button" class="ui-icon-button" :aria-label="`隐藏${panel.label}侧栏`" :title="`隐藏${panel.label}侧栏`" @click="emit('close')"><AppIcon icon="angles-left" /></button>
+        <button v-if="showPin" type="button" class="ui-icon-button" :disabled="pinDisabled" :aria-label="pinDisabled?pinDisabledReason||'当前布局使用固定侧栏':pinned?'切换为悬浮侧栏':'固定侧栏'" :title="pinDisabled?pinDisabledReason||'当前布局使用固定侧栏':pinned?(floating?'当前窗口较窄，侧栏临时悬浮；点击保持悬浮':'切换为悬浮侧栏'):'固定侧栏'" :aria-pressed="pinned" @click="emit('pin')"><SidebarPresentationIcon :floating="!pinned" /></button>
+        <button type="button" class="ui-icon-button" :aria-label="`隐藏${panel.label}侧栏`" :title="`隐藏${panel.label}侧栏`" @click="emit('close')"><AppIcon icon="sidebar-hide" /></button>
       </header>
       <div :id="`dock-content-${panel.id}`" class="dock-content" :inert="active !== panel.id" />
     </section>
@@ -20,8 +20,9 @@
 </template>
 <script setup lang="ts">
 import {onMounted,ref} from 'vue'
+import SidebarPresentationIcon from '../icons/SidebarPresentationIcon.vue'
 import type {SidebarPanelDefinition} from '@/composables/useSidebarDock'
-defineProps<{panels:SidebarPanelDefinition[];active:string;floating?:boolean;pinned?:boolean}>()
+withDefaults(defineProps<{panels:SidebarPanelDefinition[];active:string;floating?:boolean;pinned?:boolean;pinDisabled?:boolean;pinDisabledReason?:string;showPin?:boolean}>(),{showPin:true})
 const emit=defineEmits<{close:[];pin:[]}>()
 const ready=ref(false)
 onMounted(()=>{ready.value=true})

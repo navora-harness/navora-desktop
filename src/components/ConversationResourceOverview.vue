@@ -13,7 +13,7 @@
     <section class="resource-overview-section">
       <header><h3>来源</h3><span v-if="sources.length" class="resource-overview-count">{{ sources.length }}</span></header>
       <div v-if="!sources.length" class="resource-overview-empty">暂无来源</div>
-      <button v-for="source in shownSources" :key="source.url" type="button" class="resource-overview-row" :title="source.url" @click="openSource(source.url)"><AppIcon icon="link" /><span>{{ source.title || source.url }}</span></button>
+      <a v-for="source in shownSources" :key="source.url" :href="source.url" :data-chat-id="chatId" class="resource-overview-row" :title="source.url" @click="openSource($event,source.url)"><AppIcon icon="link" /><span>{{ source.title || source.url }}</span></a>
       <button v-if="sources.length>3" type="button" class="resource-overview-more" @click="allSources=!allSources"><AppIcon :icon="allSources?'chevron-up':'link'" />{{ allSources?'收起来源':'查看全部来源' }}</button>
     </section>
     <section v-if="tree.length" class="resource-overview-section">
@@ -30,8 +30,10 @@ import {useWorkspaceResources} from '@/composables/useWorkspaceResources'
 import type {BrowserTreeSession,ChatMessage} from '@shared/types'
 import {conversationSources} from '@shared/conversation-resources'
 import type {ResourceTab} from '@/composables/useConversationResources'
+import {useAppLinks} from '@/composables/useAppLinks'
 const props=defineProps<{chatId:string;messages:ChatMessage[];tree:BrowserTreeSession[]}>()
 const emit=defineEmits<{view:[tab:ResourceTab];preview:[path:string];notify:[text:string];jump:[id:string]}>()
+const links=useAppLinks(text=>emit('notify',text))
 const allSources=ref(false)
 const {entries,snapshot,loading,error,refresh:load}=useWorkspaceResources(toRef(props,'chatId'))
 const sources=computed(()=>conversationSources(props.messages))
@@ -39,7 +41,7 @@ const shownSources=computed(()=>allSources.value?sources.value:sources.value.sli
 const outputCount=computed(()=>finalOutputs(props.messages).length)
 const latestArtifact=computed(()=>entries.value.find(entry=>entry.evidence))
 const windows=computed(()=>props.tree.flatMap(session=>session.windows))
-async function openSource(url:string){try{const result=await window.navora!.app.openExternal(url);if(!result.ok)throw Error('open_failed')}catch{emit('notify','无法打开此来源')}}
+async function openSource(event:MouseEvent,url:string){event.preventDefault();await links.openLink(url,props.chatId)}
 watch(()=>props.chatId,()=>{allSources.value=false})
 </script>
 <style>

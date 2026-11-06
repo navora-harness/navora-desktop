@@ -99,20 +99,21 @@ export class PermissionGate {
     capability: PermissionCapability,
     detail: string,
     signal?: AbortSignal,
+    options?: { forcePrompt?: boolean },
   ): Promise<{ ok: boolean; reason?: string }> {
     if (signal?.aborted) return { ok: false, reason: 'aborted' }
     if (this.alwaysDeny.get(chatId)?.has(capability)) return { ok: false, reason: 'always_deny' }
     const mode: PermissionMode = this.modesForChat(chatId)[capability] || 'ask'
     if (mode === 'deny') return { ok: false, reason: 'denied_by_config' }
-    if (this.alwaysAllow.get(chatId)?.has(capability)) return { ok: true }
-    if (mode === 'allow') return { ok: true }
-    if (mode === 'allow_notify') {
+    if (!options?.forcePrompt&&this.alwaysAllow.get(chatId)?.has(capability)) return { ok: true }
+    if (!options?.forcePrompt&&mode === 'allow') return { ok: true }
+    if (!options?.forcePrompt&&mode === 'allow_notify') {
       this.onNotify?.(chatId, capability, detail)
       return { ok: true }
     }
 
     const chatSet = this.chatAllow.get(chatId)
-    if (chatSet?.has(capability)) return { ok: true }
+    if (!options?.forcePrompt&&chatSet?.has(capability)) return { ok: true }
 
     const cfg = this.getConfig().permissions
     const id = `perm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
@@ -151,6 +152,10 @@ export class PermissionGate {
 
 export function toolNameToCapability(name: string): PermissionCapability | null {
   switch (name) {
+    case 'plan_read_url':
+      return 'network.request'
+    case 'plan_write_artifact':
+      return 'file.write'
     case 'browser_open':
       return null // checked as session.create + window.create in executeAgentTool
     case 'browser_session_create':

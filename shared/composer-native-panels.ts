@@ -30,7 +30,7 @@ export function composerNativeModelMatches(option:ComposerNativeModelOption,quer
 export function composerNativePanelContent(kind:ComposerNativePanelKind,state:ComposerNativePanelState):NativePanelContent {
   const children:NativePanelContent[]=[]
   if(kind==='model'){
-    children.push(text('model:title','模型与思考等级'),{id:'model:search',type:'input',value:state.modelQuery,placeholder:'搜索模型或服务商',maxLength:512})
+    children.push(text('model:title','模型与思考等级'),{id:'model:search',type:'input',value:state.modelQuery,placeholder:'搜索模型或服务商',accessibleName:'搜索模型或服务商',navigationTarget:'model:list',maxLength:512})
     if(state.modelLoading)children.push(text('model:loading','正在读取模型…',true))
     if(state.modelError)children.push(text('model:error',state.modelError),action('model:retry','重试'))
     else if(state.modelInvalid)children.push(text('model:invalid','原服务商已移除，请重新选择模型。',true))
@@ -40,10 +40,10 @@ export function composerNativePanelContent(kind:ComposerNativePanelKind,state:Co
     for(const [providerId,group] of groups){
       const groupId=composerNativeModelControlId(providerId)
       models.push(text(`${groupId}:provider`,group.label,true))
-      for(const option of group.options){const id=composerNativeModelControlId(option.key);models.push({id:`${id}:row`,type:'column',gap:3,children:[action(id,`${option.key===state.modelKey?'✓  ':''}${option.label}`,{disabled:state.modelBusy,tooltip:`${option.providerLabel} · ${option.model}\n${option.capabilities}${option.hasKey?'':' · 未保存密钥（本地端点可能无需密钥）'}`}),text(`${id}:detail`,option.capabilities+(option.hasKey?'':' · 未保存密钥'),true)]})}
+      for(const option of group.options){const id=composerNativeModelControlId(option.key);models.push({id,type:'item',role:'option',contextMenu:false,selected:option.key===state.modelKey,disabled:state.modelBusy,padding:7,accessibleName:`${option.label}，${option.providerLabel}，${option.capabilities}`,tooltip:`${option.providerLabel} · ${option.model}\n${option.capabilities}${option.hasKey?'':' · 未保存密钥（本地端点可能无需密钥）'}`,style:{radius:7},children:[{id:`${id}:copy`,type:'column',flex:1,gap:3,children:[{...text(`${id}:label`,`${option.key===state.modelKey?'✓  ':''}${option.label}`),singleLine:true},text(`${id}:detail`,option.capabilities+(option.hasKey?'':' · 未保存密钥'),true)]}]})}
     }
     if(!models.length&&!state.modelLoading&&!state.modelError)models.push(text('model:empty',state.modelOptions.length?'没有匹配的模型':'暂无模型，请到设置添加',true))
-    children.push({id:'model:list',type:'list',height:260,gap:8,children:models})
+    children.push({id:'model:list',type:'list',role:'listbox',height:260,gap:8,children:models})
     if(state.reasoningLevels.length)children.push({id:'model:separator',type:'separator'},text('model:reasoning-title','思考等级'),{id:'model:reasoning',type:'option',value:state.reasoningLevel,disabled:state.modelBusy,items:state.reasoningLevels.map(level=>({id:level.id,value:level.id,label:level.label}))})
   }else if(kind==='usage'){
     const usage=state.usage,ratio=usage.estimated/Math.max(1,usage.window),count=(value:number)=>Math.max(0,Math.round(value)).toLocaleString()

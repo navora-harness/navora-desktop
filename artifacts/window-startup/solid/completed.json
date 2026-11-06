@@ -1,0 +1,43 @@
+{
+  "ok": true,
+  "scenario": "solid",
+  "durationMs": 1021,
+  "loading": {
+    "state": "loading",
+    "loaded": true,
+    "x": 639.5,
+    "y": 420,
+    "width": 1279,
+    "height": 840,
+    "appOpacity": "0",
+    "inert": true,
+    "background": "rgba(0, 0, 0, 0)",
+    "blur": "blur(24px)"
+  },
+  "timeline": [
+    {
+      "event": "main-shown",
+      "time": 1793928910505,
+      "window": 1
+    },
+    {
+      "event": "splash-painted",
+      "time": 1793928910556
+    },
+    {
+      "event": "main-frame-painted",
+      "time": 1793928911577
+    },
+    {
+      "event": "restored-shown",
+      "time": 1793928911579,
+      "window": 2
+    },
+    {
+      "event": "main-shown",
+      "time": 1793928911737,
+      "window": 1
+    }
+  ],
+  "errors": []
+}

@@ -32,6 +32,13 @@ export type PluginManifest = PlatformPackage & {
 
 export type PluginInstallKind = 'bundled' | 'installed' | 'linked' | 'session'
 
+export type PluginRecoveryStatus = {
+  blocked: boolean
+  recovered: number
+  issues: Array<{ path: string; error: string; kind: 'retryable' | 'invalid' }>
+  diagnosticDirectory?: string
+}
+
 export type PluginRecord = {
   artifactId?: string
   targetLabel?: string
@@ -224,6 +231,25 @@ export type NavoraPluginModule = {
  * Host surface passed into plugin execute.
  * No bare ToolExecContext — registry/runTool are capability-gated.
  */
+/** Written only by the host sidecar adapter, separate from a plugin's own result. */
+export type PluginRuntimeReceipt = {
+  version:1
+  requestId:string
+  attemptId?:string
+  pluginId:string
+  chatId:string
+  runId?:string
+  toolCallId?:string
+  method:'status'|'profiles'|'request'
+  state:'rejected'|'cancelled'|'failed'|'completed'
+  dispatched:boolean
+  startedAt:number
+  finishedAt:number
+  httpStatus?:number
+  bytes?:number
+  error?:string
+}
+
 export type PluginHostApi = {
   chatId: string
   signal: AbortSignal

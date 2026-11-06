@@ -57,7 +57,13 @@ export function appearancePalette(themeId: unknown, mode: unknown, systemDark: b
   const theme = resolveAppearanceTheme(themeId)
   const resolvedMode = resolveAppearanceMode(mode)
   const dark = resolvedMode === 'dark' || (resolvedMode === 'auto' && systemDark)
-  return {...theme, ...(dark ? DARK_COLORS[theme.id] : {}), ...HOVER_COLORS[theme.id][dark ? 'dark' : 'light'], dark}
+  const colors = {...theme, ...(dark ? DARK_COLORS[theme.id] : {})}
+  return {...colors, ...HOVER_COLORS[theme.id][dark ? 'dark' : 'light'], dark,
+    onAccent: dark ? colors.shell : '#FFFFFF',
+    danger: dark ? '#F2AAA5' : '#AF3946',
+    success: dark ? '#A1D4B2' : '#32724E',
+    warning: dark ? '#E4C68C' : '#8B6228',
+  }
 }
 
 /** Old configurations and unrecognized values use the first, default theme. */

@@ -23,11 +23,11 @@ void app.whenReady().then(async()=>{
     const first=registry.createSession('chat-session',{persist:true}),second=registry.createSession('chat-session',{persist:true}),other=registry.createSession('chat-other',{persist:false})
     const partition=first.partition
     registry.updateSession(first.sessionId,{name:'项目资料',isDefault:true});registry.updateSession(other.sessionId,{isDefault:true})
-    assert.equal(registry.getTree('chat-session')[0]!.name,'项目资料');assert.equal(registry.getTree('chat-session')[0]!.partition,partition)
+    assert.equal(registry.getTree('chat-session').find(session=>session.sessionId===first.sessionId)!.name,'项目资料');assert.equal(registry.getTree('chat-session').find(session=>session.sessionId===first.sessionId)!.partition,partition)
     checks.push('rename-preserves-session-id-and-native-partition')
     registry.updateSession(second.sessionId,{isDefault:true})
-    assert.equal(registry.getTree('chat-session').filter(session=>session.isDefault).length,1)
-    assert.equal(registry.getTree('chat-other')[0]!.isDefault,true)
+    assert.equal(registry.getTree('chat-session').filter(session=>session.scope!=='default'&&session.isDefault).length,1)
+    assert.equal(registry.getTree('chat-other').find(session=>session.sessionId===other.sessionId)!.isDefault,true)
     registry.updateSession(first.sessionId,{isDefault:true})
     checks.push('one-default-per-chat-without-changing-other-chat')
     const page=registry.createWindow(first.sessionId,{url:'about:blank',show:false}),contents=registry.getWindowRecord(page.windowId)!.win.webContents
@@ -35,7 +35,7 @@ void app.whenReady().then(async()=>{
     const nativeSession=registry.getSessionRecord(first.sessionId)!.ses
     await nativeSession.cookies.set({url,name:'retained-cookie',value:'yes'})
     const closed=await registry.manageSession(first.sessionId,'close-pages')
-    assert.equal(closed.closedPages,1);assert.equal(closed.deleted,false);assert.equal(registry.getTree('chat-session')[0]!.windows.length,0)
+    assert.equal(closed.closedPages,1);assert.equal(closed.deleted,false);assert.equal(registry.getTree('chat-session').find(session=>session.sessionId===first.sessionId)!.windows.length,0)
     assert.equal((await nativeSession.cookies.get({url}))[0]!.value,'yes')
     checks.push('close-pages-preserves-session-and-cookie')
     const reopened=registry.createWindow(first.sessionId,{url:'about:blank',show:false}),again=registry.getWindowRecord(reopened.windowId)!.win.webContents
@@ -62,7 +62,7 @@ void app.whenReady().then(async()=>{
     assert.equal(persisted.find((session:{sessionId:string})=>session.sessionId===first.sessionId).name,'项目资料')
     const restored=new BrowserRegistry(createDefaultConfig),restoreHost=new BrowserWindow({show:false})
     restored.hosts.bindMain(restoreHost);restored.restorePersistent(file,()=>true)
-    assert.equal(restored.getTree('chat-session')[0]!.name,'项目资料');assert.equal(restored.getTree('chat-session')[0]!.isDefault,true)
+    assert.equal(restored.getTree('chat-session').find(session=>session.sessionId===first.sessionId)!.name,'项目资料');assert.equal(restored.getTree('chat-session').find(session=>session.sessionId===first.sessionId)!.isDefault,true)
     restored.shutdown();restoreHost.destroy()
     checks.push('empty-persistent-session-name-and-default-survive-restore')
     const internal=registry as unknown as {persistenceFile:string|null}

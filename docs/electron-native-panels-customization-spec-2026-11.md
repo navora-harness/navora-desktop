@@ -1,6 +1,35 @@
 # Electron 原生浮层定制接口清单
 
+<!-- planning-completion-review:2026-11-06 -->
+## 完成情况复核（2026-11-06）
+
+**当前状态：部分完成；接口设想与实际契约分别保留。** 本节依据现有源码、实施记录和报告复核；下文旧日期状态保留历史含义，当前完成范围以本节为准。
+
+- [x] **已完成**｜2026-11-04—05：已发布的基础列表／多行／独立滚动槽已有应用消费，常用菜单与批注、自适应高度及主题已有后续实施证据。
+- [ ] **保留事项**｜持久侧栏／父子面板、被动交互、宿主材质公开状态及首显、子 frame 可信编辑等仍缺；旧拟议字段不能当作公开接口已实现。
+
+证据：[native7-implementation-progress-2026-11-04.md](./native7-implementation-progress-2026-11-04.md)；[native-annotation-and-dark-mode-implementation-2026-11-04.md](./native-annotation-and-dark-mode-implementation-2026-11-04.md)；[panel-density-and-annotation-chat-implementation-2026-11-05.md](./panel-density-and-annotation-chat-implementation-2026-11-05.md)。
+<!-- /planning-completion-review:2026-11-06 -->
+
+
+<!-- planning-obsolescence:2026-11-06 -->
+> **【部分过时】标记日期：2026-11-06；原文/演进日期：2026-11-03—04。**
+> **过时范围：**“.7 应用尚未接入”、基础多行/列表等待接入，以及把早期拟定接口直接当作当前已发布契约的叙述。
+> **当前依据/保留范围：**已经落地的基础能力不重复开发；公开材质状态、子 frame 可信编辑、持久侧栏/父子面板等缺口保留，未发布的字段仍不能推定存在。
+> **接续证据：**[native-ui-integration-2026-11-04.md](./native-ui-integration-2026-11-04.md)；[panel-density-and-annotation-chat-implementation-2026-11-05.md](./panel-density-and-annotation-chat-implementation-2026-11-05.md)；[current-state.md](./current-state.md)。
+<!-- /planning-obsolescence:2026-11-06 -->
+
+> 2026-11-05 规划整理核对：**部分完成**。.5/.7 基础控件已发布并被应用接入；持久侧栏/父子浮层、宿主材质首次合成与公开状态、子 frame 可信编辑等后续能力尚未收口，面板 Acrylic 搁置。 状态与归档口径见[规划状态总览](./planning-status-and-next-work-2026-11-04.md)。
+
 日期：2026-11-03；更新：2026-11-04。状态：历史定制要求；首版已发布为 `45.0.0-cloudbypass.5`，应用开始接入。
+
+`.7` 已发布，已核对 textarea／submitOnEnter、NativePanel 构造及 update 的 backgroundMaterial，以及面板／list／textarea 各自的 scrollbarPlacement；应用尚未接入。当前契约、缺口与顺序以[.7 总规划](./electron-7-readiness-and-implementation-plan-2026-11-04.md)为准，下面 `.5` 拟定契约保留历史，不作为新字段的依据。
+
+范围调整：面板 Acrylic 已按用户要求搁置，backgroundMaterial 仅保留已发布能力记录，当前不启用面板模糊或透明配色；宿主窗口材质规划独立保留。此搁置不阻塞原生面板迁移、截图退出或发行。
+
+多行批注详见[原生批注面板规划](./已完成/native-annotation-multiline-panel-plan-2026-11-04.md)：Enter 确认、Shift+Enter 换行和下方按钮可按已发布控件接入；原生排版驱动的自动增高、按钮取得最新组合文本的明确契约仍需补充或验证。不能把固定高度内部滚动、私有诊断或开发草稿当成这些缺口已经解决。
+
+2026-11-04 实施补充：浏览器更多菜单的父窗口内展开（U05）需要公开的真实锚点／边界约束。`.7` Menu.popup 仍只有窗口内容区相对 DIP x／y，固定左上锚点；appearance.width 在 `native_menu.cc:537` 实为最小首选宽度，不能当作最终菜单宽度。请求增加公开 placement／anchorBounds／constraintBounds 或等效契约，由原生实际测量、处理右对齐、父窗口及工作区边界、窄窗滚动和子菜单。**用户最新纠正：空间不足时自适应位置与可用尺寸，保持默认对齐意图，不采用方向翻转作为方案。** 字段名以正式发行接口为准；不调用私有 `_getPopupState`，不按标题猜宽，不先弹出再测量重开。应用侧坐标只转换一次，保留网页实时显示与原控制权。具体见[交互规划 U05](./browser-chrome-interaction-followup-plan-2026-11-04.md#6-u05菜单默认向窗口内部展开)。
 
 保留 WebContentsView。普通操作菜单使用已有 Menu.popup；本次定制解决网站信息和复杂原生面板的显示、定位及交互。以下保留原拟定契约；实际接入以 `.5` 随包 `electron.d.ts` 和 [发布接口说明](https://github.com/ChengHoward/edist/blob/main/NATIVE-PANELS.zh-CN.md) 为准。应用当前实施范围见 [接入记录](./native-ui-integration-2026-11-04.md)。
 
@@ -201,3 +230,25 @@ NativePanel 可用于地址建议、模型选择、附加来源选择和文本�
 持续绘制租约仅用于后台 Agent 或隐藏页面确有持续捕获需求的场景。面板打开时底层网页保持可见，不为展示面板申请长期绘制租约。结束捕获、页面销毁或任务失败后应释放保持状态。
 
 NativePanel 的原生绘制不新增网页渲染进程，但仍占用窗口、控件、内存和绘制资源。hide 后供复用，停止无意义的动画和更新；destroy 或父窗口关闭时完整释放。复杂面板使用原生控件布局，不能以新增网页渲染器替代后仍宣称没有额外渲染进程。
+
+## 6 宿主材质状态与首次激活问题（待内核补充）
+
+本节针对应用宿主 `BrowserWindow`，**不恢复已搁置的 NativePanel Acrylic**，也不改变 `showPageInfoDialog`。
+
+应用侧 `.7` 实测：Windows `10.0.26100`、系统浅色、公开辅助功能限制均为 false，隐藏构造后请求 `acrylic`、宿主 DOM 透明链正确，首次主窗在真实前景仍呈灰色；重新激活后正常显示模糊。首次图前后 `isFocused()` 为真，系统 `GetForegroundWindow()` 匹配该窗 HWND；Electron 桌面捕获和独立 GDI 裁剪一致。构造后在首次 `ready-to-show`、首次 `show`、自然首次 `focus` 重申相同材质，及等待受控背景首次绘制完成，均未消除该现象。原始／对照证据和受限验证范围见[宿主材质专题第 9 节](./window-acrylic-material-plan-2026-11-04.md#9-本轮接入与验证范围)。不得以强制聚焦、窗口隐藏重显、长延时、反复切换材质或截图背景掩盖。
+
+现有公开 `setBackgroundMaterial()` 返回 `void`，DWM 失败可能只记原生日志；`NativeWindowViews::SetBackgroundMaterial()` 已调用非客户区激活消息，不能假设应用重复一次相同调用就能修复首次视觉状态。请内核检查首次激活、窗口透明状态、DesktopWindowTreeHost／合成器与背景刷新的时序，并提供正常首次显示即可生效的路径，保留实时网页和原输入／窗口所有权。
+
+建议补充**公开、逐宿主、可订阅的材质请求／回退状态**，具体 API 名称待双方确认，当前并无可直接调用的新接口。状态至少区分请求值、平台／辅助功能不允许、原生调用失败及可获得的原生失败原因；使用现有窗口生命周期，关闭后停止通知。原生 DWM 设置成功只证明系统接受请求，不能包装成“屏幕已显示模糊”；无法确定实际合成时须明确 unknown，并让应用有依据同步撤销额外透明配色。不能以私有 `_getState()` 或截图轮询作为生产契约。
+
+验收需覆盖支持系统上的真正首次前景显示、失焦／重新激活、设置透明开关与高对比／减少透明度、浅深色和系统不支持／原生失败，记录首次与后续视觉证据及公开回执。没有焦点抢占、重载、材质来回切换或额外渲染器；原生请求失败和无法观测真实效果分别报告。此项是宿主材质后续能力，不阻塞已完成的原生普通面板迁移或网页截图替换退出。
+
+## 7 网页右键的 frame 目标与编辑凭据（待公开能力）
+
+`.7` 页面右键基础菜单已能使用真实 `context-menu`、原生 Menu 和 `params.frame`。应用已为主 frame 保存隔离世界内的焦点／选区与可观察命中节点，并复核页面／宿主／文档代次。`WebFrameMain` 当前没有公开的隔离世界执行方法；不能把子 frame 的临时编辑凭据放进页面主世界，也不能把外层 iframe 的节点身份当成内部命中节点的身份。
+
+真实隔离复现已证明：页面可修改主世界 `__navoraMenuEdit`，让旧菜单“全选”操作另一个输入框；子 frame 内部替换节点、不滚动时，仅比外层 iframe 和视口仍会错误放行检查。应用已移除这两条路径，子 frame 暂禁菜单编辑与坐标检查／复制图片；保留页面控制、链接、DevTools 和基于原生选区快照的显式文字复制，不伪称完整 frame 编辑已完成。
+
+需要公开、绑定真实 frame／document／命中节点及选择状态的上下文凭据和操作入口，或能达到同样保证的公开 frame 隔离执行能力。具体 API 名称由内核定稿；当前没有可直接调用的新方法。凭据应不可由网页脚本伪造或更新，绑定来源 WebContents，支持普通／跨源／嵌套 iframe、shadow DOM 及导航失效；编辑不能因同 frame 焦点变了就作用于新控件，检查与复制图片不能只复用已过期坐标。无需为组菜单读取或公开表单 value，密码规则及输入法行为保留原生语义。
+
+原生编辑仍由应用核对 Agent owner、租约、未完成输入和来源权限；不以新增接口绕过保护、不自动交还、不读取宿主聊天编辑器，也不因检查元素强制拆除现有 debugger。菜单关闭、导航、移窗或销毁后旧回调拒绝。此项不涉及新的 HTML 浮层、额外渲染器、网页圆角或截图替换。

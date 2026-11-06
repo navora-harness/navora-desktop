@@ -5,6 +5,7 @@ import path from 'node:path'
 import {fileURLToPath} from 'node:url'
 import {createRequire} from 'node:module'
 import {spawn} from 'node:child_process'
+import {electronRuntimeRelease} from './electron-runtime-release.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(import.meta.url)
@@ -13,8 +14,8 @@ if (override && (!path.isAbsolute(override) || !fs.statSync(override).isFile()))
   throw new Error('NAVORA_POINTER_ELECTRON must name an existing absolute Electron executable')
 }
 const executable = override || require('electron')
-const release = JSON.parse(fs.readFileSync(path.join(path.dirname(path.dirname(executable)), 'package.json'), 'utf8')).version
-if (release !== '45.0.0-cloudbypass.5') throw new Error(`Pointer smoke requires release 45.0.0-cloudbypass.5; found ${release}`)
+const release = electronRuntimeRelease(executable)
+if (release !== '45.0.0-cloudbypass.11') throw new Error(`Pointer smoke requires release 45.0.0-cloudbypass.11; found ${release}`)
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'navora-pointer-smoke-'))
 try {
   const entry = path.join(temporary, 'pointer-smoke.mjs')

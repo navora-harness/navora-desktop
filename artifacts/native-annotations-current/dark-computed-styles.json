@@ -1,0 +1,32 @@
+{
+  ".chat-new-action": {
+    "background": "rgb(43, 64, 83)",
+    "color": "rgb(232, 241, 249)",
+    "surface": "#2B4053",
+    "selection": "#365774"
+  },
+  ".chat-item.active": {
+    "background": "rgb(54, 87, 116)",
+    "color": "rgb(156, 199, 233)",
+    "surface": "#2B4053",
+    "selection": "#365774"
+  },
+  ".workspace-tab-item.active": {
+    "background": "rgb(43, 64, 83)",
+    "color": "rgb(232, 241, 249)",
+    "surface": "#2B4053",
+    "selection": "#365774"
+  },
+  ".browser-address-bar": {
+    "background": "rgb(43, 64, 83)",
+    "color": "rgb(232, 241, 249)",
+    "surface": "#2B4053",
+    "selection": "#365774"
+  },
+  ".activity-rail button": {
+    "background": "rgb(46, 75, 100)",
+    "color": "rgb(232, 241, 249)",
+    "surface": "#2B4053",
+    "selection": "#365774"
+  }
+}

@@ -28,9 +28,10 @@ export const ComposerContextBlockNode=Node.create<{preview:(block:ComposerContex
   }})]},
 })
 
-export const ComposerContextInlineNode=Node.create({
+export const ComposerContextInlineNode=Node.create<{preview:(block:ComposerContextBlock)=>string|undefined}>({
   name:'contextInline',group:'inline',inline:true,atom:true,selectable:true,
   addAttributes(){return {block:{default:null,rendered:false}}},
+  addOptions(){return {preview:()=>undefined}},
   parseHTML(){return []},
   renderHTML({node}){return ['span',{'class':'composer-context-inline-export'},String(node.attrs.block?.label||'来源')]},
   addNodeView(){return VueNodeViewRenderer(ComposerContextInlineView)},

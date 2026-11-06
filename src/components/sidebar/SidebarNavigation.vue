@@ -7,6 +7,7 @@
 import AppIcon from '../icons/AppIcon.vue'
 import {computed,onBeforeUnmount,onMounted,ref,watch} from 'vue'
 import type {SidebarPanelDefinition} from '@/composables/useSidebarDock'
+import {browserPagesByChat} from '@shared/browser-resource-sessions'
 const props=defineProps<{panels:SidebarPanelDefinition[];active:string;inactive:boolean}>()
 const emit=defineEmits<{activate:[id:string]}>()
 const label=(panel:SidebarPanelDefinition)=>({chats:'对话列表',workspace:'对话文件',browser:'浏览器资源'} as Record<string,string>)[panel.id]||panel.label
@@ -18,9 +19,9 @@ function updateDownloads(items:import('@shared/types').BrowserDownloadEntry[],no
 watch(()=>props.active,value=>{if(value==='workspace')unread.value=false})
 onMounted(()=>{
   void window.navora?.downloads.list().then(items=>{if(!disposed&&!downloadsUpdated)updateDownloads(items)}).catch(()=>{})
-  void window.navora?.browser.treeAll().then(tree=>{if(disposed)return;const counts:Record<string,number>={};for(const session of tree)counts[session.chatId]=(counts[session.chatId]||0)+session.windows.length;for(const [id,count] of Object.entries(counts))if(!updatedChats.has(id))pageCounts.value[id]=count}).catch(()=>{})
+  void window.navora?.browser.treeAll().then(tree=>{if(disposed)return;for(const [id,pages] of browserPagesByChat(tree))if(!updatedChats.has(id))pageCounts.value[id]=pages.length}).catch(()=>{})
   offDownload=window.navora?.downloads.onChanged(payload=>{downloadsUpdated=true;updateDownloads(payload.downloads,true)})
-  offBrowser=window.navora?.browser.onTreeUpdated(payload=>{updatedChats.add(payload.chatId);pageCounts.value[payload.chatId]=payload.tree.reduce((sum,session)=>sum+session.windows.length,0)})
+  offBrowser=window.navora?.browser.onTreeUpdated(payload=>{const groups=browserPagesByChat(payload.tree);for(const id of new Set([payload.chatId,...groups.keys()])){updatedChats.add(id);pageCounts.value[id]=groups.get(id)?.length||0}})
 })
 onBeforeUnmount(()=>{disposed=true;offDownload?.();offBrowser?.()})
 </script>

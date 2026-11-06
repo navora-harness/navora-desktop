@@ -2,12 +2,14 @@ import {registerBrowserWorkspace} from './modules/browser-workspace-ipc'
 import {subchatIndex} from '../shared/subchat-presentation'
 import {BrowserStartStore} from './modules/browser-start-store'
 import {registerFileWindows} from './modules/file-windows'
+import {registerWorkspaceFileActions} from './modules/workspace-file-actions'
 import {registerNativeUi} from './modules/native-ui'
-import { registerLiteratureSearch } from './modules/literature-search'
+import {createAppLinkOpener} from './modules/app-links'
 import {downloadNeedsLog} from '../shared/browser-download-status'
 import { app, BrowserWindow, dialog, ipcMain, shell, nativeTheme } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
+import os from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { version as productVersion } from '../package.json'
@@ -15,8 +17,11 @@ import { applyUserDataPath, ensureDir, ensurePortableRoot, isPortableRuntime, PO
 import { ConfigService } from './modules/config-service'
 import { configureBrowserAutomation } from './modules/browser-automation-controller'
 import { mainWindowChrome } from './modules/window-chrome'
+import { WindowStartup } from './modules/window-startup'
+import {fullscreenForSender,registerWindowFullscreen} from './modules/window-fullscreen'
 import {createSettingsNavigation,resetsSettingsDocument} from './modules/settings-navigation'
-import { appearancePalette } from '../shared/appearance'
+import {createAppQuitIntent,createAppQuitDrain,readAppQuitState} from './modules/app-quit'
+import { configureWindowMaterials, registerWindowMaterial, updateWindowMaterial, windowMaterialState } from './modules/window-material'
 import { fetchOpenAiModelsList } from '../shared/openai-models'
 import { probeModel } from './modules/model-probe'
 import { CreatorService } from './modules/creator-service'
@@ -30,6 +35,7 @@ import {WorkspaceResourceIndex} from './modules/workspace-resource-index'
 import {associateResourceEvidence} from '../shared/workspace-resources'
 import { FileDownloadService } from './modules/file-download'
 import { BrowserDownloadList } from './modules/browser-download-list'
+import {systemDownloadIcon} from './modules/download-file-icons'
 import { assertDownloadScope, downloadChatScope, filterDownloadScope, type DownloadCaller } from './modules/browser-download-access'
 import { ToolDownloadList } from '../shared/tool-downloads'
 import type { AgentEvent, BrowserDownloadsChanged } from '../shared/types'
@@ -65,7 +71,11 @@ import { SkillStore } from './modules/skill-store'
 import { MarketplaceClient } from './modules/marketplace-client'
 import { AgentRuntime } from './modules/agent-runtime'
 import { AgentInbox } from './modules/agent-inbox'
-import {compileComposerDocument,normalizeComposerDocument,type ComposerDraftOptions,type ComposerSubmitInput,type ComposerQueueEditOptions} from '../shared/composer-document'
+import {QuestionnaireStore} from './modules/questionnaire-store'
+import type {QuestionnaireRecord,QuestionnaireDraftInput,QuestionnaireSubmitInput} from '../shared/questionnaire'
+import {compileComposerDocument,previewComposerDocument,normalizeComposerDocument,composerDocumentContentIdentity,type ComposerDraftOptions,type ComposerSubmitInput,type ComposerQueueEditOptions} from '../shared/composer-document'
+import {deriveTaskConstraints,hasTaskDeclarations,type TaskConstraintSource} from '../shared/task-declarations'
+import {enforceInheritedTaskConstraints,freezeTaskConstraints} from './modules/agent-task-policy'
 import {makeFileTab} from '../shared/file-tabs'
 import {createComposerSources} from './modules/composer-sources'
 import type {ComposerImportFile,ComposerExcerptInput} from '../shared/composer-sources'
@@ -76,7 +86,7 @@ import { NavoraRpcRegistry } from './modules/remote-rpc'
 import { loadWindowState, trackWindowState } from './modules/window-state'
 import type { AppConfig, AppConfigPatch } from '../shared/config'
 import type {SettingsCommit} from '../shared/settings-commit'
-import type {BrowserSessionUpdate,BrowserSessionManageAction} from '../shared/types'
+import type {BrowserSessionCreateOptions,BrowserSessionManageOptions,BrowserSessionUpdate,BrowserSessionManageAction} from '../shared/types'
 import {confirmedModelSelection,validateModelSelection,assertConfirmedModelSelection} from '../shared/model-selection'
 import {
   assertRemoteAccessChange,
@@ -112,9 +122,20 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 let mainWindow: BrowserWindow | null = null
+let startupCompleted = false
+let windowStartup: { window: BrowserWindow; gate: WindowStartup; revealAllowed: boolean } | undefined
 const settingsNavigation=createSettingsNavigation({getMain:()=>mainWindow,createMain:()=>createWindow()})
 let tray: TrayController | null = null
 let isQuitting = false
+let quitCleanupFinished=false
+const quitDrain=createAppQuitDrain({stop:()=>{
+  isQuitting=true
+  agent?.setClosing(true)
+  for(const chat of chats?.list()||[])if(chat.queuedMessages?.length)agentInbox?.pause(chat.id)
+  abortAllAsks({preservePersistedUnlimited:true})
+  agent?.stopAll()
+},drain:async()=>{await plugins?.dispose()},commit:()=>app.quit(),failed:()=>{isQuitting=false;agent?.setClosing(false)}})
+const quitIntent=createAppQuitIntent({getMain:()=>mainWindow,createMain:()=>createWindow(),state:()=>readAppQuitState(agent),commit:()=>quitDrain.request()})
 
 const dataRootEarly = (() => {
   const env = process.env.NAVORA_DATA_ROOT
@@ -143,6 +164,8 @@ else {
 let dataRoot = dataRootEarly
 let config!: ConfigService
 let chats!: ChatStore
+let questionnaires!: QuestionnaireStore
+let retryQuestionnaireContinuations:(()=>void)|undefined
 let registry!: BrowserRegistry
 let browserStart!:BrowserStartStore
 let network!: BrowserNetworkManager
@@ -163,6 +186,7 @@ let remote!: RemoteServer
 let browserAnnotations:ReturnType<typeof registerBrowserWorkspace>|undefined
 let fileWindows:ReturnType<typeof registerFileWindows>|undefined
 let nativeUiService:ReturnType<typeof registerNativeUi>|undefined
+let appLinks:ReturnType<typeof createAppLinkOpener>|undefined
 const rpc = new NavoraRpcRegistry()
 
 function rpcHandle(channel: string, handler: (...args: any[]) => any): void {
@@ -251,7 +275,7 @@ function resolveSkillReview(id: string, response: SkillReviewResponse, notifyUi 
 }
 
 function abortAsksForChat(chatId: string): boolean {
-  let aborted=false
+  let aborted=!!questionnaires?.invalidateChat(chatId,'stopped')
   for (const [id, p] of [...pendingAsk.entries()]) {
     if (p.chatId !== chatId) continue
     resolveAsk(id, { id, answer: '', source: 'aborted' }, true)
@@ -317,13 +341,13 @@ function resolveAppIcon(): string | undefined {
 }
 
 /** Open http(s)/mailto in the OS browser; ignore unsafe schemes. */
-function openInSystemBrowser(url: string): boolean {
+async function openInSystemBrowser(url: string): Promise<boolean> {
   try {
     const u = new URL(url)
     if (u.protocol !== 'http:' && u.protocol !== 'https:' && u.protocol !== 'mailto:') {
       return false
     }
-    void shell.openExternal(url)
+    await shell.openExternal(url)
     return true
   } catch {
     return false
@@ -346,16 +370,18 @@ function isMainAppNavigation(url: string, win: BrowserWindow): boolean {
   }
 }
 
-/** Keep chat/settings in-app; send external links to the system browser. */
+/** Fallback for application content that did not emit the controlled link action. */
 function wireMainWindowExternalLinks(win: BrowserWindow): void {
   win.webContents.setWindowOpenHandler(({ url }) => {
-    openInSystemBrowser(url)
+    if(/^mailto:/i.test(url))openInSystemBrowser(url)
+    else void appLinks?.open(win.webContents,{url}).then(result=>{if(!result.ok)win.webContents.send('navora:app.link-error',result.error)})
     return { action: 'deny' }
   })
   win.webContents.on('will-navigate', (event, url) => {
     if (isMainAppNavigation(url, win)) return
     event.preventDefault()
-    openInSystemBrowser(url)
+    if(/^mailto:/i.test(url))openInSystemBrowser(url)
+    else void appLinks?.open(win.webContents,{url}).then(result=>{if(!result.ok)win.webContents.send('navora:app.link-error',result.error)})
   })
 }
 
@@ -366,7 +392,7 @@ function displayBrowserTree(chatId: string): ReturnType<BrowserRegistry['getTree
   const children = chats.listChildren(chatId)
   if (!children.length) return own
   // Keep parent sessions first; then each child (listChildren is newest-first).
-  return [...own, ...children.flatMap((c) => registry.getTree(c.id))]
+  return registry.getAllTree([chatId,...children.map(child=>child.id)])
 }
 
 /** Roll sub-chat window counts into the parent so the sidebar badge reflects activity. */
@@ -457,7 +483,17 @@ function pushAgentEvent(payload: unknown): void {
   remote?.broadcast('navora:agent.event', payload)
   const event=payload as AgentEvent
   if(event.type==='error')agentInbox?.pause(event.chatId)
-  if(event.type==='done')agentInbox?.finished(event.chatId)
+  if(event.type==='done'&&!isQuitting){
+    agentInbox?.finished(event.chatId)
+    queueMicrotask(()=>{if(!isQuitting)retryQuestionnaireContinuations?.()})
+  }
+}
+
+function pushQuestionnaireChanged(record:QuestionnaireRecord):void {
+  if(record.status!=='pending')agent?.recordQuestionnaireSettlement(record)
+  if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send('navora:questionnaires.changed',record)
+  remote?.broadcast('navora:questionnaires.changed',record)
+  pushChatChanged({type:'upsert',chatId:record.chatId})
 }
 
 function pushPermissionRequest(req: unknown): void {
@@ -563,9 +599,8 @@ function pushConfigChanged(cfg: AppConfig): void {
 }
 
 function updateWindowAppearance(win: BrowserWindow, cfg: AppConfig): void {
-  const theme = appearancePalette(cfg.app.appearance_theme, cfg.app.appearance_mode, nativeTheme.shouldUseDarkColors)
-  win.setBackgroundColor(theme.shell)
-  if (process.platform === 'win32') win.setTitleBarOverlay({ color: theme.shell, symbolColor: theme.ink })
+  updateWindowMaterial(win, cfg)
+  nativeUiService?.refreshMaterials(win)
 }
 
 /** Prefer main window; focus it so native file dialogs are not hidden behind HTML overlays. */
@@ -680,6 +715,7 @@ async function createWindow(): Promise<void> {
 
   const icon = resolveAppIcon()
   const winState = loadWindowState(dataRoot)
+  const startup = !startupCompleted
   mainWindow = new BrowserWindow({
     width: winState.width,
     height: winState.height,
@@ -700,11 +736,22 @@ async function createWindow(): Promise<void> {
       nodeIntegration: false,
       sandbox: false,
       webviewTag: false,
+      additionalArguments: startup ? ['--navora-startup'] : [],
     },
   })
   // Hide native menu; Agent windows manage their own chrome.
   mainWindow.setMenu(null)
   const win = mainWindow
+  if (startup) {
+    windowStartup?.gate.dispose()
+    windowStartup = { window: win, gate: new WindowStartup(), revealAllowed: false }
+    registry.hosts.deferPresentation()
+    win.once('show', () => windowStartup?.window === win && windowStartup.gate.shown())
+    // Keep the window fully opaque so desktop detail cannot bypass Acrylic
+    // through whole-window alpha. The material supplies background transparency.
+  }
+  registerWindowFullscreen(win)
+  registerWindowMaterial(win, 'main')
   wireMainWindowExternalLinks(win)
   registry.hosts.bindMain(win)
   registry.restorePersistent(path.join(dataRoot,'browser-workspace.json'),id=>!!chats.get(id))
@@ -713,7 +760,7 @@ async function createWindow(): Promise<void> {
   win.once('ready-to-show', () => {
     if (winState.maximized) win.maximize()
     win.show()
-    replayPersistedAsks()
+    if (!startup) replayPersistedAsks()
   })
 
   win.on('close', (e) => {
@@ -722,7 +769,9 @@ async function createWindow(): Promise<void> {
     win.hide()
   })
   win.on('closed', () => {
+    if (windowStartup?.window === win) { windowStartup.gate.dispose(); windowStartup = undefined }
     settingsNavigation.dispose()
+    quitIntent.loading(win)
     mainWindow = null
   })
   const pushMaximized = () => {
@@ -732,7 +781,7 @@ async function createWindow(): Promise<void> {
   win.on('maximize', pushMaximized)
   win.on('unmaximize', pushMaximized)
   win.webContents.on('did-finish-load', pushMaximized)
-  win.webContents.on('did-start-navigation',(_event,_url,isInPlace,isMainFrame)=>{if(resetsSettingsDocument(isInPlace,isMainFrame))settingsNavigation.loading(win)})
+  win.webContents.on('did-start-navigation',(_event,_url,isInPlace,isMainFrame)=>{if(resetsSettingsDocument(isInPlace,isMainFrame)){settingsNavigation.loading(win);quitIntent.loading(win)}})
   // A fresh document must acknowledge readiness after its App listener exists.
   // The mount announcement covers a late app boot; this request covers finish-load ordering.
   win.webContents.on('did-finish-load',()=>{if(win===mainWindow&&!win.isDestroyed())win.webContents.send('navora:app.settings.request-ready')})
@@ -747,6 +796,36 @@ async function createWindow(): Promise<void> {
 }
 
 function registerIpc(): void {
+  const startupCaller = (event: Electron.IpcMainInvokeEvent) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== event.sender.mainFrame) throw Error('startup_main_window_only')
+    return windowStartup?.window === mainWindow ? windowStartup : undefined
+  }
+  ipcMain.handle('navora:app.startup.shown', event => { startupCaller(event)?.gate.splashPainted() })
+  ipcMain.handle('navora:app.startup.ready', async event => {
+    const startup = startupCaller(event)
+    if (!startup) return true
+    const ready = await startup.gate.rendererReady()
+    if (ready) startup.revealAllowed = true
+    return ready
+  })
+  ipcMain.handle('navora:app.startup.complete', event => {
+    const startup = startupCaller(event)
+    if (!startup) return
+    if (!startup.revealAllowed) throw Error('startup_not_ready')
+    startupCompleted = true
+    startup.gate.dispose()
+    windowStartup = undefined
+    registry.hosts.resumePresentation()
+    replayPersistedAsks()
+  })
+  registerWorkspaceFileActions({files,shell:workspaceShell,trusted:(event,chatId,relative)=>{
+    if(event.sender.isDestroyed()||event.senderFrame!==event.sender.mainFrame||!chats.get(chatId))return
+    const win=BrowserWindow.fromWebContents(event.sender)
+    if(!win||win.isDestroyed()||win.webContents!==event.sender)return
+    if(win===mainWindow||fileWindows?.ownsFile(event.sender,chatId,relative))return win
+    const host=registry.hosts.hostForSender(event.sender)
+    if(host&&[...host.pages].some(id=>registry.hosts.pages.get(id)?.chatId===chatId))return win
+  }})
   function settingsCaller(event:Electron.IpcMainInvokeEvent,mainOnly=false){
     if(event.sender.isDestroyed()||event.senderFrame!==event.sender.mainFrame)throw Error('settings_ui_only')
     const win=BrowserWindow.fromWebContents(event.sender)
@@ -759,7 +838,6 @@ function registerIpc(): void {
   ipcMain.handle('navora:app.settings.ready',event=>settingsNavigation.ready(settingsCaller(event,true)))
   ipcMain.handle('navora:app.settings.handled',(event,id:unknown,accepted:unknown)=>{if(typeof id!=='string'||typeof accepted!=='boolean')throw Error('invalid_settings_ack');settingsNavigation.handled(settingsCaller(event,true),id,accepted)})
   ipcMain.handle('navora:app.settings.return',(event,id:unknown,restore:unknown)=>{if(typeof id!=='string'||typeof restore!=='boolean')throw Error('invalid_settings_return');settingsNavigation.returnToSource(settingsCaller(event,true),id,restore)})
-  registerLiteratureSearch(ipcMain)
   const creatorCall = async <T>(operation: () => T | Promise<T>) => {
     try { return { ok: true as const, ...await operation() } }
     catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : 'creator_failed' } }
@@ -804,18 +882,19 @@ function registerIpc(): void {
     dataRoot,
     portable: isPortableRuntime(),
   }))
-  rpcHandle('navora:app.openExternal', (_e, url: string) => ({
-    ok: openInSystemBrowser(String(url || '')),
+  rpcHandle('navora:app.openExternal', async (_e, url: string) => ({
+    ok: await openInSystemBrowser(String(url || '')),
   }))
   // Local-only IPC (not registered on remote RPC) so remote clients cannot quit the host
-  ipcMain.handle('navora:app.quit', () => {
-    isQuitting = true
-    abortAllAsks({ preservePersistedUnlimited: true })
-    agent?.stopAll()
-    registry?.shutdown()
-    app.quit()
-    return { ok: true as const }
-  })
+  ipcMain.handle('navora:app.quitState',event=>{settingsCaller(event,true);return quitIntent.state()})
+  ipcMain.handle('navora:app.quit', (event,expectedRunningAgents?:number) => {settingsCaller(event,true);return quitIntent.confirm(expectedRunningAgents)})
+  function quitReadyCaller(event:Electron.IpcMainEvent){
+    const win=BrowserWindow.fromWebContents(event.sender)
+    if(!win||win!==mainWindow||win.isDestroyed()||event.sender.isDestroyed()||event.senderFrame!==event.sender.mainFrame)return
+    return win
+  }
+  ipcMain.on('navora:app.quit-request-ready',event=>{const win=quitReadyCaller(event);if(win)quitIntent.ready(win)})
+  ipcMain.on('navora:app.quit-request-unready',event=>{const win=quitReadyCaller(event);if(win)quitIntent.loading(win)})
   ipcMain.handle('navora:app.window.minimize', (e) => {
     const w = BrowserWindow.fromWebContents(e.sender)
     if (w && !w.isDestroyed()) w.minimize()
@@ -837,6 +916,9 @@ function registerIpc(): void {
     const w = BrowserWindow.fromWebContents(e.sender)
     return { maximized: Boolean(w && !w.isDestroyed() && w.isMaximized()) }
   })
+  ipcMain.handle('navora:app.window.toggleFullscreen',e=>fullscreenForSender(e.sender,e.senderFrame).toggle())
+  ipcMain.handle('navora:app.window.isFullscreen',e=>fullscreenForSender(e.sender,e.senderFrame).snapshot())
+  ipcMain.handle('navora:app.window.material', e => windowMaterialState(e.sender, e.senderFrame))
 
   rpcHandle('navora:config.get', () => config.get())
   rpcHandle('navora:config.commit', async (_e, request:SettingsCommit) => {
@@ -924,6 +1006,8 @@ function registerIpc(): void {
   })
 
   rpcHandle('navora:plugins.list', () => plugins.list())
+  rpcHandle('navora:plugins.recoveryStatus', () => plugins.recoveryStatus())
+  rpcHandle('navora:plugins.retryRecovery', () => plugins.retryRecovery())
   rpcHandle('navora:store.status', () => marketplace.status())
   rpcHandle('navora:store.list', (_e, opts?: { kind?: string; q?: string }) =>
     marketplace.list({
@@ -1576,6 +1660,12 @@ function registerIpc(): void {
   })
 
   rpcHandle('navora:downloads.list', (event, chatId?: string) => filterDownloadScope(listDownloads(), downloadChatScope(downloadCaller(event), chatId)))
+  rpcHandle('navora:downloads.icon', async (event, id: string, chatId?: string) => {
+    const entry=downloadForRequest(event,id,chatId)
+    if(!entry)return undefined
+    try{return await systemDownloadIcon(entry,entry.relPath?files.resolve(entry.chatId,entry.relPath):undefined)}
+    catch{return undefined}
+  })
   rpcHandle('navora:downloads.clear', (event, chatId?: string) => {
     const scope = downloadChatScope(downloadCaller(event), chatId)
     const before = listDownloads().length
@@ -1654,6 +1744,58 @@ function registerIpc(): void {
 
   rpcHandle('navora:chats.list', () => chats.list())
   rpcHandle('navora:chats.get', (_e, id: string) => chats.get(id))
+  const assertQuestionnaireAccess=(event:Electron.IpcMainInvokeEvent|null,id?:string)=>{
+    const caller=downloadCaller(event)
+    if(caller.kind!=='trusted'&&caller.kind!=='remote')throw Error('questionnaire_access_denied')
+    if(id){const record=questionnaires.get(id);if(!record||!chats.get(record.chatId))throw Error('questionnaire_not_found');return record}
+    return null
+  }
+  rpcHandle('navora:questionnaires.list',(event,chatId?:string)=>{assertQuestionnaireAccess(event);return questionnaires.list(chatId).filter(record=>!!chats.get(record.chatId))})
+  rpcHandle('navora:questionnaires.get',(event,id:string)=>{assertQuestionnaireAccess(event);const record=questionnaires.get(id);return record&&chats.get(record.chatId)?record:null})
+  rpcHandle('navora:questionnaires.saveDraft',(event,id:string,input:QuestionnaireDraftInput)=>{assertQuestionnaireAccess(event,id);return questionnaires.saveDraft(id,input)})
+  rpcHandle('navora:questionnaires.attach',(event,id:string,questionId:string,files:Array<{name:string;data:string}>)=>{assertQuestionnaireAccess(event,id);return questionnaires.attach(id,questionId,files)})
+  rpcHandle('navora:questionnaires.openAttachment',async(event,id:string,attachmentId:string)=>{
+    assertQuestionnaireAccess(event,id)
+    if(downloadCaller(event).kind!=='trusted')throw Error('请在桌面应用中打开附件')
+    const error=await shell.openPath(questionnaires.attachment(id,attachmentId).path);if(error)throw Error(error)
+  })
+  rpcHandle('navora:questionnaires.revise',(event,id:string)=>{
+    const original=assertQuestionnaireAccess(event,id)!
+    if(agent.hasRunLease(original.chatId)||chats.get(original.chatId)?.pendingAsk)throw Error('请等待当前任务完成后再修改答案')
+    return questionnaires.revise(id)
+  })
+  rpcHandle('navora:questionnaires.listTemplates',event=>{assertQuestionnaireAccess(event);return questionnaires.listTemplates()})
+  rpcHandle('navora:questionnaires.saveTemplate',(event,id:string,title:string)=>{assertQuestionnaireAccess(event,id);return questionnaires.saveTemplate(id,title)})
+  rpcHandle('navora:questionnaires.deleteTemplate',(event,id:string)=>{assertQuestionnaireAccess(event);return questionnaires.deleteTemplate(id)})
+  rpcHandle('navora:questionnaires.useTemplate',(event,id:string,chatId:string)=>{
+    assertQuestionnaireAccess(event)
+    const chat=chats.get(chatId);if(!chat)throw Error('chat_not_found')
+    if(agent.hasRunLease(chatId)||chat.pendingAsk)throw Error('请等待当前任务完成后再复用模板')
+    return questionnaires.useTemplate(id,{chatId,chatTitle:chat.title,parentChatId:chat.parentChatId,runId:randomUUID(),toolCallId:'user-form-'+randomUUID()})
+  })
+  const questionnaireContinuations=new Set<string>()
+  const continueQuestionnaire=(record:QuestionnaireRecord)=>{
+    if(isQuitting||questionnaireContinuations.has(record.id)||record.continuation?.state==='done'||agent.hasRunLease(record.chatId))return
+    questionnaireContinuations.add(record.id)
+    void agent.continueAfterPersistedQuestionnaire(record).catch(error=>{
+      if(!/^(agent_already_running|max_parallel_agent_chats|max_subchats)$/.test(error instanceof Error?error.message:String(error)))console.error('[questionnaire] continuation',error)
+    }).finally(()=>questionnaireContinuations.delete(record.id))
+  }
+  rpcHandle('navora:questionnaires.submit',(event,id:string,input:QuestionnaireSubmitInput)=>{
+    assertQuestionnaireAccess(event,id)
+    const waiting=questionnaires.hasWaiter(id),result=questionnaires.submit(id,input)
+    if(result.ok&&!waiting&&result.record.continuation?.state!=='done')continueQuestionnaire(result.record)
+    return result
+  })
+  rpcHandle('navora:questionnaires.cancel',(event,id:string,reason?:string)=>{
+    assertQuestionnaireAccess(event,id)
+    // Switching back to chat belongs to agent.submit, after its message is durably accepted.
+    if(reason==='chat')throw Error('questionnaire_chat_message_required')
+    return questionnaires.cancel(id,reason)
+  })
+  // A committed answer may have outlived a process before its continuation was registered.
+  retryQuestionnaireContinuations=()=>{for(const record of questionnaires.list())if(record.status==='submitted'&&record.continuation?.state!=='done'&&chats.get(record.chatId))continueQuestionnaire(record)}
+  retryQuestionnaireContinuations()
   const subchatChildren=(parentId:string)=>{
     const parent=chats.get(parentId)
     if(!parent||parent.kind==='sub')throw Error('subchat_parent_not_found')
@@ -1772,6 +1914,7 @@ function registerIpc(): void {
       abortAsksForChat(id)
       agent.stop(id)
       agent.clearChatState(id)
+      questionnaires.removeChat(id)
       gate.clearChat(id)
       await registry.clearChat(id)
       plugins.cancelChat(id)
@@ -1808,7 +1951,7 @@ function registerIpc(): void {
       const existing = chats.get(chatId)
       if (!existing) return null
       const document=opts?.document?normalizeComposerDocument(opts.document,chatId):undefined
-      const body=document?compileComposerDocument(document).content:String(text??'')
+      const body=document?previewComposerDocument(document).content:String(text??'')
       // Draft durability is independent of the current model's sending budget.
       // Structured drafts have schema limits; legacy strings have a transport cap.
       if(!document&&body.length>200000)throw Error('composer_document_too_large')
@@ -1886,7 +2029,7 @@ function registerIpc(): void {
     if(refs.length>100)throw Error('too_many_context_references')
     for(const ref of refs){
       const session=registry.getSessionRecord(ref.sessionId)
-      if(!session||session.chatId!==chatId)throw Error('composer_source_missing')
+      if(!session||session.scope!=='default'&&session.chatId!==chatId)throw Error('composer_source_missing')
       if(ref.kind==='window'){
         const page=ref.windowId&&registry.getWindowRecord(ref.windowId)
         if(!page||page.chatId!==chatId||page.sessionId!==ref.sessionId)throw Error('composer_source_missing')
@@ -1905,7 +2048,7 @@ function registerIpc(): void {
     return {...input,content,refs,document,modelIdentity}
   }
 
-  const startAgentMessage = async (chatId:string,raw:ComposerSubmitInput) => {
+  const startAgentMessage = async (chatId:string,raw:ComposerSubmitInput,queueSource?:TaskConstraintSource) => {
       if (!chatId) throw new Error('chatId_required')
       const payload=await prepareComposerInput(chatId,raw)
       const maxChars = Math.min(
@@ -1923,10 +2066,13 @@ function registerIpc(): void {
       if(payload.modelIdentity)validateModelSelection(config.get(),payload.modelIdentity)
       agent.assertCanRun(chatId)
 
+      const messageId=`m_${randomUUID()}`
+      const taskConstraints=enforceInheritedTaskConstraints(chats.get(chatId),freezeTaskConstraints(deriveTaskConstraints(payload.document?compileComposerDocument(payload.document).declarations:undefined,{messageId,...queueSource,...(payload.document?{documentId:payload.document.id,documentRevision:payload.document.revision}:{})})))
       const userMsg = chats.appendMessage(chatId, {
+        id:messageId,
         role: 'user',
         content: content || '（附带浏览器上下文）',
-        meta: {modelIdentity:payload.modelIdentity,...(refs.length?{refs}:{}),...(payload.document?{document:payload.document}:{}),...(payload.clientMessageId?{clientMessageId:payload.clientMessageId}:{})},
+        meta: {modelIdentity:payload.modelIdentity,taskConstraints,...(refs.length?{refs}:{}),...(payload.document?{document:payload.document}:{}),...(payload.clientMessageId?{clientMessageId:payload.clientMessageId}:{})},
       })
       if (userMsg) {
         pushAgentEvent({ type: 'message', chatId, message: userMsg })
@@ -1941,16 +2087,16 @@ function registerIpc(): void {
       }
 
       // Fire-and-forget after registration; start-gate errors already thrown above.
-      void agent.run({ chatId, userText: content, refs,modelIdentity:payload.modelIdentity }).catch((e) => {
+      void agent.run({ chatId, userText: content, refs,modelIdentity:payload.modelIdentity,taskConstraints }).catch((e) => {
         console.error('[agent.run]', e)
       })
       return chats.get(chatId)
   }
   agentInbox=new AgentInbox({
     get:id=>chats.get(id),save:(id,entries,paused)=>chats.setMessageQueue(id,entries,paused),
-    changed:chatId=>pushChatChanged({type:'upsert',chatId}),running:id=>agent.isRunning(id),
+    changed:chatId=>pushChatChanged({type:'upsert',chatId}),running:id=>agent.hasRunLease(id),
     start:startAgentMessage,insert:(id,input)=>agent.insertUserInput(id,input),
-    validateIncoming:(id,input)=>{if(input.modelIdentity)assertConfirmedModelSelection(input.modelIdentity,confirmedModelSelection(config.get(),chats.get(id)||{}))},
+    validateIncoming:(id,input)=>{if(isQuitting)throw Error('app_closing');if(input.modelIdentity)assertConfirmedModelSelection(input.modelIdentity,confirmedModelSelection(config.get(),chats.get(id)||{}))},
     prepare:prepareComposerInput,accepted:(id,key,fingerprint)=>chats.rememberAcceptedMessage(id,key,fingerprint),
     maxChars:()=>Math.min(200000,Math.max(1000,Math.floor(config.get().app.max_composer_chars||16000))),
   })
@@ -1958,14 +2104,24 @@ function registerIpc(): void {
   for(const chat of chats.list())if(chat.queuedMessages?.length)agentInbox.pause(chat.id)
   rpcHandle('navora:agent.run',async(_e,chatId:string,payload:ComposerSubmitInput)=>{
     const revision=payload.draftRevision??chats.get(chatId)?.draftRevision
-    await startAgentMessage(chatId,payload);chats.clearDraftRevision(chatId,revision);pushChatChanged({type:'upsert',chatId});return chats.get(chatId)
+    if(agent.hasRunLease(chatId)&&payload.document&&hasTaskDeclarations(compileComposerDocument(payload.document).declarations))await agentInbox!.submit(chatId,payload,'queue')
+    else await startAgentMessage(chatId,payload)
+    chats.clearDraftRevision(chatId,revision);pushChatChanged({type:'upsert',chatId});return chats.get(chatId)
   })
   rpcHandle('navora:agent.submit',async(_e,chatId:string,payload:ComposerSubmitInput,mode?:'queue'|'insert')=>{
     const revision=payload.draftRevision??chats.get(chatId)?.draftRevision
     try{
-      const accepted=await agentInbox!.submit(chatId,payload,mode==='insert'||mode==='queue'?mode:config.get().app.running_message_mode==='insert'?'insert':'queue')
+      const pendingForms=questionnaires.list(chatId).filter(record=>record.status==='pending')
+      const accepted=await agentInbox!.submit(chatId,payload,pendingForms.length?'insert':mode==='insert'||mode==='queue'?mode:config.get().app.running_message_mode==='insert'?'insert':'queue',()=>{
+        // Persist acceptance before waking the original form tool. Insert keeps its task context;
+        // declaration/model changes are queued and stop the old run before queue pumping.
+        chats.flushChat(chatId)
+        const queued=pendingForms.length&&chats.get(chatId)?.queuedMessages?.some(entry=>payload.clientMessageId?entry.clientMessageId===payload.clientMessageId:entry.content===payload.content)
+        for(const record of pendingForms)if(questionnaires.get(record.id)?.status==='pending')questionnaires.cancel(record.id,'chat')
+        if(queued&&agent.hasRunLease(chatId))agent.stop(chatId)
+      })
       const current=chats.get(chatId)?.draftDocument
-      const unfinishedClear=!accepted&&payload.document&&current?.id===payload.document.id&&current.revision===payload.document.revision&&JSON.stringify(current.content)===JSON.stringify(payload.document.content)
+      const unfinishedClear=!accepted&&payload.document&&current?.id===payload.document.id&&current.revision===payload.document.revision&&composerDocumentContentIdentity(current)===composerDocumentContentIdentity(payload.document)
       if(accepted||unfinishedClear)chats.clearDraftRevision(chatId,revision)
       pushChatChanged({type:'upsert',chatId});return chats.get(chatId)
     }catch(error){
@@ -1983,24 +2139,26 @@ function registerIpc(): void {
     agent.assertCanRun(chatId)
     const candidate=chats.get(chatId)?.messages.slice().reverse().find(message=>message.role==='user')
     if(!candidate)throw new Error('nothing_to_retry')
-    const retry=await prepareComposerInput(chatId,{content:candidate.content,refs:candidate.meta?.refs,document:candidate.meta?.document})
+    const retry=await prepareComposerInput(chatId,{content:candidate.content,refs:candidate.meta?.refs,document:candidate.meta?.document,modelIdentity:candidate.meta?.modelIdentity as ComposerSubmitInput['modelIdentity']})
+    const taskConstraints=enforceInheritedTaskConstraints(chats.get(chatId),candidate.meta?.taskConstraints!==undefined?freezeTaskConstraints(candidate.meta.taskConstraints):freezeTaskConstraints(deriveTaskConstraints(retry.document?compileComposerDocument(retry.document).declarations:undefined,{messageId:candidate.id,...(retry.document?{documentId:retry.document.id,documentRevision:retry.document.revision}:{})})))
     agent.assertCanRun(chatId)
     const lastUser = chats.trimAfterLastUser(chatId)
     if (!lastUser) throw new Error('nothing_to_retry')
     const refs = retry.refs || []
     pushChatChanged({ type: 'upsert', chatId })
     void agent
-      .run({ chatId, userText: retry.content, refs: refs.length ? refs : undefined,modelIdentity:retry.modelIdentity })
+      .run({ chatId, userText: retry.content, refs: refs.length ? refs : undefined,modelIdentity:retry.modelIdentity,taskConstraints })
       .catch((e) => {
         console.error('[agent.retry]', e)
       })
     return chats.get(chatId)
   })
 
-  rpcHandle('navora:agent.stop', (_e, chatId: string) => {
+  rpcHandle('navora:agent.stop', (_e, chatId: string,expectedRunId?:string) => {
+    if(expectedRunId!==undefined&&(typeof expectedRunId!=='string'||agent.currentRunId(chatId)!==expectedRunId))return {ok:false,error:'agent_run_changed'}
     let aborted=false
     for(const id of chats.collectCascadeIds(chatId)){agentInbox?.pause(id);aborted=abortAsksForChat(id)||aborted}
-    const ok = agent.stop(chatId)||aborted
+    const ok = agent.stop(chatId,false,expectedRunId)||aborted
     return { ok }
   })
 
@@ -2042,12 +2200,12 @@ function registerIpc(): void {
 
   rpcHandle('navora:browser.annotations.list',(_e,chatId:string)=>{if(!chats.get(chatId))throw Error('chat_not_found');return browserAnnotations?.list(chatId)||[]})
   rpcHandle('navora:browser.tree', (_e, chatId: string) => displayBrowserTree(chatId))
-  rpcHandle('navora:browser.treeAll', () => chats.list().flatMap(chat => registry.getTree(chat.id)))
+  rpcHandle('navora:browser.treeAll', () => registry.getAllTree(chats.list().map(chat=>chat.id)))
   rpcHandle('navora:browser.windowCounts', () => displayWindowCounts())
 
-  rpcHandle('navora:browser.session.create', (_e: unknown, chatId: string, opts?: { persist?: boolean }) => {
-    if (!chatId) throw new Error('chatId_required')
-    return registry.createSession(chatId, { persist: opts?.persist === true })
+  rpcHandle('navora:browser.session.create', (_e: unknown, chatId: string, opts?: BrowserSessionCreateOptions) => {
+    if (!chatId||!chats.get(chatId)) throw new Error('chatId_required')
+    return registry.resolveSession(chatId,opts)
   })
 
   rpcHandle('navora:browser.session.close', async (_e, sessionId: string) => {
@@ -2057,16 +2215,19 @@ function registerIpc(): void {
     return result.deleted
   })
   rpcHandle('navora:browser.session.update',(_e,sessionId:string,patch:BrowserSessionUpdate)=>registry.updateSession(sessionId,patch))
-  rpcHandle('navora:browser.session.manage',async(_e,sessionId:string,action:BrowserSessionManageAction)=>{
-    const ownerChatId=registry.getSessionRecord(sessionId)?.chatId,result=await registry.manageSession(sessionId,action)
+  rpcHandle('navora:browser.session.manage',async(_e,sessionId:string,action:BrowserSessionManageAction,options?:BrowserSessionManageOptions)=>{
+    if(options?.chatId&&!chats.get(options.chatId))throw Error('browser_wrong_chat')
+    const ownerChatId=registry.getSessionRecord(sessionId)?.chatId,result=await registry.manageSession(sessionId,action,options)
     if(result.deleted){network.disposeSession(sessionId);if(ownerChatId)agent?.notifySessionClosed(ownerChatId,sessionId)}
     return result
   })
 
   rpcHandle(
     'navora:browser.window.create',
-    (_e: unknown, sessionId: string, opts?: { url?: string; show?: boolean }) => {
+    (_e: unknown, sessionId: string, opts?: { url?: string; show?: boolean;chatId?:string }) => {
+      if(registry.isPublicSession(sessionId)&&(!opts?.chatId||!chats.get(opts.chatId)))throw Error('browser_page_owner_required')
       return registry.createWindow(sessionId, {
+        chatId:opts?.chatId,
         url: opts?.url || 'https://www.bing.com/',
         show: opts?.show,
       })
@@ -2102,20 +2263,19 @@ if (!gotLock) {
     applyUserDataPath(dataRoot)
 
     config = new ConfigService(dataRoot)
+    configureWindowMaterials({ getConfig: () => config.get(), environment: () => ({
+      platform: process.platform, release: os.release(), systemDark: nativeTheme.shouldUseDarkColors,
+      highContrast: nativeTheme.shouldUseHighContrastColors, forcedColors: nativeTheme.inForcedColorsMode,
+      reducedTransparency: nativeTheme.prefersReducedTransparency,
+    }) })
     await configureBrowserAutomation(config.get().browser.automation)
     nativeTheme.on('updated', () => {
       // Native captions and renderer media queries follow the same OS preference.
       pushConfigChanged(config.get())
     })
-    app.on('browser-window-created', (_event, win) => {
-      win.webContents.on('did-finish-load', () => {
-        if (!mainWindow || mainWindow.isDestroyed() || win.isDestroyed()) return
-        if (win.webContents.getURL().split('#')[0] === mainWindow.webContents.getURL().split('#')[0]) {
-          updateWindowAppearance(win, config.get())
-        }
-      })
-    })
     chats = new ChatStore(dataRoot)
+    questionnaires = new QuestionnaireStore(dataRoot)
+    questionnaires.onChanged(pushQuestionnaireChanged)
     secrets = new SecretsStore(dataRoot)
     skills = new SkillStore(dataRoot)
     skills.onChanged(() => pushSkillsChanged())
@@ -2193,6 +2353,7 @@ if (!gotLock) {
       () => config.get(),
       (sessionId) => registry.getSessionRecord(sessionId)?.ses ?? null,
       () => path.join(dataRoot, 'logs'),
+      {resolveOwner:(sessionId,details)=>registry.networkRequestOwner(sessionId,details.webContentsId),isShared:sessionId=>registry.isPublicSession(sessionId)},
     )
     registry.bindNetwork(network)
 
@@ -2250,6 +2411,7 @@ if (!gotLock) {
     registry.bindPermissionGate(gate)
 
     agent = new AgentRuntime({
+      questionnaires,
       getBrowserDownloads: (chatId)=>browserDownloads.list(chatId),
       getConfig: () => config.get(),
       updateConfig: async (patch) => {
@@ -2449,20 +2611,21 @@ if (!gotLock) {
     void remote.syncFromConfig().catch((e) => console.warn('[remote] sync', e))
 
     registerIpc()
-    browserAnnotations=registerBrowserWorkspace({registry,files,start:browserStart,getConfig:()=>config.get(),chatExists:id=>!!chats.get(id),getMain:()=>mainWindow,
+    browserAnnotations=registerBrowserWorkspace({registry,files,start:browserStart,getConfig:()=>config.get(),chatExists:id=>!!chats.get(id),getMain:()=>mainWindow,preparePageMenu:(parent,close)=>nativeUiService?.prepareGuestMenu(parent,close)||(()=>{}),
       preload:path.join(__dirname,'preload.js'),loadHost:(win,id)=>{
         const route=`/browser-host/${id}`
         if(process.env.VITE_DEV_SERVER_URL)void win.loadURL(process.env.VITE_DEV_SERVER_URL+'#'+route)
         else void win.loadFile(path.join(__dirname,'..','dist','index.html'),{hash:route})
       }})
 
-    fileWindows=registerFileWindows({files,getMain:()=>mainWindow,chatExists:id=>!!chats.get(id),browserOwnsChat:(sender,chatId)=>{
+    fileWindows=registerFileWindows({files,hosts:registry.hosts,getMain:()=>mainWindow,chatExists:id=>!!chats.get(id)})
+    appLinks=createAppLinkOpener({registry,getConfig:()=>config.get(),chatExists:id=>!!chats.get(id),external:url=>shell.openExternal(url),trusted:(sender,chatId)=>{
+      const win=BrowserWindow.fromWebContents(sender)
+      if(!win||win.isDestroyed()||win.webContents!==sender)return
+      if(win===mainWindow)return win
       const host=registry.hosts.hostForSender(sender)
-      return !!host&&!host.embedded&&[...host.pages].some(id=>registry.hosts.pages.get(id)?.chatId===chatId)
-    },preload:path.join(__dirname,'preload.js'),load:win=>{
-      const route='/file-host'
-      if(process.env.VITE_DEV_SERVER_URL)void win.loadURL(process.env.VITE_DEV_SERVER_URL+'#'+route)
-      else void win.loadFile(path.join(__dirname,'..','dist','index.html'),{hash:route})
+      if(host&&(!chatId||registry.hosts.hostPages(host.id).some(id=>registry.hosts.pages.get(id)?.chatId===chatId)))return win
+      if(fileWindows?.ownsSender(sender)&&(!chatId||fileWindows.ownsChat(sender,chatId)))return win
     }})
     nativeUiService=registerNativeUi({trusted:sender=>{
       const win=BrowserWindow.fromWebContents(sender)
@@ -2472,16 +2635,11 @@ if (!gotLock) {
       if(!page||page.isDestroyed()||host?.window.webContents!==sender||host.active!==id)throw Error('native_ui_page_wrong_host')
       const wc=page.webContents,epoch=page.automation.snapshot().documentEpoch,hostId=page.hostId
       return {webContents:wc,valid:()=>{const current=registry.hosts.getHost(hostId||'');return !page.isDestroyed()&&page.hostId===hostId&&current?.window.webContents===sender&&current.active===id&&page.automation.snapshot().documentEpoch===epoch}}
-    },pageSettings:(source,_url)=>{void settingsNavigation.open(source,'browser')}})
+    },pageSettings:(source,_url)=>{void settingsNavigation.open(source,'browser')},materialState:sender=>windowMaterialState(sender,sender.mainFrame)})
     tray = createAppTray({
       getMainWindow: () => mainWindow,
       createWindow,
-      onQuit: () => {
-        isQuitting = true
-        abortAllAsks({ preservePersistedUnlimited: true })
-        agent.stopAll()
-        app.quit()
-      },
+      onQuit: () => {void quitIntent.request().catch(error=>console.warn('[quit] Could not request confirmation',error))},
     })
 
     if (shouldShowMainOnStart(config.get())) {
@@ -2500,11 +2658,21 @@ if (!gotLock) {
     if (!toTray || isQuitting) app.quit()
   })
 
-  app.on('before-quit', () => {
+  app.on('before-quit', event => {
+    if(!quitDrain.ready()){
+      event.preventDefault()
+      void quitDrain.request().catch(error=>{
+        isQuitting=false
+        console.warn('[plugins] quit drain failed',error)
+        void quitIntent.request('插件资源尚未完成清理，程序仍保留，请重试退出。').catch(failure=>console.warn('[quit] Could not show recovery',failure))
+      })
+      return
+    }
+    if(quitCleanupFinished)return
+    quitCleanupFinished=true
     nativeUiService?.dispose()
     try{browserStart?.flush()}catch(error){console.warn('[browser-start] quit save failed',error)}
     fileWindows?.dispose()
-    plugins.dispose()
     isQuitting = true
     abortAllAsks({ preservePersistedUnlimited: true })
     agent?.stopAll()

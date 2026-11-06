@@ -8,6 +8,10 @@
     <OnboardingWizard v-model="wizardOpen" :manual="wizardManual" />
     <StoreUiHost />
     <TextContextMenuHost />
+    <AppLinksHost />
+    <WorkspaceTabInfoHost />
+    <WindowFindHost />
+    <UiNoticeHost />
   </v-app>
 </template>
 
@@ -17,6 +21,10 @@ import {useRouter} from 'vue-router'
 import OnboardingWizard from './components/OnboardingWizard.vue'
 import StoreUiHost from './components/store/StoreUiHost.vue'
 import TextContextMenuHost from './components/TextContextMenuHost.vue'
+import AppLinksHost from './components/AppLinksHost.vue'
+import WorkspaceTabInfoHost from './components/WorkspaceTabInfoHost.vue'
+import WindowFindHost from './components/WindowFindHost.vue'
+import UiNoticeHost from './components/UiNoticeHost.vue'
 import { useOnboarding } from './composables/useOnboarding'
 import { useAppearance } from './composables/useAppearance'
 

@@ -2,7 +2,8 @@ type WorkspaceTabBase={key:string;chatId:string;fullTitle?:string;url?:string;de
 export type WorkspaceFileTab=WorkspaceTabBase&{kind?:undefined;path:string}
 export type WorkspaceBrowserTab=WorkspaceTabBase&{kind:'browser';path:string}
 export type WorkspaceSubchatTab=WorkspaceTabBase&{kind:'subchats';parentChatId:string;selectedSubchatId?:string;title:string;path?:never}
-export type FileTab=WorkspaceFileTab|WorkspaceBrowserTab|WorkspaceSubchatTab
+export type WorkspaceQuestionnaireTab=WorkspaceTabBase&{kind:'questionnaire';questionnaireId:string;questionnaireRevision:number;questionnaireTitle?:string;title:string;path?:never}
+export type FileTab=WorkspaceFileTab|WorkspaceBrowserTab|WorkspaceSubchatTab|WorkspaceQuestionnaireTab
 export type WorkspaceTab=FileTab
 export type FileTabs={tabs:FileTab[];active:string;open:boolean}
 export const emptyFileTabs=():FileTabs=>({tabs:[],active:'',open:false})
@@ -48,6 +49,22 @@ export function openSubchatTab(state:FileTabs,parentChatId:string,selectedSubcha
   const tab=makeSubchatTab(parentChatId,selectedSubchatId),existing=state.tabs.find(item=>item.key===tab.key)
   if(!existing&&state.tabs.length>=32)throw Error('标签页已达上限，请先关闭部分标签页')
   return {tabs:existing?state.tabs.map(item=>item.key===tab.key?tab:item):[...state.tabs,tab],active:tab.key,open:true}
+}
+export type QuestionnaireTabInput={chatId:string;questionnaireId:string;questionnaireRevision?:number;questionnaireTitle?:string}
+export function questionnaireTabLabel(value:unknown){const title=typeof value==='string'?value.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g,'').trim():'';return title?`问卷: ${title}`:'问卷'}
+/** The singleton key is stable even when a different chat's questionnaire replaces it. */
+export function makeQuestionnaireTab(input:QuestionnaireTabInput):WorkspaceQuestionnaireTab{
+  if(!/^[\w-]{1,200}$/.test(input.chatId)||!/^[\w-]{1,200}$/.test(input.questionnaireId)||input.questionnaireRevision!==undefined&&(!Number.isSafeInteger(input.questionnaireRevision)||input.questionnaireRevision<0))throw Error('invalid_questionnaire_tab')
+  const questionnaireTitle=typeof input.questionnaireTitle==='string'?input.questionnaireTitle.trim():undefined
+  return {key:'questionnaire',kind:'questionnaire',chatId:input.chatId,questionnaireId:input.questionnaireId,questionnaireRevision:input.questionnaireRevision||0,...(questionnaireTitle?{questionnaireTitle}:{}),title:questionnaireTabLabel(questionnaireTitle)}
+}
+export function openQuestionnaireTab(state:FileTabs,input:QuestionnaireTabInput):FileTabs{
+  const tab=makeQuestionnaireTab(input),existing=state.tabs.find(item=>item.kind==='questionnaire'||item.key===tab.key)
+  if(!existing&&state.tabs.length>=32)throw Error('标签页已达上限，请先关闭部分标签页')
+  let replaced=false
+  const tabs=state.tabs.flatMap<FileTab>(item=>{if(item.kind!=='questionnaire'&&item.key!==tab.key)return [item];if(replaced)return [];replaced=true;return [tab]})
+  if(!replaced)tabs.push(tab)
+  return {tabs,active:tab.key,open:true}
 }
 export function showFileWorkspace(state:FileTabs,chatId:string):FileTabs{
   if(!state.tabs.length)return openBrowserTab(state,chatId)
@@ -117,7 +134,10 @@ export function restoreFileTabs(value:unknown):FileTabs{
       const item=stored as Partial<FileTab>
       if(typeof item.chatId!=='string')continue
       let tab:FileTab
-      if(item.kind==='subchats'){
+      if(item.kind==='questionnaire'){
+        if(item.key!=='questionnaire'||typeof item.questionnaireId!=='string')continue
+        tab=makeQuestionnaireTab({chatId:item.chatId,questionnaireId:item.questionnaireId,questionnaireRevision:item.questionnaireRevision,questionnaireTitle:item.questionnaireTitle})
+      }else if(item.kind==='subchats'){
         if(item.parentChatId!==item.chatId)continue
         tab=makeSubchatTab(item.chatId,typeof item.selectedSubchatId==='string'?item.selectedSubchatId:undefined)
         if(item.key!==tab.key)continue

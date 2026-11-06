@@ -1,9 +1,69 @@
 # 文档导航
 
-整理日期：2026-11-04。当前行为以 [当前功能与验证边界](./current-state.md) 为准；设计草案和历史验收记录保留原日期，不代表最新版本全部功能。
+- [插件后台任务、双向通信与执行控制完整规划](./plugin-background-jobs-and-agent-communication-plan-2026-11-06.md)：主动唤醒 Agent、任务状态与输入快照、暂停/取消/强制终止、隔离执行、可靠事件和分阶段验收；设计待实施。
+
+- [对话批注列表与移除自动静音](./conversation-annotations-and-audio-removal-2026-11-06.md)：摘要左侧 HTML 列表、避免与 View 重叠、附加已有批注及声音逻辑删除；源码和定向验证完成，新安装包待并行内核更新完成后统一生成。
+
+- [两次 QQ 下载任务诊断](./qq-download-two-latest-diagnosis-2026-11-06.md)：官方点击产生签名的成功证据、直链重试／遮挡误报／旧引用和进展策略问题，以及按用户澄清移除自动静音的记录。
+
+2026-11-06 已逐份复核 25 份当前规划，并在首屏勾选有证据的已完成子项；22 份含完成子项，3 份历史替代继续保留原分类，完成目录维持 29 份。新增完成包括首次光标回执前隐藏、问卷条件／附件／日期／修改差异／模板、插件依赖 staging 与恢复重试、查找最小化还原。0.4.14／.10 已有成品验包与隔离启动证据；详见[完成标记与有效剩余](./planning-status-and-next-work-2026-11-04.md)。
+
+
+- [插件可靠性第二批完善](./plugin-reliability-followup-2026-11-06.md)：IO 恢复重试与界面、SDK 生产依赖 staging、真实 Windows 文件锁/只读故障；源码与定向验证完成，未重新发行，强杀回收与跨平台认证仍待完成。
+
+- [插件与 Fastls 首批完善](./plugin-foundation-progress-2026-11-05.md)：0.4.13 安装恢复、静态检查、受控队列、可信请求身份及真实 Agent/fcurl 退出；含首批已验收范围和未完成门槛。
+
+
+2026-11-06 已标记过时规划：3 份整份过时、16 份部分过时、1 份历史基线。每份首屏说明范围及接续证据；名单见[过时规划与有效待办](./planning-status-and-next-work-2026-11-04.md)。搁置和仍有效的未完成目标继续保留。
+- [面板密度、对话批注与右键直接批注](./panel-density-and-annotation-chat-implementation-2026-11-05.md)：当前源码增量；列表随内容收缩、来源／重试去重、共用暗色、安装摘要；批注列表改为对话卡片，右键直接填写，NP 持焦快捷键按用户要求取消。未重新打包。
+
+- [退出确认的实际运行状态](./quit-confirmation-state-2026-11-05.md)：0.4.12 按全应用活动 Agent 数量显示退出提示，含状态变化、草稿等待和最终提交保护，附真实界面与成品检查。
+
+- [文件交互与混合独立窗口实施](./file-workspace-interaction-followup-2026-11-05.md)：0.4.11 共用文件/网页窗口与导航栏、文件选择快捷键、标签宽度和拖动修复，以及文档入口、焦点和悬停虚线；包含实际界面与成品验证边界。
+
+- [本轮已确认事项实施与验收](./confirmed-plans-implementation-2026-11-05.md)：本轮源码、真实窗口验证和交付的统一索引；历史规划状态以本记录更新为准。
+
+最新规划整理见[未完成规划与日期](./planning-status-and-next-work-2026-11-04.md)：0.4.14 验包后再次核对，25 份保留文件合并为 9 类功能收尾及 1 项综合回归问题；已做、取消、搁置和历史替代分别说明。
+
+整理日期：2026-11-06。当前行为以 [当前功能与验证边界](./current-state.md) 为准；设计草案和历史验收记录保留原日期，不代表最新版本全部功能。
+
+最新制品：0.4.14 Windows x64 安装版／便携版。五项问卷扩展与 Electron .10 已纳入；968 项单测、类型/构建、问卷组件与主应用、两包核对及成品自然退出通过。综合浏览器测试保留退出超时问题，未计通过；详见[发行说明](../release/v0.4.14/RELEASE-NOTES.zh-CN.md)与[扩展记录](./agent-questionnaire-extensions-implementation-2026-11-06.md)。旧制品保留各自交付和验证范围。
 
 ## 使用与开发
 
+- [全界面菜单审查与三项修复总规划](./已完成/menu-audit-and-followup-plan-2026-11-05.md)：本轮 M1–M3/R1–R3 已完成并纳入 0.4.10；P2 增强另列，原规划归档。
+
+- [回复文件集与完整悬停反馈](./已完成/reply-file-collections-plan-2026-11-05.md)：同次回复多文件折叠为文件集、展开清单与真实数量／大小，整行悬停及原文件操作保留；首版源码与组件验证完成，未重新打包。
+
+- [历史执行证据与网页验证漏报原诊断](./已完成/agent-history-and-page-blocker-diagnosis-2026-11-05.md)：保留 0.4.9 诊断证据；对应历史事实与验证交接修复已纳入 0.4.10，原诊断归档。
+
+- [搜索面板位置与浏览器资源侧栏调整](./search-sidebar-followup-implementation-2026-11-05.md)：搜索上移至标题栏中点、窄窗避让，以及显示网页时浏览器资源侧栏自动停靠；源码已修改，未重新打包。
+
+- [普通浮层实时网页与确认框兼容](./已完成/browser-live-view-overlay-cleanup-plan-2026-11-05.md)：已纳入 0.4.10；普通浮层不截图或隐藏 View，六类显式遮罩确认保留旧流程，取消恢复原页。
+
+- [顶部搜索、全屏与设置实施](./search-fullscreen-settings-implementation-2026-11-05.md)：失焦保留、工作区双击、设置确认／关于页及实际截图的验证范围；已纳入 0.4.7。
+
+- [顶部搜索与窗口全屏规划](./已完成/search-np-and-fullscreen-plan-2026-11-05.md)：已按调整后的功能范围归档；NP 持焦快捷键转发取消，原实机验证边界保留。
+
+- [0.4.6 面板复查与后续规划](./panel-optimization-audit-plan-2026-11-05.md)：本轮密度、去重、暗色和安装摘要已实施；独立批注列表改为对话卡片，旧审计基线及低优先级复核保留。
+
+- [下载卡片与 Electron .9 同号修订](./download-card-and-electron9-refresh-2026-11-05.md)：平铺文件行、实际原生截图、新二进制定向验收及截图／隐藏 View 残留检查；已纳入 0.4.6。
+
+- [Electron .8 自动化与 0.4.4 发行](./electron-8-automation-implementation-2026-11-05.md)：新版输入／查询接口、Agent 整轮后台隔离与保活、精确取消和清理，以及安装版／便携版核对记录；完整跨 frame 连续性后续已由 `.9` 内核实现，不再搁置，详见[当前逐项复核](./browser-input-ownership-and-cursor-plan-2026-11.md#12-当前完成情况复核2026-11-050412-源码)。
+
+- [输入浮层与统一滚动条](./composer-popovers-and-scrollbars-2026-11-05.md)：默认透明、无箭头的滚动条，编辑框等宽附加浮层、同层来源选择，以及输入区 HTML 卡片；源码已更新，8 组定向检查通过，本轮未打包。
+
+- [Agent 多引擎联网检索规划（搁置）](./literature-search-plan.md)：记录聊天中并发搜索、按需读取正文与引用方案；2026-11-05 按用户要求搁置，待明确恢复后再实施。
+
+- [原生批注、暗色与菜单位置实施](./native-annotation-and-dark-mode-implementation-2026-11-04.md)：删除旧批注底栏／背景占位，原生多行与列表、应用协调高度、暗色 Acrylic 与样式修复、菜单位置约束和展开期间的侧栏策略；本轮未生成发行包。
+
+- [自动化与浏览器后续实施记录](./automation-and-browser-followup-implementation-2026-11-04.md)：原生输入／效率修复、公共默认会话、资源侧栏、置顶、任务声明及页面菜单的源码与隔离验证；宿主毛玻璃首次视觉和原生能力缺口单列，不倒填到已安装版本。
+- [本轮规划实现核对与待办总清单](./planning-status-and-next-work-2026-11-04.md)：2026-11-05 更新至 0.4.13；面板/直接批注已完成，NP 持焦转发已取消，跨 frame 不再搁置；插件 S1/F0 首批已交付，其余可靠性和状态功能仍待完成。
+- [浏览器工具行与交互补全](./browser-chrome-interaction-followup-plan-2026-11-04.md)：输入后提示、图标对齐／逐条删除、Agent 图标和“返回主页”已接入；长期交还诊断及向窗口内展开的剩余边界。
+- [安装版首项自动化失败诊断](./installed-automation-first-chat-diagnosis-2026-11-04.md)：保留 0.3.40／`.7` 首项运行的只读证据，并链接后续输入、效率策略和观察压缩修复。
+- [Electron .7 接入与截图退出进展](./native7-implementation-progress-2026-11-04.md)：运行时、原生整行列表、连续缩放、搜索／文件选择与普通菜单已接入，496 项源码回归及隔离应用检查通过。按用户最新要求已打包验包 0.3.40；剩余截图入口和缺失能力分别列明，面板 Acrylic 搁置。
+- [浏览器呈现与弹层清理进展](./browser-presentation-and-overlay-progress-2026-11-04.md)：保留 `.5` 阶段白屏／配色及五个常用入口的迁移证据；最新 `.7` 和 0.3.40 交付见上项，剩余截图入口继续待完成。
+- [浏览器窗口一致性与原生浮层补全规划](./native-panels-followup-plan-2026-11-04.md)：优先修独立窗口白屏与标签配色差异，整理弹层截图退出清单、标签提示串目标、原生地址建议、普通菜单统一与横排缩放；内核扩展由定制 Electron 智能体提供，网站信息保持不变，附加保留 HTML 特例。
 - [原生菜单与面板接入](./native-ui-integration-2026-11-04.md)：0.3.38 升级定制内核 `.5`，普通菜单和常用面板原生化，记录实时网页、输入连续性与兼容边界。
 - [其余规划实施与发行检查](./remaining-plans-implementation-2026-11-03.md)：0.3.37 正式实现、459 项源码测试、真实窗口检查和发行包核验；原生接入后续见 0.3.38 记录。
 
@@ -11,13 +71,9 @@
 - [当前功能与验证边界](./current-state.md)：侧栏、对话、资源、插件与待实现能力。
 - [本轮界面实施与复查](./interface-implementation-check-2026-11-03.md)：正式源码改造、379 项源码测试、原生窗口及关联工程结果，明确发行包与物理输入验收边界。
 - [0.3.36 后追加工作与检查](./next-iteration-check-2026-11-03.md)：聊天查找修复、快捷键弹窗/开关、仅 Agent 自动静音，以及后续子对话/输出的历史样板；最新实施与新包见 0.3.37 记录。
-- [输入区控件与浮层规划](./composer-controls-plan-2026-11.md)：模型面板、回答方式／权限图标、发送状态、上下文预算及选区悬浮面板，含[离线示例](../../_planning/composer-attachment-example.html)。
-- [当前聊天内查找规划](./conversation-find-plan-2026-11.md)：Ctrl/⌘ F、命中跳转／高亮、折叠内容及流式回复的阅读稳定性，细化路线 C03。
-- [标题栏与导航细化](./window-chrome-polish-plan-2026-11.md)：品牌／菜单间距、导航留白与图标下移；早期[冷暖主题示例](../../_planning/window-chrome-example.html)保留细线开关，最终选择见实施记录。
 - [项目与插件开发说明](./project-and-plugin-guide.md)：宿主、工具、插件 SDK、权限及关联仓库。
 - [模块索引](./modules.md)：主进程、渲染界面和共享契约；早期章节与最新实现的差异见页首说明。
 - [2026-11-03 项目检查报告](./project-inspection-2026-11-03.md)：本轮规划后运行的类型、测试、构建、原生界面与关联工程检查，含安装版自动化观察、控件根因、失败项与覆盖边界。
-- [插件与技能创建器](./creator-plan.md)：草稿、校验、生成、试用、安装与导出。
 - [插件商店使用与维护](./plugin-store-guide.md)：桌面入口、发布、安装和故障排查。
 
 ## 商店与插件契约
@@ -29,22 +85,25 @@
 
 SDK 与官方插件链接按关联仓库并列检出组织；仅检出桌面仓库时，可从项目首页访问关联仓库。商店工程当前位于本机并列目录，其 README/PROTOCOL 在本仓 docs/store 保留带日期的快照，以便单独检出桌面仓库也能查阅；维护商店源文档时应同步快照。商店 catalog 下的说明是各版本插件包的发布产物，由 publish/rebuild 同步，文档整理不直接改写这些版本文件。
 
+## 已完成规划
+
+- [已完成规划索引（29 份）](./已完成/README.md)：归档已实施的界面、设置、输入区、查找、子对话、标签、浏览器会话与批注规划，保留原设计及验证边界。
+
+仍有待办的规划、长期维护说明、实施记录及主动搁置项目继续保留在本目录。最新状态见[当前功能](./current-state.md)和[规划核对与待办总清单](./planning-status-and-next-work-2026-11-04.md)。
+
 ## 后续设计
 
-- [原生网页圆角与菜单面板](./native-overlay-webcontentsview-plan-2026-11.md)：采用系统菜单和专用 NativePanel 的替代路线，`.5` 发布后已恢复接入；不再新增顶层 WebContentsView。
-- [子对话工作区新规划](./subchat-workspace-plan-2026-11.md)：移除左侧子树，聊天内名称进入单一汇总标签的列表/详情，保留父草稿和运行身份；含[可点击示例](../../_planning/subchat-workspace-example.html)。
+- [Agent 问卷与文件路径提示实施](./agent-questionnaire-implementation-2026-11-05.md)：主题一致的问卷表单、唯一标签、持久草稿、提交后继续及文件完整路径悬停提示已纳入 0.4.8；0.4.9 追加问卷标签动态标题，已打包核验并生成真实成品截图。[原规划](./agent-questionnaire-plan-2026-11-05.md)保留后续范围。
+
+- [桌面自动化接口调研与规划（搁置）](./desktop-automation-codex-reference-plan-2026-11-05.md)：2026-11-05 本机 Codex 安装实现调查，记录 UI Automation、原生输入／截图、管道通信和动画证据；用户明确搁置，不进入当前实施批次。
+- [网页原生右键菜单](./browser-page-context-menu-plan-2026-11-04.md)：基础动作已接入；主 frame 的隔离编辑／坐标保护、子 frame 原生目标缺口与最新版批注入口分别记录。
+- [窗口 Acrylic 与透明框架](./window-acrylic-material-plan-2026-11-04.md)：宿主开关、支持判断、实色回退已接入，首次前景灰色的真实视觉问题待内核衔接。NativePanel 自身 Acrylic 仍搁置。
+- [Electron .7 发布能力与实施总规划](./electron-7-readiness-and-implementation-plan-2026-11-04.md)：多行输入、独立滚动槽和已发布但搁置的面板材质分别列明，保留自动增高／被动穿透／复杂侧栏等缺口；明确三项发行门槛和并行后续规划，当前已开始接入，实况见实施进展。
+- [Electron .6 能力核对历史](./electron-6-readiness-and-implementation-plan-2026-11-04.md)：保留已核验制品与当时方案；当前实施状态以上述 .7 总规划为准。
+- [虚拟光标接续实施](./cursor-first-position-and-handoff-implementation-2026-11-06.md)：首次指针回执前隐藏已实现，当前机器系统画面及并发取消已有验证；首批执行途中显示、多设备／宿主矩阵和长期交还原现场核销仍保留。
+- [原生网页与菜单面板](./native-overlay-webcontentsview-plan-2026-11.md)：采用系统菜单和专用 NativePanel，`.5` 发布后已恢复接入；不新增顶层 WebContentsView，网页 View 圆角要求已按用户决定取消。
 - [工作区自适应与悬浮侧栏](./workspace-responsive-and-floating-sidebar-plan-2026-11.md)：分隔拖动/窗口变窄自动展开、比例恢复与迟滞、侧栏固定/悬浮两种展示和独立显隐。
-- [标签图标、换位动效与地址工具行](./workspace-tab-label-and-icon-plan-2026-11.md)：混排标题/图标/音频原因、拖动让位和提交动效，以及整行高度、内距与原生视口的统一规划。
-- [网页悬浮批注与专用光标](./browser-floating-annotation-plan-2026-11.md)：统一点击/拖选、目标旁评论条、临时目标与保存，以及独立于 AI 自动化的批注光标；含[离线样板](../../_planning/browser-floating-annotation-example.html)。
-- [对话输出区重设计](./conversation-output-redesign-plan-2026-11.md)：参考扁平正文/工具/子对话活动排版，重新设计内容与状态，含[离线样板](../../_planning/conversation-output-example.html)。
-- [原生浏览器左上角错位回归](./browser-view-origin-regression-plan-2026-11.md)：记录未提交默认边界被显示的 P0 根因；正式修复与 22 项原生专项结果见 0.3.37 实施记录。
-- [侧栏外侧滚动槽规划](./sidebar-scrollbar-layout-plan-2026-11.md)：对话、文件、浏览器、插件与设置导航的滚动归属，原生轨道独立留白与嵌套滚动整理。
-- [设置返回、关于与光标卡片](./settings-navigation-and-cursor-plan-2026-11.md)：光标复用主题选择形式、帮助关于统一入口、离开设置恢复来源；内容标签区域统一称工作区。
-- [本轮界面重构统一规划](./interface-renovation-plan-2026-11.md)：汇总新增需求、文档、交互示例、依赖和实施顺序；第 7 节独立记录 0.3.36 后的追加目标及实际状态。
 - [浏览器输入控制权与专属光标规划](./browser-input-ownership-and-cursor-plan-2026-11.md)：安装版错误与实现核对，整轮任务保护、显式人工接管及三款原生 SVG 光标设计；现已接入正式控制器，实机验证边界见实施复查。
-- [设置生效与统一控件／模型配置规划](./settings-immediate-save-plan-2026-11.md)：移除全局“应用”，自动提交与局部手动提交分流，整理开关几何、双重焦点及高级模型参数。
-- [浏览器资源界面重构规划](./browser-resource-redesign-plan-2026-11.md)：资源筛选、会话管理、五类空状态、菜单与危险操作拆分，含[离线资源示例](../../_planning/browser-resources-redesign-example.html)。
-- [附加菜单、富文本与工作区展开新规划](./composer-attachment-plan-2026-11.md)：2026-11-03 新增，包含“添加 / 工具”菜单、句内引用、更多来源、展开后对话／文件／网页同栏，以及弹出层导致浏览器视图变白的回归方案；保留[离线交互示例](../../_planning/composer-attachment-example.html)，正式应用接入与验证见实施复查。
 - [浏览器常用标签功能接入](./main-window-framework-v2-plan.md#24-浏览器常用标签功能接入2026-11-03)：共用标签与菜单、关闭恢复、固定／音频、多选移窗及空白页过滤已接入，含检查范围和剩余边界。
 - [浏览器标签统一体验规划](./main-window-framework-v2-plan.md#23-浏览器标签统一体验规划2026-11-03)：设计依据，统一状态、菜单和操作规则；实际接入见第 24 节，分组／缩略图等仍待实施。
 - [全界面图标接入记录](./main-window-framework-v2-plan.md#22-全界面图标接入记录2026-11-03)：96 个共享图形已接入，含 Fluent Regular、朝外／朝内折角、用途绑定与检查边界。
@@ -59,18 +118,15 @@ SDK 与官方插件链接按关联仓库并列检出组织；仅检出桌面仓�
 - [文献检索加速方案](./literature-search-plan.md)：已落地首版多 API 并发查询与增量结果；记录来源级限流、去重、缓存和后续扩展计划。
 - [应用窗口与内容区界面优化建议](./browser-ui-optimization-2026-11.md)：窗口层级、资源侧栏、内容区标题栏和浏览器工具栏的布局与配色建议。
 - [浏览器 Agent 自动化](./browser-agent-automation.md)：原生快照、拟人轨迹、虚拟光标、页面接管与后台可信输入；运行时已升级 cloudbypass.5。
-- [浏览器自动化控制规划](./browser-automation-control-plan.md)：设置、Agent 简化调用、控制权及异常恢复的实现约束与验收记录。
-- [浏览器地址栏精简规划与交付](./browser-toolbar-compact-plan.md)：已完成 Agent 图标左键切换/右键面板、移除状态行、批注图标化及按需环形下载进度；适配新标签系统，隔离 `.4` 界面验证 53 项通过，含剩余验证边界。
 - [2026-10 历史功能路线](./feature-roadmap-2026-10.md)：保留当时设计与验收记录；最新计划和状态以 2026-11 路线图及当前功能页为准。
 - [跨平台插件安装与原生运行时](./plugin-platform-installation-plan.md)：通用机制和 Windows 闭环已实现；macOS/Linux 宿主运行与分发仍需逐平台验收。
 - [Fastls 与 fastls-curl 集成](./fastls-plugin-plan.md)：三个基础工具及 Windows x64 闭环已实现；Cookie 上下文、自动逐跳和其他平台认证仍待完成。
 
 ## 历史设计与阶段记录
 
-- [早期架构草案](./architecture-plan.md)：保留当时设计决策，现有界面和能力见当前功能页。
 - [2026-10 重构方案](./renovation-plan-2026-10.md)：立项时基线及分阶段验收。
 - [重构进展](./renovation-progress.md)：阶段性结果及当时测试数量。
 - [2026-10-31 项目复核](./project-review-and-update-2026-10-31.md)：该轮实施依据、结果与后续增量。
-- [JS 对话框内核方案](./electron-js-dialog-customization-plan.md) 与 [宿主对接方案](./js-dialog-electron-api-plan.md)：保留设计过程；现已优先使用可探测的原生 Handler，不可用时降级。
+- [JS 对话框内核方案](./electron-js-dialog-customization-plan.md) 与 [宿主对接方案](./js-dialog-electron-api-plan.md)：保留设计过程；当前为 native-only；三类普通对话框已接入，beforeunload 的 Handler 链仍未闭环。
 
 更新规则：功能变化先同步当前功能页和用户入口说明；协议变化同时更新宿主、SDK 与商店规范。规划明确标记待实施，测试数量绑定记录日期，构建截图、用户数据与凭据不作为源码文档提交。

@@ -13,8 +13,8 @@
         class="icon-btn"
         :disabled="!chatId || busySession"
         :class="{ loading: busySession }"
-        title="新建浏览器会话并打开页面"
-        aria-label="新建浏览器会话"
+        title="新建独立浏览会话并打开页面"
+        aria-label="新建独立浏览会话"
         @click="createDialog=true"
       >
         <AppIcon icon="plus" />
@@ -24,11 +24,10 @@
     </Teleport>
     <Transition name="resource-body">
     <div v-show="!collapsed" class="res-body" data-ctx-menu="browser">
-      <div v-if="!chatId" class="res-empty">选择对话后使用浏览器</div>
-      <div v-else-if="!tree.length" class="res-empty">此对话暂无浏览器资源<button type="button" class="icon-btn" :disabled="busySession || busyQuickOpen" title="新建页面" aria-label="在此对话中新建页面" @click="quickOpen"><AppIcon icon="plus" /></button></div>
+      <div v-if="!tree.length" class="res-empty">暂无页面<button v-if="chatId" type="button" class="icon-btn" :disabled="busySession || busyQuickOpen" title="新建页面" aria-label="在此对话中新建页面" @click="quickOpen"><AppIcon icon="plus" /></button></div>
       <div v-else class="res-tree">
-        <button v-if="emptySessions.length&&!includeEmpty&&!search.trim()" class="empty-sessions-toggle" type="button" :aria-expanded="showEmpty" @click="showEmpty=!showEmpty"><AppIcon :icon="showEmpty?'chevron-down':'chevron-right'" />未打开页面的会话（{{ emptySessions.length }}）</button>
-        <div v-for="s in visibleSessions" :key="s.sessionId" class="tree-sess" :data-session-id="s.sessionId">
+        <button v-if="!prefiltered&&emptySessions.length&&!includeEmpty&&!search.trim()" class="empty-sessions-toggle" type="button" :aria-expanded="showEmpty" @click="showEmpty=!showEmpty">{{ showEmpty?'隐藏':'显示' }}空会话（{{ emptySessions.length }}）</button>
+        <div v-for="s in visibleSessions" :key="s.sessionId" class="tree-sess" :data-session-id="s.sessionId" :data-session-scope="isPublicBrowserSession(s)?'default':s.persist?'persistent':'temporary'">
           <div
             class="tree-row sess"
             :class="{'is-empty':!s.windows.length}"
@@ -36,23 +35,26 @@
             @dragstart="onDragStart($event, sessionRef(s))" @dragend="($event.currentTarget as HTMLElement).classList.remove('dragging')"
             @click="selectSession(s)"
           @contextmenu="onSessionMenu($event, s)"
-          :title="`${sessionLabel(s)} · ${s.persist?'保留会话数据':'临时会话'}`"
+          :title="`${sessionLabel(s)} · ${isPublicBrowserSession(s)?'所有对话共享网站数据':s.persist?'保留会话数据':'临时会话'}`"
         >
-            <button v-if="s.windows.length" type="button" class="tree-disclosure" :aria-label="`${expandedSessions.has(s.sessionId)?'折叠':'展开'}会话 ${s.sessionIndex}`" :aria-expanded="expandedSessions.has(s.sessionId)" @click.stop="toggleSession(s.sessionId)"><AppIcon :icon="expandedSessions.has(s.sessionId)?'chevron-down':'chevron-right'" /></button>
-            <span v-else class="tree-disclosure-space" aria-hidden="true" />
+            <button type="button" class="tree-disclosure" :aria-label="`${expandedSessions.has(s.sessionId)?'折叠':'展开'}${sessionLabel(s)}`" :aria-expanded="expandedSessions.has(s.sessionId)" @click.stop="toggleSession(s.sessionId)"><AppIcon :icon="expandedSessions.has(s.sessionId)?'caret-down':'caret-right'" /></button>
             <button type="button" class="tree-name" :aria-label="`打开${sessionLabel(s)}`" @keydown="treeKey($event,s)" @click.stop="selectSession(s)">
-              <AppIcon icon="layer-group" class="tree-kind-icon session-kind-icon" />
-              <span class="session-title">{{ sessionLabel(s) }}</span><span v-if="s.isDefault" class="tree-meta">默认</span>
-              <span v-if="s.chatId !== chatId" class="tree-meta">{{ ownerLabel(s.chatId) }}</span>
+              <AppIcon :icon="isPublicBrowserSession(s)?'globe':'layer-group'" class="tree-kind-icon session-kind-icon" />
+              <span class="session-title">{{ sessionLabel(s) }}</span><span v-if="!isPublicBrowserSession(s)" class="tree-meta">{{ s.persist?'持久':'临时' }}</span>
             </button>
-            <span v-if="s.persist" class="session-persistent" role="img" aria-label="保留会话数据" title="保留会话数据；网站可能要求重新登录"><AppIcon icon="thumbtack" /></span>
-            <BrowserResourceActions class="session-actions" :count="s.windows.length" :label="`${sessionLabel(s)}更多操作`" :active="sessMenu?.open && menuSession?.sessionId===s.sessionId" @more="onSessionMenu($event,s)" />
+            <BrowserResourceActions class="session-actions" :count="s.windows.length||undefined" :label="`${sessionLabel(s)}更多操作`" :active="sessMenu?.open && menuSession?.sessionId===s.sessionId" @more="onSessionMenu($event,s)" />
           </div>
-          <div v-if="!s.windows.length&&expandedSessions.has(s.sessionId)" class="session-empty-detail">暂无打开的页面<button type="button" @click="createWindow(s.sessionId)">在此会话新建页面</button></div>
+          <div v-if="!s.windows.length&&expandedSessions.has(s.sessionId)&&!search.trim()" class="session-empty-detail">
+            <button type="button" class="session-create-browser" :disabled="!!busyWindow" :aria-busy="busyWindow===s.sessionId" :aria-label="`在${sessionLabel(s)}中创建新浏览器`" @click="createWindow(s.sessionId)">
+              <AppIcon :icon="busyWindow===s.sessionId?'circle-notch':'plus'" :spin="busyWindow===s.sessionId" />
+              <span>{{ busyWindow===s.sessionId?'正在创建…':'创建新浏览器' }}</span>
+            </button>
+          </div>
           <div v-if="s.windows.length" v-show="expandedSessions.has(s.sessionId)||!!search.trim()" class="tree-children">
             <div
               v-for="w in windowsOf(s)"
               :key="w.windowId"
+              :data-page-id="w.windowId" :data-owner-id="browserPageChatId(s,w)"
               class="tree-row win"
               :class="{'is-selected':w.selected}"
               draggable="true"
@@ -63,7 +65,7 @@
             >
               <button type="button" class="tree-name" :title="w.url" :aria-current="w.selected?'page':undefined" @keydown="treeKey($event,s,w)" @click.stop="showPage(w)">
                 <span class="tree-kind-icon browser-kind-icon"><AppIcon icon="browser" /></span>
-                <span class="page-title">{{ windowLabel(s,w) }}</span>
+                <span class="page-labels"><span class="page-title">{{ windowLabel(s,w) }}</span><span v-if="showOwners" class="page-owner" :title="ownerLabel(browserPageChatId(s,w))">{{ ownerLabel(browserPageChatId(s,w)) }}</span></span>
                 <span v-if="w.loading" class="tree-meta">加载中</span>
               </button>
               <BrowserResourceActions class="page-actions" label="页面更多操作" :active="winMenu?.open && menuWindow?.windowId===w.windowId" @more="onWindowMenu($event,s,w)" />
@@ -75,7 +77,7 @@
     </Transition>
 
     <SidebarContextMenu ref="sessMenu">
-      <div class="sidebar-ctx-label">{{ menuSession?.persist ? '保留会话数据' : '临时会话' }}</div>
+      <div class="sidebar-ctx-label">{{ menuSession&&isPublicBrowserSession(menuSession)?'所有对话共享网站数据':menuSession?.persist?'持久会话':'临时会话' }}</div>
       <button v-if="menuSession?.windows.length" type="button" class="sidebar-more-item" role="menuitem" @click="openSession(menuSession!)"><AppIcon icon="browser" /><span>打开页面</span></button>
       <button type="button" class="sidebar-more-item" role="menuitem" @click="emit('add-ref', sessionRef(menuSession!))">
         <AppIcon icon="paperclip" />
@@ -83,14 +85,14 @@
       </button>
       <button type="button" class="sidebar-more-item" role="menuitem" :disabled="busyWindow === menuSession?.sessionId" @click="createWindow(menuSession!.sessionId)">
         <AppIcon icon="browser" />
-        <span>新建页面</span>
+        <span>在此会话新建页面</span>
       </button>
-      <button type="button" class="sidebar-more-item" role="menuitem" @click="beginRename"><AppIcon icon="pen-to-square" /><span>重命名</span></button>
-      <button type="button" class="sidebar-more-item" role="menuitem" :disabled="!!busyManagement" @click="setDefault"><AppIcon icon="check" /><span>{{ menuSession?.isDefault?'取消默认会话':'设为默认会话' }}</span></button>
+      <button v-if="menuSession&&!isPublicBrowserSession(menuSession)" type="button" class="sidebar-more-item" role="menuitem" @click="beginRename"><AppIcon icon="pen-to-square" /><span>重命名</span></button>
       <div class="sidebar-ctx-label with-sep">管理</div>
-      <button type="button" class="sidebar-more-item" role="menuitem" :disabled="!menuSession?.windows.length||!!busyManagement" @click="beginManage('close-pages')"><AppIcon icon="xmark" /><span>关闭全部页面</span></button>
-      <button type="button" class="sidebar-more-item danger" role="menuitem" :disabled="!!busyManagement" @click="beginManage('clear-data')"><AppIcon icon="trash" /><span>清除网站数据…</span></button>
+      <button type="button" class="sidebar-more-item" role="menuitem" :disabled="!closablePages||!!busyManagement" @click="beginManage('close-pages')"><AppIcon icon="xmark" /><span>{{ menuSession&&isPublicBrowserSession(menuSession)?'关闭当前对话的页面':'关闭全部页面' }}</span></button>
+      <button type="button" class="sidebar-more-item danger" role="menuitem" :disabled="!!busyManagement||menuSession?.initialized===false" :title="menuSession?.initialized===false?'尚未创建网站数据':undefined" @click="beginManage('clear-data')"><AppIcon icon="trash" /><span>清除网站数据…</span></button>
       <button
+        v-if="menuSession&&!isPublicBrowserSession(menuSession)"
         type="button"
         class="sidebar-more-item danger"
         role="menuitem"
@@ -110,18 +112,19 @@
         <AppIcon icon="browser" />
         <span>{{ isRemote ? '远程查看' : '打开页面' }}</span>
       </button>
-      <button type="button" class="sidebar-more-item" role="menuitem" @click="copyUrl(menuWindow!)">
+      <button type="button" class="sidebar-more-item" role="menuitem" :disabled="!menuAddressState.context||addressPending" :title="menuAddressState.reason" @click="pageAddressAction('copy')">
         <AppIcon icon="copy" />
-        <span>复制网址</span>
+        <span>{{ menuAddressState.copyLabel }}</span>
       </button>
+      <button v-if="!isRemote&&menuAddressState.visible" type="button" class="sidebar-more-item" role="menuitem" :disabled="!menuAddressState.context||addressPending" :title="menuAddressState.reason" @click="pageAddressAction('external')"><AppIcon icon="arrow-up-right-from-square" /><span>{{ menuAddressState.label }}</span></button>
       <button type="button" class="sidebar-more-item danger" role="menuitem" @click="closeWindow(menuWindow!)">
         <AppIcon icon="xmark" />
         <span>关闭页面</span>
       </button>
     </SidebarContextMenu>
     <BrowserSessionCreateDialog v-model="createDialog" :chat-id="chatId" :owner-title="ownerLabel(chatId)" @created="createdSession" />
-    <v-dialog :model-value="!!renameTarget" max-width="420" :persistent="!!busyManagement" @update:model-value="!$event&&(renameTarget=null)"><v-card><v-card-title>重命名会话</v-card-title><v-card-text><v-text-field v-model="renameDraft" label="会话名称" maxlength="80" hint="留空恢复默认名称" persistent-hint autofocus variant="outlined" @keydown.enter="saveRename" /><p v-if="dialogError" class="session-error" role="alert">{{ dialogError }}</p></v-card-text><v-card-actions><v-spacer /><v-btn :disabled="!!busyManagement" @click="renameTarget=null">取消</v-btn><v-btn color="primary" :loading="!!busyManagement" @click="saveRename()">保存</v-btn></v-card-actions></v-card></v-dialog>
-    <v-dialog :model-value="!!manageTarget" max-width="460" :persistent="!!busyManagement" @update:model-value="!$event&&(manageTarget=null)"><v-card><v-card-title>{{ manageTitle }}</v-card-title><v-card-text><p>会话：{{ manageTarget&&sessionLabel(manageTarget) }}</p><p>所属对话：{{ manageTarget&&ownerLabel(manageTarget.chatId) }} · {{ manageTarget?.windows.length||0 }} 个页面</p><p class="session-impact">{{ manageDescription }}</p><p v-if="dialogError" class="session-error" role="alert">{{ dialogError }}</p></v-card-text><v-card-actions><v-spacer /><v-btn :disabled="!!busyManagement" @click="manageTarget=null">取消</v-btn><v-btn :color="manageAction==='close-pages'?'primary':'error'" :loading="!!busyManagement" @click="confirmManage">{{ manageTitle }}</v-btn></v-card-actions></v-card></v-dialog>
+    <BrowserContentDialog :model-value="!!renameTarget" max-width="420" :persistent="!!busyManagement" @update:model-value="!$event&&(renameTarget=null)"><v-card><v-card-title>重命名会话</v-card-title><v-card-text><v-text-field v-model="renameDraft" label="会话名称" maxlength="80" hint="留空恢复默认名称" persistent-hint autofocus variant="outlined" @keydown.enter="saveRename" /><p v-if="dialogError" class="session-error" role="alert">{{ dialogError }}</p></v-card-text><v-card-actions><v-spacer /><v-btn :disabled="!!busyManagement" @click="renameTarget=null">取消</v-btn><v-btn color="primary" :loading="!!busyManagement" @click="saveRename()">保存</v-btn></v-card-actions></v-card></BrowserContentDialog>
+    <BrowserConfirmationDialog :model-value="!!manageTarget" :confirmation="manageAction==='close-pages'?'close-session':manageAction==='clear-data'?'clear-session-data':'delete-session'" :context-key="manageTarget?.sessionId" max-width="460" :persistent="!!busyManagement" @update:model-value="!$event&&(manageTarget=null)"><v-card><v-card-title>{{ manageTitle }}</v-card-title><v-card-text><p>{{ manageTarget&&sessionLabel(manageTarget) }}</p><p v-if="manageTarget&&!isPublicBrowserSession(manageTarget)">所属对话：{{ ownerLabel(manageTarget.chatId) }}</p><p class="session-impact">{{ manageDescription }}</p><p v-if="dialogError" class="session-error" role="alert">{{ dialogError }}</p></v-card-text><v-card-actions><v-spacer /><v-btn :disabled="!!busyManagement" @click="manageTarget=null">取消</v-btn><v-btn :color="manageAction==='close-pages'?'primary':'error'" :loading="!!busyManagement" @click="confirmManage">{{ manageTitle }}</v-btn></v-card-actions></v-card></BrowserConfirmationDialog>
   </div>
 </template>
 
@@ -130,9 +133,13 @@ import AppIcon from '../icons/AppIcon.vue'
 import BrowserResourceActions from './BrowserResourceActions.vue'
 import { computed, ref,watch } from 'vue'
 import type { BrowserContextRef, BrowserSessionManageAction, BrowserTreeSession, BrowserTreeWindow } from '@shared/types'
-import { browserSessionLabel as sessionLabel } from '@shared/browser-session'
+import { browserSessionLabel } from '@shared/browser-session'
+import {browserPageChatId,isPublicBrowserSession} from '@shared/browser-resource-sessions'
+import {browserPageAddressState,browserPageAddressError,sameBrowserPageAddress,type BrowserPageAddressContext,type BrowserPageAddressAction} from '@shared/browser-page-address'
 import BrowserSessionCreateDialog from './BrowserSessionCreateDialog.vue'
 import SidebarContextMenu from './SidebarContextMenu.vue'
+import BrowserContentDialog from '../BrowserContentDialog.vue'
+import BrowserConfirmationDialog from '../BrowserConfirmationDialog.vue'
 
 const props = withDefaults(defineProps<{
   headerTarget?: string
@@ -146,16 +153,25 @@ const props = withDefaults(defineProps<{
   includeEmpty?: boolean
   search?: string
   ownerMatched?: boolean
-}>(), {headerVisible:true,includeEmpty:false,search:'',ownerMatched:false})
+  prefiltered?: boolean
+  showOwners?: boolean
+  knownSessionIds?: string[]
+}>(), {headerVisible:true,includeEmpty:false,search:'',ownerMatched:false,prefiltered:false,showOwners:false})
 
 const emit = defineEmits<{
   'add-ref': [ref: BrowserContextRef]
   'ask-close-session': [session: BrowserTreeSession]
   'remote-view': [windowId: string]
+  'request-page': [sessionId:string]
   notify: [text: string, color?: string]
 }>()
 
 const collapsed = ref(false)
+function sessionLabel(session:BrowserTreeSession){
+  const label=browserSessionLabel(session)
+  const duplicates=props.tree.filter(candidate=>browserSessionLabel(candidate)===label)
+  return duplicates.length>1?`${label} · ${session.sessionId.replace(/^sess_/,'').slice(0,6)}`:label
+}
 const busySession = ref(false)
 const busyQuickOpen = ref(false)
 const busyWindow = ref<string | null>(null)
@@ -163,30 +179,38 @@ const sessMenu = ref<InstanceType<typeof SidebarContextMenu> | null>(null)
 const winMenu = ref<InstanceType<typeof SidebarContextMenu> | null>(null)
 const menuSession = ref<BrowserTreeSession | null>(null)
 const menuWindow = ref<BrowserTreeWindow | null>(null)
+const menuAddressState=computed(()=>browserPageAddressState(menuWindow.value,menuSession.value&&menuWindow.value?browserPageChatId(menuSession.value,menuWindow.value):props.chatId))
+const addressPending=ref(false)
+let addressSnapshot:BrowserPageAddressContext|undefined
 const expandedSessions=ref(new Set<string>())
+const collapsedSessions=new Set<string>()
 const showEmpty=ref(false),createDialog=ref(false),busyManagement=ref(''),renameTarget=ref<BrowserTreeSession|null>(null),renameDraft=ref(''),dialogError=ref('')
 const manageTarget=ref<BrowserTreeSession|null>(null),manageAction=ref<BrowserSessionManageAction>('close-pages')
-const manageTitle=computed(()=>manageAction.value==='close-pages'?'关闭全部页面':manageAction.value==='clear-data'?'清除网站数据':'删除会话及数据')
-const manageDescription=computed(()=>manageAction.value==='close-pages'?'关闭此会话的页面，保留会话名称、默认标记和网站数据。网页可取消关闭。':manageAction.value==='clear-data'?'先关闭全部页面，再清除该会话的 Cookie、网站存储和缓存；网站可能要求重新登录。保留会话名称和默认标记。':'先关闭全部页面，再清除网站数据并删除会话。不会删除所属对话、消息或文件。')
-const emptySessions=computed(()=>props.tree.filter(s=>!s.windows.length))
+const manageChatId=ref('')
+const sharedManage=computed(()=>!!manageTarget.value&&isPublicBrowserSession(manageTarget.value))
+const manageTitle=computed(()=>manageAction.value==='close-pages'?(sharedManage.value?'关闭当前对话的页面':'关闭全部页面'):manageAction.value==='clear-data'?(sharedManage.value?'清除共享网站数据':'清除网站数据'):'删除会话及数据')
+const manageDescription=computed(()=>sharedManage.value?(manageAction.value==='close-pages'?'只关闭当前对话在默认会话中打开的页面。其它对话页面和共享登录数据会保留。':'将关闭默认会话的所有页面，并清除共享 Cookie、网站存储和缓存。所有对话使用的登录状态都会受到影响；执行中的页面操作需先结束。'):manageAction.value==='close-pages'?'关闭此会话的页面，保留网站数据。网页可取消关闭。':manageAction.value==='clear-data'?'先关闭全部页面，再清除 Cookie、网站存储和缓存；网站可能要求重新登录。':'先关闭全部页面，再清除网站数据并删除会话。不会删除所属对话、消息或文件。')
+const closablePages=computed(()=>menuSession.value?.windows.filter(page=>!isPublicBrowserSession(menuSession.value!)||!!props.chatId&&browserPageChatId(menuSession.value!,page)===props.chatId).length||0)
+const emptySessions=computed(()=>props.tree.filter(s=>!isPublicBrowserSession(s)&&!s.windows.length))
 const sessionMatches=(s:BrowserTreeSession)=>props.ownerMatched||sessionLabel(s).toLocaleLowerCase().includes(props.search.trim().toLocaleLowerCase())
-function windowsOf(s:BrowserTreeSession){const needle=props.search.trim().toLocaleLowerCase();return !needle||sessionMatches(s)?s.windows:s.windows.filter(w=>(w.title+' '+w.url).toLocaleLowerCase().includes(needle))}
-const visibleSessions=computed(()=>[...props.tree].filter(s=>props.search.trim()?(sessionMatches(s)||windowsOf(s).length):s.windows.length||props.includeEmpty||showEmpty.value).sort((a,b)=>Number(!a.windows.length)-Number(!b.windows.length)))
+function windowsOf(s:BrowserTreeSession){const needle=props.search.trim().toLocaleLowerCase();return props.prefiltered||!needle||sessionMatches(s)?s.windows:s.windows.filter(w=>(w.title+' '+w.url).toLocaleLowerCase().includes(needle))}
+const visibleSessions=computed(()=>[...props.tree].filter(s=>props.prefiltered||isPublicBrowserSession(s)||(props.search.trim()?(sessionMatches(s)||windowsOf(s).length):s.windows.length||props.includeEmpty||showEmpty.value)).sort((a,b)=>Number(isPublicBrowserSession(b))-Number(isPublicBrowserSession(a))))
 let sessionsWithPages=new Set<string>()
-watch(()=>props.tree.map(s=>`${s.sessionId}:${!!s.windows.length}`).join('\0'),()=>{
-  const live=new Set(props.tree.filter(s=>s.windows.length).map(s=>s.sessionId))
-  for(const id of live)if(!sessionsWithPages.has(id))expandedSessions.value.add(id)
-  const known=new Set(props.tree.map(s=>s.sessionId))
+watch(()=>[props.tree.map(s=>`${s.sessionId}:${!!s.windows.length}`).join('\0'),props.knownSessionIds?.join('\0')],()=>{
+  const live=new Set(props.tree.filter(s=>s.windows.length||isPublicBrowserSession(s)).map(s=>s.sessionId))
+  for(const id of live)if(!sessionsWithPages.has(id)&&!collapsedSessions.has(id))expandedSessions.value.add(id)
+  const known=new Set(props.knownSessionIds||props.tree.map(s=>s.sessionId))
   for(const id of expandedSessions.value)if(!known.has(id))expandedSessions.value.delete(id)
+  for(const id of collapsedSessions)if(!known.has(id))collapsedSessions.delete(id)
   sessionsWithPages=live
 },{immediate:true})
-function toggleSession(id:string){if(expandedSessions.value.has(id))expandedSessions.value.delete(id);else expandedSessions.value.add(id)}
-function selectSession(s:BrowserTreeSession){expandedSessions.value.add(s.sessionId);const page=s.windows.find(w=>w.selected)||s.windows[0];if(page)showPage(page)}
+function toggleSession(id:string){if(expandedSessions.value.has(id)){expandedSessions.value.delete(id);collapsedSessions.add(id)}else{expandedSessions.value.add(id);collapsedSessions.delete(id)}}
+function selectSession(s:BrowserTreeSession){expandedSessions.value.add(s.sessionId);collapsedSessions.delete(s.sessionId);const page=s.windows.find(w=>w.selected)||s.windows[0];if(page)showPage(page)}
 function treeKey(event:KeyboardEvent,s:BrowserTreeSession,w?:BrowserTreeWindow){
   if(event.isComposing)return
   if(event.key==='F10'&&event.shiftKey){if(w)onWindowMenu(event,s,w);else onSessionMenu(event,s);return}
-  if(event.key==='ArrowRight'&&!w){event.preventDefault();expandedSessions.value.add(s.sessionId);return}
-  if(event.key==='ArrowLeft'){event.preventDefault();if(w)(event.currentTarget as HTMLElement).closest('.tree-sess')?.querySelector<HTMLButtonElement>('.sess .tree-name')?.focus();else expandedSessions.value.delete(s.sessionId);return}
+  if(event.key==='ArrowRight'&&!w){event.preventDefault();expandedSessions.value.add(s.sessionId);collapsedSessions.delete(s.sessionId);return}
+  if(event.key==='ArrowLeft'){event.preventDefault();if(w)(event.currentTarget as HTMLElement).closest('.tree-sess')?.querySelector<HTMLButtonElement>('.sess .tree-name')?.focus();else{expandedSessions.value.delete(s.sessionId);collapsedSessions.add(s.sessionId)}return}
   if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return
   event.preventDefault()
   const buttons=[...(event.currentTarget as HTMLElement).closest('.res-tree')?.querySelectorAll<HTMLButtonElement>('.tree-name')||[]].filter(button=>button.checkVisibility())
@@ -199,6 +223,7 @@ async function openSession(s:BrowserTreeSession){
   const page=s.windows.find(w=>w.selected)||s.windows[0]
   if(!page){await createWindow(s.sessionId);return}
   expandedSessions.value.add(s.sessionId)
+  collapsedSessions.delete(s.sessionId)
   showPage(page)
 }
 
@@ -244,11 +269,12 @@ function onSessionMenu(e: MouseEvent|KeyboardEvent, s: BrowserTreeSession) {
 function onWindowMenu(e: MouseEvent|KeyboardEvent, s: BrowserTreeSession, w: BrowserTreeWindow) {
   menuSession.value = s
   menuWindow.value = w
+  addressSnapshot=browserPageAddressState(w,browserPageChatId(s,w)).context
   winMenu.value?.show(e)
 }
 
 async function createdSession(session:BrowserTreeSession){showEmpty.value=true;await createWindow(session.sessionId)}
-function beginRename(){if(!menuSession.value)return;renameTarget.value=menuSession.value;renameDraft.value=menuSession.value.name||'';dialogError.value=''}
+function beginRename(){if(!menuSession.value||isPublicBrowserSession(menuSession.value))return;renameTarget.value=menuSession.value;renameDraft.value=menuSession.value.name||'';dialogError.value=''}
 async function saveRename(event?:KeyboardEvent){
   if(event?.isComposing)return
   event?.preventDefault()
@@ -258,20 +284,15 @@ async function saveRename(event?:KeyboardEvent){
   catch(error){dialogError.value=error instanceof Error?error.message:'重命名失败'}
   finally{busyManagement.value=''}
 }
-async function setDefault(){
-  if(!menuSession.value||busyManagement.value||!window.navora)return
-  const target=menuSession.value;busyManagement.value=target.sessionId
-  try{await window.navora.browser.updateSession(target.sessionId,{isDefault:!target.isDefault});emit('notify',target.isDefault?'已取消默认会话':'已设为默认会话','primary')}
-  catch(error){emit('notify',error instanceof Error?error.message:'保存默认会话失败')}
-  finally{busyManagement.value=''}
-}
-function beginManage(action:BrowserSessionManageAction){if(!menuSession.value)return;manageTarget.value=menuSession.value;manageAction.value=action;dialogError.value=''}
+function beginManage(action:BrowserSessionManageAction){if(!menuSession.value||isPublicBrowserSession(menuSession.value)&&(action==='delete'||action==='close-pages'&&!props.chatId))return;manageTarget.value=menuSession.value;manageAction.value=action;manageChatId.value=props.chatId;dialogError.value=''}
 async function confirmManage(){
   if(!manageTarget.value||busyManagement.value||!window.navora)return
   const target=manageTarget.value;busyManagement.value=target.sessionId;dialogError.value=''
   try{
     if(!props.tree.some(s=>s.sessionId===target.sessionId&&s.chatId===target.chatId))throw Error('会话已不存在，请刷新后重试')
-    const result=await window.navora.browser.manageSession(target.sessionId,manageAction.value)
+    const common=isPublicBrowserSession(target)
+    if(common&&manageAction.value==='close-pages'&&props.chatId!==manageChatId.value)throw Error('当前对话已切换，请重新打开会话菜单。')
+    const result=await window.navora.browser.manageSession(target.sessionId,manageAction.value,common?{...(manageAction.value==='close-pages'?{chatId:manageChatId.value}:{}),...(manageAction.value==='clear-data'?{confirmedSharedImpact:true}:{})}:undefined)
     manageTarget.value=null
     emit('notify',result.remainingPages?`已关闭 ${result.closedPages} 个页面；其余页面取消关闭`:result.deleted?'会话及网站数据已删除':result.action==='clear-data'?'网站数据已清除，会话已保留':`已关闭 ${result.closedPages} 个页面，会话数据已保留`,'primary')
   }catch(error){dialogError.value=error instanceof Error?error.message:'会话管理失败'}
@@ -286,7 +307,7 @@ async function quickOpen() {
     const pages=props.tree.flatMap(s=>s.windows)
     const existing = pages.find(w=>w.selected)||pages[0]
     if (existing) { showPage(existing); return }
-    const session = props.tree.find(s=>s.isDefault) || props.tree[0] || await window.navora.browser.createSession(props.chatId, { persist: false })
+    const session = await window.navora.browser.createSession(props.chatId)
     await createWindow(session.sessionId)
   } catch (error) { emit('notify', error instanceof Error ? error.message : '打开浏览器失败') }
   finally { busyQuickOpen.value = false }
@@ -295,10 +316,14 @@ defineExpose({ quickOpen })
 
 async function createWindow(sessionId: string) {
   if (!window.navora || busyWindow.value) return
+  const target=props.tree.find(session=>session.sessionId===sessionId),chatId=target&&!isPublicBrowserSession(target)?target.chatId:props.chatId
+  if(!chatId){emit('request-page',sessionId);return}
   busyWindow.value = sessionId
   try {
-    const page=await window.navora.browser.createWindow(sessionId,{url:'about:blank',show:!props.isRemote})
+    if(target&&isPublicBrowserSession(target))await window.navora.browser.createSession(chatId)
+    const page=await window.navora.browser.createWindow(sessionId,{chatId,url:'about:blank',show:!props.isRemote})
     expandedSessions.value.add(sessionId)
+    collapsedSessions.delete(sessionId)
     if(props.isRemote)emit('remote-view',page.windowId)
   } catch (e) {
     emit('notify', e instanceof Error ? e.message : '创建窗口失败')
@@ -326,18 +351,22 @@ async function closeWindow(w: BrowserTreeWindow) {
   }
 }
 
-async function copyUrl(w: BrowserTreeWindow) {
-  const url = String(w.url || '').trim()
-  if (!url) {
-    emit('notify', '没有网址')
-    return
+async function pageAddressAction(action:BrowserPageAddressAction) {
+  const context=addressSnapshot
+  if(!context||addressPending.value)return
+  // Remote browser resources cannot start the remote host's system browser.
+  addressPending.value=true
+  try{
+    if(props.isRemote){
+      if(action!=='copy')throw Error('browser_desktop_only')
+      const session=props.tree.find(session=>session.windows.some(page=>page.windowId===context.pageId)),page=session?.windows.find(page=>page.windowId===context.pageId)
+      if(!page||!sameBrowserPageAddress(context,browserPageAddressState(page,session?browserPageChatId(session,page):undefined).context))throw Error('browser_page_address_changed')
+      await navigator.clipboard.writeText(context.url)
+    }else await window.navora!.browser.workspace.pageAddressAction(context,action)
+    if(action==='copy')emit('notify','已复制网址','primary')
   }
-  try {
-    await navigator.clipboard.writeText(url)
-    emit('notify', '已复制网址', 'primary')
-  } catch {
-    emit('notify', '复制失败')
-  }
+  catch(error){emit('notify',browserPageAddressError(error))}
+  finally{addressPending.value=false}
 }
 </script>
 
@@ -503,8 +532,18 @@ async function copyUrl(w: BrowserTreeWindow) {
 .browser-panel .tree-row{pointer-events:auto}
 </style>
 <style scoped>
+.page-labels{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}.page-owner{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:1.2;color:var(--navora-muted)}.tree-row.sess .session-title{flex:1}.tree-row.sess .tree-meta{flex-shrink:0}.tree-row.sess .tree-name{color:var(--navora-ink)}.session-title{color:inherit}.tree-children{border-color:var(--navora-stroke)}.tree-children .tree-row.win::after{background:var(--navora-stroke)}.tree-row{color:var(--navora-ink)}.tree-row:hover{background:var(--control-hover);border-color:var(--navora-stroke)}
+</style>
+<style scoped>
 .tree-row.win.is-selected{position:relative;border-radius:7px;background:var(--control-selected);color:var(--navora-accent)}
 .tree-row.win.is-selected::before{content:'';position:absolute;left:0;top:8px;bottom:8px;width:2px;border-radius:2px;background:var(--navora-accent)}
 .tree-row.win.is-selected .tree-name{color:var(--navora-accent);font-weight:500}
-.empty-sessions-toggle{display:flex;align-items:center;gap:5px;padding:7px 5px;font-size:11px;color:var(--navora-muted);text-align:left}.empty-sessions-toggle .app-icon{width:10px;height:10px}.empty-sessions-toggle:focus-visible{outline:2px solid var(--navora-accent);outline-offset:-2px;border-radius:5px}.session-empty-detail{font-size:11px;color:var(--navora-muted);padding:7px 12px 10px 27px;line-height:1.7}.session-empty-detail button{display:block;color:var(--navora-accent);margin-top:5px;text-align:left}.res-empty{line-height:1.7;opacity:1;color:var(--navora-muted)}.res-empty>.icon-btn{margin-left:8px}.session-impact{font-size:13px;line-height:1.8;margin-top:14px}.session-error{font-size:12px;color:rgb(var(--v-theme-error));margin-top:12px}
+.empty-sessions-toggle{display:flex;align-items:center;gap:5px;padding:7px 5px;font-size:11px;color:var(--navora-muted);text-align:left}.empty-sessions-toggle .app-icon{width:10px;height:10px}.empty-sessions-toggle:focus-visible{outline:2px solid var(--navora-accent);outline-offset:-2px;border-radius:5px}.session-empty-detail{font-size:11px;color:var(--navora-muted);padding:7px 12px 10px 27px;line-height:1.7}.res-empty{line-height:1.7;opacity:1;color:var(--navora-muted)}.res-empty>.icon-btn{margin-left:8px}.session-impact{font-size:13px;line-height:1.8;margin-top:14px}.session-error{font-size:12px;color:rgb(var(--v-theme-error));margin-top:12px}
+.session-create-browser{display:inline-flex;align-items:center;gap:7px;max-width:100%;min-height:32px;padding:5px 10px;border:1px solid var(--navora-stroke);border-radius:7px;background:transparent;color:var(--navora-accent);font:inherit;font-size:12px;line-height:20px;text-align:left;cursor:pointer}
+.session-create-browser>.app-icon{width:13px;height:13px;flex:0 0 13px}
+.session-create-browser>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.session-create-browser:hover:not(:disabled){background:var(--control-hover);border-color:var(--navora-accent)}
+.session-create-browser:active:not(:disabled){background:var(--control-selected,var(--control-hover))}
+.session-create-browser:focus-visible{outline:2px solid var(--navora-accent);outline-offset:2px}
+.session-create-browser:disabled{opacity:.55;cursor:default}
 </style>

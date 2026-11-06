@@ -77,14 +77,53 @@ test('full saves validate automation before replacing the committed configuratio
   assert.equal(fs.readFileSync(service.getPath(), 'utf8'), disk)
 }))
 
+test('cursor style and size persist across reloads while invalid sizes leave disk unchanged', () => withRoot(root => {
+  const service = new ConfigService(root)
+  service.update({ browser: { automation: { cursor_style: 'diamond', cursor_scale: 1.5 } } })
+  const loaded = new ConfigService(root).get().browser.automation
+  assert.equal(loaded.cursor_style, 'diamond')
+  assert.equal(loaded.cursor_scale, 1.5)
+  assert.equal(loaded.protect_input, true)
+  const disk = fs.readFileSync(service.getPath(), 'utf8')
+  assert.throws(() => service.update({ browser: { automation: { cursor_scale: 2.01 } } }))
+  assert.equal(fs.readFileSync(service.getPath(), 'utf8'), disk)
+  assert.equal(service.get().browser.automation.cursor_scale, 1.5)
+}))
+
 test('a failed configuration write does not commit a valid candidate to memory', () => withRoot(root => {
   const service = new ConfigService(root)
   const previous = service.get()
   fs.renameSync(service.getPath(), path.join(root, 'saved-config.yml'))
   fs.mkdirSync(service.getPath())
-  assert.throws(() => service.update({ browser: { automation: { speed_multiplier: 1.5 } } }))
+  assert.throws(() => service.update({ browser: { automation: { cursor_scale: 1.5 } } }))
   assert.equal(service.get(), previous)
-  assert.equal(service.get().browser.automation.speed_multiplier, 1)
+  assert.equal(service.get().browser.automation.cursor_scale, 1)
+}))
+
+test('window material preference migrates safely and invalid saves preserve the committed preference', () => withRoot(root => {
+  const service = new ConfigService(root)
+  assert.equal(service.get().app.window_acrylic, true)
+  service.update({ app: { window_acrylic: false } })
+  assert.equal(new ConfigService(root).get().app.window_acrylic, false)
+  const previous = service.get(), disk = fs.readFileSync(service.getPath(), 'utf8')
+  assert.throws(() => service.update({ app: { window_acrylic: 'true' } } as unknown as AppConfigPatch), /window_acrylic/)
+  assert.equal(service.get(), previous)
+  assert.equal(fs.readFileSync(service.getPath(), 'utf8'), disk)
+  fs.writeFileSync(service.getPath(), 'app:\n  window_acrylic: invalid\n  language: en-US\n')
+  const migrated = new ConfigService(root).get()
+  assert.equal(migrated.app.window_acrylic, false)
+  assert.equal(migrated.app.language, 'en-US')
+}))
+
+test('a failed material preference write keeps the saved choice for every host', () => withRoot(root => {
+  const service = new ConfigService(root)
+  service.update({ app: { window_acrylic: false } })
+  const previous = service.get()
+  fs.renameSync(service.getPath(), path.join(root, 'saved-material-config.yml'))
+  fs.mkdirSync(service.getPath())
+  assert.throws(() => service.update({ app: { window_acrylic: true } }))
+  assert.equal(service.get(), previous)
+  assert.equal(service.get().app.window_acrylic, false)
 }))
 
 test('guarded commits reject stale edits and invalid values before replacing disk', () => withRoot(root => {

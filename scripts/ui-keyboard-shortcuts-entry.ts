@@ -8,6 +8,8 @@ import {createDefaultConfig} from '../shared/config'
 import {makeFileTab} from '../shared/file-tabs'
 const root=process.env.NAVORA_DATA_ROOT!,output=process.env.NAVORA_UI_OUTPUT!
 const config=createDefaultConfig();config.app.onboarding_completed=true;config.remote.enabled=false
+// Simulate an existing installation with the retired setting still on disk.
+Object.assign(config.browser.automation,{auto_mute:true})
 fs.writeFileSync(path.join(root,'config.yml'),JSON.stringify(config));app.setPath('userData',root)
 fs.mkdirSync(path.join(root,'chats'),{recursive:true});fs.mkdirSync(path.join(root,'workspace','chat_shortcuts'),{recursive:true})
 fs.writeFileSync(path.join(root,'workspace','chat_shortcuts','shortcuts.md'),'# 快捷键检查\n\n只读文件预览。')
@@ -48,6 +50,19 @@ app.on('browser-window-created',(_event,win)=>{
       await until(()=>js(`(async()=>{const config=await window.navora.config.get();return config.app.shortcuts?.[${JSON.stringify(id)}]===${value}&&!document.querySelector('[data-shortcut-id="${id}"] input').disabled})()`),id+' saved')
     }
     try{
+      if(process.env.NAVORA_SETTINGS_AUDIO_ONLY==='1'){
+        await until(()=>visible('.composer'),'main application ready')
+        await click('.sidebar-settings-btn');await until(()=>visible('.settings-workspace'),'settings workspace')
+        await js('[...document.querySelectorAll(".settings-navigation .nav-item")].find(button=>button.textContent.trim().startsWith("浏览器")).click()')
+        await until(()=>visible('.browser-automation-settings'),'automation settings')
+        assert.equal(await js('!!document.querySelector("input[aria-label*=自动静音]")'),false)
+        assert.equal(await js('window.navora.config.get().then(config=>Object.hasOwn(config.browser.automation,"auto_mute"))'),false)
+        assert.equal(await js('!!document.querySelector("input[aria-label=显示虚拟光标]")'),true)
+        checks.push('legacy-auto-mute-discarded','auto-mute-switch-removed','cursor-settings-remain')
+        await capture('browser-automation-without-auto-mute')
+        fs.writeFileSync(path.join(output,'completed.json'),JSON.stringify({ok:true,checks,scope:'Targeted browser automation settings; full keyboard suite is separate',errors},null,2))
+        console.log(JSON.stringify({ok:true,checks,output}));server.close();app.exit(0);return
+      }
       await until(()=>visible('.composer'),'conversation ready');win.setContentSize(1100,850);await wait(250)
       await js('(()=>{window.shortcutOrigin=document.querySelector("[data-composer-editor] [contenteditable=true]");window.shortcutOrigin.focus()})()')
       assert.equal(await js('document.activeElement===window.shortcutOrigin'),true,'The original editor has real focus')
@@ -96,16 +111,10 @@ app.on('browser-window-created',(_event,win)=>{
       await click('.sidebar-settings-btn');await until(()=>visible('.settings-workspace'),'settings view');await help();await closeHelp();assert.equal(await visible('.settings-workspace'),true);checks.push('help-toggles-inside-settings')
       await js('[...document.querySelectorAll(".settings-navigation .nav-item")].find(button=>button.textContent.trim().startsWith("浏览器")).click()')
       await until(()=>visible('.browser-automation-settings input[type=checkbox]'),'browser automation settings')
-      assert.equal(await js('document.querySelector(".browser-automation-settings input[type=checkbox]").checked'),true,'Automatic agent audio muting defaults on')
-      checks.push('automatic-agent-audio-muting-default-on-in-settings')
-      await click('.browser-automation-settings input[type=checkbox]')
-      await until(()=>js('window.navora.config.get().then(config=>config.browser.automation.auto_mute===false)'),'auto mute disabled immediately')
-      assert.equal(await js('[...document.querySelectorAll(".settings-page button")].some(button=>button.textContent.trim()==="应用")'),false,'No application button is needed for the switch')
-      checks.push('automatic-agent-audio-muting-switch-auto-saves-without-apply')
-      await click('.browser-automation-settings input[type=checkbox]')
-      await until(()=>js('window.navora.config.get().then(config=>config.browser.automation.auto_mute===true)'),'auto mute reenabled immediately')
-      checks.push('automatic-agent-audio-muting-switch-restores-on')
-      await capture('02-settings-agent-audio-muting')
+      assert.equal(await js('!!document.querySelector("input[aria-label*=自动静音]")'),false,'Retired automatic mute switch is absent')
+      assert.equal(await js('window.navora.config.get().then(config=>Object.hasOwn(config.browser.automation,"auto_mute"))'),false,'Retired mute setting is absent from normalized config')
+      checks.push('automatic-agent-muting-removed-from-settings-and-config')
+      await capture('02-settings-browser-automation')
       await click('.settings-workspace [aria-label="返回上一页"]');await until(()=>visible('.composer'),'return to chat')
       win.setContentSize(1680,1000);await wait(220)
       await js('window.navora.chats.get("chat_shortcuts").then(()=>{document.querySelector(".chat-title-click")?.click()})')
@@ -193,13 +202,13 @@ app.on('browser-window-created',(_event,win)=>{
       assert.equal(await js('window.settingsConfirmCalls'),2)
       await js('void(window.confirm=window.originalSettingsConfirm)')
       checks.push('browser-settings-menu-order-gear-and-keyboard','browser-settings-existing-category-watches-request','browser-settings-credential-guard-cancel-keeps-draft')
-      await click('[aria-label="文献检索"]');await until(()=>js('location.hash.startsWith("#/literature")'),'main window on non-chat route')
+      await click('[aria-label="使用文档"]');await until(()=>visible('.docs-workspace'),'main window on usage guide')
       checks.push('browser-settings-nonsecret-draft-guard-permits-route-leave')
       await chooseBrowserSettings(detached)
       await until(()=>js('document.querySelector(".settings-workspace .settings-current-title")?.textContent.trim()==="浏览器"'),'detached browser opens settings from a different main route')
       assert.equal(await guest.executeJavaScript('window.settingsPageState.value'),17,'Changing the main app route does not reload the independent native page')
       assert.equal(await detachedJs('(async()=>{const state=await window.navora.browser.workspace.state();return state.pages.flatMap(session=>session.windows).find(page=>page.windowId===state.pages.flatMap(session=>session.windows)[0].windowId).presentation})()'),'detached')
-      await click('.settings-workspace [aria-label="返回上一页"]');await until(async()=>!await visible('.settings-workspace'),'browser settings closes after returning from literature')
+      await click('.settings-workspace [aria-label="返回上一页"]');await until(async()=>!await visible('.settings-workspace'),'browser settings closes after returning from usage guide')
       checks.push('browser-settings-from-non-chat-main-route-retains-native-page')
       await js(`window.navora.fileTabs.detach(${JSON.stringify(makeFileTab('chat_shortcuts','shortcuts.md'))},'chat_shortcuts')`)
       await until(()=>Promise.resolve(BrowserWindow.getAllWindows().some(candidate=>candidate!==win&&candidate.webContents.getURL().includes('/file-host'))),'detached file host')

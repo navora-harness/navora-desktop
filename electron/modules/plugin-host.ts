@@ -82,6 +82,9 @@ export function createPluginHostApi(
   const registry: PluginHostRegistry = {
     createSession: (chatId, opts) => {
       requireCap('session.create')
+      if(chatId!==ctx.chatId)throw Error('browser_wrong_chat')
+      if(opts?.persist===undefined)throw Error('public_session_use_scoped_runTool')
+      if(opts.persist)requireCap('session.persist')
       return ctx.registry.createSession(chatId, opts)
     },
     createWindow: (sessionId, opts) => {
@@ -99,16 +102,24 @@ export function createPluginHostApi(
       checkSession(sessionId)
       return ctx.registry.closeSession(sessionId, clear)
     },
-    assertSessionOwned: (chatId, sessionId) =>
-      ctx.registry.assertSessionOwned(chatId, sessionId),
-    assertWindowOwned: (chatId, windowId) =>
-      ctx.registry.assertWindowOwned(chatId, windowId) as { win: unknown },
-    getSessionRecord: (sessionId) =>
-      ctx.registry.getSessionRecord(sessionId) as
+    assertSessionOwned: (chatId, sessionId) =>{
+      if(chatId!==ctx.chatId)throw Error('browser_wrong_chat')
+      return ctx.registry.assertSessionOwned(chatId, sessionId)
+    },
+    assertWindowOwned: (chatId, windowId) =>{
+      if(chatId!==ctx.chatId)throw Error('browser_wrong_chat')
+      return ctx.registry.assertWindowOwned(chatId, windowId) as { win: unknown }
+    },
+    getSessionRecord: (sessionId) =>{
+      // A raw public Session would bypass per-request ownership and shared-management confirmation.
+      if(ctx.registry.isPublicSession(sessionId))throw Error('public_session_use_scoped_runTool')
+      ctx.registry.assertSessionOwned(ctx.chatId,sessionId)
+      return ctx.registry.getSessionRecord(sessionId) as
         | { ses: unknown }
         | null
-        | undefined,
-    getTree: (chatId) => ctx.registry.getTree(chatId),
+        | undefined
+    },
+    getTree: (chatId) =>{if(chatId!==ctx.chatId)throw Error('browser_wrong_chat');return ctx.registry.getTree(chatId)},
     setUserAgent: (sessionId, ua) => {
       requireCap('session.set_ua')
       checkSession(sessionId)

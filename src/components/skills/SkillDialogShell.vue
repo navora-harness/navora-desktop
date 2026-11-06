@@ -1,5 +1,5 @@
 <template>
-  <v-dialog
+  <BrowserContentDialog
     :model-value="modelValue"
     :fullscreen="isMobileLayout"
     :max-width="dialogMaxWidth"
@@ -54,11 +54,12 @@
         <slot name="actions" />
       </v-card-actions>
     </v-card>
-  </v-dialog>
+  </BrowserContentDialog>
 </template>
 
 <script setup lang="ts">
 import StatusIcon from '@/components/StatusIcon.vue'
+import BrowserContentDialog from '../BrowserContentDialog.vue'
 import { computed } from 'vue'
 import { useMobileLayout } from '@/composables/useMobileLayout'
 
@@ -98,8 +99,9 @@ function onModel(v: boolean) {
   max-height:calc(100dvh - 48px);
   border-radius: 12px !important;
   overflow: hidden;
-  border: 1px solid #d5dee7;
-  background: #fff;
+  border: 1px solid var(--navora-stroke);
+  background: var(--navora-surface);
+  color: var(--navora-ink);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -138,8 +140,8 @@ function onModel(v: boolean) {
   justify-content: space-between;
   gap: 12px;
   padding: 18px 20px 14px;
-  background: #fff;
-  border-bottom: 1px solid #e8eef4;
+  background: var(--navora-surface);
+  border-bottom: 1px solid var(--navora-stroke);
   flex-shrink: 0;
 }
 .skill-dlg-card.is-mobile .skill-dlg-head {
@@ -156,7 +158,7 @@ function onModel(v: boolean) {
   font-weight: 650;
   letter-spacing: 0.02em;
   text-transform: none;
-  color: #7f8c8d;
+  color: var(--navora-muted);
   opacity: 1;
   margin-bottom: 6px;
   overflow: hidden;
@@ -167,7 +169,7 @@ function onModel(v: boolean) {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
-  color: #15202b;
+  color: var(--navora-ink);
   line-height: 1.25;
   letter-spacing: -0.01em;
   display: flex;
@@ -187,7 +189,7 @@ function onModel(v: boolean) {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: #d4a017;
+  color: var(--control-warning, #d4a017);
   font-size: 0.95em;
   line-height: 1;
   cursor: help;
@@ -196,7 +198,7 @@ function onModel(v: boolean) {
 .skill-dlg-sub {
   margin: 6px 0 0;
   font-size: 0.84rem;
-  color: #5d6d7e;
+  color: var(--navora-muted);
   line-height: 1.45;
 }
 .skill-dlg-close {
@@ -207,7 +209,7 @@ function onModel(v: boolean) {
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #7a8a99;
+  color: var(--navora-muted);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -218,8 +220,8 @@ function onModel(v: boolean) {
 }
 .skill-dlg-close:hover,
 .skill-dlg-close:active {
-  background: #eef3f7;
-  color: #1b4f72;
+  background: var(--control-hover, var(--navora-header));
+  color: var(--navora-ink);
 }
 .skill-dlg-body {
   flex:1 1 auto;
@@ -239,11 +241,11 @@ function onModel(v: boolean) {
 }
 .skill-dlg-actions {
   padding: 12px 16px 16px !important;
-  border-top: 1px solid #e8eef4;
+  border-top: 1px solid var(--navora-stroke);
   gap: 6px;
   row-gap: 8px;
   flex-wrap: wrap;
-  background: #fbfcfd;
+  background: var(--navora-surface);
   flex-shrink: 0;
 }
 .skill-dlg-card.is-mobile .skill-dlg-actions {

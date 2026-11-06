@@ -64,5 +64,5 @@ try {
   assert.equal(store.remove('fastls').ok, true)
   console.log('plugin-platform smoke: v2 catalog, automatic selection, preview guard, install, runtime request, wrong platform, failed replacement, desktop pack and uninstall passed')
 } catch (e) { console.error(e); process.exitCode = 1 }
-finally { store?.dispose(); server?.closeAllConnections(); server?.close(); app.exit(Number(process.exitCode) || 0) }
+finally { await store?.dispose(); server?.closeAllConnections(); server?.close(); app.exit(Number(process.exitCode) || 0) }
 })

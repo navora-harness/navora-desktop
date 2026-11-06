@@ -43,6 +43,7 @@ export type DownloadPart = {
   /** e.g. bytes=0-1048575 */
   range?: string
 }
+export type DownloadRequestScope = <T>(url:string,method:string,signal:AbortSignal|undefined,run:(headers:Record<string,string>,signal:AbortSignal)=>Promise<T>)=>Promise<T>
 
 export type DownloadProgress = {
   partIndex: number
@@ -98,6 +99,7 @@ export class FileDownloadService {
       /** Prefer Session UA; falls back to app default_ua_preset. */
       userAgent?: string
       session?: Session | null
+      requestScope?:DownloadRequestScope
       signal?: AbortSignal
       onProgress?: (p: DownloadProgress) => void
     },
@@ -136,6 +138,7 @@ export class FileDownloadService {
         dest: opts.dest,
         parts: [part],
         session: opts.session,
+        requestScope:opts.requestScope,
         userAgent,
         signal: opts.signal,
         onProgress: opts.onProgress,
@@ -172,6 +175,7 @@ export class FileDownloadService {
         dest: opts.dest,
         parts: [{ ...part, headers: retryHeaders }],
         session: opts.session,
+        requestScope:opts.requestScope,
         userAgent,
         signal: opts.signal,
         onProgress: opts.onProgress,
@@ -185,6 +189,7 @@ export class FileDownloadService {
       dest: string
       parts: DownloadPart[]
       session?: Session | null
+      requestScope?:DownloadRequestScope
       userAgent?: string
       signal?: AbortSignal
       onProgress?: (p: DownloadProgress) => void
@@ -251,12 +256,12 @@ export class FileDownloadService {
         })
         if (part.range) setHeader(headers, 'Range', part.range)
 
-        const got = await streamPartViaSessionFetch(part.url, tmp, {
+        const start=(scopeHeaders:Record<string,string>={},signal=opts.signal)=>streamPartViaSessionFetch(part.url, tmp, {
           session: opts.session || null,
           method: part.method || 'GET',
-          headers,
+          headers:{...headers,...scopeHeaders},
           body: encodeBody(part.body, part.bodyEncoding),
-          signal: opts.signal,
+          signal,
           timeoutMs,
           maxBytesRemaining: maxBytes - total,
           append: true,
@@ -275,6 +280,7 @@ export class FileDownloadService {
             })
           },
         })
+        const got=opts.requestScope?await opts.requestScope(part.url,part.method||'GET',opts.signal,start):await start()
         results.push({
           url: part.url,
           status: got.status,

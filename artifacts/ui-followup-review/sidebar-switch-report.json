@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "checks": [
+    "titlebar toggles fixed/floating",
+    "duplicate dock control removed",
+    "divider slides left/right and changes length continuously",
+    "existing editor and sidebar preserved",
+    "hidden sidebar restores without changing preference",
+    "reduced motion respected",
+    "hover highlights button, fixed/floating share identical hover tone and return to transparent on leave"
+  ],
+  "metrics": {
+    "fixed": 10.350001335144043,
+    "mid": 6.414250373840332,
+    "final": 5.796000957489014,
+    "fixedLeft": 298.8160705566406,
+    "midLeft": 296.8715515136719,
+    "finalLeft": 296.5660705566406
+  }
+}

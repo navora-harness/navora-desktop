@@ -14,7 +14,7 @@
   --navora-switch-on-hover:color-mix(in srgb,var(--appearance-accent) 80%,var(--appearance-ink));
   --appearance-danger-hover:color-mix(in srgb,var(--control-danger) 16%,var(--appearance-surface));
 }
-:root[data-navora-color-scheme=dark]{--control-danger:#EF9DA9}
+:root[data-navora-color-scheme=dark]{--control-danger:var(--appearance-danger)}
 
 /* Selected controls retain a separate hover tone without changing their geometry. */
 :root[data-navora-theme] .navora-app :is(button,[role=treeitem],.chat-item,.chat-sub-chip,.tree-row):is(.active,.selected,.is-selected,[aria-pressed=true],[aria-selected=true],[aria-current=page]){

@@ -25,6 +25,7 @@ async function until(check: () => Promise<boolean>, message: string): Promise<vo
 const fixture = (framed: boolean) => `<!doctype html><meta charset="utf-8"><title>Pointer fixture</title>
 <style>html,body{margin:0;width:100%;height:100%;overflow:hidden}button{position:absolute;left:280px;top:80px;width:120px;height:60px}#drag{position:absolute;left:50px;top:210px;width:80px;height:60px;background:teal;touch-action:none;user-select:none}iframe{position:absolute;left:430px;top:80px;width:420px;height:400px;border:3px solid black}</style>
 <button id="${framed ? 'frame-button' : 'main-button'}">Click fixture</button><div id="drag">Drag fixture</div>
+${framed ? '' : '<button id="second-button" style="left:60px;top:110px;width:110px;height:50px">Second fixture</button>'}
 ${framed ? '' : '<iframe id="child-frame" src="/frame"></iframe>'}
 <script>
 window.pointerFixture={events:[],clicks:0,dragEnds:0,dragMoves:[],dragDelta:null,errors:[],captureRequests:[]};
@@ -47,7 +48,7 @@ void app.whenReady().then(async () => {
   let server: http.Server | undefined
   try {
     // This custom package currently retains the upstream beta version in process.versions.
-    assert.equal(process.env.NAVORA_POINTER_SMOKE_RELEASE, '45.0.0-cloudbypass.5', 'Use the new customized Electron package')
+    assert.equal(process.env.NAVORA_POINTER_SMOKE_RELEASE, '45.0.0-cloudbypass.11', 'Use the new customized Electron package')
     assert.ok(process.versions.electron.startsWith('45.'), 'Use an Electron 45 runtime')
     server = http.createServer((request, response) => {
       response.setHeader('Content-Type', 'text/html; charset=utf-8')
@@ -74,8 +75,9 @@ void app.whenReady().then(async () => {
     config.browser.wait.delay_ms = 0
     config.browser.action_timeout_ms = 3000
     const normal = new AbortController()
+    let browserRunId = 'pointer-fixture-main-run'
     const context = (signal = normal.signal) => ({
-      chatId: 'pointer-fixture', signal, getConfig: () => config,
+      chatId: 'pointer-fixture', browserRunId, signal, getConfig: () => config,
       registry: {
         assertWindowOwned(chatId: string, windowId: string) {
           assert.equal(chatId, 'pointer-fixture'); assert.equal(windowId, 'window'); return record
@@ -96,7 +98,7 @@ void app.whenReady().then(async () => {
     const reset = () => wc.executeJavaScript('window.pointerFixture.events=[]')
     const assertSequence = (result: Record<string, any>) => {
       assert.equal(result.ok, true)
-      assert.ok(['dispatchInputSequence', 'dispatchInputSequence+target_clickSelector'].includes(result.method))
+      assert.ok(['dispatchInputSequence', 'dispatchInputSequence+target_clickElement'].includes(result.method))
       assert.equal((result.dispatch ?? result).status, 'completed')
       assert.ok(result.plannedSteps >= 1, 'Tool returns the planned step count')
     }
@@ -105,7 +107,39 @@ void app.whenReady().then(async () => {
     await pause(50)
     assert.equal(win.isVisible(), false, 'All fixtures remain hidden')
 
-    await reset()
+    // Exercise the ordinary selector/ref API before any artificial mouse warm-up.
+    // The first click must learn its real native mouseup, so later clicks can
+    // interpolate from that confirmed point rather than repeating one-point moves.
+    const firstOrdinary=await call('browser_click',{selector:'#main-button'})
+    assert.equal(firstOrdinary.ok,true)
+    assert.equal(firstOrdinary.approach.startPosition,'unknown')
+    assert.equal(firstOrdinary.motionApplied,false,'Unknown initial position is a real single-point establishment')
+    assert.equal(firstOrdinary.pointerReceipt.confirmed,true,'A native click confirms its actual main-frame endpoint')
+    const secondRefs=await call('browser_get',{what:'agent_snapshot',selector:'#second-button',maxFrames:1,maxNodes:20})
+    const secondRef=secondRefs.value.elements.find((element:any)=>element.tagName.toLowerCase()==='button').ref
+    const ordinaryReports:Record<string,unknown>[]=[]
+    for(const args of [{ref:secondRef},{selector:'#main-button'},{ref:secondRef}]){
+      const beforeBatches=batches.length,beforeTime=performance.now()
+      const result=await call('browser_click',args)
+      const elapsedMs=performance.now()-beforeTime
+      assert.equal(result.ok,true)
+      assert.equal(result.approach.startPosition,'confirmed','Consecutive ordinary clicks retain a confirmed viewport start')
+      assert.equal(result.motionApplied,true)
+      assert.ok(result.approach.movementSteps>2,'A batch must contain intermediate movement, not just exist')
+      assert.ok(result.approach.movementDurationMs>0)
+      assert.ok(elapsedMs>=result.approach.movementDurationMs-30,'Native movement follows its timed schedule')
+      assert.equal(batches.length,beforeBatches+1)
+      assert.equal(result.pointerReceipt.confirmed,true)
+      const delivered=(await state()).events.filter((event:any)=>event.type==='mouseup').at(-1)
+      assert.deepEqual(result.position.point,{x:delivered.x,y:delivered.y},'Next start comes from the actual trusted native release')
+      ordinaryReports.push({method:result.method,startPosition:result.approach.startPosition,movementSteps:result.approach.movementSteps,movementDurationMs:result.approach.movementDurationMs,elapsedMs,position:result.position})
+    }
+    console.log('[pointer-smoke] consecutive ordinary clicks',JSON.stringify(ordinaryReports))
+
+    // A caller-provided from is not evidence of the pointer's actual position.
+    // Establish one real confirmed point in this persistent Agent lease first.
+    assertSequence(await mouse({action:'move',x:20,y:30,motion:false}))
+    await reset(); batches.length=0
     const beforeMove = performance.now()
     const moved = await mouse({action: 'move', from: {x: 20, y: 30}, x: 216.25, y: 132.75,
       motion: {durationMs: 240, speedMultiplier: 1.2, intervalMs: 8, seed: 42}})
@@ -165,18 +199,18 @@ void app.whenReady().then(async () => {
     await captureWin.loadURL(`http://127.0.0.1:${(server.address() as {port: number}).port}/`)
     await captureContents.capturePage(undefined, {stayHidden: true, stayAwake: true})
     const captureState = () => captureContents.executeJavaScript('structuredClone(window.pointerFixture)') as Promise<any>
-    const probeCapture = async (kind: 'legacy' | 'sequence') => {
+    await captureContents.setAutomationOptions({isolateInput: true, keepRendering: true})
+    const probeCapture = async (kind: 'singleEvent' | 'sequence') => {
       await captureContents.executeJavaScript('document.querySelector("#drag").style.transform="";window.pointerFixture.events=[];window.pointerFixture.captureRequests=[]')
       const events = [
-        {type: 'mouseMoved', x: 90, y: 240, button: 'none', buttons: 0},
-        {type: 'mousePressed', x: 90, y: 240, button: 'left', buttons: 1, clickCount: 1},
-        {type: 'mouseMoved', x: 130, y: 250, button: 'none', buttons: 1},
-        {type: 'mouseMoved', x: 170, y: 260, button: 'none', buttons: 1},
-        {type: 'mouseReleased', x: 170, y: 260, button: 'left', buttons: 0, clickCount: 1},
+        {type: 'mouseMoved', position: {x: 90, y: 240}, button: 'none', buttons: 0},
+        {type: 'mousePressed', position: {x: 90, y: 240}, button: 'left', buttons: 1, clickCount: 1},
+        {type: 'mouseMoved', position: {x: 130, y: 250}, button: 'none', buttons: 1},
+        {type: 'mouseMoved', position: {x: 170, y: 260}, button: 'none', buttons: 1},
+        {type: 'mouseReleased', position: {x: 170, y: 260}, button: 'left', buttons: 0, clickCount: 1},
       ]
-      if (kind === 'legacy') {
-        const legacy = captureContents as unknown as {dispatchMouseEvent(event: Record<string, unknown>): Promise<unknown>}
-        for (const event of events) { await legacy.dispatchMouseEvent(event); await pause(40) }
+      if (kind === 'singleEvent') {
+        for (const event of events) { assert.equal((await captureContents.dispatchMouseEvent(event)).status, 'dispatched'); await pause(40) }
       } else {
         const result = await (captureContents as unknown as typeof api).dispatchInputSequence(events.map((event, index) => ({...event, kind: 'mouse', atMs: index * 40})))
         assert.equal(result.status, 'completed')
@@ -186,14 +220,11 @@ void app.whenReady().then(async () => {
       return {requested: captured.captureRequests, granted: captured.events.filter((event: any) => event.type === 'gotpointercapture').length,
         cancelled: captured.events.some((event: any) => event.type === 'pointercancel'), errors: captured.errors}
     }
-    const captureDiagnostics: Record<string, unknown> = {legacy: await probeCapture('legacy'), sequence: await probeCapture('sequence')}
-    const virtual = captureContents as unknown as {setVirtualCursorEnabled?: (enabled: boolean, options?: {blockRealPointer: boolean; blockRealKeyboard: boolean}) => Promise<void>}
-    if (virtual.setVirtualCursorEnabled) {
-      try {
-        await virtual.setVirtualCursorEnabled(true, {blockRealPointer: false, blockRealKeyboard: false})
-        captureDiagnostics.virtualSequence = await probeCapture('sequence')
-      } finally { await virtual.setVirtualCursorEnabled(false, {blockRealPointer: false, blockRealKeyboard: false}) }
-    }
+    const captureDiagnostics: Record<string, unknown> = {singleEvent: await probeCapture('singleEvent'), sequence: await probeCapture('sequence')}
+    try {
+      await captureContents.setAutomationOptions({virtualCursor: {enabled: true}})
+      captureDiagnostics.virtualSequence = await probeCapture('sequence')
+    } finally { await captureContents.resetAutomationOptions() }
     console.log('[pointer-smoke] hidden pointer capture diagnostics', JSON.stringify(captureDiagnostics))
 
     // Native target coordinates are relative to the same element, including inside a frame.
@@ -207,6 +238,7 @@ void app.whenReady().then(async () => {
       const result = await mouse({action: 'click', target: element.target, from: {x: 2, y: 4}, x: 12.25, y: 14.5,
         motion: {durationMs: 75, intervalMs: 7.5, seed: 9}})
       assertSequence(result)
+      assert.equal(result.startPosition,'unknown','Target-local offsets never borrow a viewport start')
       await until(() => wc.executeJavaScript(`${targetStateCode}.events.some(event=>event.type==='click')`), 'The target document receives click')
       const targetState = await wc.executeJavaScript(`structuredClone(${targetStateCode})`)
       const lastClick = targetState.events.filter((event: any) => event.type === 'click').at(-1)
@@ -232,7 +264,7 @@ void app.whenReady().then(async () => {
     assert.equal(hoveredRef.ok, true, 'A host-owned native ref can be hovered')
     assert.equal(batches.length, beforeNativeHover + 1, 'Native ref hover uses the configured timed approach')
     const refApproachEnd = batches.at(-1)![0].at(-1)
-    assert.ok(Math.abs(refApproachEnd.x - expectedNativeCenter.x) <= 1 && Math.abs(refApproachEnd.y - expectedNativeCenter.y) <= 1,
+    assert.ok(Math.abs(refApproachEnd.position.x - expectedNativeCenter.x) <= 1 && Math.abs(refApproachEnd.position.y - expectedNativeCenter.y) <= 1,
       `Native ref approach uses top-level CSS pixels (${JSON.stringify(refApproachEnd)} versus ${JSON.stringify(expectedNativeCenter)})`)
     const beforeNativeClick = batches.length
     const nativeClicked = await call('browser_click', {target: nativeButton.target, motion: {durationMs: 60, intervalMs: 10}})
@@ -249,6 +281,7 @@ void app.whenReady().then(async () => {
 
     wc.setZoomFactor(1.25)
     await wc.capturePage(undefined, {stayHidden: true, stayAwake: true})
+    assertSequence(await mouse({action:'move',x:30,y:40,motion:false}))
     await reset()
     assertSequence(await mouse({action: 'move', from: {x: 30, y: 40}, x: 200.25, y: 160.75,
       motion: {durationMs: 80, intervalMs: 8, seed: 3}}))
@@ -288,6 +321,9 @@ void app.whenReady().then(async () => {
     assert.equal(await wc.executeJavaScript('window.overlayClicks'), 0, 'Flow never falls back to an unsafe coordinate click')
     await wc.executeJavaScript('document.querySelector("#pointer-overlay").remove()')
 
+    assertSequence(await mouse({action:'move',x:20,y:30,motion:false}))
+    await until(async()=>{const last=(await state()).events.filter((event:any)=>event.type==='pointermove').at(-1);return last&&Math.abs(last.x-20)<=1&&Math.abs(last.y-30)<=1},
+      'The stale-target probe starts from a real point away from the button')
     const clicksBeforeRemoval = (await state()).clicks
     await wc.executeJavaScript(`window.replacementClicks=0;document.addEventListener('pointermove',()=>{const original=document.querySelector('#main-button');const replacement=original.cloneNode(true);replacement.addEventListener('click',()=>window.replacementClicks++);original.replaceWith(replacement)},{once:true})`)
     const batchesBeforeRemoval = batches.length
@@ -299,6 +335,7 @@ void app.whenReady().then(async () => {
     assert.equal(await wc.executeJavaScript('window.replacementClicks'), 0, 'A replacement at the same coordinates never receives click')
 
     const cancelling = new AbortController()
+    assertSequence(await mouse({action:'move',x:20,y:30,motion:false}))
     const clicksBeforeCancel = (await state()).clicks
     const replacementClicksBeforeCancel = await wc.executeJavaScript('window.replacementClicks')
     const batchesBeforeCancel = batches.length
@@ -315,7 +352,9 @@ void app.whenReady().then(async () => {
       'A cancelled viewport click never reaches the replacement button')
     assert.equal(batches.length, batchesBeforeCancel + 1, 'A cancelled batch is never replayed through another backend')
 
-    await wc.executeJavaScript('document.querySelector("#drag").style.transform="";window.pointerFixture.events=[]')
+    await wc.executeJavaScript('document.querySelector("#drag").style.transform=""')
+    assertSequence(await mouse({action:'move',x:90,y:240,motion:false}))
+    await reset()
     const cancellingDrag = new AbortController()
     const dragPending = mouse({action: 'drag', from: {x: 90, y: 240}, x: 260, y: 290,
       motion: {durationMs: 400, intervalMs: 10, seed: 10}}, cancellingDrag.signal)
@@ -338,6 +377,11 @@ void app.whenReady().then(async () => {
 
     // Exercise ownership gates without the normal helper's automatic observation.
     const controller = getBrowserAutomationController(wc)
+    await controller.finishRun(browserRunId)
+    const shortContext={...context(),browserRunId:undefined}
+    await executeAgentTool('browser_get',{windowId:'window',what:'text',waitUntil:'none'},shortContext)
+    assertSequence(await executeAgentTool('browser_mouse',{windowId:'window',action:'move',x:30,y:40,motion:false},shortContext) as Record<string,any>)
+    browserRunId='pointer-fixture-control-gates'
     const oldIntent = new Map([['window', {webContentsId: wc.id,
       epoch: controller.captureEpoch(), documentEpoch: controller.captureDocumentEpoch()}]])
     const rawMouse = (extraContext: Partial<ToolExecContext> = {}) => executeAgentTool('browser_mouse', {
@@ -345,7 +389,7 @@ void app.whenReady().then(async () => {
       motion: {durationMs: 30, intervalMs: 10},
     }, {...context(), ...extraContext}) as Promise<Record<string, any>>
     const beforeGates = batches.length
-    assert.equal(controller.needsObservation(), true, 'A completed action closes the next input observation gate')
+    assert.equal(controller.needsObservation(), true, 'A compatibility short call releases ownership and requires a new observation')
     assert.equal((await rawMouse()).error, 'browser_observation_required')
     assert.equal(batches.length, beforeGates, 'Missing observation dispatches no input')
     const paused = await controller.pause()
@@ -357,6 +401,7 @@ void app.whenReady().then(async () => {
     assert.equal(controller.needsObservation(), true, 'A paused read does not authorize future input')
     assert.equal((await rawMouse()).error, 'browser_manual_control')
     await controller.resume()
+    browserRunId='pointer-fixture-resumed-run'
     assert.equal((await rawMouse()).error, 'browser_observation_required', 'Resume requires a fresh current-owner observation')
     const resumedRead = await executeAgentTool('browser_get', {windowId: 'window', what: 'text', waitUntil: 'none'}, context()) as Record<string, any>
     assert.equal(resumedRead.ok, true)
@@ -364,13 +409,33 @@ void app.whenReady().then(async () => {
       'Fresh observation never revives an intent captured before pause')
     assert.equal(batches.length, beforeGates, 'Paused, unobserved, and old intents dispatch no input')
     assertSequence(await rawMouse())
+    // Exercise the host's retry decision with a real dispatched click, then an
+    // injected partial receipt. This does not claim a native partial failure.
+    const originalClickElement=wc.clickElement
+    let injectedClickCalls=0
+    const clicksBeforeReceiptInjection=await wc.executeJavaScript('window.replacementClicks')
+    wc.clickElement=async options=>{
+      injectedClickCalls++
+      const delivered=await originalClickElement.call(wc,options)
+      assert.equal(delivered.status,'dispatched','The injected receipt follows a real native click')
+      return {...delivered,status:'failed',reason:'INJECTED_PARTIAL_RECEIPT',deliveryWarning:'PARTIAL_CLICK_SEQUENCE'}
+    }
+    let injectedFlow:Record<string,any>
+    try{
+      injectedFlow=await call('browser_flow',{steps:[{do:'click',selector:'#main-button',motion:false}],retries:3,retryDelayMs:1,maxTotalMs:3000})
+    }finally{wc.clickElement=originalClickElement}
+    assert.equal(injectedFlow.ok,false)
+    assert.equal(injectedClickCalls,1,'Flow never replays a click after a partial receipt')
+    assert.equal(injectedFlow.partialResult?.reason,'INJECTED_PARTIAL_RECEIPT','The host retains the uncertain delivery summary')
+    await until(()=>wc.executeJavaScript(`window.replacementClicks===${clicksBeforeReceiptInjection+1}`),'The single real click reaches the fixture exactly once')
+    console.log('[pointer-smoke] partial receipt injection',JSON.stringify({nativeClickCalls:injectedClickCalls,scope:'host retry decision; partial receipt injected after a real click'}))
     assert.equal(win.isVisible(), false, 'Smoke never presents or focuses a window')
     assert.equal(wc.debugger.isAttached(), false, 'Native pointer movement never attaches the debugger')
     console.log('[pointer-smoke] PASS', JSON.stringify({release: process.env.NAVORA_POINTER_SMOKE_RELEASE, electron: process.versions.electron,
       checks: ['native-capability', 'trusted-intermediate-moves', 'fractional-css-endpoint', 'speed-and-interval',
         'single-batch-click', 'drag-button-state-and-document-update', 'main-and-iframe-local-targets',
-        'native-ref-hover-and-css-approach', 'default-native-target-click', 'frame-center-without-guessed-curve', 'zoom', 'agent-default-hover-click', 'obscured-target-protection', 'flow-no-replay', 'stale-target-protection',
-        'cancel-without-click-or-replay', 'cancelled-drag-releases-buttons', 'pause-resume-observation-and-stale-intent-gates', 'hidden-window', 'no-debugger'], captureDiagnostics, batches: batches.length}))
+        'consecutive-ordinary-ref-selector-clicks', 'native-ref-hover-and-css-approach', 'default-native-target-click', 'frame-center-without-guessed-curve', 'zoom', 'agent-default-hover-click', 'obscured-target-protection', 'flow-no-replay', 'stale-target-protection',
+        'cancel-without-click-or-replay', 'cancelled-drag-releases-buttons', 'pause-resume-observation-and-stale-intent-gates', 'flow-partial-receipt-injection-no-replay', 'hidden-window', 'no-debugger'], captureDiagnostics, batches: batches.length}))
   } finally {
     captureWin?.destroy()
     win?.destroy()

@@ -1,0 +1,36 @@
+{
+  "version": "45.0.0-cloudbypass.11",
+  "revision": "release-538739eddbee",
+  "platform": "win32",
+  "arch": "x64",
+  "archive": {
+    "name": "electron-v45.0.0-cloudbypass.11-win32-x64.zip",
+    "url": "https://github.com/ChengHoward/edist/releases/download/v45.0.0-cloudbypass.11/electron-v45.0.0-cloudbypass.11-win32-x64.zip",
+    "size": 169214230,
+    "sha256": "9a24ef91a67a181cc2cd863b2dec4beea0bb6d1207ff2a2d00d942e437113b28"
+  },
+  "binarySha256": "538739eddbeef55d302856c22aba2f500eee392af48e24172e5e3320d9e24e44",
+  "binaryCodeSha256": "bfabd58930dfa74e32523fb8c3c3af9e629c35be7dc4128305e135d645c1731a",
+  "typesSha256": "c3de33b4f5b39412513bde8c25f216a9f1423e92a1aef1f0d0701f7e9de4ab2b",
+  "npm": {
+    "name": "electron-45.0.0-cloudbypass.11.tgz",
+    "url": "https://github.com/ChengHoward/edist/releases/download/v45.0.0-cloudbypass.11/electron-45.0.0-cloudbypass.11.tgz",
+    "size": 222272,
+    "sha256": "580a0825c479d7e914dd20343482d4a3a531f318f717235de3e9cbbb176b445b",
+    "integrity": "sha512-YegazNWHPlIhjzD4jPt4GVoF4BQ5cQXIKOQCBwOUCMfk/6aD8Pv1kwSQlkS6SPxYu2bTKr9ylfDU9rUavGRBSQ=="
+  },
+  "provenance": {
+    "manifest": {
+      "name": "native-panel-build-manifest.json",
+      "url": "https://github.com/ChengHoward/edist/releases/download/v45.0.0-cloudbypass.11/native-panel-build-manifest.json",
+      "size": 12753,
+      "sha256": "1395668a1942dbd1fa74976fd80d396dffde68d238819f32107adfee4d2edd34"
+    },
+    "releaseNotes": {
+      "name": "release-notes.md",
+      "url": "https://github.com/ChengHoward/edist/releases/download/v45.0.0-cloudbypass.11/release-notes.md",
+      "size": 2863,
+      "sha256": "3849c487bf201a9af5d6044a1ed52a7e4ff2957423aa10af23d2fb0a441bfac1"
+    }
+  }
+}

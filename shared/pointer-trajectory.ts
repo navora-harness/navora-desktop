@@ -42,9 +42,11 @@ export interface PointerTrajectoryOptions {
 }
 
 /** Structurally compatible with a mouse movement step in the new dispatchInputSequence API. */
-export interface PointerInputSequenceStep extends PointerTrajectoryPoint {
+export interface PointerInputSequenceStep {
   kind: 'mouse'
   type: 'mouseMoved'
+  atMs: number
+  position: PointerPosition
 }
 
 const COORDINATE_LIMIT = 1_000_000
@@ -193,7 +195,10 @@ function makeTiming(timing: NonNullable<PointerTrajectoryOptions['timing']>, ran
     if (t >= 1) return 1
     const index = t * TIMING_SEGMENTS
     const lower = Math.floor(index)
-    return (cumulative[lower] + (cumulative[lower + 1] - cumulative[lower]) * (index - lower)) / total
+    const pulseProgress=(cumulative[lower] + (cumulative[lower + 1] - cumulative[lower]) * (index - lower)) / total
+    // Keep the natural asymmetry but spread displacement across the interval;
+    // a pure narrow pulse otherwise looks like a jump even at slower duration.
+    return minimumJerk(t)*0.55+pulseProgress*0.45
   }
 }
 
@@ -299,6 +304,6 @@ export function toPointerInputSequence(points: readonly PointerTrajectoryPoint[]
     validatePosition(`points[${index}]`, point)
     finiteRange(`points[${index}].atMs`, point.atMs, previousTime, MAX_DURATION_MS)
     previousTime = point.atMs
-    return { kind: 'mouse', type: 'mouseMoved', x: point.x, y: point.y, atMs: point.atMs }
+    return { kind: 'mouse', type: 'mouseMoved', position: {x: point.x, y: point.y}, atMs: point.atMs }
   })
 }

@@ -4,12 +4,30 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { assertPlatformPackage, packageCompatibility, safeRuntimePath, type PlatformHost, type PlatformPackage } from '../../shared/plugin-platform'
+import { PLUGIN_PACKAGE_MAX_ENTRIES } from '../../shared/plugin-package-limits'
 
+type PlatformProbe = { os: string; arch: string; release: string; productVersion?: string; glibc?: string; sharedObjects?: string[] }
+/** Pure interpretation: Darwin kernel releases are never macOS product versions. */
+export function platformHostFromProbe(hostVersion: string, probe: PlatformProbe): PlatformHost {
+  const numeric = (s: string | undefined) => s && /^\d+(?:\.\d+){0,3}$/.test(s) ? s : undefined
+  const glibc = probe.os === 'linux' ? numeric(probe.glibc) : undefined
+  const musl = probe.os === 'linux' && probe.sharedObjects?.some(file => /(?:^|\/)ld-musl-[^/]+\.so\.1$/.test(file))
+  return { os: probe.os, arch: probe.arch, hostVersion, osVersion: probe.os === 'darwin' ? numeric(probe.productVersion) : probe.release,
+    kernelVersion: probe.release, libc: glibc ? 'glibc' : musl ? 'musl' : undefined, libcVersion: glibc }
+}
 export function platformHost(hostVersion: string): PlatformHost {
-  const header = (process.report?.getReport() as { header?: { glibcVersionRuntime?: string } })?.header
-  const glibc = header?.glibcVersionRuntime
-  return { os: process.platform, arch: process.arch, hostVersion, osVersion: process.platform === 'darwin' ? undefined : os.release(),
-    kernelVersion: os.release(), libc: glibc ? 'glibc' : undefined, libcVersion: glibc }
+  let glibc: string | undefined, sharedObjects: string[] | undefined, productVersion: string | undefined
+  if (process.platform === 'linux') {
+    try {
+      const report = process.report?.getReport() as { header?: { glibcVersionRuntime?: string }; sharedObjects?: string[] }
+      glibc = report?.header?.glibcVersionRuntime; sharedObjects = report?.sharedObjects
+    } catch { /* Unknown libc stays unknown; compatibility rejects required conditions. */ }
+  } else if (process.platform === 'darwin') {
+    const result = spawnSync('/usr/bin/sw_vers', ['-productVersion'], { windowsHide: true, shell: false, encoding: 'utf8', timeout: 1500, maxBuffer: 4096,
+      env: { PATH: '/usr/bin:/bin' } })
+    if (!result.error && result.status === 0) productVersion = result.stdout.trim()
+  }
+  return platformHostFromProbe(hostVersion, { os: process.platform, arch: process.arch, release: os.release(), productVersion, glibc, sharedObjects })
 }
 export function assertPackageCompatible(manifest: PlatformPackage, hostVersion: string): void {
   const error = packageCompatibility(manifest, platformHost(hostVersion))
@@ -52,7 +70,7 @@ export function assertRuntimeFiles(dir: string, manifest: PlatformPackage, resto
   if (!fs.existsSync(listPath)) throw new Error('runtime_manifest_missing')
   if (fs.statSync(listPath).size > 2 * 1024 * 1024) throw new Error('runtime_manifest_too_large')
   const list = JSON.parse(fs.readFileSync(listPath, 'utf8')) as { version: number; files: RuntimeFile[] }
-  if (list.version !== 1 || !Array.isArray(list.files) || list.files.length > 50_000) throw new Error('invalid_runtime_manifest')
+  if (list.version !== 1 || !Array.isArray(list.files) || list.files.length > PLUGIN_PACKAGE_MAX_ENTRIES) throw new Error('invalid_runtime_manifest')
   const seen = new Set<string>()
   for (const f of list.files) {
     if (!safeRuntimePath(f.path) || f.path === 'runtime-files.json' || seen.has(f.path.toLowerCase())

@@ -8,6 +8,14 @@ import type { SkillReviewDraft, SkillReviewRequest, SkillReviewResponse } from '
 import { isUrlAllowed } from '../../shared/url-allowlist'
 import { normalizeMatchPattern } from '../../shared/match-pattern'
 import { normalizeBrowserToolCall } from '../../shared/browser-tool-policy'
+import { browserInputMustNotReplay } from './browser-input-result'
+import { observeKeyboard, keyboardEffect } from './browser-keyboard-observation'
+import { getBrowserAutomationController } from './browser-automation-controller'
+import {browserSessionScope,DEFAULT_BROWSER_SESSION_ID} from '../../shared/browser-session'
+import {FETCH_SCOPE_HEADER} from './browser-network-scope'
+import {taskToolFailure} from './agent-task-policy'
+import {readPublicPlanUrl,writePlanArtifact} from './plan-tools'
+import type {RuntimeTaskConstraints} from '../../shared/task-declarations'
 import { resolvePointerMotion } from '../../shared/browser-automation'
 import {
   browserControlFailure, captureBrowserIntentEpochs, commitBrowserInput,
@@ -16,6 +24,9 @@ import {
 } from './browser-tool-coordination'
 import type { BrowserAutomationOperation } from './browser-automation-controller'
 import { attachBrowserNativeRefs, resolveBrowserNativeRef } from './browser-native-refs'
+import { sameAgentTarget, typeNativeTargetText, type TargetTextReceipt } from './browser-target-text'
+import {observeSubmittedText,rememberSubmissionObservation,observePendingSubmission} from './browser-submission-observation'
+import {nativeTargetIssues} from '../../shared/browser-native-target'
 import { assertBrowserInputCurrent, currentBrowserInputOperation } from './browser-input-context'
 import { dispatchOwnedTargetMouse, dispatchOwnedTargetTouch } from './browser-target-input'
 import { startOwnedNavigation, startOwnedHistoryNavigation } from './browser-navigation-control'
@@ -31,7 +42,7 @@ import type { BrowserRegistry } from './browser-registry'
 import type { BrowserNetworkManager } from './browser-network'
 import type { WorkspaceFiles } from './workspace-files'
 import { isPathInsideOrEqual } from './workspace-files'
-import type { FileDownloadService } from './file-download'
+import type { DownloadRequestScope, FileDownloadService } from './file-download'
 import type { WorkspaceShell } from './workspace-shell'
 import type { ChatStore } from './chat-store'
 import type { SecretsStore } from './secrets'
@@ -42,7 +53,8 @@ import {
   type PermissionGate,
 } from './permission-gate'
 import { dispatchTrustedPointer } from './trusted-input'
-import { dispatchPointerMotion, hasPointerMotion, invalidatePointerMotion, type PointerMotionSettings } from './pointer-motion'
+import { dispatchPointerMotion, hasPointerMotion, invalidatePointerMotion, pointerMotionPosition, pointerMotionWasInterpolated, type PointerMotionSettings } from './pointer-motion'
+import { nativePointerWithReceipt } from './trusted-pointer-receipt'
 import type { PointerPosition } from '../../shared/pointer-trajectory'
 import { jsDialogHost } from './js-dialog-host'
 import { browserCapabilities } from './browser-capabilities'
@@ -51,8 +63,8 @@ import { pageIndexReadScript, pageIndexFocusScript, pageIndexResolveScript } fro
 import type { PageSnapshot } from '../../shared/page-index'
 import {
   centerOf,
-  clickSelector,
-  hasClickSelector,
+  clickElementBySelector, queryAcrossDocumentsAgentSnapshot,
+  hasClickElement,
   hasQuerySelectorDeep,
   hasQuerySelectorAcrossDocuments,
   querySelectorDeep,
@@ -70,11 +82,7 @@ import { packPluginProject } from './plugin-pack'
 import { findPluginReadmePath } from './plugin-store'
 
 function parseAgentTarget(value:unknown):Electron.AgentTarget|null {
-  if(!value||typeof value!=='object')return null
-  const target=value as Partial<Electron.AgentTarget>
-  const integer=(n:unknown)=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0
-  if(!integer(target.webContentsId)||!integer(target.processId)||!integer(target.routingId)||!integer(target.documentId)||!integer(target.backendNodeId))return null
-  return target as Electron.AgentTarget
+  return nativeTargetIssues(value).length?null:value as Electron.AgentTarget
 }
 
 /** Keep motion parameters inside the existing browser permission/manual-control gates. */
@@ -109,7 +117,7 @@ async function runPointerMotion(
       beforeDispatch: () => assertBrowserInputCurrent(wc),
     })
     return {
-      ...result, method: 'dispatchInputSequence',
+      ...result, method: 'dispatchInputSequence',motionApplied:pointerMotionWasInterpolated(result),
       ...(result.ok ? {} : { error: result.reason || 'pointer_sequence_failed', ...(result.error ? { message: result.error } : {}) }),
     }
   } catch (error) {
@@ -141,7 +149,8 @@ function targetKeyDispatcher(wc: WebContents, target: Electron.AgentTarget, ctx:
     const key = String(event.code || event.key || '')
     if ((event.type === 'rawKeyDown' || event.type === 'keyDown') && key && operation && !releases.has(key)) {
       const release = { ...event, target, type: 'keyUp' as const, modifiers: 0 }
-      releases.set(key, operation.registerCleanup(async () => {
+      releases.set(key, operation.registerCleanup(async context => {
+        if(context?.nativeResetConfirmed){releases.get(key)?.();releases.delete(key);return}
         const result = await wc.dispatchKeyEvent(release)
         operation.noteResult(result)
         if (result.status !== 'dispatched') throw new Error(result.reason || 'key_release_failed')
@@ -154,9 +163,17 @@ function targetKeyDispatcher(wc: WebContents, target: Electron.AgentTarget, ctx:
 }
 
 export type ToolExecContext = {
+  taskConstraints?:RuntimeTaskConstraints
+  /** Shared only within one tool invocation, so cancellation retains partial edit receipts. */
+  browserTextReceipt?: { value?: TargetTextReceipt }
   chatId: string
   /** Page input protection lasts until this agent task completes. */
   browserRunId?: string
+  /** Host-owned invocation identity and sidecar receipts, never plugin input. */
+  toolCallId?:string
+  pluginRuntimeReceipts?:import('../../shared/plugins').PluginRuntimeReceipt[]
+  pluginRequestAdmission?:()=>Record<string,unknown>|null
+  isToolRunCurrent?:()=>boolean
   /** Root chat id for session-scoped plugin-dev links (parent of sub-chats). */
   pluginScopeChatId?: string
   signal: AbortSignal
@@ -411,6 +428,7 @@ function truncateFlowResult(result: Record<string, unknown>): Record<string, unk
     'lastDispatchedPoint',
     'cleanup',
     'clickDispatch',
+    'dispatch',
     'iframeSelector',
     'innerSelector',
     'x',
@@ -1271,11 +1289,13 @@ async function sessionFetch(
 
 export async function executeAgentTool(name:string,rawArgs:Record<string,unknown>,ctx:ToolExecContext,opts?:{skipPermission?:boolean}):Promise<unknown>{
   const normalized = normalizeBrowserToolCall(name, rawArgs)
-  const context = { ...ctx, browserIntentEpochs: ctx.browserIntentEpochs ?? captureBrowserIntentEpochs(ctx.registry, ctx.chatId) }
+  const phaseFailure=taskToolFailure(normalized.name,normalized.args,ctx.taskConstraints,ctx.plugins?.ownsToolForChat(ctx.pluginScopeChatId||ctx.chatId,normalized.name)===true)
+  if(phaseFailure)return phaseFailure
+  const context: ToolExecContext = { ...ctx, ...(normalized.name === 'browser_type' ? {browserTextReceipt: {}} : {}), browserIntentEpochs: ctx.browserIntentEpochs ?? captureBrowserIntentEpochs(ctx.registry, ctx.chatId) }
   try { return await withBrowserIntentCancellation(normalized.name, normalized.args, context, next => executeAgentToolInternal(normalized.name, normalized.args, next, opts)) }
   catch (error) {
     const failure = browserControlFailure(error)
-    if (failure) return failure
+    if (failure) return {...failure,...(context.browserTextReceipt?.value ? {input:context.browserTextReceipt.value} : {})}
     throw error
   }
 }
@@ -1289,7 +1309,10 @@ async function executeAgentToolInternal(
   assertNotAborted(ctx.signal)
   const cfg = ctx.getConfig()
 
-  if (!opts?.skipPermission) {
+  const sharedSensitive=typeof rawArgs.sessionId==='string'&&ctx.registry.isPublicSession?.(rawArgs.sessionId)&&new Set(['browser_session_clear','browser_session_set_proxy','browser_session_set_ua','browser_cookies_get','browser_cookies_set','browser_cookies_remove']).has(name)
+  const phaseFailure=taskToolFailure(name,rawArgs,ctx.taskConstraints,ctx.plugins?.ownsToolForChat(ctx.pluginScopeChatId||ctx.chatId,name)===true)
+  if(phaseFailure)return phaseFailure
+  if (!opts?.skipPermission||sharedSensitive||name==='plan_read_url'||name==='plan_write_artifact') {
     // Combined open checks both session.create and window.create.
     if (name === 'browser_open') {
       const sessGate = await ctx.gate.check(
@@ -1335,11 +1358,13 @@ async function executeAgentToolInternal(
       }
 
       if (capability) {
+        const sharedManagement=sharedSensitive
         const gate = await ctx.gate.check(
           ctx.chatId,
           capability,
-          `${name} ${JSON.stringify(rawArgs).slice(0, 200)}`,
+          sharedManagement?`管理公共默认浏览器会话：${name}。此操作涉及所有对话共用的登录、Cookie、网站存储或网络配置，可能中断其他任务。请明确确认共享影响。`:`${name} ${JSON.stringify(rawArgs).slice(0, 200)}`,
           ctx.signal,
+          sharedManagement?{forcePrompt:true}:undefined,
         )
         if (!gate.ok) return { ok: false, error: gate.reason || 'permission_denied' }
       }
@@ -1352,6 +1377,14 @@ async function executeAgentToolInternal(
 async function executeAgentToolBody(name: string, rawArgs: Record<string, unknown>, ctx: ToolExecContext): Promise<unknown> {
   assertNotAborted(ctx.signal)
   const cfg = ctx.getConfig()
+  if(['browser_click','browser_type','browser_press','browser_mouse','browser_touch','browser_hover'].includes(name)&&rawArgs.target!==undefined&&nativeTargetIssues(rawArgs.target).length)return{ok:false,error:'invalid_agent_target',dispatchedCount:0,issues:nativeTargetIssues(rawArgs.target),hint:'Read a fresh browser_get(what=agent_snapshot or agent_find), then pass its complete ref/target. No input was dispatched; do not guess a focused field.'}
+  if(name==='plan_read_url'){
+    if(Object.keys(rawArgs).some(key=>key!=='url'))return{ok:false,error:'plan_read_custom_request_forbidden'}
+    // Process fetch has no browser Cookie jar and exposes manual redirects.
+    // Electron net.fetch rejects manual redirects before returning their status.
+    return readPublicPlanUrl(rawArgs.url,{allowlist:cfg.browser.url_allowlist,maxBytes:cfg.browser.fetch_max_body_bytes||524288,signal:AbortSignal.any([ctx.signal,AbortSignal.timeout(Math.max(1,cfg.browser.fetch_timeout_ms||30000))]),fetch:(url,init)=>fetch(url,init)})
+  }
+  if(name==='plan_write_artifact')return writePlanArtifact(ctx.files,ctx.chatId,ctx.browserRunId||'',rawArgs,cfg.files.max_write_bytes||262144,ctx.signal)
   if (['browser_click', 'browser_hover', 'browser_type'].includes(name) && rawArgs.ref) {
     if (rawArgs.iframeSelector) return {ok:false,error:'ref_and_iframe_scope_conflict'}
     const rec = ctx.registry.assertWindowOwned(ctx.chatId, String(rawArgs.windowId || ''))
@@ -1458,70 +1491,34 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
         const folderReject = rejectLocalFolderFileUrl(urlEarly)
         if (folderReject) return folderReject
       }
-      const existing = ctx.registry.getTree(ctx.chatId)
+      const existing = ctx.registry.getTree(ctx.chatId).filter(session=>session.initialized!==false)
       const sessionCount = existing.length
       const windowCount = existing.reduce((n, s) => n + (s.windows?.length || 0), 0)
       // Hard efficiency guard: one browse context per chat unless user needs isolation.
       // If Session remains but all windows were closed, reopen a window on that Session.
-      if (sessionCount >= 1 && windowCount >= 1) {
+      const explicitIsolation=rawArgs.persist!==undefined||rawArgs.scope==='temporary'||rawArgs.scope==='persistent'||rawArgs.ua!==undefined
+      if (sessionCount >= 1 && windowCount >= 1&&!explicitIsolation) {
         return {
           ok: false,
           error: 'reuse_existing_session',
           hint:
             '本 Chat 已有浏览器资源。请用 browser_list_resources 查看，并用已有 windowId 执行 browser_navigate / browser_get。' +
-            '清 cookie 用 browser_session_clear 后再 navigate；不要为同一问题再次 browser_open。',
+            '账号或代理需要隔离时显式创建 temporary/persistent 专用会话，不要清理公共 Cookie。',
           tree: existing,
           sessionCount,
           windowCount,
         }
       }
-      let reusedSessionId: string | undefined
-      if (sessionCount >= 1 && windowCount === 0) {
-        reusedSessionId = String(existing[existing.length - 1]?.sessionId || '')
-        if (!reusedSessionId) {
-          return {
-            ok: false,
-            error: 'reuse_existing_session',
-            hint: '已有 Session 但无法解析 sessionId。请 browser_list_resources 后 browser_window_create。',
-            tree: existing,
-            sessionCount,
-            windowCount,
-          }
-        }
-      }
-      const wantPersist = rawArgs.persist === true
-      let persist = false
-      if (wantPersist && !reusedSessionId) {
-        const persistGate = await ctx.gate.check(
-          ctx.chatId,
-          'session.persist',
-          '创建持久化 Session（Cookie/存储可跨重启保留）。拒绝则改为创建临时 Session。',
-          ctx.signal,
-        )
-        persist = persistGate.ok
-      }
-      const sess = reusedSessionId
-        ? (() => {
-            const rec = ctx.registry.assertSessionOwned(ctx.chatId, reusedSessionId)
-            return {
-              sessionId: rec.sessionId,
-              chatId: rec.chatId,
-              sessionIndex: rec.sessionIndex,
-              partition: rec.partition,
-              persist: rec.persist,
-              windows: [] as [],
-            }
-          })()
-        : ctx.registry.createSession(ctx.chatId, {
-            persist,
-            ua: rawArgs.ua ? String(rawArgs.ua) : undefined,
-          })
       const url = urlEarly
       if (url !== 'about:blank' && !isUrlAllowed(url, cfg.browser.url_allowlist)) {
-        if (!reusedSessionId) await ctx.registry.closeSession(sess.sessionId, true)
         return { ok: false, error: 'url_not_allowed' }
       }
+      const options={scope:rawArgs.scope as import('../../shared/types').BrowserSessionScope|undefined,persist:rawArgs.persist as boolean|undefined,ua:rawArgs.ua as string|undefined}
+      browserSessionScope(options)
+      const sess=await ctx.registry.resolveSession(ctx.chatId,options,detail=>ctx.gate.check(ctx.chatId,'session.persist',detail,ctx.signal),ctx.signal)
+      const reusedSessionId=existing.some(session=>session.sessionId===sess.sessionId)?sess.sessionId:undefined
       const win = ctx.registry.createWindow(sess.sessionId, {
+        chatId:ctx.chatId,
         url,
         show: rawArgs.show !== undefined ? Boolean(rawArgs.show) : undefined,
         width: rawArgs.width != null ? Number(rawArgs.width) : undefined,
@@ -1560,12 +1557,7 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
               note: '已有 Session 但窗口已关闭：已在原 Session 上新建窗口（未新建 Session）。',
             }
           : {}),
-        ...(wantPersist && !persist && !reusedSessionId
-          ? {
-              persistDenied: true,
-              note: 'User denied persist; created ephemeral Session (cookies/storage cleared when closed).',
-            }
-          : {}),
+        scope:sess.scope,sourceChatId:ctx.chatId,
         window: {
           ...win,
           url: wc.getURL() || win.url,
@@ -1577,78 +1569,63 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
     }
 
     case 'browser_session_create': {
-      // Default ephemeral; persist only when the model explicitly requests it.
-      const wantPersist = rawArgs.persist === true
-      let persist = false
-      if (wantPersist) {
-        const persistGate = await ctx.gate.check(
-          ctx.chatId,
-          'session.persist',
-          '创建持久化 Session（Cookie/存储可跨重启保留）。拒绝则改为创建临时 Session。',
-          ctx.signal,
-        )
-        persist = persistGate.ok
-      }
-      const sess = ctx.registry.createSession(ctx.chatId, {
-        persist,
-        ua: rawArgs.ua ? String(rawArgs.ua) : undefined,
-      })
+      const sess=await ctx.registry.resolveSession(ctx.chatId,{scope:rawArgs.scope as import('../../shared/types').BrowserSessionScope|undefined,persist:rawArgs.persist as boolean|undefined,ua:rawArgs.ua as string|undefined},detail=>ctx.gate.check(ctx.chatId,'session.persist',detail,ctx.signal),ctx.signal)
       return {
         ok: true,
         session: sess,
         persist: sess.persist,
-        ...(wantPersist && !persist
-          ? {
-              persistDenied: true,
-              note: 'User denied persist; created ephemeral Session (cookies/storage cleared when closed).',
-            }
-          : {}),
+        scope:sess.scope,
       }
     }
 
     case 'browser_session_close': {
       const sessionId = String(rawArgs.sessionId || '')
-      ctx.registry.assertSessionOwned(ctx.chatId, sessionId)
-      ctx.network.disposeSession(sessionId)
-      await ctx.registry.closeSession(sessionId, true)
+      ctx.registry.assertSessionUsable(ctx.chatId, sessionId)
+      if(!ctx.registry.isPublicSession(sessionId))ctx.network.disposeSession(sessionId)
+      await ctx.registry.closeSession(sessionId, true,ctx.chatId)
       return { ok: true }
     }
 
     case 'browser_session_clear': {
       const sessionId = String(rawArgs.sessionId || '')
-      ctx.registry.assertSessionOwned(ctx.chatId, sessionId)
-      await ctx.registry.clearSessionData(sessionId)
+      ctx.registry.assertSessionUsable(ctx.chatId, sessionId)
+      await ctx.registry.withSharedSessionManagement(sessionId,ctx.signal,()=>ctx.registry.clearSessionData(sessionId))
       return { ok: true }
     }
 
     case 'browser_session_set_proxy': {
       const sessionId = String(rawArgs.sessionId || '')
-      ctx.registry.assertSessionOwned(ctx.chatId, sessionId)
+      ctx.registry.assertSessionUsable(ctx.chatId, sessionId)
       const rules = String(rawArgs.proxyRules || '').trim()
-      await ctx.registry.setProxy(sessionId, rules || null)
+      await ctx.registry.withSharedSessionManagement(sessionId,ctx.signal,()=>ctx.registry.setProxy(sessionId, rules || null))
       return { ok: true, proxyRules: rules || null }
     }
 
     case 'browser_session_set_ua': {
       const sessionId = String(rawArgs.sessionId || '')
-      ctx.registry.assertSessionOwned(ctx.chatId, sessionId)
+      ctx.registry.assertSessionUsable(ctx.chatId, sessionId)
       const ua = String(rawArgs.userAgent || '')
-      ctx.registry.setUserAgent(sessionId, ua)
+      await ctx.registry.withSharedSessionManagement(sessionId,ctx.signal,async()=>ctx.registry.setUserAgent(sessionId, ua))
       return { ok: true }
     }
 
     case 'browser_session_fetch': {
-      const sessionId = String(rawArgs.sessionId || '')
+      let sessionId = String(rawArgs.sessionId || '')
       const url = String(rawArgs.url || '')
-      const s = ctx.registry.assertSessionOwned(ctx.chatId, sessionId)
+      if(!sessionId||sessionId===DEFAULT_BROWSER_SESSION_ID&&!ctx.registry.getSessionRecord(sessionId)){
+        const allowed=await ctx.gate.check(ctx.chatId,'session.create','首次取得公共默认浏览器会话，用于当前任务请求。',ctx.signal)
+        if(!allowed.ok)return{ok:false,error:allowed.reason||'session_create_denied'}
+        sessionId=(await ctx.registry.resolveSession(ctx.chatId,{},detail=>ctx.gate.check(ctx.chatId,'session.persist',detail,ctx.signal),ctx.signal)).sessionId
+      }
+      const s = ctx.registry.assertSessionUsable(ctx.chatId, sessionId)
       if (!isUrlAllowed(url, cfg.browser.url_allowlist)) {
         return { ok: false, error: 'url_not_allowed' }
       }
       const result = await withTimeout(
-        trackBrowserSideEffect(ctx, () => sessionFetch(s.ses, url, {
-          signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(Math.max(1, Math.floor(cfg.browser.fetch_timeout_ms || 30000)))]),
+        trackBrowserSideEffect(ctx, () => ctx.network.withFetchScope(sessionId,ctx.chatId,url,rawArgs.method?String(rawArgs.method):'GET',ctx.signal,(internalHeaders,scopedSignal)=>sessionFetch(s.ses, url, {
+          signal: AbortSignal.any([scopedSignal, AbortSignal.timeout(Math.max(1, Math.floor(cfg.browser.fetch_timeout_ms || 30000)))]),
           method: rawArgs.method ? String(rawArgs.method) : 'GET',
-          headers: (rawArgs.headers as Record<string, string>) || undefined,
+          headers: {...Object.fromEntries(Object.entries((rawArgs.headers as Record<string,string>)||{}).filter(([key])=>key.toLowerCase()!==FETCH_SCOPE_HEADER)),...internalHeaders},
           body: rawArgs.body != null ? String(rawArgs.body) : undefined,
           redirect: rawArgs.redirect === 'error' ? 'error' : 'follow',
           navigationLike: rawArgs.navigationLike === false ? false : true,
@@ -1658,7 +1635,7 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
               ? String(rawArgs.acceptLanguage)
               : resolveAcceptLanguage(cfg),
           referer: typeof rawArgs.referer === 'string' ? rawArgs.referer : undefined,
-        })),
+        }))),
         cfg.browser.fetch_timeout_ms || 30000,
         'fetch',
         ctx.signal,
@@ -1674,6 +1651,7 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
       }
       return {
         ok: true,
+        sessionId,scope:s.scope,sourceChatId:ctx.chatId,coverage:ctx.network.coverage(sessionId),
         status: result.status,
         url: result.url,
         headers: result.headers,
@@ -1683,12 +1661,13 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
 
     case 'browser_window_create': {
       const sessionId = String(rawArgs.sessionId || '')
-      ctx.registry.assertSessionOwned(ctx.chatId, sessionId)
+      ctx.registry.assertSessionUsable(ctx.chatId, sessionId)
       const url = rawArgs.url ? String(rawArgs.url) : 'about:blank'
       if (url !== 'about:blank' && !isUrlAllowed(url, cfg.browser.url_allowlist)) {
         return { ok: false, error: 'url_not_allowed' }
       }
       const win = ctx.registry.createWindow(sessionId, {
+        chatId:ctx.chatId,
         url,
         show: rawArgs.show !== undefined ? Boolean(rawArgs.show) : undefined,
         width: rawArgs.width != null ? Number(rawArgs.width) : undefined,
@@ -2165,14 +2144,13 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
           if (typeof rawArgs.x !== 'number' || typeof rawArgs.y !== 'number') return { ok: false, error: 'pointer_coordinates_required', ...meta }
           return finishClick(await runPointerMotion(wc, 'click', { x: rawArgs.x, y: rawArgs.y }, rawArgs, ctx.signal, actionMs, target))
         }
-        if(typeof wc.clickSelector!=='function')return {ok:false,error:'target_click_unavailable',capabilities:browserCapabilities(wc),...meta}
+        if(typeof wc.clickElement!=='function')return {ok:false,error:'target_click_unavailable',capabilities:browserCapabilities(wc),...meta}
         if (rawArgs.motion && typeof rawArgs.motion === 'object' && Object.hasOwn(rawArgs.motion, 'holdMs')) return {ok:false,error:'coordinate_click_required_for_hold',...meta}
         const approach = await approachNativeTarget(wc, target, rawArgs, ctx, actionMs)
         if (approach && !approach.ok) return finishClick(approach)
-        invalidatePointerMotion(wc)
         try{
-          const result=await commitBrowserInput(ctx, windowId, () => wc.clickSelector('',{target,button,clickCount,scrollIntoView:true}))
-          return finishClick({ok:result.status==='dispatched',method:'target_clickSelector',dispatch:result,motionApplied:!!approach,...(approach?{movementDispatchedCount:approach.dispatchedCount}:{}),...(result.status==='failed'?{error:result.reason||'target_click_failed'}:{})})
+          const {dispatch:result,...receipt}=await nativePointerWithReceipt(wc,target,'click',button,()=>commitBrowserInput(ctx, windowId, () => wc.clickElement({target,button,clickCount,scrollIntoView:true})))
+          return finishClick({ok:result.status==='dispatched',method:'target_clickElement',dispatch:result,...receipt,motionApplied:pointerMotionWasInterpolated(approach),...(approach?{approach,movementDispatchedCount:approach.dispatchedCount}:{}),...(result.status==='failed'?{error:result.reason||'target_click_failed'}:{})})
         }catch(error){return {ok:false,error:'target_click_failed',message:error instanceof Error?error.message:String(error),...meta}}
       }
 
@@ -2214,19 +2192,20 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
         }
       }
 
-      if (hasClickSelector(wc) && (!hasPointerMotion(wc) || rawArgs.motion === false)) {
+      if (hasClickElement(wc) && (!hasPointerMotion(wc) || rawArgs.motion === false)) {
         invalidatePointerMotion(wc)
         try {
-          const ok = await commitBrowserInput(ctx, windowId, () => clickSelector(wc, selector, {
+          const dispatch = await commitBrowserInput(ctx, windowId, () => clickElementBySelector(wc, selector, {
             button,
             clickCount,
             pierce,
             scrollIntoView: true,
           }))
-          if (ok) {
+          if (dispatch) {
             return finishClick({
-              ok: true,
-              method: 'clickSelector',
+              ok: dispatch.status === 'dispatched',
+              method: 'clickElement', dispatch,
+              ...(dispatch.status === 'failed' ? {error:dispatch.reason || 'target_click_failed'} : {}),
               pierce,
             })
           }
@@ -2291,13 +2270,13 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
         // center-click native, so transforms/obstructions/stale documents are checked
         // by the existing target implementation rather than guessing local offsets.
         try {
-          const dispatch = await commitBrowserInput(ctx, windowId, () => wc.clickSelector('', { target: element.target, button, clickCount, scrollIntoView: true }))
+          const {dispatch,...receipt} = await nativePointerWithReceipt(wc,element.target,'click',button,()=>commitBrowserInput(ctx, windowId, () => wc.clickElement({ target: element.target, button, clickCount, scrollIntoView: true })))
           const zeroClick = dispatch.status === 'failed' && !dispatch.deliveryWarning &&
             ['target-resolution', 'frame-routing'].includes(dispatch.stage)
           return finishClick({
-            ...approach, ok: dispatch.status === 'dispatched',
+            ...approach,...receipt,approach,motionApplied:pointerMotionWasInterpolated(approach),ok: dispatch.status === 'dispatched',
             status: dispatch.status === 'dispatched' ? 'completed' : 'failed',
-            method: 'dispatchInputSequence+target_clickSelector', clickDispatch: dispatch,
+            method: 'dispatchInputSequence+target_clickElement', clickDispatch: dispatch,
             movementDispatchedCount: approach.dispatchedCount,
             dispatchedCount: zeroClick ? approach.dispatchedCount : null,
             ...(zeroClick ? { clickDispatchedCount: 0 } : {}),
@@ -2305,10 +2284,8 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
           })
         } catch (error) {
           return finishClick({ ...approach, ok: false, status: 'failed', reason: 'TARGET_CLICK_REJECTED', error: 'target_click_failed',
-            method: 'dispatchInputSequence+target_clickSelector', movementDispatchedCount: approach.dispatchedCount,
-            dispatchedCount: null, message: error instanceof Error ? error.message : String(error) })
-        } finally {
-          invalidatePointerMotion(wc)
+            method: 'dispatchInputSequence+target_clickElement', movementDispatchedCount: approach.dispatchedCount,
+            dispatchedCount: null,position:pointerMotionPosition(wc),message: error instanceof Error ? error.message : String(error) })
         }
       }
       invalidatePointerMotion(wc)
@@ -2519,6 +2496,7 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
       const isHardFail = (result: Record<string, unknown> | null | undefined) => {
         const err = String(result?.error || '')
         return (
+          browserInputMustNotReplay(result) ||
           result?.status === 'cancelled' ||
           (result?.ok === false && String(result.method || '').startsWith('dispatchInputSequence')) ||
           err === 'permission_denied' ||
@@ -2721,6 +2699,8 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
                 matchReason: clickOk ? 'click_when_ready' : undefined,
               }),
             })
+            if (isHardFail(fr)) return {ok:false,error:String(fr.error||'step_failed'),failedStep:cursor,
+              failedResult:truncateFlowResult(fr),attempts,steps:log,...summarizePage()}
             if (!clickOk) {
               if (pageMatchesClearNeedles()) {
                 cleared = true
@@ -2822,6 +2802,8 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
               matchReason: clickOk ? 'click_when_ready' : undefined,
             }),
           })
+          if (isHardFail(fr)) return {ok:false,error:String(fr.error||'step_failed'),failedStep:cursor,
+            failedResult:truncateFlowResult(fr),attempts,steps:log,...summarizePage()}
           if (clickOk) {
             cursor = coalesced.endIndex + 1
             if (looksLikeClearanceFlow && pageMatchesClearNeedles() && cursor < steps.length) {
@@ -2948,7 +2930,7 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
           }
         }
 
-        const ok = stepSucceeded(kind, result)
+        const ok = !isHardFail(result) && stepSucceeded(kind, result)
         log.push({
           index: cursor,
           do: kind,
@@ -3066,26 +3048,48 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
       const meta = pageWaitMeta(wc, wait)
       if(target){
         if(typeof wc.dispatchKeyEvent!=='function')return {ok:false,error:'target_keyboard_unavailable',capabilities:browserCapabilities(wc),...meta}
+        if(typeof wc.getAgentSnapshot!=='function')return {ok:false,error:'text_target_verification_unavailable',...meta}
         const beforeUrl=wc.getURL()
         const dispatch=targetKeyDispatcher(wc,target,ctx,windowId)
-        const steps:Electron.AgentDispatchResult[]=[]
-        if(!append){
-          steps.push(await dispatch({type:'rawKeyDown',key:'Control',code:'ControlLeft'}))
-          steps.push(await dispatch({type:'rawKeyDown',key:'a',code:'KeyA',modifiers:2}))
-          steps.push(await dispatch({type:'keyUp',key:'a',code:'KeyA',modifiers:2}))
-          steps.push(await dispatch({type:'keyUp',key:'Control',code:'ControlLeft'}))
-          steps.push(await dispatch({type:'rawKeyDown',key:'Backspace',code:'Backspace'}))
-          steps.push(await dispatch({type:'keyUp',key:'Backspace',code:'Backspace'}))
+        let beforeSubmit:Electron.AgentSnapshot|undefined
+        const readSubmissionSnapshot=async()=>{
+          const read=()=>wc.getAgentSnapshot({maxNodes:5000,maxFrames:1000,timeoutMs:Math.min(actionMs,1500),pierce:true})
+          const operation=currentBrowserOperation(ctx,windowId)
+          const snapshot=await(operation?operation.track(read):read())
+          assertBrowserInputCurrent(wc)
+          return snapshot
         }
-        if(text)steps.push(await dispatch({type:'char',text}))
-        if(steps.some(step=>step.status==='failed'))return {ok:false,error:'target_type_failed',steps,dispatch:steps.at(-1),...meta}
-        if(submit){
-          steps.push(await dispatch({type:'rawKeyDown',key:'Enter',code:'Enter'}))
-          steps.push(await dispatch({type:'keyUp',key:'Enter',code:'Enter'}))
+        const typed=await typeNativeTargetText({
+          text:rawArgs.text,append,submit,platform:process.platform,dispatch,signal:ctx.signal,timeoutMs:actionMs,
+          ...(typeof wc.dispatchInputSequence==='function'?{dispatchSequence:(events:Electron.KeyEvent[],timeoutMs:number)=>{
+            const sequence=events.map(({timestamp:_timestamp,...event})=>({...event,kind:'key' as const,atMs:0,target}))
+            return commitBrowserInput(ctx,windowId,()=>wc.dispatchInputSequence(sequence,{signal:ctx.signal,timeoutMs:Math.min(timeoutMs,120000),maxLatenessMs:5000,focusTimeoutMs:5000}))
+          }}:{}),
+          assertCurrent:()=>{currentBrowserOperation(ctx,windowId);assertBrowserInputCurrent(wc)},
+          readTarget:async()=>{
+            const read=()=>wc.getAgentSnapshot({selector:'input,textarea,[contenteditable],[role="textbox"]',maxNodes:5000,maxFrames:1000,timeoutMs:Math.min(actionMs,10000),pierce:true})
+            const operation=currentBrowserOperation(ctx,windowId)
+            const snapshot=await(operation?operation.track(read):read())
+            assertBrowserInputCurrent(wc)
+            return snapshot.elements.find(element=>sameAgentTarget(element.target,target))
+          },
+          onReceipt:receipt=>{if(ctx.browserTextReceipt)ctx.browserTextReceipt.value=receipt},
+          prepareSubmissionObservation:async()=>{beforeSubmit=await readSubmissionSnapshot()},
+          observeSubmission:async(expected,original)=>{
+            // At most two fresh native reads. No Enter/click replay, no unrelated
+            // frame/text scrape and no promotion of mere dispatch to saved data.
+            let observed=observeSubmittedText(beforeSubmit,await readSubmissionSnapshot(),original,expected)
+            if(observed.status==='unknown'&&!ctx.signal.aborted)observed=observeSubmittedText(beforeSubmit,await readSubmissionSnapshot(),original,expected)
+            if(observed.status==='unknown')rememberSubmissionObservation(wc,beforeSubmit,original,expected)
+            return observed
+          },
+        })
+        if(!typed.ok)return {...typed,...meta,url:wc.getURL(),navigated:wc.getURL()!==beforeUrl}
+        if(typed.submitted){
           const after=await settleAfterInteraction(wc,cfg,ctx.signal,beforeUrl,8000)
-          return {ok:steps.every(step=>step.status==='dispatched'),length:text.length,submitted:true,method:'target_dispatchKeyEvent',steps,...pageWaitMeta(wc,after),url:wc.getURL(),title:wc.getTitle(),navigated:wc.getURL()!==beforeUrl}
+          return {...typed,...pageWaitMeta(wc,after),url:wc.getURL(),title:wc.getTitle(),navigated:wc.getURL()!==beforeUrl}
         }
-        return {ok:true,length:text.length,submitted:false,method:'target_dispatchKeyEvent',steps,...meta,url:wc.getURL()}
+        return {...typed,...meta,url:wc.getURL()}
       }
       const selWaitMs = Math.min(actionMs, Number(rawArgs.waitTimeoutMs) || 5000)
       const sel = await waitForSelectorSoft(wc, worldId, selector, selWaitMs, ctx.signal)
@@ -3135,7 +3139,7 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
           title: wc.getTitle(),
           hint: navigated
             ? undefined
-            : 'Enter 未导致跳转。不要停下来问用户；立刻 browser_click 页面上的 Search/提交按钮。',
+            : 'Enter 已派发，未导航不能说明提交未生效。先只读核对页面结果，不要重复 Enter 或点击提交来重放副作用。',
         }
       }
       return { ok: true, length: text.length, submitted: false, ...meta, url: wc.getURL() }
@@ -3215,7 +3219,8 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
           const snapshot = what === 'agent_snapshot'
             ? await wc.getAgentSnapshot(options)
             : await wc.findAgentElements(agentQuery,options)
-          return {ok:true,value:attachBrowserNativeRefs(wc,snapshot),native:true,capabilities:browserCapabilities(wc),...meta}
+          const submissionObservation=what==='agent_snapshot'&&!selector?observePendingSubmission(wc,snapshot):undefined
+          return {ok:true,value:attachBrowserNativeRefs(wc,snapshot),native:true,capabilities:browserCapabilities(wc),...meta,...(submissionObservation?{submissionObservation}:{})}
         }
         if (what === 'snapshot') {
           const snapshot = await isolatedEval(wc, worldId, pageIndexReadScript({
@@ -3500,15 +3505,16 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
 
     case 'browser_network_rule_add': {
       const sessionId = String(rawArgs.sessionId || '')
-      ctx.registry.assertSessionOwned(ctx.chatId, sessionId)
+      ctx.registry.assertSessionUsable(ctx.chatId, sessionId)
       const pat = normalizeMatchPattern(String(rawArgs.urlPattern || '*://*/*'))
       const rule = ctx.network.add(sessionId, {
         kind: (rawArgs.kind as 'observe' | 'modify' | 'block') || 'observe',
         urlPattern: pat.pattern,
         headers: rawArgs.headers as Record<string, string> | undefined,
-      })
+      },ctx.chatId)
       return {
         ok: true,
+        coverage:ctx.network.coverage(sessionId),
         rule,
         ...(pat.normalized
           ? {
@@ -3530,18 +3536,19 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
 
     case 'browser_network_rule_remove': {
       const sessionId = String(rawArgs.sessionId || '')
-      ctx.registry.assertSessionOwned(ctx.chatId, sessionId)
-      const ok = ctx.network.remove(sessionId, String(rawArgs.ruleId || ''))
-      return ok ? { ok: true } : { ok: false, error: 'rule_not_found' }
+      ctx.registry.assertSessionUsable(ctx.chatId, sessionId)
+      const ok = ctx.network.remove(sessionId, String(rawArgs.ruleId || ''),ctx.chatId)
+      return ok ? { ok: true,coverage:ctx.network.coverage(sessionId) } : { ok: false, error: 'rule_not_found',coverage:ctx.network.coverage(sessionId) }
     }
 
     case 'browser_network_rule_list': {
       const sessionId = String(rawArgs.sessionId || '')
-      ctx.registry.assertSessionOwned(ctx.chatId, sessionId)
-      const log = ctx.network.getLog(sessionId, { limit: 20 })
+      ctx.registry.assertSessionUsable(ctx.chatId, sessionId)
+      const log = ctx.network.getLog(sessionId, { limit: 20 },ctx.chatId)
       return {
         ok: true,
-        rules: ctx.network.list(sessionId),
+        coverage:ctx.network.coverage(sessionId),
+        rules: ctx.network.list(sessionId,ctx.chatId),
         logSummary: log.map((e) => ({
           id: e.id,
           method: e.method,
@@ -3556,10 +3563,10 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
 
     case 'browser_network_log': {
       const sessionId = String(rawArgs.sessionId || '')
-      ctx.registry.assertSessionOwned(ctx.chatId, sessionId)
+      ctx.registry.assertSessionUsable(ctx.chatId, sessionId)
       if (rawArgs.clear === true) {
-        ctx.network.clearLog(sessionId)
-        return { ok: true, cleared: true, count: 0, entries: [] }
+        ctx.network.clearLog(sessionId,ctx.chatId)
+        return { ok: true, cleared: true, count: 0, entries: [],coverage:ctx.network.coverage(sessionId) }
       }
       const limit =
         typeof rawArgs.limit === 'number' && Number.isFinite(rawArgs.limit)
@@ -3570,9 +3577,10 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
         urlContains: rawArgs.urlContains ? String(rawArgs.urlContains) : undefined,
         status: typeof rawArgs.status === 'number' ? rawArgs.status : undefined,
         includePending: Boolean(rawArgs.includePending),
-      })
+      },ctx.chatId)
       return {
         ok: true,
+        coverage:ctx.network.coverage(sessionId),
         count: entries.length,
         entries,
         hint: '可按 status / urlContains 筛选观察日志；敏感头已脱敏。',
@@ -3581,14 +3589,14 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
 
     case 'browser_network_clear': {
       const sessionId = String(rawArgs.sessionId || '')
-      ctx.registry.assertSessionOwned(ctx.chatId, sessionId)
-      ctx.network.clear(sessionId)
-      return { ok: true }
+      ctx.registry.assertSessionUsable(ctx.chatId, sessionId)
+      ctx.network.clear(sessionId,ctx.chatId)
+      return { ok: true,coverage:ctx.network.coverage(sessionId) }
     }
 
     case 'browser_cookies_get': {
       const sessionId = String(rawArgs.sessionId || '')
-      ctx.registry.assertSessionOwned(ctx.chatId, sessionId)
+      ctx.registry.assertSessionUsable(ctx.chatId, sessionId)
       const url = rawArgs.url ? String(rawArgs.url) : undefined
       const cookies = await ctx.registry.getCookies(sessionId, url)
       return { ok: true, cookies, count: cookies.length }
@@ -3596,12 +3604,12 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
 
     case 'browser_cookies_set': {
       const sessionId = String(rawArgs.sessionId || '')
-      ctx.registry.assertSessionOwned(ctx.chatId, sessionId)
+      ctx.registry.assertSessionUsable(ctx.chatId, sessionId)
       const url = String(rawArgs.url || '')
       const name = String(rawArgs.name || '')
       const value = String(rawArgs.value ?? '')
       if (!url || !name) return { ok: false, error: 'url_and_name_required' }
-      await ctx.registry.setCookie(sessionId, {
+      await ctx.registry.withSharedSessionManagement(sessionId,ctx.signal,()=>ctx.registry.setCookie(sessionId, {
         url,
         name,
         value,
@@ -3611,19 +3619,19 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
         httpOnly: rawArgs.httpOnly != null ? Boolean(rawArgs.httpOnly) : undefined,
         expirationDate:
           rawArgs.expirationDate != null ? Number(rawArgs.expirationDate) : undefined,
-      })
+      }))
       return { ok: true }
     }
 
     case 'browser_cookies_remove': {
       const sessionId = String(rawArgs.sessionId || '')
-      ctx.registry.assertSessionOwned(ctx.chatId, sessionId)
-      const removed = await ctx.registry.removeCookie(sessionId, {
+      ctx.registry.assertSessionUsable(ctx.chatId, sessionId)
+      const removed = await ctx.registry.withSharedSessionManagement(sessionId,ctx.signal,()=>ctx.registry.removeCookie(sessionId, {
         url: rawArgs.url ? String(rawArgs.url) : undefined,
         name: rawArgs.name ? String(rawArgs.name) : undefined,
         domain: rawArgs.domain ? String(rawArgs.domain) : undefined,
         path: rawArgs.path ? String(rawArgs.path) : undefined,
-      })
+      }))
       return { ok: true, removed }
     }
 
@@ -3668,15 +3676,22 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
       const hasTarget=rawArgs.target!==undefined&&rawArgs.target!==null
       const target=hasTarget?parseAgentTarget(rawArgs.target):null
       if(hasTarget&&!target)return {ok:false,error:'invalid_agent_target'}
+      const controller=getBrowserAutomationController(wc)
+      const sample=()=>observeKeyboard(wc,controller.captureEpoch(),controller.captureDocumentEpoch(),target||undefined)
+      const shortcut=key.split('+'),baseKey=shortcut.pop()||key
+      const modifiers=shortcut.map(part=>/^(?:ctrl|control)$/i.test(part)?'control':/^(?:cmd|command|meta)$/i.test(part)?'meta':part.toLowerCase()).filter((part):part is 'control'|'meta'|'alt'|'shift'=>['control','meta','alt','shift'].includes(part))
+      const modifierMask=modifiers.reduce((mask,part)=>mask|({alt:1,control:2,meta:4,shift:8}[part]||0),0)
       if(target){
         if(typeof wc.dispatchKeyEvent!=='function')return {ok:false,error:'target_keyboard_unavailable',capabilities:browserCapabilities(wc)}
-        const mapped=mapKeyCode(key)
+        const mapped=mapKeyCode(baseKey)
         const keyName=mapped==='Return'?'Enter':mapped==='Up'?'ArrowUp':mapped==='Down'?'ArrowDown':mapped==='Left'?'ArrowLeft':mapped==='Right'?'ArrowRight':mapped==='Space'?' ':mapped
         const code=keyName===' '?'Space':keyName.length===1?`Key${keyName.toUpperCase()}`:keyName
         const dispatch = targetKeyDispatcher(wc,target,ctx,windowId)
-        const down=await dispatch({type:'rawKeyDown',key:keyName,code})
-        const up=await dispatch({type:'keyUp',key:keyName,code})
-        return {ok:down.status==='dispatched'&&up.status==='dispatched',key:keyName,method:'target_dispatchKeyEvent',steps:[down,up]}
+        const before=await sample()
+        const down=await dispatch({type:'rawKeyDown',key:keyName,code,modifiers:modifierMask})
+        const up=await dispatch({type:'keyUp',key:keyName,code,modifiers:modifierMask})
+        const ok=down.status==='dispatched'&&up.status==='dispatched'
+        return {ok,key:keyName,method:'target_dispatchKeyEvent',steps:[down,up],keyboardEffect:keyboardEffect(key,before,await sample(),ok)}
       }
       const selector = rawArgs.selector ? String(rawArgs.selector) : ''
       if (selector) {
@@ -3694,12 +3709,17 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
           { timeoutMs: 5000, signal: ctx.signal, label: 'press_focus' },
         )
       }
-      const keyCode = mapKeyCode(key)
+      const keyCode = mapKeyCode(baseKey)
+      const before=await sample()
       currentBrowserOperation(ctx, windowId)
       assertBrowserInputCurrent(wc)
-      wc.sendInputEvent({ type: 'keyDown', keyCode })
-      wc.sendInputEvent({ type: 'keyUp', keyCode })
-      return { ok: true, key: keyCode }
+      await commitBrowserInput(ctx,windowId,async()=>{
+        wc.sendInputEvent({ type: 'keyDown', keyCode, modifiers })
+        wc.sendInputEvent({ type: 'keyUp', keyCode, modifiers })
+        // The legacy void API acknowledges submission, not native delivery.
+        return {status:'submitted',dispatchedCount:null}
+      })
+      return { ok: true, key: keyCode, keyboardEffect:keyboardEffect(key,before,await sample(),true) }
     }
 
     case 'browser_mouse': {
@@ -3733,8 +3753,8 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
       const button=['left','middle','right','back','forward'].includes(buttonRaw)?buttonRaw:'left'
       const x=Number(rawArgs.x)||0,y=Number(rawArgs.y)||0
       const buttonMask=button==='left'?1:button==='right'?2:button==='middle'?4:button==='back'?8:16
-      const event:Electron.MouseEvent={type,x,y,button:action==='down'||action==='up'?button:'none',clickCount:action==='down'||action==='up'?Math.max(1,Math.min(3,Number(rawArgs.clickCount)||1)):0,...(Number.isFinite(Number(rawArgs.modifiers))?{modifiers:Number(rawArgs.modifiers)}:{}),buttons:Number.isFinite(Number(rawArgs.buttons))?Number(rawArgs.buttons):action==='down'?buttonMask:0,...(action==='wheel'?{deltaX:Number(rawArgs.deltaX)||0,deltaY:Number(rawArgs.deltaY)||0}:{})}
-      const dispatch=await dispatchOwnedTargetMouse(wc,{...event,target})
+      const event:Electron.AutomationMouseEvent={type,target,offset:{x,y},button:action==='down'||action==='up'?button:'none',clickCount:action==='down'||action==='up'?Math.max(1,Math.min(3,Number(rawArgs.clickCount)||1)):0,...(Number.isFinite(Number(rawArgs.modifiers))?{modifiers:Number(rawArgs.modifiers)}:{}),buttons:Number.isFinite(Number(rawArgs.buttons))?Number(rawArgs.buttons):action==='down'?buttonMask:0,...(action==='wheel'?{deltaX:Number(rawArgs.deltaX)||0,deltaY:Number(rawArgs.deltaY)||0}:{})}
+      const dispatch=await dispatchOwnedTargetMouse(wc,event)
       return {ok:dispatch.status==='dispatched',method:'target_dispatchMouseEvent',dispatch}
     }
 
@@ -3748,9 +3768,9 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
       const wc=rec.win.webContents
       if(typeof wc.dispatchTouchEvent!=='function')return {ok:false,error:'target_touch_unavailable',capabilities:browserCapabilities(wc)}
       const supplied=Array.isArray(rawArgs.touchPoints)?rawArgs.touchPoints:[]
-      const touchPoints:Electron.TouchPoints[]=type==='touchEnd'||type==='touchCancel'?[]:supplied.map((point,index)=>{
+      const touchPoints:Electron.AutomationTargetTouchPoint[]=type==='touchEnd'||type==='touchCancel'?[]:supplied.map((point,index)=>{
         const item=point&&typeof point==='object'?point as Record<string,unknown>:{ }
-        return {x:Number(item.x)||0,y:Number(item.y)||0,id:Number(item.id)||index+1,radiusX:Number(item.radiusX)||1,radiusY:Number(item.radiusY)||1,force:Number(item.force)||1}
+        return {offset:{x:Number(item.x)||0,y:Number(item.y)||0},id:Number(item.id)||index+1,radiusX:Number(item.radiusX)||1,radiusY:Number(item.radiusY)||1,force:Number(item.force)||1}
       })
       if(type!=='touchEnd'&&type!=='touchCancel'&&!touchPoints.length)return {ok:false,error:'touch_points_required'}
       const result=await dispatchOwnedTargetTouch(wc,{target,type,touchPoints})
@@ -3770,9 +3790,8 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
         if (typeof wc.dispatchMouseEvent !== 'function') return { ok: false, error: 'target_mouse_unavailable' }
         const approach = await approachNativeTarget(wc, target, rawArgs, ctx, cfg.browser.action_timeout_ms || 15000)
         if (approach && !approach.ok) return approach
-        const dispatch = await commitBrowserInput(ctx, windowId, () => wc.dispatchMouseEvent({ type: 'mouseMoved', target }))
-        invalidatePointerMotion(wc)
-        return { ok: dispatch.status === 'dispatched', method: 'target_dispatchMouseEvent', dispatch, motionApplied: !!approach }
+        const {dispatch,...receipt} = await nativePointerWithReceipt(wc,target,'move','left',()=>commitBrowserInput(ctx, windowId, () => wc.dispatchMouseEvent({ type: 'mouseMoved', target })))
+        return { ok: dispatch.status === 'dispatched', method: 'target_dispatchMouseEvent', dispatch,...receipt,...(approach?{approach}:{}),motionApplied:pointerMotionWasInterpolated(approach) }
       }
       if (!selector) return { ok: false, error: 'selector_or_ref_required' }
       await prepareActionPageWait(wc, cfg, rawArgs, { signal: ctx.signal, worldId, selector })
@@ -3948,8 +3967,10 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
         return {ok:false,error:'querySelectorAcrossDocuments_unavailable'}
       }
       if(acrossDocuments&&agentInfo){
-        const snapshot=await wc.querySelectorAcrossDocuments(selector,{pierce,scrollIntoView,agentInfo:true})
-        return {ok:true,pierce,acrossDocuments:true,agentInfo:true,value:snapshot}
+        if(typeof wc.getAgentSnapshot!=='function')return {ok:false,error:'agent_snapshot_unavailable'}
+        // Compatibility is host-owned: .8 no longer switches native query return types.
+        const snapshot=await queryAcrossDocumentsAgentSnapshot(wc,selector,{pierce,scrollIntoView})
+        return {ok:true,pierce,acrossDocuments:true,agentInfo:true,value:attachBrowserNativeRefs(wc,snapshot)}
       }
       if (!hasQuerySelectorDeep(wc)) {
         return {
@@ -3968,7 +3989,7 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
         acrossDocuments,
         element: info,
         center: centerOf(info),
-        hint: '坐标可用于可信点击；优先 browser_click(selector)（内部会用 clickSelector）。',
+        hint: '优先 browser_click(ref/target/selector)，宿主使用 clickElement 保留目标身份；坐标为主视口 CSS 像素。',
       }
     }
 
@@ -4129,7 +4150,7 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
         }
       }
 
-      const sesRec = sessionId ? ctx.registry.assertSessionOwned(ctx.chatId, sessionId) : null
+      const sesRec = sessionId ? ctx.registry.assertSessionUsable(ctx.chatId, sessionId) : null
       const ses = sesRec?.ses || null
       const userAgent =
         sesRec?.userAgent ||
@@ -4142,7 +4163,7 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
       if (rawHeaders) {
         headers = { ...rawHeaders }
         for (const k of Object.keys(headers)) {
-          if (k.toLowerCase() === 'origin') delete headers[k]
+          if (k.toLowerCase() === 'origin'||k.toLowerCase()===FETCH_SCOPE_HEADER) delete headers[k]
         }
       }
 
@@ -4157,6 +4178,7 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
         referer,
         userAgent,
         session: ses,
+        requestScope:sessionId?((url,method,signal,run)=>ctx.network.withFetchScope(sessionId,ctx.chatId,url,method,signal,run)) as DownloadRequestScope:undefined,
         signal: ctx.signal,
         onProgress: (p) =>
           ctx.onDownloadProgress?.({
@@ -4173,7 +4195,7 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
 
     case 'file_download_compose': {
       const sessionId = rawArgs.sessionId ? String(rawArgs.sessionId) : ''
-      const ses = sessionId ? ctx.registry.assertSessionOwned(ctx.chatId, sessionId).ses : null
+      const ses = sessionId ? ctx.registry.assertSessionUsable(ctx.chatId, sessionId).ses : null
       const dest = String(rawArgs.dest || '')
       const parts = Array.isArray(rawArgs.parts)
         ? rawArgs.parts.map((p) => {
@@ -4181,7 +4203,7 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
             const enc = part.bodyEncoding === 'base64' ? ('base64' as const) : ('utf8' as const)
             return {
               url: String(part.url || ''),
-              headers: part.headers as Record<string, string> | undefined,
+              headers:part.headers?Object.fromEntries(Object.entries(part.headers as Record<string,string>).filter(([key])=>key.toLowerCase()!==FETCH_SCOPE_HEADER)):undefined,
               method: part.method ? String(part.method) : undefined,
               body: part.body != null ? String(part.body) : undefined,
               bodyEncoding: part.body != null ? enc : undefined,
@@ -4192,6 +4214,7 @@ async function executeAgentToolBody(name: string, rawArgs: Record<string, unknow
       return ctx.downloads.compose(ctx.chatId, {
         dest,
         parts,
+        requestScope:sessionId?((url,method,signal,run)=>ctx.network.withFetchScope(sessionId,ctx.chatId,url,method,signal,run)) as DownloadRequestScope:undefined,
         session: ses,
         signal: ctx.signal,
         onProgress: (p) =>

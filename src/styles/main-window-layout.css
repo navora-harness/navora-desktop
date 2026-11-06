@@ -11,7 +11,7 @@
 .navora-app .main-shell:not(.mobile-layout)>.content-surface>aside.sidebar{grid-column:1;grid-row:1;padding:0 10px 8px 12px;border-radius:0;background:var(--navora-sidebar)}
 .navora-app .main-shell.sidebar-collapsed:not(.mobile-layout)>.content-surface>aside.sidebar{padding:0;border:0;visibility:hidden;pointer-events:none}
 .navora-app .main-shell:not(.mobile-layout)>.content-surface>.main{grid-column:2;grid-row:1;border-radius:0;min-width:0;min-height:0}
-.navora-app .shell.main-shell>.activity-rail{position:relative;inset:auto;grid-column:1;grid-row:1;align-self:stretch;width:52px;min-height:0;display:flex;flex-direction:column;justify-content:space-between;padding:0 10px 8px;border:0;background:var(--navora-chrome);z-index:3}
+.navora-app .shell.main-shell>.activity-rail{position:relative;inset:auto;grid-column:1;grid-row:1;align-self:stretch;width:52px;min-height:0;display:flex;flex-direction:column;justify-content:space-between;padding:0 10px 16px;border:0;background:var(--navora-chrome);z-index:3}
 .navora-app .shell.main-shell.frameless:not(.mobile-layout)>.activity-rail{grid-row:2}
 .navora-app .main-shell .rail-panel-groups{max-height:calc(100dvh - 220px)}
 .navora-app .main-shell .window-titlebar{padding-right:150px}
@@ -42,3 +42,12 @@
 .navora-app .main-shell .window-titlebar-drag{position:static;inset:auto;flex:1;min-width:20px;height:100%;align-self:stretch}
 .navora-app .main-shell.platform-mac>.window-titlebar{padding-left:84px}
 .navora-app .shell.main-shell.frameless:not(.mobile-layout)>.activity-rail{padding-top:12px}
+.navora-app .main-shell.docs-open>.content-surface{grid-template-columns:0 minmax(0,1fr);transition:none}
+.navora-app .main-shell.docs-open>.content-surface>aside.sidebar{visibility:hidden;pointer-events:none;padding:0;border:0}
+.navora-app .main.docs-workspace-open{padding-right:0!important;grid-template-rows:minmax(0,1fr)}
+.navora-app .main>.docs-workspace{grid-row:1/-1;grid-column:1;min-height:0;min-width:0;height:100%;z-index:12}
+
+/* Documentation owns the rail selection while its reading page is visible. */
+.navora-app .activity-rail .sidebar-docs-btn{position:relative}
+.navora-app .activity-rail .sidebar-docs-btn.selected{background:var(--control-selected);color:var(--navora-accent)}
+.navora-app .activity-rail .sidebar-docs-btn.selected::before{content:"";position:absolute;left:-5px;top:11px;bottom:11px;width:3px;border-radius:3px;background:var(--navora-accent)}

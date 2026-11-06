@@ -1,0 +1,3 @@
+import {contextBridge,ipcRenderer} from 'electron'
+const methods=['list','get','saveDraft','submit','cancel','attach','openAttachment','revise','listTemplates','saveTemplate','deleteTemplate','useTemplate']
+contextBridge.exposeInMainWorld('navora',{questionnaires:{...Object.fromEntries(methods.map(method=>[method,(...args:unknown[])=>ipcRenderer.invoke('questionnaire-extension',method,...args)])),onChanged:(callback:(record:unknown)=>void)=>{const listener=(_event:unknown,record:unknown)=>callback(record);ipcRenderer.on('questionnaire-extension-changed',listener);return()=>ipcRenderer.removeListener('questionnaire-extension-changed',listener)}}})

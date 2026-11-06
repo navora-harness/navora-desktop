@@ -13,6 +13,7 @@ import {computed,onBeforeUnmount,onMounted,ref,watch} from 'vue'
 import type {BrowserContextRef,BrowserTreeSession} from '@shared/types'
 import type {WorkspaceResource} from '@shared/workspace-resources'
 import {composerToken} from '@shared/composer-commands'
+import {browserSessionLabel} from '@shared/browser-session'
 type Option={key:string;label:string;detail:string;icon:string;command?:string;reference?:BrowserContextRef;path?:string}
 const props=defineProps<{text:string;chatId:string;files:WorkspaceResource[]}>()
 const emit=defineEmits<{replace:[selection:{start:number;end:number;text:string;reference?:BrowserContextRef}]}>()
@@ -24,7 +25,7 @@ const options=computed(()=>{
   const current=token.value;if(!current)return []
   const q=current.query.toLocaleLowerCase()
   const windows:Option[]=tree.value.flatMap(s=>s.windows.map(w=>({key:w.windowId,label:w.title||'无标题页面',detail:w.url,icon:'browser',reference:{kind:'window' as const,sessionId:s.sessionId,sessionIndex:s.sessionIndex,windowId:w.windowId,label:w.title||'无标题页面',url:w.url}})))
-  const sessions:Option[]=tree.value.map(s=>({key:s.sessionId,label:`会话 ${s.sessionIndex}`,detail:`${s.windows.length} 个页面 · ${s.persist?'已保留':'临时'}`,icon:'layer-group',reference:{kind:'session' as const,sessionId:s.sessionId,sessionIndex:s.sessionIndex,label:`会话 ${s.sessionIndex}`}}))
+  const sessions:Option[]=tree.value.map(s=>({key:s.sessionId,label:browserSessionLabel(s),detail:`${s.windows.length} 个页面 · ${s.scope==='default'?'共享':s.persist?'持久':'临时'}`,icon:s.scope==='default'?'globe':'layer-group',reference:{kind:'session' as const,sessionId:s.sessionId,sessionIndex:s.sessionIndex,label:browserSessionLabel(s)}}))
   const files:Option[]=props.files.map(f=>({key:f.id,label:f.name,detail:f.path,icon:'file',path:f.path}))
   const list=current.kind==='all'?commands:current.kind==='file'?files:current.kind==='session'?sessions:windows
   return list.filter(o=>!q||(o.label+' '+o.detail+' '+o.command+' '+o.key).toLocaleLowerCase().includes(q)).slice(0,40)

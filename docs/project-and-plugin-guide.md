@@ -7,7 +7,7 @@
 | 文档用途 | 交给其它 AI / 协作者快速理解产品能力与插件开发契约 |
 | 对应代码 | `navora-desktop` + `navora-plugin-sdk` + `navora-plugins` |
 | 整理日期 | 2026-11-01 |
-| 详细模块 | 见同目录 [`modules.md`](./modules.md)、[`architecture-plan.md`](./architecture-plan.md) |
+| 详细模块 | 见同目录 [`modules.md`](./modules.md)、[`architecture-plan.md`](./已完成/architecture-plan.md) |
 | 插件规范原文 | [`../../navora-plugin-sdk/SPEC.md`](../../navora-plugin-sdk/SPEC.md) |
 
 ---
@@ -405,7 +405,7 @@ unofficial Electron 二进制常经本机 mirror（见 desktop README / `.npmrc.
 |------|------|
 | 宿主 README | `navora-desktop/README.md` |
 | 模块说明 | `navora-desktop/docs/modules.md` |
-| 架构规划 | `navora-desktop/docs/architecture-plan.md` |
+| 架构规划 | `navora-desktop/docs/已完成/architecture-plan.md` |
 | 核心工具 schema | `navora-desktop/shared/agent-tools.ts` |
 | 插件类型契约 | `navora-plugin-sdk/navora-plugin.d.ts` |
 | 插件规范 | `navora-plugin-sdk/SPEC.md` |

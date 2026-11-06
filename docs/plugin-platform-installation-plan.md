@@ -1,155 +1,227 @@
 # 插件跨平台安装与原生运行时规划
 
-日期：2026-11-01。状态：首批平台安装与 fcurl 一次性调用已实现并在 Windows 验证；其余阶段按验收推进。实施结果见 [集成进展](./fastls-integration-progress.md)。Fastls 实施依赖见 [Fastls 插件规划](./fastls-plugin-plan.md)。
+> 2026-11-06 第二批：已补 IO 恢复重试、图形恢复入口、受限 lockfile 生产依赖 staging；两项真实 Windows 文件故障、故障注入与恢复界面已有证据。完整 S1/强杀回收/跨平台认证仍未完成。当前范围以[第二批实施记录](./plugin-reliability-followup-2026-11-06.md)为准；下列首批发行证据保留原范围，本批尚未发行。
 
-目标是让同一个插件 ID、同一个版本能交付多种平台产物，安装时自动选择当前宿主能够运行的包，失败时保留已安装的可用版本。用户无需准备 Node、npm 或编译工具。现有纯 JavaScript 插件、套件变体和文件夹开发外链继续可用。
 
-## 1. 当前实现与需要补齐的环节
+<!-- planning-completion-review:2026-11-06 -->
+## 完成情况复核（2026-11-06）
 
-- `shared/plugins.ts` 的 `PluginManifest` 没有平台和运行时约束；`electron/modules/plugin-store.ts` 解压后直接 `require(main)`，不安装 npm 依赖。
-- `shared/store.ts`、`navora-store/src/types.js` 的版本只有一组 ZIP 路径、大小和摘要；`navora-store/src/ingest.js` 固定写入 `<id>/<version>/package.zip`，相同版本不能独立存储不同平台包。
-- `navora-plugin-sdk/bin/navora-plugin.mjs` 默认 bundle 依赖，仅 external `electron`；打包带依赖时复制开发机的 `node_modules`。桌面内置 `plugin-pack.ts` 有另一套复制和压包实现，需要同步升级。
-- `marketplace-client.ts` 在预览、安装、更新发现和缓存中均按现有版本结构工作；只改下载入口会导致预览、更新提示、缓存命中与实际安装不一致。
-- 插件当前位于 Electron 主进程。进程内原生模块与独立可执行文件必须分别建模。Fastls 集成已发布的 `FastTLS/fastls-curl v0.2.0`，实际可执行文件名为 `fcurl` / `fcurl.exe`，不再使用 npm SDK 路线。
+**当前状态：部分完成；S1 两批已有实现，完整 S1 及跨平台交付未验收。** 本节依据现有源码、实施记录和报告复核；下文旧日期状态保留历史含义，当前完成范围以本节为准。
 
-## 2. 核心决定
+- [x] **已完成**｜2026-11-05—06：备份事务／启动恢复、安装忙状态、SDK 与桌面静态打包检查、运行时有界队列和正常取消／退出排空首批已纳入 0.4.13。
+- [x] **已完成**｜2026-11-06：SDK 受限 lockfile 生产依赖 staging、IO 故障恢复重试和图形入口已完成源码与定向验证：插件单测 93 项、SDK 15 项、两项真实 Windows 文件故障、两种动画模式界面通过；宿主改动后续纳入 0.4.14，SDK／插件／正式商店未重发。
+- [ ] **保留事项**｜真实磁盘耗尽／完整锁／ACL／断电矩阵、自动排空后升级、私有目录 ACL／硬配额、父死进程树回收和 macOS／Linux 实机及分发认证仍缺。
 
-1. **发布平台包，安装时选包。** 用户安装阶段只下载并校验已构建产物，不运行 npm、安装脚本或本地编译。
-2. **平台与产品变体分离。** `suite` / `packageId` 仍表示能力变体；`artifactId` 表示同一变体版本的平台产物。不得把 win32、darwin 放进 suite 供用户手选。
-3. **使用实际执行架构。** 第一版以宿主 `process.arch` 选择产物；Rosetta 中运行的 x64 宿主选择 x64 包，不因硬件为 arm64 自动跨架构启动。以后再增加显式模拟执行策略。
-4. **纯 JS 保持简单。** 无平台声明的旧包按 legacy 处理，保留安装能力；不把它自动认证为跨平台兼容。新包显式声明 portable 或平台目标。
-5. **独立可执行文件为通用运行方式。** Fastls 使用正式发布的 `fcurl v0.2.0`，按单次调用启动并由宿主管理其进程；进程内原生模块只有在声明兼容且经过真实 Electron 验证后才允许启用。
-6. **静态校验先于执行。** 浏览商店、预览 ZIP、选平台和检查文件完整性都不执行插件入口；安装健康检查在授权安装后运行。
+证据：[plugin-foundation-progress-2026-11-05.md](./plugin-foundation-progress-2026-11-05.md)；[plugin-reliability-followup-2026-11-06.md](./plugin-reliability-followup-2026-11-06.md)；[plugin-install-transaction.ts](./../electron/modules/plugin-install-transaction.ts)。
+<!-- /planning-completion-review:2026-11-06 -->
 
-## 3. 平台与运行时契约
+> 实施：2026-11-05 开始，2026-11-06 完成本轮交付。状态：**S1 安装/运行时、SDK 及桌面 pack 首批已实施并验证；S1 完整验收及其他平台交付仍待完成**。本轮修改宿主安装事务、运行生命周期和 SDK 静态检查，未发布 SDK/Fastls 新包或认证新平台。证据与边界见[本轮实施记录](./plugin-foundation-progress-2026-11-05.md)，总体状态见[规划状态总览](./planning-status-and-next-work-2026-11-04.md)。
 
-新增共享的目标解析、校验和匹配模块，桌面端与 SDK/商店使用一致规则及同一组契约样例。
+关联：[Fastls 功能规划](./fastls-plugin-plan.md)、[已有集成进展](./fastls-integration-progress.md)。版本基线仍为 SDK 0.2.0、Fastls 插件 0.1.0、fcurl 0.2.0；本轮宿主源码版本为 0.4.13，构建/退出夹具与成品交付结果在实施记录中分别记录。
 
-目标由 `os`、`arch`、可选 `linkage/libc` 和最低系统、内核及 libc 版本组成。第一批平台键包含 `win32-x64`、`darwin-x64`、`darwin-arm64`、静态 `linux-x64/linux-arm64` 及动态 `linux-x64-glibc/linux-arm64-glibc`。通用机制可以识别 win32-arm64、musl 等目标，识别不等于某个插件存在对应产物。
+## 1. 用户最终会得到什么
 
-`libc` 只允许 Linux 使用。最低系统版本取实际二进制及其动态依赖与本项目要求的交集；如包内另带语言运行时，再叠加其要求。检测不到已声明的必要条件时返回 `platform_detection_failed`，不得把未知 libc 当成 glibc。平台检测在主进程完成，结果可供预览 UI 读取，不信任渲染端上报值。
+同一个插件、同一个版本可以提供不同系统和架构的安装包。商店根据正在运行的 Navora 自动选择，用户不需要理解平台包、不需要安装 Node/npm 或编译工具。安装失败保留原来的可用插件，运行被拒绝时说明原因和下一步。
 
-建议新增以下字段；名称在实现阶段统一进入 SDK 类型，不在两端分别发明：
+平台包存在、安装器能校验、目标机器能执行、正式桌面能分发，是四个分别验收的条件。只有四项通过，才能把该平台标为“已支持”。
 
-```ts
-type ArtifactTarget =
-  | { kind: 'portable' }
-  | { kind: 'platform'; os: string; arch: string; libc?: 'glibc' | 'musl';
-      minOsVersion?: string; minKernelVersion?: string; minLibcVersion?: string;
-      linkage?: 'static' | 'dynamic' }
+## 2. 已有事实与当前缺口
 
-type PluginRuntime =
-  | { kind: 'electron-main'; nodeRange?: string;
-      native?: { binding: 'napi'; minNapi: number }
-             | { binding: 'node-abi'; modules: string; electronRange: string } }
-  | { kind: 'executable-sidecar'; executable: string; binaryVersion: string;
-      invocation: 'oneshot' | 'persistent'; adapter: string; protocolVersion: string }
-```
+以下是本次对照源码与已有验证记录得到的基线，不把先前计划中的功能重复列为尚未开发。
 
-`PluginManifest` 新增 `packageFormatVersion: 2`、`artifactId`、`target`、`runtime`、`minHostVersion`；构建产物含 `runtime-files.json`，逐项记录相对路径、字节数、SHA-256 和必要执行位。新格式所有运行文件必须被清单覆盖，清单自身除外，ZIP 总摘要覆盖整个清单。
+### 2.1 已有基础机制
 
-进程内模块匹配使用 Electron 实际 `process.versions.node/modules/napi/electron`。N-API 的数值匹配仅为必要条件，不能代替平台实测。sidecar 校验实际二进制版本、架构、系统依赖和调用协议，不套用 Electron/Node ABI。只有明确携带 Node 的其他插件才校验其 Node 版本。
+- `shared/plugin-platform.ts` 已提供 v2 的 artifact/target/runtime、最低宿主条件、平台匹配和歧义拒绝。SDK 与商店由 `scripts/sync-plugin-contract.mjs` 同步生成契约。
+- SDK 已支持 `build/check/pack --target <artifactId>`、`build.external`、按目标复制声明的运行文件并生成 `runtime-files.json`。桌面内置 `plugin-pack.ts` 也理解 target 和文件清单。
+- 商店已有 `index-v2.json` 和同版本多 artifacts；平台版本不投影至 v1；预览、更新筛选、安装复核和摘要缓存已接入平台选择。
+- `plugin-package.ts` 已验证目标、运行文件摘要、完整覆盖、符号链接和 PE/ELF/薄 Mach-O 的架构；Linux static 声明已有 ELF interpreter/dynamic segment 检查；Unix 安装会对清单内的可执行文件恢复执行位。
+- ZIP 安装已有同卷 staging、候选加载、旧目录和 index 备份、提交 journal、失败恢复及启动恢复入口。现行顺序允许候选拒绝时保留旧包。
+- 实际运行时实现是 `fcurl-runtime.ts` 的 `FcurlRuntimeManager`，提供固定 fcurl 一次性调用，绑定插件、chat、权限与取消信号；不是尚待新建的通用运行时管理器。
+- Windows 已有真实 Electron 的商店选择、预览变化拒绝、安装、请求、错误平台拒绝、失败替换保留旧包、内置打包与卸载验证。历史记录中五平台 ZIP 已生成、Linux ELF 已检查；本次不将历史执行结果改写为当前版本重新实测。
 
-Fastls 的目标清单为 `win32-x64`、`darwin-x64`、`darwin-arm64`、`linux-x64`、`linux-arm64`。上游归档使用 windows/amd64 等命名，SDK 显式映射到宿主目标。其发布脚本采用 CGO_ENABLED=0；Linux 产物需核对 ELF interpreter/dynamic segment 后才能声明 linkage=static、无 libc 约束，不能机械复用此前 npm 路线的 glibc 后缀。静态二进制仍要求兼容内核、系统证书和可执行挂载；目标中没有 libc 字段表示该产物不依赖 libc，不表示 Linux 环境全部已认证。Windows arm64 不在该版本发布清单。
+### 2.2 本轮已落地的补齐
 
-Linux 可执行产物声明 static 时不得再声明 libc，发布检查需有 ELF 证据；dynamic 目标必须明确实际 libc 需求，不能用省略字段表达“尚未检查”。同版本同架构存在 static 与已匹配的 libc 专属包时，专属约束优先，static 作为明确兼容的备选；同优先级重复声明仍拒绝。
+- ZIP、全局外链切换与卸载共用保留备份的提交/回滚事务；套件替换候选失败保留旧目录、index、启用状态和外链来源。会话外链及开发热重载候选失败保留旧模块，随附更新也先校验候选。外链源工程不由宿主删除。
+- package/suite 归一化互斥及 index 同步提交屏障已接入安装、链接、卸载和导出；活跃 JavaScript 执行、运行时准备及排队均计繁忙，返回 `plugin_busy`。只重载受影响 ID，其他正在执行的插件不被替换。
+- journal 已严格验证 schema、字段、名称及管理目录范围；index/journal 使用临时文件、文件 fsync 和原子替换，平台允许时同步目录。回滚保留不可变备份直至整体成功；损坏记录隔离并阻止加载可能半提交的插件。已测六处子进程直接退出后重启恢复，四处再中断恢复本身；这不是物理断电认证。
+- 本地 ZIP、SDK 静态包检查统一压缩 200 MiB、展开 500 MiB、10,000 条目。原先本地展开 1 GiB/50,000 条目的差异已消除。
+- SDK 增加 `check --static`，build/pack 的静态验证不 require 插件；原 `check` 明确标注 Node + Electron stub 层，异平台宿主执行检查拒绝。桌面 pack 已采用同等静态规则的纯 JavaScript 解析器，随 main 交付，不执行入口、不重写 inventory/刷新资产，已独立完成单测及真实主窗口工具验证；不是直接复用 SDK helper。
+- 运行时增加含准备阶段的并发预留、有界可取消队列、从入队起的总预算、可 await 的 drain/dispose、归属明确的清理失败重试；status 明示直接子进程关闭及尚不支持父死回收。可信调用身份和 checkpoint 准入见 Fastls 规划。
+- macOS 已接入固定 `/usr/bin/sw_vers -productVersion`，Linux 区分 report 中明确 glibc、明确 musl loader 和未知；产品版本/libc 解释器单测通过，未在 macOS/Linux 实机验收。
 
-平台包不能声明 portable；依赖 OS 动态库、可执行文件或原生扩展的包必须使用具体目标。新格式缺失目标、非法组合、重复 artifactId、同等优先级重叠目标在发布时拒绝。
+### 2.3 仍不能宣称完成的部分
 
-## 4. 商店协议与旧客户端隔离
+1. **桌面运行时仍仅 Windows x64。** 自定义 Electron 安装脚本、运行时清单及打包 pin 仍固定该产物。`dist:mac` / `dist:linux` 配置不代表有等能力目标宿主，也没有新增非 Windows 实机报告。
+2. **已有受限生产依赖自动交付。** SDK 显式 `build.stageDependencies` 按 npm lock v2/v3 在独立目录收集生产/optional 闭包，禁用安装脚本，不复制开发 node_modules；已测资源/许可证、锁漂移/摘要拒绝和源码移走后的离线调用。原生依赖、安装脚本生成文件、任意动态加载和其他平台真实宿主认证仍不支持。
+3. **事务故障矩阵尚未全满。** 六处受控进程退出及恢复幂等、六类 IO 故障注入、真实 Windows 索引文件占用与只读属性已验证；真实磁盘耗尽、完整文件锁/ACL 变化、断电与设备故障仍需逐项实测。当前没有版本指针或完整强断电保证。
+4. **更新仍是繁忙拒绝。** drain API 与退出等待已实现，但更新/卸载没有新增“自动停止并排空后升级”交互；恢复界面已支持中文诊断、显式重试与脱敏复制。损坏 journal 保留证据并阻塞，不提供丢弃备份绕过检查。
+5. **运行时支持范围未扩大。** 仍只承诺 `electron-main` 与固定 `fcurl-cli-v0.2` oneshot；没有通用原生 ABI/N-API、任意 sidecar、持久协议或热卸载认证。
+6. **父进程强杀后的进程树回收未完成。** 可 await 的正常取消/close/清理不等于 Job Object 或 Unix 父死策略。未知/仍有活动所有者的临时目录保留，磁盘硬配额与 Windows ACL 验证也仍待完成。
 
-保留现有 `index.json` 和 v1 路径协议，新增 `index-v2.json`。v1 目录只包含真正按旧格式交付的包；平台专属 v2 包不投影进 v1，避免旧客户端忽略新增字段后下载错误产物。已有协议允许高版本按 v1 解释，因此仅把原 index 的 schemaVersion 改为 2 不足以隔离旧客户端。
+## 3. 保持不变的设计决定
 
-新客户端优先读取 v2；仅在 v2 不存在（明确 404 或本地文件不存在）时读取 v1。v2 无效、摘要错误或网络失败不静默降级。v2 schema 严格校验，缓存与 ETag 按端点隔离。技能保留现有产物语义，可以在 v2 目录共存，不强制引入平台字段。
+- 发布已构建产物，安装阶段只下载、检查和提交，不在用户电脑运行 npm、安装脚本或编译器。
+- `suite/packageId` 表示能力变体；`artifactId` 表示该变体的系统产物。界面不要求用户把平台当套件变体来选。
+- 根据实际宿主 `process.arch` 选包。Rosetta 下的 x64 Navora 仍选 x64 包，硬件是 arm64 不触发自动改选；模拟运行作为独立验收维度。
+- 未声明平台的旧包保持 legacy 兼容，显示“未声明平台”，不自动认证为 portable。新纯 JS 包显式 portable；平台依赖不能借 legacy 声明绕过检查。
+- Fastls 继续使用真实 `fcurl` / `fcurl.exe`、固定适配器和一次一进程。通用平台工作不引入 npm Fastls/Koffi、不实现 fcurl 本身。
+- 列表、预览、ZIP 静态检查、平台选择不执行插件入口。授权安装后的受控健康检查与实际调用分别记录。
+- 插件仍属于高信任扩展。权限门约束宿主提供的 API，独立进程用于生命周期和故障隔离；二者都不构成任意第三方代码的操作系统沙箱。
 
-v2 插件结构为 `product → packages → versions → artifacts`。产品和 package 元信息维持现有语义；版本保存版本号、发布时间、状态；每个 artifact 独立保存 `artifactId/target/runtime/minHostVersion/downloadPath/sha256/size`。说明文件优先版本共享，也可有 artifact 覆盖。
+## 4. 平台契约与系统探测完善
 
-新产物路径：`plugins/<id>/<version>/artifacts/<artifactId>/package.zip`，旁边保存该产物 `meta.json`。路径校验器显式增加这一种形式，ID、版本、产物 ID 逐段验证；不能通过放宽成任意路径实现兼容。旧路径原样支持。
+### 4.1 以已实现类型为准
 
-入库唯一键为 `(kind, packageId, version, artifactId)`；不同平台不互相覆盖。默认禁止替换相同键，显式 force 仅用于开发目录；正式发布使用新版本。目录重建先聚合同版本 artifacts，再对版本排序，避免同版本出现多条假版本。
+v2 插件清单已经包含 `packageFormatVersion: 2`、`artifactId`、`target`、`runtime` 和可选 `minHostVersion`。target 为 portable，或指定 win32/darwin/linux、x64/arm64，附 Linux linkage/libc 与最低版本约束。当前 runtime 为 electron-main，或固定 fcurl oneshot 适配器。
 
-## 5. 自动选择与更新规则
+后续新增字段必须先进入共享类型、SDK、商店、契约样例，再对外使用。不得只修改文档就让旧宿主忽略一个新的必需运行条件。需要扩展能力时用新的宿主最低版本和明确的契约版本边界。
 
-1. 获取主进程探测结果，检查 host API 版本和 minHostVersion。
-2. 用户指定版本时，只在该版本中匹配；不跨版本静默替换。自动选择时，选择最新 active 且存在兼容 artifact 的版本。
-3. 同版本先选精确平台包，再选声明可运行于当前宿主的 portable 包。约束更严格且全部满足者优先；同优先级多候选视为目录错误，不依赖数组顺序。
-4. legacy 单 ZIP 在 v1 分支走旧流程，UI 标为“未声明平台”；新原生插件不能借 legacy 路径规避校验。
-5. 预览返回选中的 artifactId、目标摘要、大小及目录内容指纹；安装重新匹配并核对预览结果。目录变化返回 `install_plan_changed`，由现有安装界面刷新预览，不擅自装不同产物。
-6. 缓存键包含 packageId、version、artifactId、sha256，避免多平台或 force 后污染缓存。
-7. 自动更新只提示当前平台能安装的新版；更高版本不支持当前平台时显示原因。已安装信息记录目标、摘要和运行时，迁移数据目录到其他系统后必须重新匹配，不能直接加载旧二进制。
+`runtime-files.json` 覆盖所有运行文件，逐项记录路径、大小、SHA-256 和必要执行位；清单本身由 ZIP 摘要覆盖。摘要证明内容一致性，不等于作者身份签名。商店目录、下载源信任与代码签名分开记录。
 
-## 6. SDK 与产物构建
+### 4.2 已接入的探测与待验收规则
 
-作者清单增加 `build.external`、`build.runtimeDependencies`、`build.runtime` 和允许的 targets；产物清单由 SDK 生成，不能直接把作者清单全部透传。
+- Windows：固定 OS 版本/构建号字段的语义，区分最低系统要求与当前定制 Electron 的实际支持范围；不能只依据 Windows 产品名称匹配。
+- macOS：已通过固定路径 sw_vers、1.5 秒及 4 KiB 输出预算读取产品版本，不拿 Darwin 内核版本替代 minOsVersion；无法满足必要探测条件返回 `platform_detection_failed`。实际 Mac runner 与分发验证仍待完成。
+- Linux：已分开记录内核与 libc；只接受 process report 的 glibc 版本或明确 ld-musl 共享对象证据，未核实的 musl 版本保持未知。动态包按必要条件拒绝。static 包仍需目标机器上的内核、执行位/noexec 和宿主分发验收。
+- 架构：安装和加载均由主进程独立探测，不信任渲染端提交值。迁移用户数据到另一系统后重新匹配，不直接加载原来的二进制。
+- 静态/动态：static Linux 包禁止 libc 声明，必须有 ELF 证据；动态包必须声明已核实的 libc。Mach-O universal/fat 如有需求，先扩展验证再发布，目前不能当作已可识别。
 
-提议命令形态：`navora-plugin build <id> --target <target>`、`check <id> --target <target>`、`pack <id> --target <target>`。未指定目标时，纯 JS 项目输出 portable；需要平台的项目默认本机目标并明确展示，CI 发布要求显式目标。
+兼容选择维持平台包优先 portable、匹配的 libc 专属包优先 static、同优先级多候选拒绝。当前实现并不按所有最低版本约束建立完整偏序；第一阶段保持拒绝歧义，不额外引入多个同优先级重叠包来碰运气。
 
-构建使用独立 staging，按固定 lockfile 安装生产依赖并保留 optional dependencies，仅在构建环境运行允许的安装步骤。复制完整生产依赖闭包及合法包元数据，外置需要保留目录的运行时依赖，不合并原生组件到单个 JS 文件。`fastls-curl` 按发布版本、目标和摘要收集二进制及必要配套文件，不为它安装 Node/Koffi。不得复制 monorepo 开发依赖或借父级 node_modules 才能运行。
+## 5. SDK、依赖与产物准备
 
-跨平台参数不等于跨平台构建支持。第一版在相同 OS/arch/libc 的 runner 构建及测试；不得在 Windows 复制一份 node_modules 后改名成 Linux 包。后续如支持交叉组装，仍需目标平台执行验证才可发布。
+### 5.1 分开三类检查
 
-`--include-node-modules` 作为旧选项保留，新平台格式由 runtimeDependencies 决定依赖闭包。`plugin-pack.ts` 与 SDK 共用产物检查契约；桌面内置打包只压已完成的目标 staging，不负责下载依赖。
+1. **静态检查**：只检查 manifest、路径、完整清单、依赖闭包、二进制格式/架构、目标声明与摘要，不 require 入口、不启动二进制；可在非目标系统执行。
+2. **宿主加载检查**：在目标 Navora 的真实 Electron 中验证模块导出与宿主 API；不能用 SDK 的 Node stub 替代。
+3. **运行健康检查**：在已授权安装的目标机器上执行受控版本/能力查询与最小本地用例，记录实际运行结果。非目标机器的“未执行”不得显示为通过。
 
-静态 `check` 检查路径、清单、依赖闭包、执行位、版本一致和文件摘要；运行检查使用正确运行时，并区分“未执行”和“执行通过”。不能在非目标平台直接 require 平台包来校验导出。
+SDK 已提供显式 `check --static`，build/pack 使用静态检查；原 `check` 保留 Node + Electron stub 导出检查并标注层级，异平台不假执行。桌面内置 pack 已移除 require 入口及 pack 重写 inventory/刷新资产的步骤，采用随 main 打包的纯 JavaScript parser 和 Node 静态 resolve，检查可见字面 require/import 及传递引用；无需外部 SDK/Node 进程，不将 SDK helper 引入成品。这种静态检查不是任意动态行为认证或操作系统沙箱。桌面 plugin_build/check 后的受信候选外链加载仍可执行插件，不能泛化为全部工具路径零执行。真实 Electron 加载和目标运行仍独立验收。纯 JS 未声明 targets 的现有工程暂仍按旧格式构建，不自动转 portable。
 
-## 7. 安装、回滚与原生更新
+### 5.2 依赖闭包
 
-商店安装、本地 ZIP、开发外链、会话试用、随附插件同步全部进入同一兼容性校验器。外链发现目标不匹配时报告原因；无需复制，但不能跳过运行时检查。
+- 作者显式声明需保留目录结构的生产运行依赖；构建机在独立 staging 按固定 lockfile 收集完整闭包，保留合法包元数据与目标需要的 optional dependencies。
+- `external` 仅表示不打进 bundle，不能视为依赖已经随包带上。包内字面/传递依赖检查仍拒绝缺失、父级 node_modules 逃逸、不可静态核实加载与 `.node`。11-06 已补 SDK 显式 lockfile staging，保留生产/optional 依赖、资源和许可证，记录锁摘要；仅对应 OS/架构 runner 构建，portable 拒绝平台限制依赖。Windows 离线合成夹具已通过，其他目标 Electron/分发认证仍待完成。
+- `--include-node-modules` 保持旧兼容，不作为新生产包的默认方案；禁止复制整份 Windows node_modules 后改名发布到 Linux。
+- 原生依赖需使用目标 runner 和实际定制 Electron 的头文件/ABI。未来支持 N-API 也仍需检查 OS、架构和外部库；ABI 数值匹配只是必要条件。[Electron 原生模块文档](https://www.electronjs.org/docs/latest/tutorial/using-native-node-modules)说明了 Electron ABI 与普通 Node 的差别及定制构建头文件要求。
+- 进程内原生支持单列后续里程碑。未完成契约、实机和重启切换前，不承诺热卸载或仅清 require.cache 即可更新。
 
-安装事务顺序：预览兼容性 → 下载 → 校验 ZIP 大小/摘要 → 在插件根同卷 staging 解压 → 校验清单、目标、依赖与模式 → 健康检查 → 暂停相关调用并准备替换 → 备份旧目录与相关 index → 提交新目录/index → 加载验证 → 标记完成 → 清理备份。
+Fastls 的五个平台运行文件由其固定发布版本和收集脚本准备，附上游来源、许可证、产物摘要和 Linux 静态检查证据。交叉组装五个 ZIP 仅完成静态产物准备；不得因此跳过各目标机器执行。
 
-Windows 不能假设带锁目录可直接覆盖；使用版本化目录和可恢复指针/index 切换。多文件操作不是天然原子事务，记录事务 journal，启动时恢复未完成切换。失败恢复旧目录、启用状态、外链和套件成员信息；套件冲突成员直到候选通过检查才停用/替换，不能先删掉旧插件。
+## 6. 商店与安装流程补齐
 
-按 packageId / suite 加锁，串行化安装、卸载、更新、导出及相关调用。正式数据只在提交阶段变更；磁盘不足、断电、取消和解压失败都不能破坏旧版本。
+### 6.1 已有协议继续使用
 
-原生 sidecar 在更新前 drain、关闭会话、退出；超时终止后再切换。进程内原生库可能已被系统加载且不能安全卸载，更新标记 pending、重启后切换，禁止仅清 require.cache 当作卸载。
+- v2 路径为 `plugins/<id>/<version>/artifacts/<artifactId>/package.zip`，同目录维护说明和内部元数据；唯一键含 kind/packageId/version/artifactId。
+- 同版本不同平台共存；正式相同键保持不可变，修复发布新版本。suite 保留原有产品变体语义。
+- 客户端优先 v2，仅明确不存在才回落 v1；无效目录、摘要错误、网络失败不得静默降级。缓存与 ETag 按端点隔离，产物缓存按内容摘要隔离。
+- 预览显示实际 artifact 和安装计划，安装重新匹配并核对 `installPlanKey`；目录变化刷新预览，不擅自装另一产物。自动更新只提示当前机器可安装的版本。
 
-ZIP 延续压缩大小 200 MiB 限制；增加解压大小 1 GiB、文件数 50,000 的初始上限，实际构建体积验证后可统一调整。拒绝目录穿越、符号链接、大小写冲突路径和超限条目。Unix 仅对清单内明确允许的可执行路径恢复执行位，不给整个目录递归 chmod。Windows 检查 PE 架构；Unix 检查对应 ELF/Mach-O 架构。
+### 6.2 共同事务边界与后续故障矩阵
 
-macOS 验证包内可执行文件、动态库的签名、公证与 quarantine 行为；不能用自动清除 quarantine 或提示关闭系统保护来代替可分发性。Linux noexec、系统/运行库版本不足和 Windows 执行策略拦截均需可理解的错误。
+1. **已实现互斥**：package/suite 归一化锁和 index 提交屏障覆盖提交、卸载、替换、外链切换与导出；状态及冲突在同步提交边界内复核。下载仍可在锁外进行。
+2. **已实现候选优先**：全局 ZIP/外链候选失败不先删旧包或套件；会话外链、随附同步与开发热重载保留已加载模块。全局外链拒绝把宿主管理目录当作开发工程，避免混淆目录所有权；卸载外链只改 index，不删除源工程。
+3. **已实现繁忙拒绝**：活跃插件执行、runtime 准备和排队均阻止受影响 package/suite 切换。新执行在权限等待返回后再次核对模块身份，防止旧批准执行已被替换的入口。尚未新增自动排空升级流程。
+4. **已实现可重入恢复**：journal/schema/路径严格验证，index/journal 原子文件写及 fsync，不可变备份贯穿回滚；提交后清理失败不回滚成功安装。IO 故障保留事务供解除故障后重试，损坏 journal 隔离并保留诊断，阻止半安装加载。恢复界面及两项真实 Windows 文件故障已测；真实磁盘耗尽、完整文件锁/ACL 与断电矩阵仍待补齐。
+5. **已取得局部证据**：旧版启用状态、套件同伴、链接来源、候选及迟发加载失败、JavaScript 执行繁忙、同步重入、Windows junction 和六处进程终止恢复通过。标准用户安装、所有 Windows 文件锁与故障清理格按后续报告填写，不能合并成整项通过。
+6. **已统一 ZIP 预算**：压缩 200 MiB、展开 500 MiB、10,000 条目，本地导入与 SDK/商店保持较严格上限。目录穿越、符号链接、大小写冲突与超限拒绝；执行位只应用于已校验清单路径。真实合规产物需要扩容时统一评估所有入口，不单独放宽。
 
-## 8. 宿主管理的可执行文件
+进程内原生插件未来必须走 pending + 重启切换；sidecar 则等待自有进程退出后替换。版本化目录/指针是否引入，在文件锁和硬中断用例暴露现有目录切换不足时实施；不把当前 journal 描述为已经采用版本指针。
 
-新增 `plugin-runtime-manager.ts`，仅启动 manifest 中受约束的包内可执行路径；绝对解析、禁止 shell 拼接、Windows 隐藏窗口。插件桥接层通过 `PluginHostApi` 的 runtime 服务调用。`fastls-curl` 使用包内的实际二进制，不依赖系统 PATH，也不通过 Electron 或 Node 模拟执行。
+## 7. 运行生命周期与权限边界
 
-运行时兼容一次调用一个进程与持久进程两种方式，由二进制实际契约确定。优先通过 stdin/stdout 交换机器可读数据，stderr 输出有界脱敏日志；不预先要求 fastls-curl 实现专用帧协议或 HTTP 服务。持久协议若采用帧，需定义版本、请求 ID、调用、取消和关闭语义，并在读入阶段限制帧大小；一次性 CLI 则定义输入、退出码、stdout/stderr 和终止行为。宿主适配器统一向插件暴露结果。
+继续在当前 FcurlRuntimeManager 上补可靠性，不为本批先重写一个支持所有协议的通用管理器。
 
-针对已发布的 fcurl，适配器采用 stdout 正文流、stderr 诊断、私有目录内 `-D` 头文件，以及 stdin 请求体或头文件输入；不等待结构化 metadata。头文件/临时输入的路径只由宿主分配。`call` 结果包含 exitCode、signal、宿主取消原因、解析元数据和有界正文；一次性命令不伪造握手或原生会话。宿主生成 requestId 用于调用跟踪，而不是假设 CLI 具有该参数。
+- 受控方法仍由适配器生成参数；插件不能提交任意 exe、argv、shell、环境变量或其他 chatId。每次调用绑定 plugin/artifact/chat/权限/AbortSignal。
+- 状态与 profile 查询使用 compute.local，请求使用 network.request；安装可执行权限与每次网络调用权限分开。权限拒绝、白名单撤销、会话关闭、停用和应用退出要在所有目标平台验证。
+- 已有全局 16/单 chat 4 个准备或执行预留及全局 32/单 chat 8 个等待项；request 输入验证后开始统一截止时间，覆盖排队、准备、子进程和清理。cancelAndWait/drain/dispose 等待 close 与清理，清理失败可见并允许重试；父死进程树回收另验。
+- 已保留并固定宿主启动时 SSL_CERT_FILE/SSL_CERT_DIR 快照，校验绝对路径和文件/目录类型；结果标注 system/environment_custom，非法配置明确拒绝。仍待完整 TLS/代理及跨平台证书矩阵；不继承 NODE_OPTIONS/NODE_PATH、动态库注入变量或任意密钥，不关闭 TLS 验证。
+- 包目录与临时运行目录分开；Unix 校验临时目录和敏感文件权限，Windows 验证实际用户目录访问控制。凭据、Cookie、完整认证头和响应敏感内容不进入诊断。
+- 正常退出等待自有调用结束/回收，再完成应用退出。父进程被强杀另做 OS 级方案：Windows 验证 Job Object 的归属与 kill-on-close；Unix 验证进程组和独立监护/父死处理方案。先用测试辅助程序证明归属和回收，再接 fcurl；不按进程名称清理其他应用的进程。
+- 验证取消、超时、直接崩溃、产生子进程、父进程强杀、启动尚未完成即取消、PID 重用和残留临时目录。仅有 fcurl 自身 timeout 不算通过父死回收。
 
-`PluginHostApi` 增加可选 `runtime` 服务，建议提供 `call(method, payload, options?)` 和 `status()`；启动和关闭由宿主生命周期管理。服务实例绑定当前 pluginId、artifactId、chatId、approvedCapabilities 与 AbortSignal，插件不传可执行路径或其他 chatId。call 仅能调用该插件 manifest/SDK 契约声明的方法；返回结构化结果。缺少该 API 的旧宿主由 minHostVersion 在安装前阻止，不在首次执行时才报错。Fastls 适配器固定为 `fcurl-cli-v0.2`，使用一次性进程，首批映射 status/profiles/request；允许的 CLI 参数由宿主适配器生成，不接受插件传入任意 argv。Cookie 状态上下文在插件层管理，不声明为原生 Session。
+[Node 子进程文档](https://nodejs.org/api/child_process.html#subprocesskillsignal)提醒信号发送与进程退出并非同一状态；[Microsoft Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)提供按自有进程组管理的机制。以上是待实现方案依据，不是当前已具备的保障。
 
-通过实际支持的版本/能力查询核对二进制版本与协议，结合平台、架构、目标 artifact 和包摘要验证。环境只透传必要系统变量，不继承 NODE_OPTIONS、NODE_PATH、FASTLS_LIBRARY、用户 API 密钥或自定义动态库注入变量；CA/代理等能力通过结构化配置明确下发。
+## 8. 目标平台准备与分发条件
 
-宿主负责启动超时、请求超时、AbortSignal、崩溃检测和进程回收。持久进程按契约处理空闲退出及父进程 EOF；一次性进程按调用结束或取消清理。插件停用/卸载/更新、会话结束、应用退出均触发生命周期清理；给现有插件模块增加可选 lifecycle，旧插件无需实现。持久模式优先每 chat 独立进程；一次性模式按调用创建进程。Fastls v0.2.0 固定为一次性模式，不创建常驻 worker 或本地 HTTP 服务。
+### 8.1 Windows x64：保住现有可用链路
 
-增加 `plugin-runtime` 本地受控状态目录，安装文件保持只读；不把 cookie、临时响应或日志写回插件版本目录。独立进程隔离原生崩溃，不代表操作系统沙箱，现有插件高信任属性仍成立。
+使用当前固定定制 Electron 和 fcurl 产物先补故障矩阵。测试安装版与便携版、标准用户、含中文/空格路径、外链和商店安装；验证应用升级后既有插件仍正确加载。SmartScreen/防病毒或组织策略拦截给出实际原因，不建议用户关闭系统保护。代码签名与内容摘要分别记录，不把没有安全提示作为内容完整性证据。
 
-## 9. 界面与错误
+Windows arm64 虽能出现在通用 target 中，但 fcurl 0.2.0 当前清单无原生包；不默认借 x64 模拟扩展支持范围。
 
-商店显示“可安装”“不支持当前系统”“需更新 Navora”和已选择平台；平台选择由宿主完成，保留现有能力变体选择。详情可展示受支持平台、运行时版本和原生健康状态。
+### 8.2 macOS x64 / arm64：先有真实宿主，再认证插件
 
-结构化错误至少覆盖 `unsupported_platform`、`unsupported_arch`、`unsupported_libc`、`os_version_too_low`、`host_version_too_low`、`runtime_version_mismatch`、`runtime_file_missing`、`runtime_hash_mismatch`、`native_load_failed`、`runtime_start_failed`、`runtime_crashed`、`restart_required`、`install_plan_changed` 和 `install_rollback_failed`。用户界面使用中文说明和明确处理动作，技术原因留在可复制诊断中，不包含凭据。
+- 获取具有本项目所需浏览器/自动化能力的对应定制 Electron，建立每平台固定版本、归档摘要、资源清单和 executable 路径验证；不能未经验证静默替换成普通 Electron。
+- 将安装脚本、运行时验证、打包 electronDist 与 smoke runner 从 Windows 路径分支中拆出，保留现有 Windows pin 和完整性检查；在对应 Mac 上完成应用启动与核心浏览器用例。
+- 分别验证 Intel 和 Apple Silicon 的原生宿主；Rosetta 如要支持，单列为 x64 宿主用例。先保持分架构包，universal 为后续独立工作。
+- 验证下载后的应用与可执行插件的签名、quarantine/Gatekeeper、权限、安装位置、更新与回滚。下载型插件不因主应用已公证而自动获得同等分发认证。
+- 正式外部分发完成签名、公证及实际下载链测试；不自动清除 quarantine、不要求关闭 Gatekeeper。[Electron 签名文档](https://www.electronjs.org/docs/latest/tutorial/code-signing)将 macOS 的签名与公证分为两个发布步骤。
 
-## 10. 改动位置
+### 8.3 Linux x64 / arm64：宿主依赖与插件依赖分别验收
 
-- SDK：`navora-plugin-sdk/navora-plugin.d.ts`、`SPEC.md`、`README.md`、`bin/navora-plugin.mjs`；新增目标匹配、依赖 staging 和文件清单支持模块。
-- 商店：`src/types.js`、`protocol.js`、`paths.js`、`inspect.js`、`ingest.js`、`catalog.js`、`docs.js`、静态 serve 路径处理及 `PROTOCOL.md`；同步发布脚本 `navora-plugins/scripts/store-publish.mjs` 的命名匹配和入库逻辑。
-- 宿主：`shared/plugins.ts`、`shared/store.ts`、`shared/store-catalog-view.ts`、`electron/modules/marketplace-client.ts`、`plugin-store.ts`、`plugin-pack.ts`、`plugin-dev-cli.ts`、`plugin-dev-watcher.ts`、`plugin-host.ts`；新增平台检测、运行时管理、事务恢复模块。
-- 界面：`src/components/store/*`、`src/components/plugins/PluginImportDialog.vue`、`PluginLibraryList.vue` 及 `src/composables/useStoreUi.ts`。
-- 同步开发提示 `shared/plugin-dev-prompt.md`、插件开发文档、创建器/会话试用入口和 IPC/RPC 类型；原生项目通过标准 SDK 工程创建，现有三文件创建器不强行扩展成二进制编辑器。
+- 同样先取得对应定制 Electron 与真实包，在已选发行版上运行。最低内核、glibc、图形/桌面依赖、证书包、沙箱要求以最终宿主产物和干净系统测试确定，本规划不编造通用最低版本。
+- 第一批选择有目标 runner 的 glibc 桌面发行版，按最终声明的最低版本与一个较新版本验收 AppImage/deb。arm64 使用 arm64 环境；容器静态检查不能替代真实桌面宿主。
+- fcurl 的 static 声明只说明该二进制经 ELF 检查无动态 libc 依赖；不说明整个 Electron 桌面可在 musl/Alpine 运行。musl 宿主支持另立条件，当前不承诺。
+- 验证 noexec 数据目录、失去执行位、只读安装目录、缺证书、系统沙箱与用户目录权限。无法执行时给出可理解原因及受支持的目录选择，不自动绕过挂载/沙箱策略。
 
-## 11. 实施批次与验收门槛
+## 9. 界面和诊断
 
-P0 契约：冻结 target/runtime/artifact 结构、v2 隔离策略、匹配算法和错误码，补齐双方一致的契约样例。通过 legacy、portable、平台包、suite 组合与未知平台的匹配测试后进入下一步。
+保留简洁流程：商店自动选平台，详情展示所选目标和运行时；不兼容版本说明“系统不支持 / 架构不支持 / 需更新 Navora / 无法确认系统条件”。五个平台产物的存在不作为五个平台已认证徽标。
 
-P1 构建与商店：SDK 能在目标 runner 产出自包含 ZIP；同 ID 同版本五种 artifacts 可共存，Linux 静态目标和动态 glibc/musl 目标可分别声明。v1 老客户端仍能安装现有纯 JS 插件；不会看见 v2 平台包；v2 目录损坏不会静默回落。
+安装前显示候选目标与替换对象；失败保留原状态。更新遇请求活跃可提示停止后重试，重启才能生效的原生更新明确显示“待重启”。诊断可复制，但默认不含凭据和私有请求内容。
 
-P2 安装与恢复：预览/本地导入/外链/试用/随附同步一致校验。用下载失败、缺文件、错误摘要、磁盘不足、并发更新及提交中断验证旧版本和 suite 状态完整恢复；验证跨架构缓存隔离。
+已补 `install_recovery_required`、`install_rollback_failed`、`plugin_link_managed_path` 的中文处理提示。统一现有错误码语义及中文映射，不另造同义码：现有 `host_too_old` 继续用于宿主过旧；其余包括 unsupported_platform/unsupported_arch/unsupported_libc/platform_detection_failed、os/kernel/libc_version_too_low、runtime_*、plugin_busy、install_plan_changed、install_rollback_failed。新增 noexec/权限/签名/原生重启错误时，保持机器码稳定、中文处理动作明确，区分内容损坏与环境拒绝执行。
 
-P3 sidecar：用独立测试可执行文件验证启动、版本查询、取消、崩溃、EOF、停用/卸载/退出清理和更新 drain；按一次性/持久模式分别验收。带空格/中文安装路径及标准用户权限下运行；全程无系统 Node/npm 依赖。
+## 10. 实施顺序、交付物与门槛
 
-P4 Fastls 试点：基线固定 fcurl v0.2.0，先完成 Windows x64 插件闭环，再验证已发布的 macOS x64/arm64、Linux x64/arm64 产物。二进制及本地 CLI 冒烟已具备，插件/安装机制仍待实施。每个平台只有在真实目标环境完成安装、调用、升级、失败回滚和分发验证后才标为支持。
+### S0：冻结基线并落实目标环境
 
-通用机制完成不等于所有候选平台已发布。目标二进制存在、宿主能在该平台分发、依赖能加载、核心用例通过是四个独立发布条件。未通过目标留为 planned，不发布“已兼容”标识。
+核对并记录运行时、SDK、商店与 Fastls 的实际版本/摘要；确认 macOS/Linux 定制宿主是否有可用产物与目标测试机。输出目标环境清单、宿主分发阻塞与本次可执行范围。缺少目标宿主时只推进通用可靠性与静态包检查，该平台保持 planned。
 
-第一版不提供用户机器在线 npm 安装、自动本地编译、自动跨架构模拟、共享全局 Node 缓存或 Fastls 的 Electron 内嵌执行；不开发 fastls-curl 本身；结构化 metadata、持久 Session、HTTP/3 等尚未交付的上游接口不作为首期依赖。上述功能不是首期交付的前置条件。
+### S1：先补 Windows 可直接验证的基础可靠性
+
+**首批已落地，S1 尚未整体验收。** 共同候选/回滚、package/suite 忙状态、journal 进程终止恢复、SDK 静态检查分层、runtime 排队/drain 已有首批证据，0.4.13 首批已打包验证。11-06 新增受限生产依赖 staging、可重试 IO 恢复、图形恢复入口、六类故障注入与两项真实 Windows 文件故障；本批源码/构建/界面通过，未重新发行。剩余门槛为真实磁盘耗尽/完整文件锁/ACL/断电矩阵、父死自有进程树、私有目录/硬配额、升级排空及各目标干净环境；不得以正常取消或注入测试填满真实故障与跨平台认证。
+
+### S2：并行准备 macOS/Linux 宿主与平台探测
+
+在 S0 已有真实环境的目标上适配 pin/安装/打包/runner，补 OS/libc/架构探测和平台错误。每个平台先完成宿主启动、浏览器/文件/对话基本用例，再验证插件，避免把宿主缺陷误归于 fcurl。各平台单独通过，不互相阻塞 Windows 维护。
+
+### S3：目标平台插件闭环与正式分发
+
+用同一套本地服务器夹具执行下一节全部必需格；检查安装版、实际下载链、签名/执行位/证书/noexec，生成每目标独立证据。只对通过的平台发布支持声明。商店多产物可以预备，但未认证目标保持计划状态或按明确测试渠道交付。
+
+### S4：承接 Fastls 第二批功能
+
+平台事务/进程边界稳定后，按[Fastls 专项规划](./fastls-plugin-plan.md)实施 Cookie context、逐跳自动跳转等能力；Windows 功能迭代可先行，其他系统通过各自回归后才扩大声明。平台工作不承诺持久 Session、浏览器 Cookie/连接复用、任意 sidecar、进程内原生 ABI 或 HTTP/3。
+
+## 11. 验收矩阵与证据要求
+
+矩阵的环境轴为 Windows x64、macOS x64、macOS arm64、Linux x64、Linux arm64；每个环境记录宿主 OS/版本/架构、Electron pin、插件 artifact/摘要、安装形式与权限。下面的用例轴逐项填“通过 / 失败 / 未执行 / 不适用”，未执行不能合并成通过。
+
+- **E0 宿主前置**：固定产物完整性、打包启动、真实浏览器与文件标签、标准用户运行；没有对应宿主则后续运行格均未执行。
+- **E1 静态选包**：legacy/portable/平台/套件、错误 OS/arch、未知 libc、最低版本、歧义、静态 ELF/PE/Mach-O、执行位与缺文件/错摘要；跨架构缓存不混用。
+- **E2 商店协议**：同版本多产物、v1 隔离、v2 明确不存在才回落、错误目录不回落、安装计划变化拒绝、不兼容新版不误提示。
+- **E3 安装入口**：商店、本地 ZIP、全局外链、会话试用、随附同步、开发热更新；正确目标可以加载，错误目标在加载前拒绝。外链不删除用户工程。
+- **E4 恢复与并发**：下载/解压/健康检查/提交/写 index/提交标记/清理阶段注入失败或强杀；磁盘满、Windows 文件锁、同 package 与同 suite 竞争、取消和重启恢复。检查旧版本、启用状态、同套件成员、链接和 index 一致。
+- **E5 权限与运行**：status/profiles/本地 HTTP(S)、重复头、错误码、权限拒绝、URL 白名单与撤销、中文/空格目录、离线安装、无系统 Node/npm。
+- **E6 生命周期**：取消/超时/停用/卸载/更新准备/chat 结束/正常退出/父强杀/辅助子进程；检查实际进程退出、并发槽释放与敏感临时文件清理。
+- **E7 系统差异**：macOS 产品版本、双架构及下载签名/quarantine；Linux libc/内核、noexec、执行位和证书；Windows 标准用户/文件锁/安全策略。不适用格需写理由。
+- **E8 回归**：既有纯 JS 和套件插件、当前 SDK 三个命令、桌面内置打包、商店发布/重建/下架/快照恢复；不能为平台插件破坏旧生态。
+- **E9 正式交付**：安装与更新后的成品实测，产物摘要/来源/许可证完整、目标支持标识准确，诊断脱敏，恢复步骤可执行。
+
+现有快速入口保留：桌面 `npm run test:plugins:platform`、共享单测、商店 `node --test test/publish.test.js test/platform.test.js`。现有平台 smoke 可验证临时商店闭环，但单个 Windows 执行与生成五个平台 ZIP 都不能填满整个矩阵；新增 runner 必须去除 Windows 唯一假设。
+
+每次结果保留结构化报告、必要截图/进程证据、命令与退出码、失败注入阶段、清理结果和真实平台信息。历史进展、当前源码检查和本次实机执行分栏记录。支持声明只有在 E0–E9 的目标必需项全通过后更新。
+
+## 12. 改动范围与本轮实施边界
+
+后续实施主要落点：
+
+- 宿主分发：`package.json`、`scripts/install-cloudbypass-electron.mjs`、`electron-runtime-{manifest.json,release.mjs}`、目标 smoke runner。
+- 契约/SDK：`shared/plugin-platform.ts`、`shared/plugins.ts`、`scripts/sync-plugin-contract.mjs`、SDK 的 lib/bin/类型/SPEC 与依赖 staging。
+- 商店：共享 store 契约、`marketplace-client.ts`、navora-store 的 inspect/catalog/ingest/protocol 与发布脚本。
+- 安装/运行：`plugin-package.ts`、`plugin-store.ts`、`plugin-install-transaction.ts`、`plugin-pack.ts`、`fcurl-runtime.ts`、全局及会话外链/随附入口和对应测试。
+- 界面：商店兼容信息、插件导入/更新的忙状态与恢复反馈、开发检查结果分层和诊断映射。
+
+本轮已进入 S1/F0 实施，具体代码、可重跑测试与未执行项见[实施记录](./plugin-foundation-progress-2026-11-05.md)。后续仍按 S0–S4 的剩余门槛逐批验收；源码、Windows 构建、插件发布和其他平台认证分别记录，不能以文档更新或 Windows 成品打包作为跨平台完成证据。

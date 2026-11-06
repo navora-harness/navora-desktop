@@ -1,5 +1,26 @@
 # 计划：Electron 原生 JS Dialog API + Navora 对接
 
+<!-- planning-completion-review:2026-11-06 -->
+## 完成情况复核（2026-11-06）
+
+**当前状态：部分完成。** 本节依据现有源码、实施记录和报告复核；下文旧日期状态保留历史含义，当前完成范围以本节为准。
+
+- [x] **已完成**｜截至 2026-11-06：宿主 native-only 接入、原生能力检查、三类普通 JS 对话框及自动应答已实现；CDP fallback 已移除。
+- [ ] **保留事项**｜beforeunload 完整内核／宿主链路尚未核销；宿主存在映射分支不等于该事件已实际走通。
+
+证据：[js-dialog-host.ts](./../electron/modules/js-dialog-host.ts)；[electron-js-dialog-customization-plan.md](./electron-js-dialog-customization-plan.md)。
+<!-- /planning-completion-review:2026-11-06 -->
+
+
+<!-- planning-obsolescence:2026-11-06 -->
+> **【部分过时】标记日期：2026-11-06；原文/演进日期：正文未署日，最早可证 2026-10-30 已入库。**
+> **过时范围：**“计划中/先不实现”、当前还是 CDP 懒挂载、原生与 CDP 双后端回退的旧消费方案。
+> **当前依据/保留范围：**原生消费与三类普通对话框已实现，CDP fallback 已删除；beforeunload 完整链路仍有效，不能整份标为失效。
+> **接续证据：**[js-dialog-host.ts](../electron/modules/js-dialog-host.ts)；[current-state.md](./current-state.md)。
+<!-- /planning-obsolescence:2026-11-06 -->
+
+> 2026-11-05 规划整理核对：**部分完成**。宿主现已采用 native-only，旧 CDP 降级已删除；三类普通 JS 对话框已接入，但 beforeunload 的内核事件/Handler 链未闭环，不能由宿主映射分支推定实际可达。 状态与归档口径见[规划状态总览](./planning-status-and-next-work-2026-11-04.md)。
+
 > 历史对接草案。核心双后端宿主对接已实现，js-dialog-host.ts 优先探测 setJsDialogHandler，缺失时使用 CDP 降级；本文其它可选设计并非都已实现，原“计划中”指编写时。 当前行为与验证边界见 [当前功能](./current-state.md)，全部文档见 [导航](./README.md)。
 
 | 项 | 内容 |

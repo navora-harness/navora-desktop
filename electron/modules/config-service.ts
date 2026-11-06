@@ -10,6 +10,7 @@ import {
   normalizeAppStartupPrefs,
   ensurePermissionModes,
   resolveSubchat,
+  resolveBrowserLinkOpenMode,
   type AppConfig,
   type AppConfigPatch,
 } from '../../shared/config'
@@ -22,6 +23,8 @@ import {
 } from '../../shared/model-providers'
 import { resolveAppearanceTheme, resolveAppearanceMode } from '../../shared/appearance'
 import {resolveAppShortcuts} from '../../shared/app-shortcuts'
+import { windowAcrylicPreference } from '../../shared/window-material'
+import {resolveSubchatGlyphStyle} from '../../shared/subchat-glyph'
 import { applySettingsCommit, type SettingsCommit } from '../../shared/settings-commit'
 import { SETTINGS_GROUPS, settingsGroupDirty, validateSettingsGroup, type SettingsGroup } from '../../shared/settings-groups'
 
@@ -106,6 +109,9 @@ export class ConfigService {
     normalizeAppStartupPrefs(this.cfg)
     this.cfg.app.appearance_theme = resolveAppearanceTheme(this.cfg.app.appearance_theme).id
     this.cfg.app.appearance_mode = resolveAppearanceMode(this.cfg.app.appearance_mode)
+    this.cfg.app.subchat_glyph_style = resolveSubchatGlyphStyle(this.cfg.app.subchat_glyph_style)
+    this.cfg.browser.link_open_mode = resolveBrowserLinkOpenMode(this.cfg.browser.link_open_mode)
+    this.cfg.app.window_acrylic = windowAcrylicPreference(this.cfg.app.window_acrylic)
     this.cfg.app.shortcuts = resolveAppShortcuts(this.cfg.app.shortcuts)
     migrateAcceptLanguage(this.cfg)
     migrateShellAllowlist(this.cfg)
@@ -119,6 +125,9 @@ export class ConfigService {
     candidate.browser.automation = normalizeBrowserAutomation(candidate.browser.automation)
     candidate.app.appearance_theme = resolveAppearanceTheme(candidate.app.appearance_theme).id
     candidate.app.appearance_mode = resolveAppearanceMode(candidate.app.appearance_mode)
+    candidate.app.subchat_glyph_style = resolveSubchatGlyphStyle(candidate.app.subchat_glyph_style,true)
+    candidate.browser.link_open_mode = resolveBrowserLinkOpenMode(candidate.browser.link_open_mode,true)
+    candidate.app.window_acrylic = windowAcrylicPreference(candidate.app.window_acrylic, true)
     candidate.app.shortcuts = resolveAppShortcuts(candidate.app.shortcuts)
     ensureDefaultProvider(candidate.ai)
     ensurePermissionModes(candidate)

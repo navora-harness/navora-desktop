@@ -24,22 +24,31 @@ try {
   await wc.capturePage(undefined, { stayHidden: true, stayAwake: true })
   report.capabilities = browserCapabilities(wc)
   assert.equal(typeof wc.setVirtualCursorImage, 'function')
-  assert.equal(typeof wc.setVirtualCursorEnabled, 'function')
+  assert.equal(typeof wc.setAutomationOptions, 'function')
+  assert.equal(typeof wc.getAutomationState, 'function')
+  assert.equal(typeof wc.resetAutomationOptions, 'function')
   checks.push('custom-native-cursor-and-guard-api-present')
-  const nativeCalls: { enabled: boolean; pointer?: boolean; keyboard?: boolean }[] = []
-  const nativeEnable = wc.setVirtualCursorEnabled.bind(wc)
-  wc.setVirtualCursorEnabled = async (enabled, options) => {
-    nativeCalls.push({ enabled, pointer: options?.blockRealPointer, keyboard: options?.blockRealKeyboard })
-    await nativeEnable(enabled, options)
+  const nativeCalls: { options?: Electron.AutomationOptions; reset?: true }[] = []
+  const nativeConfigure = wc.setAutomationOptions.bind(wc), nativeReset = wc.resetAutomationOptions.bind(wc)
+  wc.setAutomationOptions = async options => {
+    nativeCalls.push({ options })
+    await nativeConfigure(options)
+  }
+  wc.resetAutomationOptions = async () => {
+    nativeCalls.push({ reset: true })
+    await nativeReset()
   }
   const controller = getBrowserAutomationController(wc)
   await controller.claimRun('native-fixture')
   assert.equal(controller.snapshot().inputProtected, true)
+  assert.equal(controller.snapshot().isolateInput, true)
+  assert.equal(controller.snapshot().keepRendering, true)
+  assert.equal(controller.snapshot().rendering?.keepAlive, true)
   checks.push('native-acquisition-confirmed-before-task-work')
   await controller.run({ runId: 'native-fixture' }, operation => operation.commit(() => wc.dispatchInputSequence([
-    { kind: 'mouse', type: 'mouseMoved', x: 100, y: 65, atMs: 0 },
-    { kind: 'mouse', type: 'mousePressed', x: 100, y: 65, button: 'left', clickCount: 1, atMs: 20 },
-    { kind: 'mouse', type: 'mouseReleased', x: 100, y: 65, button: 'left', clickCount: 1, atMs: 45 },
+    { kind: 'mouse', type: 'mouseMoved', position: {x: 100, y: 65}, atMs: 0 },
+    { kind: 'mouse', type: 'mousePressed', position: {x: 100, y: 65}, button: 'left', clickCount: 1, atMs: 20 },
+    { kind: 'mouse', type: 'mouseReleased', position: {x: 100, y: 65}, button: 'left', clickCount: 1, atMs: 45 },
   ])))
   await new Promise(resolve => setTimeout(resolve, 80))
   assert.equal(await wc.executeJavaScript('window.clicks'), 1)
@@ -53,9 +62,9 @@ try {
   assert.equal(controller.snapshot().owner, 'ai')
   checks.push('hover-event-does-not-handoff-between-tools')
   await controller.run({ runId: 'native-fixture' }, operation => operation.commit(() => wc.dispatchInputSequence([
-    { kind: 'mouse', type: 'mouseMoved', x: 340, y: 60, atMs: 0 },
-    { kind: 'mouse', type: 'mousePressed', x: 340, y: 60, button: 'left', clickCount: 1, atMs: 20 },
-    { kind: 'mouse', type: 'mouseReleased', x: 340, y: 60, button: 'left', clickCount: 1, atMs: 45 },
+    { kind: 'mouse', type: 'mouseMoved', position: {x: 340, y: 60}, atMs: 0 },
+    { kind: 'mouse', type: 'mousePressed', position: {x: 340, y: 60}, button: 'left', clickCount: 1, atMs: 20 },
+    { kind: 'mouse', type: 'mouseReleased', position: {x: 340, y: 60}, button: 'left', clickCount: 1, atMs: 45 },
   ])))
   await new Promise(resolve => setTimeout(resolve, 80))
   assert.equal(await wc.executeJavaScript('document.querySelector("iframe").contentWindow.clicks'), 1)
@@ -78,15 +87,23 @@ try {
   assert.equal(hidden.image.isEmpty(), false, 'Transparent native bitmap remains a valid image')
   assert.equal(hidden.image.toBitmap().some(Boolean), false)
   assert.equal(controller.snapshot().cursorVisible, false)
+  assert.equal(controller.snapshot().cursorEnabled, false)
   assert.equal(controller.snapshot().inputProtected, true)
-  assert.ok(nativeCalls.every(call => call.pointer && call.keyboard && call.enabled))
-  checks.push('transparent-image-accepted-with-both-native-input-guards-retained')
+  assert.equal(controller.snapshot().isolateInput, true)
+  assert.equal(controller.snapshot().keepRendering, true)
+  assert.ok(nativeCalls.filter(call => call.options).every(({options}) => options!.isolateInput && options!.keepRendering && options!.blockRealPointer && options!.blockRealKeyboard))
+  assert.equal(nativeCalls.at(-1)?.options?.virtualCursor?.enabled, false)
+  checks.push('cursor-drawing-disabled-with-isolation-rendering-and-input-guards-retained')
   await controller.finishRun('wrong-task')
   assert.equal(controller.snapshot().inputProtected, true)
   checks.push('stale-task-cannot-release-current-native-lease')
   await controller.finishRun('native-fixture')
   assert.equal(controller.snapshot().cursorEnabled, false)
   assert.equal(controller.snapshot().inputProtected, false)
+  assert.equal(controller.snapshot().isolateInput, false)
+  assert.equal(controller.snapshot().keepRendering, false)
+  assert.equal(wc.getAutomationState().inputActive, false)
+  assert.equal(nativeCalls.at(-1)?.reset, true)
   checks.push('matching-task-completion-confirmed-native-release')
   await controller.claimRun('next-task')
   const handoff = await controller.takeControl()

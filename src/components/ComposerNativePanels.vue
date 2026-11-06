@@ -20,7 +20,7 @@ async function show(next:ComposerNativePanelKind,anchor:HTMLElement){
   if(ticket!==generation||chatId!==props.chatId||!native.supported.value)return false
   kind=next;owner=chatId
   let shown=false
-  try{shown=await native.show(composerNativePanelContent(next,props.state),anchor,{placement:next==='mode'||next==='permission'?'top-start':'top-end',focusMode:next==='model'?'input':'menu'})}catch{if(ticket===generation){owner='';emit('notify','面板暂时无法打开，当前选择和草稿已保留，请重新打开。')}return false}
+  try{const settings={placement:next==='mode'||next==='permission'?'top-start' as const:'top-end' as const,focusMode:next==='model'?'input' as const:'menu' as const},content=composerNativePanelContent(next,props.state);shown=next==='model'?await native.showFocused(content,anchor,settings):await native.show(content,anchor,settings)}catch{if(ticket===generation){owner='';emit('notify','面板暂时无法打开，当前选择和草稿已保留，请重新打开。')}return false}
   if(ticket!==generation||chatId!==props.chatId){if(shown)await native.hide();return false}
   if(!shown)owner=''
   return shown

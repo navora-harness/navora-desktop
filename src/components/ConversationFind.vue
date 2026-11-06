@@ -1,23 +1,39 @@
 <template>
-  <section v-if="opened&&active" ref="panel" :data-find-owner="uid" class="conversation-find" role="search" aria-label="在当前聊天中查找" @keydown="onKey">
+  <section v-if="opened&&active&&!nativeSearch" ref="panel" :data-find-owner="uid" class="conversation-find" role="search" aria-label="在当前聊天中查找" @keydown="onKey">
     <div class="conversation-find-input"><AppIcon icon="magnifying-glass"/><input ref="input" v-model="query" type="search" aria-label="在当前聊天中查找" placeholder="查找当前聊天内容…" maxlength="1024" autocomplete="off" @compositionstart="composing=true" @compositionend="finishComposition"/></div>
     <span class="conversation-find-count" role="status" aria-live="polite">{{ !query.trim()?'':pending?'查找中…':matches.length?`${activeIndex+1} / ${matches.length}${truncated?'+':''}`:'未找到' }}</span>
     <button type="button" class="ui-icon-button" title="上一个（Shift Enter）" aria-label="上一个匹配项" :disabled="!matches.length||pending" @click="step(-1)"><AppIcon icon="chevron-up"/></button>
     <button type="button" class="ui-icon-button" title="下一个（Enter）" aria-label="下一个匹配项" :disabled="!matches.length||pending" @click="step(1)"><AppIcon icon="chevron-down"/></button>
-    <details class="conversation-find-options"><summary aria-label="查找选项" title="查找选项"><AppIcon icon="sliders"/></summary><div data-browser-chrome-overlay><label><input v-model="caseSensitive" type="checkbox"/>区分大小写</label><label><input v-model="includeTools" type="checkbox"/>包含工具与日志</label></div></details>
+    <ActionMenu ref="optionsMenu" class="conversation-find-options" label="查找选项" icon="sliders" :context-key="`${chatId}:${opened}:${active}`" :disabled="!active" :items="optionItems" @select="changeOption" @open="optionsOpen=$event" />
     <button type="button" class="ui-icon-button" title="关闭查找（Esc）" aria-label="关闭当前聊天查找" @click="close()"><AppIcon icon="xmark"/></button>
   </section>
 </template>
 <script setup lang="ts">
-import {nextTick,onBeforeUnmount,onMounted,ref,useId,watch} from 'vue'
+import {computed,nextTick,onBeforeUnmount,onMounted,ref,useId,watch} from 'vue'
 import AppIcon from './icons/AppIcon.vue'
+import ActionMenu from './ActionMenu.vue'
 import {renderMarkdown} from '@/utils/markdown'
 import {findConversationText,type ConversationMatch} from '@shared/conversation-find'
+import {isQuietResourceLog} from '@shared/message-presentation'
 import type {ChatMessage} from '@shared/types'
 import type {ConversationFindViewState} from '@shared/conversation-session'
-const props=withDefaults(defineProps<{chatId:string;messages:ChatMessage[];liveText?:string;root:HTMLElement|null;displayText:(message:ChatMessage)=>string;locate:(id:string,match?:ConversationMatch)=>Promise<void>;active?:boolean}>(),{active:true})
+import {registerWindowFindTarget,useWindowFind,openWindowFind} from '@/composables/useWindowFind'
+import type {WindowFindScope} from '@shared/window-find'
+const props=withDefaults(defineProps<{chatId:string;messages:ChatMessage[];liveText?:string;root:HTMLElement|null;displayText:(message:ChatMessage)=>string;locate:(id:string,match?:ConversationMatch)=>Promise<void>;active?:boolean;nativeSearch?:boolean;findScope?:WindowFindScope;targetTitle?:string;targetKey?:string}>(),{active:true,nativeSearch:true,findScope:'chat'})
 const emit=defineEmits<{open:[value:boolean];navigate:[]}>()
 const opened=ref(false),query=ref(''),caseSensitive=ref(false),includeTools=ref(false),input=ref<HTMLInputElement|null>(null),panel=ref<HTMLElement|null>(null),matches=ref<ConversationMatch[]>([]),activeIndex=ref(0),pending=ref(false),truncated=ref(false)
+const optionsMenu=ref<InstanceType<typeof ActionMenu>>()
+const optionsOpen=ref(false)
+const windowFind=useWindowFind(),searchable=computed(()=>props.active||props.nativeSearch&&props.findScope==='chat')
+const targetKey=computed(()=>`${props.findScope}:${props.targetKey||props.chatId}`)
+const unregister=registerWindowFindTarget({
+  target:()=>props.nativeSearch&&props.chatId&&searchable.value?{key:targetKey.value,scope:props.findScope,kind:props.findScope==='chat'?'chat':'subchat',label:props.targetTitle||'当前聊天',supportsCaseSensitive:true,supportsTools:true}:null,
+  state:()=>({status:pending.value?'searching':query.value.trim()?'ready':'idle',total:matches.value.length,ordinal:matches.value.length?activeIndex.value+1:0,truncated:truncated.value,...(truncated.value?{notice:'结果过多，请缩小查找范围'}:{})}),
+  setQuery:(value,options)=>{if(!opened.value){opened.value=true;emit('open',true)}query.value=value;caseSensitive.value=options.caseSensitive;includeTools.value=options.includeTools;schedule(props.active)},
+  step:direction=>step(direction),stop:()=>close(false)
+})
+const optionItems=computed(()=>[{id:'case',label:'区分大小写',checked:caseSensitive.value},{id:'tools',label:'包含工具与日志',checked:includeTools.value}])
+function changeOption(id:string){if(!props.active||!opened.value)return;if(id==='case')caseSensitive.value=!caseSensitive.value;else if(id==='tools')includeTools.value=!includeTools.value}
 let composing=false,compositionTimer:ReturnType<typeof setTimeout>|undefined,timer:ReturnType<typeof setTimeout>|undefined,token=0,returnFocus:HTMLElement|null=null
 const cache=new Map<string,{source:string;text:string}>()
 type HighlightCtor=new(...ranges:Range[])=>unknown
@@ -56,42 +72,46 @@ function highlight(){
   return activeRanges[0]
 }
 async function locateActive(){
-  const match=matches.value[activeIndex.value],generation=token,chatId=props.chatId;if(!props.active||!match)return
+  const match=matches.value[activeIndex.value],chatId=props.chatId,requestedQuery=query.value,requestedCase=caseSensitive.value,requestedTools=includeTools.value;if(!searchable.value||!match)return
   emit('navigate')
+  // Revealing a hidden conversation legitimately refreshes its visibility
+  // generation. Keep the requested match, but reject a new query/selection.
+  await nextTick();if(chatId!==props.chatId||!opened.value||query.value!==requestedQuery||caseSensitive.value!==requestedCase||includeTools.value!==requestedTools||matches.value[activeIndex.value]!==match)return
+  const generation=token
   if(match.messageId==='__live__')props.root?.querySelector('[data-live-answer]')?.scrollIntoView({block:'center'})
   else await props.locate(match.messageId,match)
   await nextTick();if(generation!==token||chatId!==props.chatId||!opened.value||!props.active)return
   const range=highlight();if(range){const rect=range.getBoundingClientRect(),box=props.root?.getBoundingClientRect();if(box&&props.root)props.root.scrollTop+=rect.top-box.top-box.height/3}
 }
 function schedule(navigate=true){
-  if(!props.active||!opened.value||composing)return;clearTimeout(timer);const generation=++token;pending.value=true
+  if(!searchable.value||!opened.value||composing)return;clearTimeout(timer);const generation=++token;pending.value=true
   timer=setTimeout(async()=>{
-    const previous=matches.value[activeIndex.value],items=props.messages.filter(message=>message.role==='user'||message.role==='assistant'||includeTools.value&&(message.role==='tool'||message.role==='log')).map(message=>({id:message.id,text:textFor(message)}))
+    const previous=matches.value[activeIndex.value],items=props.messages.filter(message=>!isQuietResourceLog(message)&&(message.role==='user'||message.role==='assistant'||includeTools.value&&(message.role==='tool'||message.role==='log'))).map(message=>({id:message.id,text:textFor(message)}))
     let committedLiveId:string|undefined
     if(props.liveText){const container=document.createElement('div');container.innerHTML=renderMarkdown(props.liveText);const text=container.textContent||'';if(props.messages.at(-1)?.role!=='assistant'||items.at(-1)?.text!==text)items.push({id:'__live__',text});else committedLiveId=items.at(-1)?.id}
-    const result=findConversationText(items,query.value,caseSensitive.value);if(generation!==token||!props.active)return
+    const result=findConversationText(items,query.value,caseSensitive.value);if(generation!==token||!searchable.value)return
     matches.value=result.matches;truncated.value=result.truncated;pending.value=false
     const previousId=previous?.messageId==='__live__'&&committedLiveId?committedLiveId:previous?.messageId
     const same=previous?result.matches.findIndex(match=>match.messageId===previousId&&match.from===previous.from):-1;activeIndex.value=same>=0?same:restoredIndex!==undefined?Math.min(restoredIndex,Math.max(0,result.matches.length-1)):0;if(result.matches.length||!query.value.trim())restoredIndex=undefined
-    await nextTick();if(generation!==token||!props.active)return
+    await nextTick();if(generation!==token||!searchable.value)return
     highlight();if(navigate&&result.matches.length)await locateActive()
   },120)
 }
-function step(direction:number){if(!props.active||composing||pending.value||!matches.value.length)return;activeIndex.value=(activeIndex.value+direction+matches.value.length)%matches.value.length;void locateActive()}
-function open(){if(!props.active)return;if(!opened.value){returnFocus=document.activeElement as HTMLElement;const selection=getSelection(),selected=selection?.anchorNode&&props.root?.contains(selection.anchorNode)?selection.toString().slice(0,1024):'';query.value=selected||query.value;opened.value=true;emit('open',true);schedule()}void nextTick(()=>{if(!props.active||!opened.value)return;input.value?.focus();input.value?.select()})}
-function close(restore=true){token++;clearTimeout(timer);clearTimeout(compositionTimer);composing=false;opened.value=false;pending.value=false;matches.value=[];clearHighlights();emit('open',false);if(restore&&props.active&&returnFocus?.isConnected&&returnFocus.checkVisibility())returnFocus.focus({preventScroll:true})}
+function step(direction:number){if(!searchable.value||composing||pending.value||!matches.value.length)return;activeIndex.value=(activeIndex.value+direction+matches.value.length)%matches.value.length;void locateActive()}
+function open(){if(!searchable.value)return;const selection=getSelection(),selected=selection?.anchorNode&&props.root?.contains(selection.anchorNode)?selection.toString().slice(0,1024):'';if(props.nativeSearch){if(selected)windowFind.query.value=selected;openWindowFind(props.findScope);return}if(!opened.value){returnFocus=document.activeElement as HTMLElement;query.value=selected||query.value;opened.value=true;emit('open',true);schedule()}void nextTick(()=>{if(!props.active||!opened.value)return;input.value?.focus();input.value?.select()})}
+function close(restore=true){token++;clearTimeout(timer);clearTimeout(compositionTimer);composing=false;optionsMenu.value?.hide();opened.value=false;pending.value=false;matches.value=[];clearHighlights();emit('open',false);if(restore&&props.active&&returnFocus?.isConnected&&returnFocus.checkVisibility())returnFocus.focus({preventScroll:true})}
 function finishComposition(){clearTimeout(compositionTimer);compositionTimer=setTimeout(()=>{composing=false;schedule()},0)}
-function outsideOptions(event:PointerEvent){const details=panel.value?.querySelector<HTMLDetailsElement>('details[open]');if(details&&!details.contains(event.target as Node))details.open=false}
-function onKey(event:KeyboardEvent){if(!props.active||event.isComposing||event.keyCode===229||composing)return;if(event.key==='Escape'){const details=panel.value?.querySelector<HTMLDetailsElement>('details[open]');if(details){details.open=false;event.preventDefault();event.stopPropagation();if(details.contains(document.activeElement))details.querySelector('summary')?.focus();return}event.preventDefault();event.stopPropagation();close()}else if(event.key==='F3'){event.preventDefault();event.stopPropagation();step(event.shiftKey?-1:1)}else if(event.key==='Enter'&&event.target===input.value){event.preventDefault();event.stopPropagation();step(event.shiftKey?-1:1)}}
-watch([query,caseSensitive,includeTools],()=>schedule())
+function onKey(event:KeyboardEvent){if(!props.active||event.isComposing||event.keyCode===229||composing)return;if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(optionsOpen.value){optionsMenu.value?.hide();return}close()}else if(event.key==='F3'){event.preventDefault();event.stopPropagation();step(event.shiftKey?-1:1)}else if(event.key==='Enter'&&event.target===input.value){event.preventDefault();event.stopPropagation();step(event.shiftKey?-1:1)}}
+watch([query,caseSensitive,includeTools],()=>schedule(props.active))
 watch(()=>[props.messages.map(message=>[message.id,message.content]),props.liveText],()=>{if(opened.value)schedule(false)},{deep:true})
 watch(()=>props.chatId,()=>{close(false);query.value='';cache.clear();highlightNames=namesFor(props.chatId);styleHighlights()})
-watch(()=>props.active,active=>{token++;clearTimeout(timer);clearTimeout(compositionTimer);composing=false;pending.value=false;clearHighlights();if(active&&opened.value)schedule(false)})
-onMounted(()=>{styleHighlights();document.addEventListener('pointerdown',outsideOptions)})
-onBeforeUnmount(()=>{close(false);highlightStyle?.remove();clearTimeout(compositionTimer);document.removeEventListener('pointerdown',outsideOptions)})
+watch(()=>props.active,()=>{token++;clearTimeout(timer);clearTimeout(compositionTimer);composing=false;pending.value=false;clearHighlights();if(searchable.value&&opened.value)schedule(false);else optionsMenu.value?.hide()})
+onMounted(styleHighlights)
+onBeforeUnmount(()=>{unregister();close(false);highlightStyle?.remove();clearTimeout(compositionTimer)})
 function snapshot():ConversationFindViewState{return {opened:opened.value,query:query.value,caseSensitive:caseSensitive.value,includeTools:includeTools.value,activeIndex:activeIndex.value}}
 function restore(saved:ConversationFindViewState){close(false);query.value=saved.query;caseSensitive.value=saved.caseSensitive;includeTools.value=saved.includeTools;restoredIndex=saved.activeIndex;opened.value=saved.opened;emit('open',saved.opened);if(props.active&&saved.opened)schedule(false)}
-defineExpose({open,close,step,snapshot,restore,get opened(){return opened.value},get highlightNames(){return highlightNames}})
+function dismiss(restore=true){if(props.nativeSearch&&windowFind.active.value?.target.key===targetKey.value)windowFind.close();close(restore)}
+defineExpose({open,close:dismiss,step,snapshot,restore,get opened(){return opened.value},get highlightNames(){return highlightNames}})
 </script>
 <style>
 /* The chat container uses display:contents, so this bar is a fourth grid item.

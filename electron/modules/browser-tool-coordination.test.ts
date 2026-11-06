@@ -4,9 +4,10 @@ import test from 'node:test'
 import type { WebContents } from 'electron'
 import type { ToolExecContext } from './browser-tools'
 import { getBrowserAutomationController, BrowserAutomationError } from './browser-automation-controller'
-import { captureBrowserIntentEpochs, coordinateBrowserTool, trackBrowserSideEffect, withBrowserIntentCancellation } from './browser-tool-coordination'
+import { browserControlFailure, captureBrowserIntentEpochs, coordinateBrowserTool, trackBrowserSideEffect, withBrowserIntentCancellation } from './browser-tool-coordination'
 import { attachBrowserNativeRefs, resolveBrowserNativeRef } from './browser-native-refs'
 import { normalizeBrowserToolCall } from '../../shared/browser-tool-policy'
+import { automationTestApi } from './browser-automation-test-api'
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void
@@ -18,7 +19,7 @@ function fixture(count = 1) {
   const pages = Array.from({ length: count }, (_, index) => {
     const wc = Object.assign(new EventEmitter(), {
       id: id++, isDestroyed: () => false,
-      setVirtualCursorEnabled: async () => {}, setVirtualCursorFrameRate: () => {},
+      ...automationTestApi(),
     }) as unknown as WebContents
     const win = { webContents: wc, activeOperations: 0, manager: { flushLayout() {} }, isDestroyed: () => false }
     return { windowId: `w${index}`, chatId: 'chat', win, sessionId: 'session' }
@@ -32,11 +33,119 @@ function fixture(count = 1) {
       return page
     },
     assertSessionOwned: () => ({ windows: new Map(pages.map(page => [page.windowId, page])) }),
+    assertSessionUsable: () => ({ windows: new Map(pages.map(page => [page.windowId, page])) }),
+    isPublicSession:()=>false,
   }
   const ctx = { chatId: 'chat', signal: new AbortController().signal, registry } as unknown as ToolExecContext
   ctx.browserIntentEpochs = captureBrowserIntentEpochs(ctx.registry, ctx.chatId)
   return { ctx, pages, controller: getBrowserAutomationController(pages[0]!.win.webContents) }
 }
+
+function blockerFixture(){
+  const f=fixture(2)
+  const mainFrame={processId:1,routingId:1,framesInSubtree:[]}
+  const sample={probes:[{verificationText:true,challengeControl:true,suspectedFrame:false,blockingContainer:true,foreground:true,visible:true,kind:'human_verification',partial:false}],frames:[],partial:false,layout:'1000x800'}
+  Object.assign(f.pages[0]!.win.webContents,{mainFrame,executeJavaScriptInIsolatedWorld:async()=>sample})
+  return {...f,sample}
+}
+
+test('cached title and URL are not successful reads after renderer exit',async()=>{
+  const {ctx,pages}=fixture()
+  Object.assign(pages[0]!.win.webContents,{isCrashed:()=>true})
+  for(const what of ['title','url','agent_snapshot','agent_find']){
+    let reads=0
+    const result=await coordinateBrowserTool('browser_get',{windowId:'w0',what},ctx,async()=>{
+      reads++;return{ok:true,value:'cached title'}
+    }) as Record<string,unknown>
+    assert.equal(reads,0)
+    assert.deepEqual(result,{ok:false,dataRead:false,windowId:'w0',error:'render_process_gone'})
+  }
+})
+
+test('renderer exit during a native read cannot return successful data',async()=>{
+  for(const rejects of [false,true]){
+    const {ctx,pages}=fixture()
+    let crashed=false
+    Object.assign(pages[0]!.win.webContents,{isCrashed:()=>crashed})
+    const result=await coordinateBrowserTool('browser_get',{windowId:'w0',what:'agent_snapshot'},ctx,async()=>{
+      crashed=true
+      if(rejects)throw new Error('RENDER_PROCESS_GONE')
+      return{ok:true,value:{complete:false,frames:[{reason:'RENDER_PROCESS_GONE'}],elements:[]}}
+    }) as Record<string,unknown>
+    assert.deepEqual(result,{ok:false,dataRead:false,windowId:'w0',error:'render_process_gone'})
+  }
+})
+
+test('host detection retains readable DOM, pauses only blocked page and denies inputs/evaluate/session fetch',async()=>{
+  const {ctx,pages,controller}=blockerFixture()
+  const result=await coordinateBrowserTool('browser_get',{windowId:'w0',what:'text'},ctx,async()=>({ok:true,value:'Underlying products remain readable'})) as Record<string,unknown>
+  assert.equal(result.ok,true);assert.equal((result.pageBlocker as {state:string}).state,'confirmed')
+  assert.equal(controller.snapshot().owner,'paused')
+  let dispatched=0
+  for(const name of ['browser_click','browser_evaluate','browser_session_fetch','browser_navigate','browser_reload','browser_find','file_download','file_download_compose']){
+    await assert.rejects(coordinateBrowserTool(name,['browser_session_fetch','file_download_compose'].includes(name)?{sessionId:'session'}:{windowId:'w0'},ctx,async()=>{dispatched++;return {ok:true}}),error=>error instanceof BrowserAutomationError&&error.code==='browser_page_blocked')
+  }
+  assert.equal(dispatched,0)
+  for(const name of ['browser_session_fetch','file_download','file_download_compose'])await assert.rejects(coordinateBrowserTool(name,{url:'https://fixture.invalid/'},ctx,async()=>{dispatched++;return {ok:true}}),{code:'page_blocker_scope_required'})
+  await assert.rejects(coordinateBrowserTool('file_download_compose',{windowId:'w1',dest:'fixture.txt',parts:[{url:'https://fixture.invalid/'}]},ctx,async()=>{dispatched++;return {ok:true}}),{code:'page_blocker_scope_required'})
+  await assert.rejects(coordinateBrowserTool('browser_session_fetch',{windowId:'w1',url:'https://fixture.invalid/'},ctx,async()=>{dispatched++;return {ok:true}}),{code:'page_blocker_scope_required'})
+  assert.equal(dispatched,0)
+  assert.equal(getBrowserAutomationController(pages[1]!.win.webContents).snapshot().owner,'ai')
+  await coordinateBrowserTool('browser_click',{windowId:'w1'},ctx,async()=>{dispatched++;return {ok:true}})
+  assert.equal(dispatched,1)
+})
+
+test('user completion must pass host recheck, never launches/replays finished work, and old intents remain invalid',async()=>{
+  const {ctx,controller,sample,pages}=blockerFixture()
+  await coordinateBrowserTool('browser_get',{windowId:'w0'},ctx,async()=>({ok:true,value:'data'}))
+  await controller.takeControl()
+  await assert.rejects(controller.resume(),{code:'browser_page_blocked'})
+  assert.equal(controller.snapshot().owner,'user')
+  ;(pages[0]!.win.webContents as unknown as EventEmitter).emit('did-navigate-in-page')
+  assert.equal(controller.snapshot().pageBlocker?.state,'unknown')
+  assert.ok(controller.snapshot().pageBlocker?.previouslyBlockedAt)
+  await assert.rejects(coordinateBrowserTool('browser_session_fetch',{url:'https://fixture.invalid/'},ctx,async()=>({ok:true})),{code:'page_blocker_scope_required'})
+  sample.probes=[]
+  await controller.resume()
+  assert.equal(controller.snapshot().owner,'ai');assert.equal(controller.snapshot().needsObservation,true)
+  let dispatched=0
+  await assert.rejects(coordinateBrowserTool('browser_click',{windowId:'w0'},ctx,async()=>{dispatched++;return {ok:true}}),{code:'browser_operation_invalidated'})
+  assert.equal(dispatched,0)
+  assert.equal(controller.snapshot().pageBlocker?.state,'not_observed')
+  assert.ok(controller.snapshot().pageBlocker?.clearedAt)
+})
+
+test('a background read cannot take manual ownership away, and stale probe cannot lock a changed document',async()=>{
+  const {ctx,controller,pages}=blockerFixture()
+  await controller.takeControl()
+  await coordinateBrowserTool('browser_get',{windowId:'w0'},ctx,async()=>({ok:true}))
+  assert.equal(controller.snapshot().owner,'user')
+  const wc=pages[0]!.win.webContents
+  Object.assign(wc,{executeJavaScriptInIsolatedWorld:async()=>{(wc as unknown as EventEmitter).emit('did-navigate-in-page');return {probes:[],frames:[],partial:false,layout:'1000x800'}}})
+  await assert.rejects(coordinateBrowserTool('browser_get',{windowId:'w0'},ctx,async()=>({ok:true})),{code:'browser_document_changed'})
+  assert.equal(controller.snapshot().pageBlocker?.state,'unknown')
+})
+
+test('operation diagnostics distinguish known document invalidation without guessing unknown takeover',()=>{
+  const unknown=browserControlFailure(new BrowserAutomationError('browser_operation_invalidated'))
+  assert.equal((unknown?.diagnostic as {cause:string}).cause,'unknown')
+  const document=browserControlFailure(new BrowserAutomationError('browser_document_changed','changed',{expectedDocumentEpoch:1,actualDocumentEpoch:2,dispatched:false}))
+  assert.equal((document?.diagnostic as {cause:string}).cause,'document_changed')
+  assert.equal((document?.diagnostic as {dispatched:boolean}).dispatched,false)
+})
+
+test('a verification appearing while an action waits in the page queue is checked after acquiring its lease',async()=>{
+  const {ctx,controller,sample}=blockerFixture()
+  const blocked=sample.probes;sample.probes=[]
+  const started=deferred(),release=deferred()
+  const first=controller.run({readOnly:true},async()=>{started.resolve();await release.promise})
+  await started.promise
+  let dispatched=0
+  const queued=coordinateBrowserTool('browser_click',{windowId:'w0'},ctx,async()=>{dispatched++;return {ok:true}})
+  sample.probes=blocked;release.resolve();await first
+  await assert.rejects(queued,{code:'browser_page_blocked'})
+  assert.equal(dispatched,0);assert.equal(controller.snapshot().owner,'paused')
+})
 
 test('permission approved after takeover cannot acquire or dispatch the old action', async () => {
   const { ctx, controller } = fixture()

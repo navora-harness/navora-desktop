@@ -27,11 +27,14 @@ export type TranscriptBlock =
   | { type: 'chat' | 'tool' | 'log'; key: string; message: ChatMessage }
   | { type: 'run'; key: string; items: ChatMessage[]; reasoning: string }
 
-/** Old manual-close notifications are UI state changes, not execution history. */
+/** Resource notifications stay in Agent context; dedicated panels present their state. */
 export function isQuietResourceLog(message: ChatMessage): boolean {
-  if (message.role !== 'log' || message.meta?.kind !== 'user_op') return false
+  if (message.role !== 'log') return false
+  if (message.meta?.kind === 'browser_download') return true
+  if (message.meta?.kind !== 'user_op') return false
   const summary = String(message.meta?.summary || message.content.split(/\r?\n/, 1)[0] || '').trim()
   return ['你关闭了一个浏览器窗口', '你关闭了一个浏览器会话', '你关闭了一个 Session'].includes(summary)
+    || /^(?:浏览器下载(?:开始|完成|失败)|已拦截浏览器下载)[：:]/.test(summary)
 }
 
 /** Counts describe recorded operations, never imply that every attempted call succeeded. */

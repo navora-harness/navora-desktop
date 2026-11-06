@@ -7,7 +7,7 @@ const document=(content:ComposerNode[])=>({...createComposerDocument('chat-a'),c
 test('version 1 migration preserves edited excerpts and document identity',()=>{
   const legacy={...document([{type:'contextBlock',attrs:{block:{...source(),mode:'excerpt'},collapsed:true},content:[{type:'paragraph',content:[{type:'text',text:'用户修改的摘录',marks:[{type:'bold'}]}]}]}]),schemaVersion:1 as const}
   const normalized=normalizeComposerDocument(legacy,'chat-a')
-  assert.equal(normalized.schemaVersion,2)
+  assert.equal(normalized.schemaVersion,3)
   assert.equal(normalized.id,legacy.id)
   assert.deepEqual(normalized.content,legacy.content)
   assert.match(compileComposerDocument(normalized).content,/\*\*用户修改的摘录\*\*/)
@@ -28,7 +28,7 @@ test('inline references reject excerpts, nested resources, top-level atoms and d
   assert.throws(()=>normalizeComposerDocument(document([{type:'paragraph',content:[{type:'contextInline',attrs:{block:{...source(),mode:'excerpt'}}}]}])),/context/)
   assert.throws(()=>normalizeComposerDocument(document([{type:'contextBlock',attrs:{block:{...source(),mode:'excerpt'}},content:[{type:'paragraph',content:[{type:'contextInline',attrs:{block:source('two')}}]}]}])),/context/)
   assert.throws(()=>normalizeComposerDocument(document([{type:'paragraph',content:[{type:'contextInline',attrs:{block:source()}},{type:'contextInline',attrs:{block:source()}}]}])),/duplicate/)
-  assert.throws(()=>normalizeComposerDocument({...document([]),schemaVersion:3}),/document_version/)
+  assert.throws(()=>normalizeComposerDocument({...document([]),schemaVersion:4}),/document_version/)
 })
 
 test('recovery merge renews colliding IDs across inline and block references while preserving collapsed state',()=>{

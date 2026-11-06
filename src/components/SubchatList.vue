@@ -7,7 +7,7 @@
     <p v-else-if="!items.length" class="subchat-state">还没有子对话。聊天中的 Agent 委派任务后，会在这里显示。</p>
     <p v-else-if="!filtered.length" class="subchat-state">没有匹配的子对话。<button type="button" @click="view.query='';view.filter='all'">清除筛选</button></p>
     <div ref="scroller" class="subchat-list-scroll" @scroll="saveScroll" @keydown="rowKey">
-      <section v-for="group in groups" :key="group.id" class="subchat-group"><h3>{{group.label}} <span>{{group.items.length}}</span></h3><button v-for="item in group.items" :key="item.id" type="button" class="subchat-list-row" :data-subchat-id="item.id" @click="emit('select',item.id)"><img :src="subchatGlyphUrl(item.id)" alt=""/><span class="subchat-list-copy"><span class="subchat-list-name" :title="item.title"><i v-if="item.unread" class="subchat-unread" title="有未读进展" aria-label="有未读进展"/>{{item.title}}</span><span class="subchat-list-summary" :title="item.purpose">{{item.summary||item.purpose||'暂无进展记录'}}</span></span><span class="subchat-list-meta"><span :class="['subchat-status',item.status]">{{item.pendingCount?`需要处理 · ${item.pendingCount}`:subchatStatusLabels[item.status]}}</span><time>{{subchatTime(item,now)}}</time><span v-if="item.resourceCount">{{item.resourcesTruncated?'至少 ' : ''}}{{item.resourceCount}} 项资源</span></span></button></section>
+      <section v-for="group in groups" :key="group.id" class="subchat-group"><h3>{{group.label}} <span>{{group.items.length}}</span></h3><button v-for="item in group.items" :key="item.id" type="button" class="subchat-list-row" data-ctx-menu="subchat" :data-subchat-id="item.id" @contextmenu.prevent.stop="emit('menu',$event,item)" @click="emit('select',item.id)"><img :src="subchatGlyphUrl(item.id)" alt=""/><span class="subchat-list-copy"><span class="subchat-list-name" :title="item.title"><i v-if="item.unread" class="subchat-unread" title="有未读进展" aria-label="有未读进展"/>{{item.title}}</span><span class="subchat-list-summary" :title="item.purpose">{{item.summary||item.purpose||'暂无进展记录'}}</span></span><span class="subchat-list-meta"><span :class="['subchat-status',item.status]">{{item.pendingCount?`需要处理 · ${item.pendingCount}`:subchatStatusLabels[item.status]}}</span><time>{{subchatTime(item,now)}}</time><span v-if="item.resourceCount">{{item.resourcesTruncated?'至少 ' : ''}}{{item.resourceCount}} 项资源</span></span></button></section>
     </div>
   </section>
 </template>
@@ -17,10 +17,12 @@ const subchatListViews=new Map<string,{query:string;filter:string;scrollTop:numb
 <script setup lang="ts">
 import {computed,nextTick,onBeforeUnmount,onMounted,reactive,ref,watch} from 'vue'
 import type {SubchatIndexItem} from '@shared/types'
-import {subchatGlyphUrl,subchatGroup,subchatStatusLabels,subchatTime} from '@shared/subchat-presentation'
+import {subchatGroup,subchatStatusLabels,subchatTime} from '@shared/subchat-presentation'
+import {useSubchatGlyph} from '@/composables/useSubchatGlyph'
 import AppIcon from './icons/AppIcon.vue'
 const props=defineProps<{parentChatId:string;items:SubchatIndexItem[];loading:boolean;error?:string}>()
-const emit=defineEmits<{select:[id:string];refresh:[]}>()
+const emit=defineEmits<{select:[id:string];refresh:[];menu:[event:MouseEvent|KeyboardEvent,item:SubchatIndexItem]}>()
+const {glyphUrl:subchatGlyphUrl}=useSubchatGlyph()
 type View={query:string;filter:string;scrollTop:number}
 const views=subchatListViews,view=reactive<View>({query:'',filter:'all',scrollTop:0}),searchInput=ref<HTMLInputElement>(),scroller=ref<HTMLElement>(),now=ref(Date.now())
 let timer:ReturnType<typeof setInterval>|undefined
@@ -30,7 +32,7 @@ watch(()=>props.parentChatId,(id,old)=>{if(old)saveView(old);Object.assign(view,
 watch(()=>[view.query,view.filter],()=>saveView())
 const filtered=computed(()=>{const q=view.query.trim().toLocaleLowerCase();return props.items.filter(item=>(view.filter==='all'||subchatGroup(item)===view.filter)&&(!q||`${item.title}\n${item.purpose}`.toLocaleLowerCase().includes(q)))})
 const groups=computed(()=>[{id:'attention',label:'需要处理'},{id:'running',label:'进行中'},{id:'done',label:'已完成'},{id:'unfinished',label:'未完成'}].map(group=>({...group,items:filtered.value.filter(item=>subchatGroup(item)===group.id)})).filter(group=>group.items.length))
-function rowKey(event:KeyboardEvent){if(event.isComposing||!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;const rows=[...(scroller.value?.querySelectorAll<HTMLButtonElement>('.subchat-list-row')||[])],at=rows.indexOf(document.activeElement as HTMLButtonElement);if(at<0||!rows.length)return;event.preventDefault();rows[event.key==='Home'?0:event.key==='End'?rows.length-1:(at+(event.key==='ArrowDown'?1:-1)+rows.length)%rows.length]?.focus()}
+function rowKey(event:KeyboardEvent){if(event.isComposing)return;if(event.key==='ContextMenu'||event.key==='F10'&&event.shiftKey){const id=(event.target as HTMLElement).closest<HTMLElement>('[data-subchat-id]')?.dataset.subchatId,item=props.items.find(item=>item.id===id);if(item){event.preventDefault();event.stopPropagation();emit('menu',event,item)}return}if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;const rows=[...(scroller.value?.querySelectorAll<HTMLButtonElement>('.subchat-list-row')||[])],at=rows.indexOf(document.activeElement as HTMLButtonElement);if(at<0||!rows.length)return;event.preventDefault();rows[event.key==='Home'?0:event.key==='End'?rows.length-1:(at+(event.key==='ArrowDown'?1:-1)+rows.length)%rows.length]?.focus()}
 onMounted(()=>{if(scroller.value)scroller.value.scrollTop=view.scrollTop;timer=setInterval(()=>{now.value=Date.now()},1000)})
 onBeforeUnmount(()=>{saveView();clearInterval(timer)})
 defineExpose({focusSearch:()=>searchInput.value?.focus()})

@@ -1,5 +1,5 @@
 <template>
-  <div class="msg inchat-card perm" role="group" aria-label="需要授权">
+  <div class="msg inchat-card perm" data-decision-card="permission" :data-decision-state="expired?'expired':busy?'submitting':submissionError?'error':'pending'" :aria-busy="busy" role="group" aria-label="需要授权">
     <div class="msg-row">
       <div class="msg-avatar perm" aria-hidden="true">
         <StatusIcon kind="perm" />
@@ -10,43 +10,24 @@
           <span v-if="chatTitle" class="perm-chat">{{ chatTitle }}</span>
         </div>
         <h3 class="inchat-title">{{ capabilityLabel }}</h3>
-        <p v-if="remainingLabel" class="ask-timeout" :class="{ urgent: remainingUrgent }">
+        <p v-if="remainingLabel && !expired" class="ask-timeout" :class="{ urgent: remainingUrgent }">
           {{ remainingLabel }}
         </p>
         <p v-if="pendingCount>1" class="perm-queue" role="status">还有 {{ pendingCount-1 }} 个此对话的授权请求等待处理</p>
-        <div
-          v-if="remainingLabel"
-          class="ask-countdown-bar"
-          :class="{ urgent: remainingUrgent }"
-        >
-          <div class="ask-countdown-bar-fill" :style="{ width: `${remainingPct}%` }" />
-        </div>
-        <div v-if="req.detail" class="perm-detail-card">
-          <div class="perm-detail-label">请求说明</div>
+        <p v-if="detailSummary" class="perm-detail-summary">{{ detailSummary }}</p>
+        <details class="perm-detail-card">
+          <summary>请求详情</summary>
           <div class="perm-detail-text">{{ displayDetail }}</div>
           <code class="perm-cap">{{ req.capability }}</code>
-        </div>
-        <div class="perm-group">
-          <div class="perm-group-label">仅处理这一次</div>
-          <div class="perm-row">
-            <button type="button" class="perm-btn primary" :disabled="busy" @click="emit('decide', 'allow')">
-              允许这一次
-            </button>
-            <button type="button" class="perm-btn ghost" :disabled="busy" @click="emit('decide', 'deny')">
-              拒绝这一次
-            </button>
-          </div>
-        </div>
-        <div class="perm-group">
-          <div class="perm-group-label">本次运行中记住（仅此对话）</div>
-          <div class="perm-stack">
-            <button type="button" class="perm-btn tonal" :disabled="busy" @click="emit('decide', 'allow_chat')">
-              本次运行中，此对话允许
-            </button>
-            <button type="button" class="perm-btn danger-ghost" :disabled="busy" @click="emit('decide', 'always_deny')">
-              本次运行中，此对话拒绝
-            </button>
-          </div>
+        </details>
+        <label class="perm-remember"><input v-model="remember" data-permission-remember type="checkbox" :disabled="unavailable" />本次运行记住（仅此对话）</label>
+        <p v-if="expired" class="decision-status" role="status">请求已失效，请等待新的请求。</p>
+        <p v-else-if="busy" class="decision-status" role="status">正在提交…</p>
+        <p v-else-if="submissionError" class="decision-error" role="alert">{{ submissionError }}</p>
+        <div class="perm-row">
+          <button type="button" class="perm-btn primary" :disabled="unavailable" @click="decide(true)">{{ remember?'允许并记住':'允许一次' }}</button>
+          <button type="button" class="perm-btn ghost" :disabled="unavailable" @click="decide(false)">{{ remember?'拒绝并记住':'拒绝' }}</button>
+          <button v-if="expired" type="button" class="decision-dismiss" data-decision-dismiss @click="emit('dismiss')">关闭</button>
         </div>
       </div>
     </div>
@@ -55,7 +36,7 @@
 
 <script setup lang="ts">
 import StatusIcon from '@/components/StatusIcon.vue'
-import {computed} from 'vue'
+import {computed,ref,watch} from 'vue'
 import {permissionDetailForDisplay} from '@shared/permission-presentation'
 import type { PermissionDecision, PermissionRequest } from '@shared/types'
 
@@ -68,212 +49,54 @@ const props=withDefaults(defineProps<{
   remainingUrgent?: boolean
   remainingPct?: number
   busy?: boolean
+  submissionError?: string
+  expired?: boolean
 }>(),{pendingCount:1})
 const displayDetail=computed(()=>permissionDetailForDisplay(props.req.detail))
+const detailSummary=computed(()=>{const first=displayDetail.value.split(/\n/).find(line=>line.trim())||'';return first.length>160?`${first.slice(0,160)}…`:first})
+const remember=ref(false)
+const unavailable=computed(()=>!!props.busy||!!props.expired)
+watch(()=>props.req.id,()=>{remember.value=false})
 
 const emit = defineEmits<{
   decide: [decision: PermissionDecision]
+  dismiss: []
 }>()
+function decide(allow:boolean){if(unavailable.value)return;emit('decide',allow?(remember.value?'allow_chat':'allow'):(remember.value?'always_deny':'deny'))}
 </script>
 
 <style scoped>
-.inchat-card {
-  width: 100%;
-  max-width: 100%;
-  margin: 4px 0 8px;
-  box-sizing: border-box;
-}
-.msg-row {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  width: 100%;
-  min-width: 0;
-}
-.msg-avatar {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  background: #e8f8f0;
-  color: #1e8449;
-  font-size: 0.9rem;
-}
-.msg-main {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: 100%;
-  padding: 16px 18px 18px;
-  border-radius: 14px;
-  background: #fff;
-  border: 1px solid #cfe0ec;
-  box-shadow: 0 4px 16px rgba(21, 32, 43, 0.06);
-  box-sizing: border-box;
-}
-.msg-role {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 8px;
-  font-size: 0.78rem;
-  font-weight: 650;
-  color: #1e8449;
-  margin-bottom: 8px;
-}
-.perm-chat {
-  font-weight: 600;
-  color: #7f8c8d;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.inchat-title {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: #15202b;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-.ask-timeout {
-  margin: 8px 0 0;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: #7f8c8d;
-}
-.ask-timeout.urgent {
-  color: #b9770e;
-}
-.ask-countdown-bar {
-  margin-top: 6px;
-  width: 100%;
-  height: 4px;
-  border-radius: 999px;
-  background: #e4ecf2;
-  overflow: hidden;
-}
-.ask-countdown-bar-fill {
-  display: block;
-  height: 100%;
-  background: #5d8aa8;
-  transition: width 0.45s linear;
-}
-.ask-countdown-bar.urgent .ask-countdown-bar-fill {
-  background: #c0392b;
-}
-.perm-queue {
-  margin: 8px 0 0;
-  color: #536c80;
-  font-size: 0.78rem;
-}
-.perm-detail-card {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: #f4f8fb;
-  border: 1px solid #e2ebf2;
-}
-.perm-detail-label {
-  color: #7f8c8d;
-  font-size: 0.7rem;
-  font-weight: 650;
-}
-.perm-detail-text {
-  font-size: 0.86rem;
-  color: #5d6d7e;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.perm-cap {
-  align-self: flex-start;
-  max-width: 100%;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: #eef3f7;
-  color: #5d6d7e;
-  font-size: 0.72rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  overflow-wrap: anywhere;
-  white-space: normal;
-}
-.perm-group {
-  margin-top: 16px;
-}
-.perm-group-label {
-  font-size: 0.72rem;
-  font-weight: 650;
-  color: #7f8c8d;
-  margin-bottom: 8px;
-  letter-spacing: 0.02em;
-}
-.perm-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.perm-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.perm-btn {
-  border: 1px solid transparent;
-  border-radius: 10px;
-  padding: 12px 16px;
-  font: inherit;
-  font-size: 0.9rem;
-  font-weight: 600;
-  cursor: pointer;
-  line-height: 1.3;
-  text-align: center;
-  box-sizing: border-box;
-}
-.perm-row .perm-btn {
-  flex: 1 1 140px;
-  min-width: 120px;
-}
-.perm-stack .perm-btn {
-  width: 100%;
-  text-align: left;
-}
-.perm-btn.primary {
-  background: #1b4f72;
-  color: #fff;
-}
-.perm-btn.primary:hover:not(:disabled) {
-  background: #163f5b;
-}
-.perm-btn.ghost {
-  background: #fff;
-  border-color: #d5dde5;
-  color: #5d6d7e;
-}
-.perm-btn.ghost:hover:not(:disabled) {
-  background: #f4f6f8;
-}
-.perm-btn.tonal {
-  background: #eaf3fa;
-  color: #1b4f72;
-}
-.perm-btn.tonal:hover:not(:disabled) {
-  background: #dceaf4;
-}
-.perm-btn.danger-ghost {
-  background: #fdf6f5;
-  color: #c0392b;
-}
-.perm-btn.danger-ghost:hover:not(:disabled) {
-  background: #f8e6e4;
-}
-.perm-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
+.inchat-card{width:100%;max-width:100%;margin:4px 0 8px;box-sizing:border-box;color:var(--navora-ink)}
+.msg-row{display:flex;gap:8px;align-items:flex-start;width:100%;min-width:0}
+.msg-avatar{flex-shrink:0;width:26px;height:26px;display:grid;place-items:center;background:transparent;color:var(--navora-accent);font-size:14px}
+.msg-main{flex:1 1 auto;min-width:0;width:100%;padding:12px 14px;border-radius:9px;background:var(--navora-surface);border:1px solid var(--navora-stroke);box-shadow:none;box-sizing:border-box}
+.msg-role{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px;font-size:11px;font-weight:500;color:var(--navora-muted);margin-bottom:4px}
+.inchat-title{margin:0;font-size:14px;font-weight:600;color:var(--navora-ink);line-height:1.5;overflow-wrap:anywhere}
+.ask-timeout{margin:5px 0 0;font-size:11px;color:var(--navora-muted)}
+.ask-timeout.urgent{color:var(--appearance-warning,var(--control-danger))}
+.decision-status,.decision-error{margin:9px 0 0;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.decision-status{color:var(--navora-muted)}
+.decision-error{color:var(--control-danger)}
+.decision-dismiss{margin-left:auto;border:0;border-radius:5px;background:transparent;padding:5px 8px;color:var(--navora-muted);font:inherit;font-size:12px;cursor:default}
+.decision-dismiss:hover{background:var(--control-hover);color:var(--navora-ink)}
+button:focus-visible,summary:focus-visible,input:focus-visible{outline:2px solid var(--control-focus,var(--navora-accent));outline-offset:2px}
+button:disabled{opacity:.5;cursor:default}
+
+.perm-chat{font-weight:400;color:var(--navora-muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.perm-queue{margin:5px 0 0;color:var(--navora-muted);font-size:11px}
+.perm-detail-summary{margin:6px 0 0;font-size:12px;line-height:1.6;color:var(--navora-ink);overflow-wrap:anywhere}
+.perm-detail-card{margin-top:6px;font-size:11px;color:var(--navora-muted)}
+.perm-detail-card summary{width:fit-content;cursor:default;border-radius:3px}
+.perm-detail-card[open]{padding-bottom:2px}
+.perm-detail-text{margin:6px 0;font-size:12px;color:var(--navora-muted);line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.perm-cap{display:block;max-width:100%;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere;white-space:normal}
+.perm-remember{display:flex;align-items:center;gap:7px;width:fit-content;min-height:26px;margin-top:8px;color:var(--navora-muted);font-size:11px;cursor:default}
+.perm-remember input{width:14px;height:14px;margin:0;accent-color:var(--navora-accent)}
+.perm-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:7px}
+.perm-btn{min-height:32px;padding:6px 12px;border:1px solid var(--navora-stroke);border-radius:6px;font:inherit;font-size:12px;font-weight:500;cursor:default;line-height:1.4;text-align:center;box-sizing:border-box}
+.perm-btn.primary{background:var(--navora-accent);border-color:var(--navora-accent);color:var(--appearance-on-accent,#fff)}
+.perm-btn.primary:hover:not(:disabled){filter:brightness(.94)}
+.perm-btn.ghost{background:transparent;color:var(--navora-ink)}
+.perm-btn.ghost:hover:not(:disabled){background:var(--control-hover)}
+@media(pointer:coarse){.perm-btn,.decision-dismiss,.perm-remember{min-height:44px}}
 </style>

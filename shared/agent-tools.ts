@@ -1,3 +1,4 @@
+import {nativeAgentTargetSchema} from './browser-native-target'
 import type { ChatCompletionTool } from './openai-types'
 
 const pointerPositionSchema = {
@@ -11,7 +12,7 @@ const pointerMotionSchema = {
       type: 'object',
       properties: {
         durationMs: { type: 'number', description: 'Base movement duration in milliseconds; omit for automatic distance/target-width timing.' },
-        speedMultiplier: { type: 'number', description: 'Positive speed multiplier. 1.05 is 5% faster; 0.95 is 5% slower.' },
+        speedMultiplier: { type: 'number', minimum:0.1, maximum:4, description: 'One-call speed override 0.1..4. Omit to respect the saved preference (new default 0.6).' },
         intervalMs: { type: 'number', description: 'Positive milliseconds between planned samples; fractions allowed, final interval may be shorter.' },
         sampleRateHz: { type: 'number', description: 'Alternative to intervalMs, 1..240 Hz (default 120).' },
         timing: { type: 'string', enum: ['lognormal', 'minimum-jerk'] },
@@ -28,6 +29,25 @@ const pointerMotionSchema = {
 
 /** OpenAI-compatible tool schemas for Navora browser agent. */
 export const AGENT_TOOLS: ChatCompletionTool[] = [
+  {
+    type:'function',
+    function:{
+      name:'agent_ask_form',
+      description:'Collect independent missing requirements or preferences in one persistent questionnaire tab. Prefer 3–8 concise questions; use agent_ask_user for one simple choice. Reuse known facts. Stable ids identify questions/options; recommended options are never selected answers. This call waits for explicit submission without a timeout. Do not use for permission approval. If cancelled or switched back to chat, discuss the user message and do not immediately repeat the questionnaire.',
+      parameters:{type:'object',properties:{
+        title:{type:'string'},description:{type:'string'},templateId:{type:'string',description:'Reuse a saved or built-in template; discover ids with agent_form_templates. Omit questions when using a template. Answers are never reused.'},
+        questions:{type:'array',items:{type:'object',properties:{
+          id:{type:'string',description:'Unique stable ascii id'},type:{type:'string',enum:['single','multi','toggle','text','textarea','number','date','dateRange','attachment']},title:{type:'string'},description:{type:'string'},required:{type:'boolean'},
+          options:{type:'array',items:{type:'object',properties:{id:{type:'string'},label:{type:'string'},description:{type:'string'},recommended:{type:'boolean'}},required:['id','label']}},
+          allowOther:{type:'boolean'},allowUnknown:{type:'boolean'},allowDelegate:{type:'boolean'},allowSkip:{type:'boolean'},allowNote:{type:'boolean'},placeholder:{type:'string'},min:{type:'number'},max:{type:'number'},unit:{type:'string'},
+          showWhen:{type:'object',description:'Show only if a preceding visible answered question equals this value (multi choice: contains option id).',properties:{questionId:{type:'string'},equals:{anyOf:[{type:'string'},{type:'boolean'},{type:'number'}]}},required:['questionId','equals']},
+          minDate:{type:'string',description:'YYYY-MM-DD'},maxDate:{type:'string',description:'YYYY-MM-DD'},accept:{type:'array',items:{type:'string'},description:'Attachment extensions, e.g. .pdf, .png; omit to accept all files.'},maxFiles:{type:'integer',minimum:1,maximum:10},maxFileBytes:{type:'integer',minimum:1,maximum:10485760},
+        },required:['id','type','title']}},
+      },anyOf:[{required:['title','questions']},{required:['templateId']}]},
+    },
+  },
+  {type:'function',function:{name:'agent_form_templates',description:'List reusable questionnaire templates (ids, titles and questions). Includes built-in requirements, project-init and execution plus user-saved templates. Use agent_ask_form with templateId to collect fresh answers in any task.',parameters:{type:'object',properties:{}}}},
+  {type:'function',function:{name:'agent_form_attachment',description:'Read a submitted questionnaire attachment owned by this chat. Use questionnaireId and attachment id from the submitted answers. Text is paginated; supported images are attached transiently for image-capable models. Other binary files return metadata and their managed local path, not decoded contents. Unsubmitted, hidden, removed and other-chat attachments are inaccessible.',parameters:{type:'object',properties:{questionnaireId:{type:'string'},attachmentId:{type:'string'},offset:{type:'integer',minimum:0},maxChars:{type:'integer',minimum:1,maximum:200000}},required:['questionnaireId','attachmentId']}}},
   {
     type: 'function',
     function: {
@@ -237,7 +257,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_open',
       description:
-        'One-shot: create ONE Session + ONE BrowserWindow (only when this Chat has no usable session yet). Prefer the final target url (official site / direct search URL). Do NOT call again while a window still exists — reuse windowId with browser_navigate/browser_get. If a session exists but windows are empty (user closed the window), calling again reopens a window on that session. Never use file:// to open a local folder — use file_open / file_reveal instead.',
+        'Open a page for this conversation using the public default session (shared login/Cookie/storage across conversations, retained across restarts). Reuse this conversation’s existing pages; shared storage never grants control over another conversation’s pages. Only request temporary/persistent scope when account, proxy or task isolation is needed. Prefer the actual target URL. Never clear public cookies to solve a single task; create an isolated session instead. Never open file:// directories; use file_open/file_reveal.',
       parameters: {
         type: 'object',
         properties: {
@@ -248,8 +268,9 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
           persist: {
             type: 'boolean',
             description:
-              'Request persisted Session (default false). Use true only when user asks for persistence/login retention, or task needs durable cookies/storage. If denied, falls back to ephemeral.',
+              'Legacy explicit isolation: false creates a dedicated temporary session, true a dedicated persistent one. Omit to use the public default. A denied persistence request returns failure without changing scope.',
           },
+          scope:{type:'string',enum:['default','temporary','persistent'],description:'Omit/default reuses public storage. temporary/persistent explicitly isolate. Do not combine conflicting scope and persist.'},
           ua: { type: 'string', description: 'Optional User-Agent override' },
           show: {
             type: 'boolean',
@@ -280,15 +301,16 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_session_create',
       description:
-        'Create a browser Session without a window (rare). Prefer browser_open for browsing. Default is ephemeral. Only set persist:true when the user asks to keep login/cookies across restarts, or when the task clearly requires a durable session. If persist is denied, an ephemeral Session is created instead.',
+        'Acquire browser storage without opening a page. Omit options/default to idempotently obtain the public default session. Use temporary/persistent only for actual isolation needs; public storage shares login across conversations while pages, rules, logs and permissions remain attributed separately. Persistence denial returns failure; no silent switch to another account/session.',
       parameters: {
         type: 'object',
         properties: {
           persist: {
             type: 'boolean',
             description:
-              'Request persisted Session (default false). Use true only when user asks for persistence/login retention, or task needs durable cookies/storage. If denied, falls back to ephemeral.',
+              'Legacy explicit private scope: false temporary, true persistent. Omit to obtain public default storage.',
           },
+          scope:{type:'string',enum:['default','temporary','persistent']},
           ua: { type: 'string', description: 'Optional User-Agent override' },
         },
       },
@@ -298,7 +320,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'browser_session_close',
-      description: 'Explicitly release a Session when the Agent judges it is no longer needed. Destroys all its windows and clears cookies/storage. Prefer browser_window_close if only the page is no longer needed; keep the Session for reuse. Do not clear login, active downloads or user-requested retained state.',
+      description: 'Close this conversation’s pages in a public default session, retaining shared login/storage and all other conversations’ pages. For dedicated sessions, releases that private session and its data. Prefer browser_window_close when only a page is no longer needed. Do not delete retained data or disrupt active downloads.',
       parameters: {
         type: 'object',
         properties: { sessionId: { type: 'string' } },
@@ -311,7 +333,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_session_clear',
       description:
-        'Clear cookies/storage for a Session without closing windows. After clear, call browser_navigate (or browser_open if no window) to reload the target URL — do not only narrate that you will clear.',
+        'Clear session cookies/storage. Clearing the public default affects every conversation and requires explicit shared-impact confirmation plus a global request/input barrier; prefer a dedicated temporary session for task/account conflicts. Never clear public login as a routine recovery step.',
       parameters: {
         type: 'object',
         properties: { sessionId: { type: 'string' } },
@@ -323,7 +345,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'browser_session_set_proxy',
-      description: 'Set or clear HTTP proxy for a Session.',
+      description: 'Set/clear a session proxy. Public default changes affect every conversation and require explicit shared-impact confirmation. Prefer a dedicated session for an isolated proxy.',
       parameters: {
         type: 'object',
         properties: {
@@ -338,7 +360,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'browser_session_set_ua',
-      description: 'Override User-Agent for a Session (and its windows).',
+      description: 'Override a session User-Agent. Public default changes affect every conversation and require explicit shared-impact confirmation. Prefer a dedicated session for task-specific UA.',
       parameters: {
         type: 'object',
         properties: {
@@ -354,7 +376,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_session_fetch',
       description:
-        'HTTP request via Session.fetch (shares cookies/proxy/UA). Prefer for APIs/JSON/static HTML without opening a visible window. For API-only tasks: browser_session_create then fetch — do not browser_open. DEFAULT: fills missing browser navigation-like headers (Accept / Accept-Language / Sec-Fetch-* / Upgrade-Insecure-Requests / UA) in navigation wire order — do NOT hand-roll a full navigation header set unless you must override specific fields.',
+        'HTTP request via Session.fetch, sharing the selected storage/proxy/UA while attributing this request and its logs/rules to the current conversation. Omit sessionId to use the public default without opening a page. Explicit sessionId must be usable by this conversation. Fills missing navigation-like headers by default; pass only necessary overrides. Public network rules/logs cover owned pages and explicitly scoped fetches; unattributed service workers receive only application baseline checks. Results include static coverage without other chats’ request details.',
       parameters: {
         type: 'object',
         properties: {
@@ -370,7 +392,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
           body: { type: 'string' },
           redirect: { type: 'string', enum: ['follow', 'error'] },
         },
-        required: ['sessionId', 'url'],
+        required: ['url'],
       },
     },
   },
@@ -701,7 +723,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_click',
       description:
-        'Trusted click. Selectors/refs use a smooth timed approach with dispatchInputSequence when available. Native targets retain center-click routing for iframe/hidden windows; supply explicit target-relative x/y plus motion for a timed targeted click. A stale target/ref requires a fresh snapshot. Existing iframeSelector plus innerSelector/offsets remains available.',
+        'Trusted click through native clickElement. Selectors/refs use a smooth timed approach with dispatchInputSequence when available. Native targets retain center-click routing for iframe/hidden windows; supply explicit target-relative x/y plus motion for a timed targeted click. A stale target/ref requires a fresh snapshot. Existing iframeSelector plus innerSelector/offsets remains available.',
       parameters: {
         type: 'object',
         properties: {
@@ -711,7 +733,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
             description: 'Host-page selector, or inner selector when used with iframeSelector. Optional when ref is supplied.',
           },
           ref: { type: 'string', description: 'Exact element ref from the current page snapshot or browser_find' },
-          target: { type:'object', properties:{webContentsId:{type:'number'},processId:{type:'number'},routingId:{type:'number'},documentId:{type:'number'},backendNodeId:{type:'number'}}, description:'Native target from browser_get(agent_snapshot/agent_find). Enables trusted click in iframe/shadow content without activating a hidden window; stale targets must be refreshed.' },
+          target: nativeAgentTargetSchema,
           iframeSelector: {
             type: 'string',
             description:
@@ -848,7 +870,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
           windowId: { type: 'string' },
           selector: { type: 'string' },
           ref: { type: 'string', description: 'Short ref from the latest browser_get snapshot, agent_snapshot or agent_find.' },
-          target: { type: 'object', description: 'Advanced: native target from the latest agent snapshot.' },
+          target: nativeAgentTargetSchema,
           pierce: { type: 'boolean', description: 'Pierce shadow roots (default true)' },
           from: pointerPositionSchema,
           motion: pointerMotionSchema,
@@ -872,7 +894,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
           selector: { type: 'string' },
           pierce: { type: 'boolean', description: 'Pierce shadow roots (default true)' },
           acrossDocuments: { type: 'boolean', description: 'Use native querySelectorAcrossDocuments to include iframe documents (default false)' },
-          agentInfo: { type:'boolean', description:'Return the coverage-aware native AgentSnapshot instead of the legacy geometry result (requires acrossDocuments=true).' },
+          agentInfo: { type:'boolean', description:'Host compatibility mode: return a native AgentSnapshot instead of geometry (requires acrossDocuments=true). The host routes this to getAgentSnapshot; .8 native queries do not accept agentInfo.' },
           scrollIntoView: {
             type: 'boolean',
             description: 'Scroll matched element into view before measuring (default false)',
@@ -907,7 +929,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_type',
       description:
-        'Type into an element ref or CSS selector (clears unless append=true). For iframe/shadow fields or hidden windows, pass the current native target from agent_snapshot/agent_find. Re-read the page to verify the result. submit=true presses Enter.',
+        'Type into an element ref or CSS selector (clears unless append=true). For iframe/shadow fields or hidden windows, pass the current native target from agent_snapshot/agent_find. Re-read the page to verify the result. submit=true dispatches Enter; submitted means key-down dispatched, not business success. Read input.submission and input.pageResult separately; after a partial Enter never replay it.',
       parameters: {
         type: 'object',
         properties: {
@@ -915,7 +937,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
           selector: { type: 'string' },
           text: { type: 'string' },
           ref: { type: 'string', description: 'Element ref; use ref or selector' },
-          target: { type:'object', properties:{webContentsId:{type:'number'},processId:{type:'number'},routingId:{type:'number'},documentId:{type:'number'},backendNodeId:{type:'number'}}, description:'Native target from browser_get(agent_snapshot/agent_find); supports trusted typing into iframe/shadow fields in hidden windows.' },
+          target: nativeAgentTargetSchema,
           append: { type: 'boolean' },
           submit: {
             type: 'boolean',
@@ -943,7 +965,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
           windowId: { type: 'string' },
           key: { type: 'string' },
           selector: { type: 'string' },
-          target: { type:'object', properties:{webContentsId:{type:'number'},processId:{type:'number'},routingId:{type:'number'},documentId:{type:'number'},backendNodeId:{type:'number'}}, description:'Native target from browser_get(agent_snapshot/agent_find); dispatches the key without activating the window.' },
+          target: nativeAgentTargetSchema,
         },
         required: ['windowId', 'key'],
       },
@@ -953,8 +975,8 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     type:'function',
     function:{
       name:'browser_mouse',
-      description:'Trusted pointer actions. move/click/drag generate a smooth timed trajectory in ONE native sequence; drag includes paired press/release. Without target, x/y/from are top-level viewport CSS pixels and x/y are required. With target, coordinates are element-relative CSS offsets, retaining hidden-window routing. Supply from for an explicit start; otherwise reuse the last completed position in the same coordinate scope (first viewport starts at 0,0; first target starts at its destination). Use motion.speedMultiplier/intervalMs to tune speed. Legacy down/up/wheel require a target; never split a native drag across separate sequence calls. Inspect status/dispatchedCount before retrying any failure.',
-      parameters:{type:'object',properties:{windowId:{type:'string'},target:{type:'object',properties:{webContentsId:{type:'number'},processId:{type:'number'},routingId:{type:'number'},documentId:{type:'number'},backendNodeId:{type:'number'}}},action:{type:'string',enum:['move','click','drag','down','up','wheel']},x:{type:'number'},y:{type:'number'},from:pointerPositionSchema,motion:pointerMotionSchema,button:{type:'string',enum:['left','middle','right','back','forward']},clickCount:{type:'number'},buttons:{type:'number'},modifiers:{type:'number'},deltaX:{type:'number'},deltaY:{type:'number'}},required:['windowId','action']},
+      description:'Trusted pointer actions in ONE native sequence; drag includes paired press/release. Without target, x/y/from are top-level viewport CSS pixels and x/y are required. With target, coordinates are element-relative CSS offsets, retaining hidden-window routing. from requests a drag start; move/click use only a confirmed viewport position. An unknown start is established at the destination with one native event, without an invented trajectory. Target-local points do not establish a main-viewport position. Use motion.speedMultiplier/intervalMs to tune an available trajectory. Legacy down/up/wheel require a target; never split a native drag across separate sequence calls. Inspect status/dispatchedCount before retrying any failure.',
+      parameters:{type:'object',properties:{windowId:{type:'string'},target:nativeAgentTargetSchema,action:{type:'string',enum:['move','click','drag','down','up','wheel']},x:{type:'number'},y:{type:'number'},from:pointerPositionSchema,motion:pointerMotionSchema,button:{type:'string',enum:['left','middle','right','back','forward']},clickCount:{type:'number'},buttons:{type:'number'},modifiers:{type:'number'},deltaX:{type:'number'},deltaY:{type:'number'}},required:['windowId','action']},
     },
   },
   {
@@ -966,7 +988,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
         type:'object',
         properties:{
           windowId:{type:'string'},
-          target:{type:'object',properties:{webContentsId:{type:'number'},processId:{type:'number'},routingId:{type:'number'},documentId:{type:'number'},backendNodeId:{type:'number'}}},
+          target:nativeAgentTargetSchema,
           action:{type:'string',enum:['touchStart','touchMove','touchEnd','touchCancel']},
           touchPoints:{type:'array',items:{type:'object',properties:{x:{type:'number'},y:{type:'number'},id:{type:'number'},radiusX:{type:'number'},radiusY:{type:'number'},force:{type:'number'}},required:['x','y']}},
         },
@@ -1061,11 +1083,11 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
             enum: ['title', 'url', 'text', 'html', 'dom_summary', 'snapshot', 'agent_snapshot', 'agent_find', 'capabilities'],
             description: 'snapshot returns page-index refs; agent_snapshot and agent_find use native coverage-aware DOM/AX reading across frames and closed shadow roots; capabilities reports actual native API availability',
           },
-          selector: { type: 'string', description: 'Optional scope for text/html' },
-          query: { type: 'string', description: 'Optional snapshot index query, in Chinese or English' },
+          selector: { type: 'string', description: 'For text/html: subtree scope. For agent_snapshot: matching-element filter, NOT a subtree scope; omit selector for a full coverage recovery read. Use agent_find + agentQuery to filter native elements.' },
+          query: { type: 'string', description: 'Legacy snapshot index query, or text filter for agent_find when agentQuery is omitted. Does not filter agent_snapshot.' },
           limit: { type: 'number', description: 'Snapshot element limit, 1–80 (default 60)' },
           refresh: { type: 'boolean', description: 'Force rebuilding the page index instead of using a fresh cached index' },
-          agentQuery: { type: 'object', properties: { selector:{type:'string'}, role:{type:'string'}, name:{type:'string'}, text:{type:'string'}, label:{type:'string'}, disabled:{type:'boolean'}, checked:{type:'string'}, selected:{type:'boolean'} }, description:'Native agent_find filter. If omitted, query is treated as text.' },
+          agentQuery: { type: 'object', properties: { selector:{type:'string'}, role:{type:'string'}, name:{type:'string'}, text:{type:'string'}, label:{type:'string'}, disabled:{type:'boolean'}, checked:{type:'string'}, selected:{type:'boolean'} }, description:'Only valid with what=agent_find. Native element filter; if omitted, query is treated as text. For agent_snapshot use selector/maxNodes/maxFrames instead.' },
           maxNodes: { type:'number', description:'Native snapshot output cap (default 300, max 5000)' },
           maxFrames: { type:'number', description:'Native frame coverage cap (default 100, max 1000)' },
           agentTimeoutMs: { type:'number', description:'Native snapshot budget in milliseconds (default 5000, max 30000)' },
@@ -1199,7 +1221,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_network_rule_add',
       description:
-        'Add a webRequest rule: observe | modify headers | block. For observe, matching requests are buffered with statusCode + response/request headers (see browser_network_log). urlPattern MUST be a match pattern with scheme separator "://" (e.g. *://*.example.com/*). Do NOT use bare globs like *example.com* — that fails with Missing scheme separator.',
+        'Add a current-chat webRequest rule: observe | modify headers | block. Public-session coverage is limited to owned pages and explicitly scoped host fetches; unattributed service-worker requests receive application baseline checks but no chat rules/logs. Use an explicitly isolated session when the task needs a dedicated network principal. Inspect the returned coverage; it never guarantees complete interception. For observe, matching requests are buffered with statusCode + response/request headers. urlPattern MUST contain a scheme separator "://" (e.g. *://*.example.com/*).',
       parameters: {
         type: 'object',
         properties: {
@@ -1224,7 +1246,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'browser_network_rule_remove',
-      description: 'Remove a network rule by id.',
+      description: 'Remove a current-chat network rule by id; rules belonging to other chats sharing the public session are inaccessible.',
       parameters: {
         type: 'object',
         properties: {
@@ -1239,7 +1261,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'browser_network_rule_list',
-      description: 'List network rules for a Session (also returns a short recent log summary).',
+      description: 'List only the current chat network rules and recent log summary for a Session. The returned coverage describes supported request sources; public unattributed worker requests are not included.',
       parameters: {
         type: 'object',
         properties: { sessionId: { type: 'string' } },
@@ -1252,7 +1274,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'browser_network_log',
       description:
-        'Read buffered network observations for a Session (from observe rules). Each entry includes url, method, statusCode, requestHeaders, responseHeaders (sensitive values redacted). Pass clear:true to empty the buffer.',
+        'Read only current-chat buffered network observations from observe rules. Each entry includes url, method, statusCode and redacted headers. Public-session entries cover owned pages and scoped fetches, not unattributed service workers; inspect returned coverage. Pass clear:true to empty only this chat buffer.',
       parameters: {
         type: 'object',
         properties: {
@@ -1274,7 +1296,7 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'browser_network_clear',
-      description: 'Clear all network rules for a Session (log buffer kept; use browser_network_log clear:true to wipe logs).',
+      description: 'Clear only the current chat network rules in a Session. Other chats sharing the public session are unaffected. The current-chat log buffer is kept; use browser_network_log clear:true to clear it. Results state actual source coverage.',
       parameters: {
         type: 'object',
         properties: { sessionId: { type: 'string' } },
@@ -2005,6 +2027,15 @@ export const AGENT_TOOLS: ChatCompletionTool[] = [
     },
   },
 ]
+
+/** Presentation metadata is explicit and never inferred from a filename or extension. */
+const filePresentationTools=new Set(['file_write','file_copy','file_move','file_concat','file_download','file_download_compose','browser_screenshot','desktop_screenshot'])
+for(const tool of AGENT_TOOLS){
+  if(!filePresentationTools.has(tool.function.name))continue
+  const parameters=tool.function.parameters
+  const properties=parameters?.properties as Record<string,unknown>|undefined
+  if(properties)properties.purpose={type:'string',enum:['delivery','process','example','evidence'],description:'How this generated file will be presented: delivery for the final user deliverable; process for intermediate files; example for demonstrations; evidence for supporting screenshots or records. Set intentionally; omission preserves compatibility.'}
+}
 
 /** Exposed only when plugins.dev_mode is enabled. */
 export const PLUGIN_DEV_TOOL_NAMES = new Set([

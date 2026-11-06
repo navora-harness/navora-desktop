@@ -16,6 +16,7 @@ import {
   type PluginManifest,
   type PluginParseOptions,
   type PluginRecord,
+  type PluginRecoveryStatus,
   type PluginSuiteManifest,
   type PluginSuitePackagePreview,
   type PluginsIndex,
@@ -25,8 +26,9 @@ import { isSafeZipEntryName, normalizeStoreSuite } from '../../shared/store'
 import { ensureDir } from '../data-root'
 import { assertPackageCompatible, assertRuntimeFiles, checkRuntimeVersion } from './plugin-package'
 import { assertPlatformPackage } from '../../shared/plugin-platform'
+import { PLUGIN_PACKAGE_MAX_ENTRIES, PLUGIN_PACKAGE_MAX_EXPANDED_BYTES } from '../../shared/plugin-package-limits'
 import { FcurlRuntimeManager } from './fcurl-runtime'
-import { commitPluginInstall, recoverPluginTransactions } from './plugin-install-transaction'
+import { commitPluginInstall, commitPluginMutation, recoverPluginTransactions, writePluginIndexAtomic } from './plugin-install-transaction'
 import { createPluginHostApi } from './plugin-host'
 import type { ToolExecContext } from './browser-tools'
 
@@ -161,12 +163,12 @@ function zipEntryName(e: ZipEntry): string {
 function assertZipEntriesSafe(entries: ZipEntry[]): void {
   let expanded = 0
   const names = new Set<string>()
-  if (entries.length > 50_000) throw new Error('zip_too_many_files')
+  if (entries.length > PLUGIN_PACKAGE_MAX_ENTRIES) throw new Error('zip_too_many_files')
   for (const e of entries) {
     const name = zipEntryName(e).toLowerCase()
     if (name.replace(/\/$/, '').split('/').some(p => /[.:\x00-\x1f ]$/.test(p) || /[:\x00-\x1f]/.test(p))) throw new Error('zip_unsafe_path')
     expanded += e.header.size
-    if (expanded > 1024 * 1024 * 1024 || names.has(name)) throw new Error('zip_expansion_limit')
+    if (!Number.isSafeInteger(e.header.size) || e.header.size < 0 || expanded > PLUGIN_PACKAGE_MAX_EXPANDED_BYTES || names.has(name)) throw new Error('zip_expansion_limit')
     names.add(name)
     if (((e.attr >>> 16) & 0xf000) === 0xa000) throw new Error('zip_symlink')
     if (!isSafeZipEntryName(zipEntryName(e))) throw new Error('zip_unsafe_path')
@@ -447,13 +449,22 @@ export class PluginStore {
   private sessionToolOwner = new Map<string, Map<string, string>>()
   private changeListener: (() => void) | null = null
   private changeScheduled = false
+  private mutationKeys = new Set<string>()
+  private activeExecutions = new Map<string, number>()
+  private recoveryBlocked = false
+  private recoveryReport: PluginRecoveryStatus = { blocked: false, recovered: 0, issues: [] }
+  private reloadPending = false
+  private disposed = false
 
   constructor(dataRoot: string) {
     this.runtime = new FcurlRuntimeManager(path.join(dataRoot, 'plugin-runtime'))
     this.root = path.join(dataRoot, 'plugins')
     this.indexPath = path.join(this.root, 'index.json')
     ensureDir(this.root)
-    recoverPluginTransactions(this.root)
+    const recovery = recoverPluginTransactions(this.root)
+    this.recoveryReport = recovery
+    this.recoveryBlocked = recovery.blocked
+    if (recovery.blocked) console.error('[plugins] installation recovery required', recovery.issues)
     this.reload()
   }
 
@@ -463,17 +474,85 @@ export class PluginStore {
 
   cancelChat(chatId: string): void { this.runtime.cancel({ chatId }) }
 
-  dispose(): void { this.runtime.dispose() }
+  cancelChatAndWait(chatId: string): Promise<void> { return this.runtime.cancelAndWait({ chatId }) }
+
+  dispose(): Promise<void> { this.disposed = true; return this.runtime.dispose() }
 
   getRoot(): string {
     return this.root
   }
 
+  recoveryStatus(): PluginRecoveryStatus {
+    return { ...this.recoveryReport, blocked: this.recoveryBlocked, issues: this.recoveryReport.issues.map(issue => ({ ...issue })),
+      ...(this.recoveryBlocked ? { diagnosticDirectory: this.root } : {}) }
+  }
+
+  private requireRecovery(): void {
+    this.recoveryBlocked = true
+    this.loaded.clear(); this.toolOwner.clear()
+    this.recoveryReport = { blocked: true, recovered: 0, diagnosticDirectory: this.root,
+      issues: [{ path: this.root, error: 'install_rollback_failed', kind: 'retryable' }] }
+    this.scheduleChanged()
+  }
+
+  retryRecovery(): { ok: boolean; status: PluginRecoveryStatus; error?: string } {
+    if (this.disposed) return { ok: false, status: this.recoveryStatus(), error: 'runtime_closed' }
+    if (this.mutationKeys.size || [...this.activeExecutions.values()].some(Boolean)
+      || [...this.loaded.keys(), ...[...this.sessionLoaded.values()].flatMap(map => [...map.keys()])].some(id => this.runtime.isActive(id))) {
+      return { ok: false, status: this.recoveryStatus(), error: 'plugin_busy' }
+    }
+    if (!this.recoveryBlocked) return { ok: true, status: this.recoveryStatus() }
+    this.recoveryReport = recoverPluginTransactions(this.root, true)
+    this.recoveryBlocked = this.recoveryReport.blocked
+    if (!this.recoveryBlocked) {
+      try { this.reload() }
+      catch {
+        this.recoveryBlocked = true
+        this.loaded.clear(); this.toolOwner.clear()
+        this.recoveryReport.issues.push({ path: this.root, error: 'plugin_reload_failed', kind: 'retryable' })
+      }
+    }
+    this.scheduleChanged()
+    return { ok: !this.recoveryBlocked, status: this.recoveryStatus(), ...(this.recoveryBlocked ? { error: 'install_recovery_required' } : {}) }
+  }
+
+  private isBusy(id: string): boolean {
+    return !!this.activeExecutions.get(id) || this.runtime.isActive(id)
+  }
+
+  private suiteBusy(suite: string | undefined): boolean {
+    if (!suite) return false
+    const candidates = [...this.loaded.values(), ...[...this.sessionLoaded.values()].flatMap(map => [...map.values()])]
+    return candidates.some(p => suiteOf(p.manifest) === suite && this.isBusy(p.manifest.id))
+  }
+
+  private mutation<T>(ids: string[], suites: Array<string | undefined>, run: () => T): T | { ok: false; error: string } {
+    if (this.disposed) return { ok: false, error: 'runtime_closed' }
+    if (this.recoveryBlocked) return { ok: false, error: 'install_recovery_required' }
+    const keys = [...new Set(['store:index', ...ids.map(id => `package:${id}`), ...suites.filter(Boolean).map(s => `suite:${s}`)])].sort()
+    if (keys.some(k => this.mutationKeys.has(k)) || ids.some(id => this.isBusy(id)) || suites.some(s => this.suiteBusy(s))) return { ok: false, error: 'plugin_busy' }
+    for (const key of keys) this.mutationKeys.add(key)
+    try { return run() } finally { for (const key of keys) this.mutationKeys.delete(key) }
+  }
+
   reload(): PluginsIndex {
+    if (this.recoveryBlocked || this.disposed) return this.index
+    if (this.mutationKeys.size || [...this.activeExecutions.values()].some(Boolean) || [...this.loaded.keys()].some(id => this.runtime.isActive(id))) {
+      this.reloadPending = true
+      return this.index
+    }
+    return this.reloadNow(true)
+  }
+
+  private reloadNow(preservePrevious = false, affectedIds?: Set<string>): PluginsIndex {
+    if (this.recoveryBlocked) return this.index
+    this.reloadPending = false
     ensureDir(this.root)
-    this.syncBundledPlugins()
     this.loadIndexFile()
-    this.scanAndLoad()
+    if (!affectedIds) this.syncBundledPlugins()
+    if (this.recoveryBlocked) { this.loaded.clear(); this.toolOwner.clear(); return this.index }
+    this.loadIndexFile()
+    this.scanAndLoad(preservePrevious, affectedIds)
     this.reconcileIndex()
     this.rebuildToolIndex()
     this.persistIndex()
@@ -509,15 +588,24 @@ export class PluginStore {
           shouldCopy = true
         }
       }
-      // Do not overwrite a linked plugin of the same id via folder name collision;
-      // bundled sync only manages installed dirs under root.
-      if (shouldCopy) {
+      // Bundled updates are candidates too. Do not replace the live directory
+      // until the new package has loaded successfully; linked projects are never managed here.
+      if (shouldCopy && !this.index.plugins.some(p => p.id === manifest.id && p.linkPath)) {
+        const stagingRoot = path.join(this.root, '.staging')
+        ensureDir(stagingRoot)
+        const stage = path.join(stagingRoot, randomUUID())
         try {
-          if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true })
-          copyDirSync(src, dest)
+          copyDirSync(src, stage)
+          const candidate = this.loadOne(stage, name, 'bundled')
+          if (candidate.loadError) throw new Error(candidate.loadError)
+          commitPluginInstall(this.root, stage, name, [], () => {
+            const loaded = this.loadOne(dest, name, 'bundled')
+            if (loaded.loadError) throw new Error(loaded.loadError)
+          })
         } catch (e) {
+          if (e instanceof Error && e.message === 'install_rollback_failed') this.requireRecovery()
           console.warn('[plugins] sync bundled failed', name, e)
-        }
+        } finally { try { fs.rmSync(stage, { recursive: true, force: true }) } catch { /* Owned orphan stage is retained. */ } }
       }
     }
   }
@@ -611,8 +699,18 @@ export class PluginStore {
     }
   }
 
-  private scanAndLoad(): void {
+  private scanAndLoad(preservePrevious: boolean, affectedIds?: Set<string>): void {
+    const previous = new Map(this.loaded)
+    const keepCandidate = (loaded: LoadedPlugin): LoadedPlugin => {
+      const old = previous.get(loaded.manifest.id)
+      if (preservePrevious && loaded.loadError && old?.mod && old.dirPath === loaded.dirPath) {
+        console.warn('[plugins] candidate reload rejected; previous module retained', loaded.manifest.id, loaded.loadError)
+        return old
+      }
+      return loaded
+    }
     for (const prev of this.loaded.values()) {
+      if (affectedIds && !affectedIds.has(prev.manifest.id)) continue
       const mainFile = path.join(prev.dirPath, prev.manifest.main || 'main.cjs')
       this.bustRequire(mainFile)
     }
@@ -621,15 +719,6 @@ export class PluginStore {
     const linkedById = new Map<string, string>()
     for (const e of this.index.plugins) {
       if (e.linkPath) linkedById.set(e.id, e.linkPath)
-    }
-
-    // Drop leftover installed dirs when id is linked (dev mode wins).
-    for (const id of linkedById.keys()) {
-      try {
-        this.removeInstalledDirForId(id)
-      } catch (e) {
-        console.warn('[plugins] cleanup installed under link failed', id, e)
-      }
     }
 
     // 1) Installed / bundled under dataRoot/plugins (skip ids that are linked)
@@ -656,7 +745,8 @@ export class PluginStore {
         }
         if (linkedById.has(peekId)) continue
 
-        const loaded = this.loadOne(dirPath, dirName, 'installed')
+        const old = previous.get(peekId)
+        const loaded = affectedIds && !affectedIds.has(peekId) && old?.dirPath === dirPath ? old : keepCandidate(this.loadOne(dirPath, dirName, 'installed'))
         this.loaded.set(loaded.manifest.id, loaded)
       }
     }
@@ -679,7 +769,8 @@ export class PluginStore {
         })
         continue
       }
-      const loaded = this.loadOne(linkPath, path.basename(linkPath), 'linked')
+      const old = previous.get(id)
+      const loaded = affectedIds && !affectedIds.has(id) && old?.dirPath === linkPath ? old : keepCandidate(this.loadOne(linkPath, path.basename(linkPath), 'linked'))
       // Force kind linked even if somehow marked bundled in json
       loaded.kind = 'linked'
       loaded.manifest = { ...loaded.manifest, bundled: false }
@@ -728,7 +819,7 @@ export class PluginStore {
 
   private persistIndex(): void {
     ensureDir(this.root)
-    fs.writeFileSync(this.indexPath, JSON.stringify(this.index, null, 2), 'utf8')
+    writePluginIndexAtomic(this.indexPath, JSON.stringify(this.index, null, 2))
     this.scheduleChanged()
   }
 
@@ -749,18 +840,6 @@ export class PluginStore {
     return new Set(this.index.plugins.filter((p) => p.enabled).map((p) => p.id))
   }
 
-  private setLinkPath(id: string, linkPath: string | undefined): void {
-    let entry = this.index.plugins.find((p) => p.id === id)
-    if (!entry) {
-      entry = { id, enabled: true }
-      this.index.plugins.push(entry)
-    }
-    if (linkPath) {
-      entry.linkPath = path.resolve(linkPath)
-      delete entry.sourceArchive
-    } else delete entry.linkPath
-  }
-
   private sourceFields(loaded: LoadedPlugin): { source: string; sourceDetail?: string } {
     const indexEntry = this.index.plugins.find((p) => p.id === loaded.manifest.id)
     if (loaded.kind === 'bundled') {
@@ -773,29 +852,6 @@ export class PluginStore {
       return { source: '压缩包安装', sourceDetail: indexEntry.sourceArchive }
     }
     return { source: '本地安装', sourceDetail: loaded.dirPath }
-  }
-
-  private removeInstalledDirForId(id: string): void {
-    const destName = sanitizePluginDirName(id)
-    const dest = path.join(this.root, destName)
-    if (fs.existsSync(dest)) {
-      fs.rmSync(dest, { recursive: true, force: true })
-    }
-    // Also remove any dir whose manifest id matches
-    if (!fs.existsSync(this.root)) return
-    for (const name of fs.readdirSync(this.root)) {
-      if (name === 'index.json' || name === destName) continue
-      const dir = path.join(this.root, name)
-      try {
-        if (!fs.statSync(dir).isDirectory()) continue
-        const raw = readJsonFile(path.join(dir, 'plugin.json'))
-        if (isManifest(raw) && raw.id === id) {
-          fs.rmSync(dir, { recursive: true, force: true })
-        }
-      } catch {
-        /* ignore */
-      }
-    }
   }
 
   list(): PluginRecord[] {
@@ -858,18 +914,6 @@ export class PluginStore {
     }
   }
 
-  /** Remove non-bundled suite conflicts; fails if any conflict is bundled. */
-  private removeSuiteConflicts(conflicts: PluginRecord[]): { ok: boolean; error?: string } {
-    if (conflicts.some((c) => c.bundled || c.kind === 'bundled')) {
-      return { ok: false, error: 'plugin_suite_bundled_conflict' }
-    }
-    for (const c of conflicts) {
-      const res = this.remove(c.id)
-      if (!res.ok) return { ok: false, error: res.error || 'plugin_suite_conflict' }
-    }
-    return { ok: true }
-  }
-
   /** Read plugin README.md / docs.md for Settings docs viewer. */
   readReadme(id: string): { ok: boolean; markdown?: string; fileName?: string; error?: string } {
     const loaded = this.loaded.get(String(id || '').trim())
@@ -893,7 +937,11 @@ export class PluginStore {
     error?: string
     disabledConflicts?: Array<{ id: string; name: string }>
   } {
+    if (this.disposed) return { ok: false, error: 'runtime_closed' }
+    if (this.recoveryBlocked) return { ok: false, error: 'install_recovery_required' }
+    if (this.mutationKeys.has('store:index') || this.mutationKeys.has(`package:${id}`) || this.mutationKeys.has(`suite:${suiteOf(this.loaded.get(id)?.manifest)}`)) return { ok: false, error: 'plugin_busy' }
     if (!this.loaded.has(id)) return { ok: false, error: 'plugin_not_found' }
+    const oldIndex = structuredClone(this.index)
     const entry = this.index.plugins.find((p) => p.id === id)
     if (!entry) return { ok: false, error: 'plugin_not_found' }
 
@@ -906,6 +954,7 @@ export class PluginStore {
           const otherLoaded = this.loaded.get(other.id)
           if (suiteOf(otherLoaded?.manifest) !== group) continue
           other.enabled = false
+          this.runtime.cancel({ pluginId: other.id })
           disabledConflicts.push({
             id: other.id,
             name: otherLoaded?.manifest.name || other.id,
@@ -917,7 +966,10 @@ export class PluginStore {
     if (!enabled) this.runtime.cancel({ pluginId: id })
     entry.enabled = Boolean(enabled)
     this.rebuildToolIndex()
-    this.persistIndex()
+    try { this.persistIndex() } catch (e) {
+      this.index = oldIndex; this.rebuildToolIndex()
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
     const plugin = this.get(id)
     if (!plugin) return { ok: false, error: 'plugin_not_found' }
     return {
@@ -929,54 +981,34 @@ export class PluginStore {
 
   /** Unlink or delete a non-bundled plugin. Linked: index only; installed: remove dir. */
   remove(id: string): { ok: boolean; error?: string } {
-    const loaded = this.loaded.get(id)
-    if (!loaded) return { ok: false, error: 'plugin_not_found' }
-    if (loaded.kind === 'bundled' || loaded.manifest.bundled) {
-      return { ok: false, error: 'plugin_bundled_cannot_remove' }
-    }
-    if (this.runtime.isActive(id)) return { ok: false, error: 'plugin_busy' }
-    try {
-      if (loaded.kind === 'installed') {
-        fs.rmSync(loaded.dirPath, { recursive: true, force: true })
+    const current = this.loaded.get(id)
+    if (!current) return { ok: false, error: 'plugin_not_found' }
+    return this.mutation([id], [suiteOf(current.manifest)], () => {
+      const loaded = this.loaded.get(id)
+      if (!loaded) return { ok: false, error: 'plugin_not_found' }
+      if (loaded.kind === 'bundled' || loaded.manifest.bundled) return { ok: false, error: 'plugin_bundled_cannot_remove' }
+      const oldIndex = structuredClone(this.index)
+      try {
+        commitPluginMutation(this.root, loaded.kind === 'installed' ? [loaded.dirName] : [], () => {
+          this.index.plugins = this.index.plugins.filter(p => p.id !== id)
+          this.persistIndex()
+          this.reloadNow(false, new Set([id]))
+        })
+        return { ok: true }
+      } catch (e) {
+        if (e instanceof Error && e.message === 'install_rollback_failed') this.requireRecovery()
+        this.index = oldIndex
+        this.reloadNow(false, new Set([id]))
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
       }
-      this.index.plugins = this.index.plugins.filter((p) => p.id !== id)
-      this.persistIndex()
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e) }
-    }
-    this.reload()
-    return { ok: true }
+    })
   }
 
   removeMany(ids: string[]): { removed: string[]; failed: string[] } {
-    const removed: string[] = []
-    const failed: string[] = []
-    const seen = new Set<string>()
-    let dirty = false
-    for (const raw of ids) {
-      const id = String(raw || '').trim()
-      if (!id || seen.has(id)) continue
-      seen.add(id)
-      const loaded = this.loaded.get(id)
-      if (!loaded || loaded.kind === 'bundled' || loaded.manifest.bundled) {
-        failed.push(id)
-        continue
-      }
-      try {
-        if (loaded.kind === 'installed') {
-          fs.rmSync(loaded.dirPath, { recursive: true, force: true })
-        }
-        this.index.plugins = this.index.plugins.filter((p) => p.id !== id)
-        this.loaded.delete(id)
-        dirty = true
-        removed.push(id)
-      } catch {
-        failed.push(id)
-      }
-    }
-    if (dirty) {
-      this.persistIndex()
-      this.reload()
+    const removed: string[] = [], failed: string[] = []
+    for (const id of new Set(ids.map(id => String(id || '').trim()).filter(Boolean))) {
+      const result = this.remove(id)
+      ;(result.ok ? removed : failed).push(id)
     }
     return { removed, failed }
   }
@@ -1165,43 +1197,43 @@ export class PluginStore {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
 
-    const existing = this.get(manifest.id)
-    if (existing && !opts?.overwrite) {
-      return { ok: false, error: 'plugin_exists' }
-    }
-    if (existing?.bundled || existing?.kind === 'bundled') {
-      return { ok: false, error: 'plugin_bundled_cannot_overwrite' }
-    }
+    const relative = path.relative(fs.realpathSync(this.root), fs.realpathSync(dir))
+    if (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)) return { ok: false, error: 'plugin_link_managed_path' }
 
-    const conflicts = this.findSuiteConflicts(suiteOf(manifest), manifest.id)
-    if (conflicts.length) {
-      const replace = opts?.replaceSuite ?? opts?.replaceExclusivity
-      if (!replace) return this.suiteConflictError(conflicts)
-      opts?.onProgress?.({ phase: 'replace_suite', label: '卸载同套件包' })
-      const cleared = this.removeSuiteConflicts(conflicts)
-      if (!cleared.ok) return { ok: false, error: cleared.error }
-    }
-
-    try {
-      opts?.onProgress?.({ phase: 'verify', label: '校验清单' })
-      // Drop installed copy if any; link replaces install
-      this.removeInstalledDirForId(manifest.id)
-      this.setLinkPath(manifest.id, dir)
-      // Preserve enabled if overwriting
-      const entry = this.index.plugins.find((p) => p.id === manifest.id)!
-      if (existing) entry.enabled = existing.enabled
-      else entry.enabled = manifest.defaultEnabled !== false
-      this.persistIndex()
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e) }
-    }
-
-    opts?.onProgress?.({ phase: 'import', label: '加载插件模块' })
-    this.reload()
-    const plugin = this.get(manifest.id)
-    if (!plugin) return { ok: false, error: 'import_load_failed' }
-    if (plugin.error) return { ok: false, error: plugin.error, plugin }
-    return { ok: true, plugin }
+    return this.mutation([manifest.id, ...this.findSuiteConflicts(suiteOf(manifest), manifest.id).map(p => p.id)], [suiteOf(manifest)], () => {
+      const existing = this.get(manifest.id)
+      if (existing && !opts?.overwrite) return { ok: false, error: 'plugin_exists' }
+      if (existing?.bundled || existing?.kind === 'bundled') return { ok: false, error: 'plugin_bundled_cannot_overwrite' }
+      const conflicts = this.findSuiteConflicts(suiteOf(manifest), manifest.id)
+      if (conflicts.some(c => c.bundled || c.kind === 'bundled') || (conflicts.length && !(opts?.replaceSuite ?? opts?.replaceExclusivity))) return this.suiteConflictError(conflicts)
+      const affected = [manifest.id, ...conflicts.map(c => c.id)]
+      const oldIndex = structuredClone(this.index)
+      try {
+        opts?.onProgress?.({ phase: 'verify', label: '校验并加载候选插件' })
+        const candidate = this.loadOne(dir, path.basename(dir), 'linked')
+        if (candidate.loadError) throw new Error(candidate.loadError)
+        // Never move or delete the linked project, including a project that is
+        // itself located under the managed root. It is not a replaceable copy.
+        const canonical = fs.realpathSync(dir)
+        const removeDirs = [...this.loaded.values()].filter(p => affected.includes(p.manifest.id) && p.kind === 'installed'
+          && fs.realpathSync(p.dirPath) !== canonical).map(p => p.dirName)
+        opts?.onProgress?.({ phase: 'import', label: '提交插件外链' })
+        commitPluginMutation(this.root, removeDirs, () => {
+          this.index.plugins = this.index.plugins.filter(p => !affected.includes(p.id))
+          this.index.plugins.push({ id: manifest.id, enabled: existing ? existing.enabled : manifest.defaultEnabled !== false, linkPath: dir })
+          this.persistIndex()
+          this.reloadNow(false, new Set(affected))
+          const plugin = this.get(manifest.id)
+          if (!plugin || plugin.error) throw new Error(plugin?.error || 'import_load_failed')
+        })
+        return { ok: true, plugin: this.get(manifest.id) || undefined }
+      } catch (e) {
+        if (e instanceof Error && e.message === 'install_rollback_failed') this.requireRecovery()
+        this.index = oldIndex
+        this.reloadNow(false, new Set(affected))
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      }
+    })
   }
 
   private installFromZip(
@@ -1231,62 +1263,70 @@ export class PluginStore {
       }
     }
 
-    const existing = this.get(manifest.id)
-    if (existing && !opts?.overwrite) {
-      return { ok: false, error: 'plugin_exists' }
-    }
-    if (existing?.bundled || existing?.kind === 'bundled') {
-      return { ok: false, error: 'plugin_bundled_cannot_overwrite' }
-    }
+    return this.mutation([manifest.id, ...this.findSuiteConflicts(suiteOf(manifest), manifest.id).map(p => p.id)], [suiteOf(manifest)], () => {
+      const existing = this.get(manifest.id)
+      if (existing && !opts?.overwrite) {
+        return { ok: false, error: 'plugin_exists' }
+      }
+      if (existing?.bundled || existing?.kind === 'bundled') {
+        return { ok: false, error: 'plugin_bundled_cannot_overwrite' }
+      }
 
-    opts?.onProgress?.({ phase: 'verify', label: '校验压缩包' })
-    const conflicts = this.findSuiteConflicts(suiteOf(manifest), manifest.id)
-    if (conflicts.length && !(opts?.replaceSuite ?? opts?.replaceExclusivity)) return this.suiteConflictError(conflicts)
-    if ([manifest.id, ...conflicts.map(c => c.id)].some(id => this.runtime.isActive(id))) return { ok: false, error: 'plugin_busy' }
-    const destName = sanitizePluginDirName(manifest.id)
-    const stagingRoot = path.join(this.root, '.staging')
-    ensureDir(stagingRoot)
-    const tmp = path.join(stagingRoot, randomUUID())
-    const oldIndex = structuredClone(this.index)
-    try {
-      opts?.onProgress?.({ phase: 'extract', label: '解压并验证插件文件' })
-      ensureDir(tmp)
-      if (peeked.kind === 'suite') extractSuitePackageToDir(zipPath, peeked.selected.packagePrefix, tmp)
-      else extractSingleZipToDir(zipPath, tmp, peeked.rootPrefix)
-      assertRuntimeFiles(tmp, manifest, true)
-      validatePluginDir(tmp)
-      checkRuntimeVersion(tmp, manifest)
-      const candidate = this.loadOne(tmp, destName, 'installed')
-      if (candidate.loadError) throw new Error(candidate.loadError)
-      // V2 includes plugin.json in its integrity list: never rewrite the signed inventory.
-      if (manifest.packageFormatVersion !== 2) {
-        const written = readJsonFile(path.join(tmp, 'plugin.json')) as PluginManifest
-        written.bundled = false
-        fs.writeFileSync(path.join(tmp, 'plugin.json'), JSON.stringify(written, null, 2), 'utf8')
-      } else if (manifest.bundled) throw new Error('plugin_bundled_cannot_import')
+      opts?.onProgress?.({ phase: 'verify', label: '校验压缩包' })
+      const conflicts = this.findSuiteConflicts(suiteOf(manifest), manifest.id)
+      if (conflicts.some(c => c.bundled || c.kind === 'bundled')) return this.suiteConflictError(conflicts)
+      if (conflicts.length && !(opts?.replaceSuite ?? opts?.replaceExclusivity)) return this.suiteConflictError(conflicts)
+      if ([manifest.id, ...conflicts.map(c => c.id)].some(id => this.isBusy(id))) return { ok: false, error: 'plugin_busy' }
+      const destName = sanitizePluginDirName(manifest.id)
+      const stagingRoot = path.join(this.root, '.staging')
+      ensureDir(stagingRoot)
+      const tmp = path.join(stagingRoot, randomUUID())
+      const oldIndex = structuredClone(this.index)
       const affected = [manifest.id, ...conflicts.map(c => c.id)]
-      const removeDirs = [...this.loaded.values()].filter(p => affected.includes(p.manifest.id) && p.kind === 'installed').map(p => p.dirName)
-      opts?.onProgress?.({ phase: 'import', label: '提交并加载插件' })
-      commitPluginInstall(this.root, tmp, destName, removeDirs, () => {
-        this.index.plugins = this.index.plugins.filter(p => !affected.includes(p.id))
-        this.index.plugins.push({ id: manifest.id, enabled: existing ? existing.enabled : manifest.defaultEnabled !== false, sourceArchive: path.basename(zipPath) })
-        this.persistIndex()
-        this.reload()
-        const plugin = this.get(manifest.id)
-        if (!plugin || plugin.error) throw new Error(plugin?.error || 'import_load_failed')
-      })
-      return { ok: true, plugin: this.get(manifest.id) || undefined }
-    } catch (e) {
-      this.index = oldIndex
-      this.reload()
-      return { ok: false, error: e instanceof Error ? e.message : String(e) }
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true })
-    }
+      try {
+        opts?.onProgress?.({ phase: 'extract', label: '解压并验证插件文件' })
+        ensureDir(tmp)
+        if (peeked.kind === 'suite') extractSuitePackageToDir(zipPath, peeked.selected.packagePrefix, tmp)
+        else extractSingleZipToDir(zipPath, tmp, peeked.rootPrefix)
+        assertRuntimeFiles(tmp, manifest, true)
+        validatePluginDir(tmp)
+        checkRuntimeVersion(tmp, manifest)
+        const candidate = this.loadOne(tmp, destName, 'installed')
+        if (candidate.loadError) throw new Error(candidate.loadError)
+        // V2 includes plugin.json in its integrity list: never rewrite the signed inventory.
+        if (manifest.packageFormatVersion !== 2) {
+          const written = readJsonFile(path.join(tmp, 'plugin.json')) as PluginManifest
+          written.bundled = false
+          fs.writeFileSync(path.join(tmp, 'plugin.json'), JSON.stringify(written, null, 2), 'utf8')
+        } else if (manifest.bundled) throw new Error('plugin_bundled_cannot_import')
+        const removeDirs = [...this.loaded.values()].filter(p => affected.includes(p.manifest.id) && p.kind === 'installed').map(p => p.dirName)
+        opts?.onProgress?.({ phase: 'import', label: '提交并加载插件' })
+        commitPluginInstall(this.root, tmp, destName, removeDirs, () => {
+          this.index.plugins = this.index.plugins.filter(p => !affected.includes(p.id))
+          this.index.plugins.push({ id: manifest.id, enabled: existing ? existing.enabled : manifest.defaultEnabled !== false, sourceArchive: path.basename(zipPath) })
+          this.persistIndex()
+          this.reloadNow(false, new Set(affected))
+          const plugin = this.get(manifest.id)
+          if (!plugin || plugin.error) throw new Error(plugin?.error || 'import_load_failed')
+        })
+        return { ok: true, plugin: this.get(manifest.id) || undefined }
+      } catch (e) {
+        if (e instanceof Error && e.message === 'install_rollback_failed') this.requireRecovery()
+        this.index = oldIndex
+        this.reloadNow(false, new Set(affected))
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      } finally {
+        try { fs.rmSync(tmp, { recursive: true, force: true }) } catch (e) { console.warn('[plugins] staging cleanup failed', e) }
+      }
+    })
   }
 
   /** Pack plugin directory into a .zip at destPath. */
   exportToZip(id: string, destPath: string): { ok: boolean; path?: string; error?: string } {
+    return this.mutation([id], [suiteOf(this.loaded.get(id)?.manifest)], () => this.exportToZipNow(id, destPath))
+  }
+
+  private exportToZipNow(id: string, destPath: string): { ok: boolean; path?: string; error?: string } {
     const loaded = this.loaded.get(id)
     if (!loaded) return { ok: false, error: 'plugin_not_found' }
     if (loaded.loadError && !fs.existsSync(path.join(loaded.dirPath, 'plugin.json'))) {
@@ -1401,30 +1441,33 @@ export class PluginStore {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
 
-    const loaded = this.loadOne(dir, path.basename(dir), 'session')
-    loaded.kind = 'session'
-    loaded.manifest = { ...loaded.manifest, bundled: false }
+    return this.mutation([manifest.id], [suiteOf(manifest)], () => {
+      const loaded = this.loadOne(dir, path.basename(dir), 'session')
+      if (loaded.loadError) return { ok: false, error: loaded.loadError }
+      loaded.kind = 'session'
+      loaded.manifest = { ...loaded.manifest, bundled: false }
 
-    let byId = this.sessionLoaded.get(scope)
-    if (!byId) {
-      byId = new Map()
-      this.sessionLoaded.set(scope, byId)
-    }
-    byId.set(manifest.id, loaded)
-    this.rebuildSessionToolIndex(scope)
-    this.scheduleChanged()
+      let byId = this.sessionLoaded.get(scope)
+      if (!byId) {
+        byId = new Map()
+        this.sessionLoaded.set(scope, byId)
+      }
+      byId.set(manifest.id, loaded)
+      this.rebuildSessionToolIndex(scope)
+      this.scheduleChanged()
 
-    const plugin = this.listSessionPlugins(scope).find((p) => p.id === manifest.id)
-    if (!plugin) return { ok: false, error: 'import_load_failed' }
-    if (plugin.error) return { ok: false, error: plugin.error, plugin }
-    return { ok: true, plugin }
+      const plugin = this.listSessionPlugins(scope).find((p) => p.id === manifest.id)
+      if (!plugin) return { ok: false, error: 'import_load_failed' }
+      if (plugin.error) return { ok: false, error: plugin.error, plugin }
+      return { ok: true, plugin }
+    })
   }
 
   unloadSessionPlugin(scopeChatId: string, pluginId: string): boolean {
     const scope = String(scopeChatId || '').trim()
     const id = String(pluginId || '').trim()
     const byId = this.sessionLoaded.get(scope)
-    if (!byId?.has(id)) return false
+    if (!byId?.has(id) || this.isBusy(id) || this.mutationKeys.has('store:index') || this.mutationKeys.has(`package:${id}`) || this.recoveryBlocked) return false
     byId.delete(id)
     if (!byId.size) this.sessionLoaded.delete(scope)
     this.rebuildSessionToolIndex(scope)
@@ -1438,8 +1481,9 @@ export class PluginStore {
     for (const [scope, byId] of this.sessionLoaded) {
       let changed = false
       for (const [id, loaded] of [...byId.entries()]) {
-        if (path.resolve(loaded.dirPath) !== want) continue
+        if (path.resolve(loaded.dirPath) !== want || this.isBusy(id) || this.mutationKeys.has('store:index') || this.mutationKeys.has(`package:${id}`) || this.recoveryBlocked) continue
         const next = this.loadOne(want, path.basename(want), 'session')
+        if (next.loadError || next.manifest.id !== id) continue
         next.kind = 'session'
         next.manifest = { ...next.manifest, bundled: false }
         byId.set(id, next)
@@ -1635,6 +1679,7 @@ export class PluginStore {
     args: Record<string, unknown>,
     ctx: ToolExecContext,
   ): Promise<unknown> {
+    if (this.disposed) return { ok: false, error: 'runtime_closed' }
     const resolved = this.resolveScopedLoaded(ctx.pluginScopeChatId || ctx.chatId, name)
     if (!resolved) return { ok: false, error: `unknown_plugin_tool:${name}` }
     const { pluginId, loaded } = resolved
@@ -1658,21 +1703,38 @@ export class PluginStore {
     if (!capabilities.length) {
       return { ok: false, error: 'plugin_permissions_empty' }
     }
+    if (this.disposed || this.recoveryBlocked || this.mutationKeys.has('store:index') || this.mutationKeys.has(`package:${pluginId}`) || this.mutationKeys.has(`suite:${suiteOf(loaded.manifest)}`)
+      || this.resolveScopedLoaded(ctx.pluginScopeChatId || ctx.chatId, name)?.loaded !== loaded) return { ok: false, error: 'plugin_no_longer_active' }
     const api = createPluginHostApi(ctx, capabilities, {
       call: (method, args = {}) => {
         if (this.resolveScopedLoaded(ctx.pluginScopeChatId || ctx.chatId, name)?.loaded !== loaded) return Promise.resolve({ ok: false, error: 'plugin_no_longer_active' })
         return this.runtime.call({ pluginId, chatId: ctx.chatId, dir: loaded.dirPath, manifest: loaded.manifest,
-          signal: ctx.signal, capabilities, allowlist: () => ctx.getConfig().browser.url_allowlist || [] }, method, args)
+          signal: ctx.signal, capabilities, allowlist: () => ctx.getConfig().browser.url_allowlist || [],
+          runId: ctx.browserRunId, toolCallId: ctx.toolCallId, admission: ctx.pluginRequestAdmission,
+          isCurrent: () => !this.disposed && !ctx.signal.aborted && (!ctx.isToolRunCurrent || ctx.isToolRunCurrent())
+            && this.resolveScopedLoaded(ctx.pluginScopeChatId || ctx.chatId, name)?.loaded === loaded,
+          onReceipt: receipt => {
+            const receipts = ctx.pluginRuntimeReceipts
+            if (!receipts) return
+            if (receipts.length >= 256) receipts.shift()
+            receipts.push({ ...receipt })
+          } }, method, args)
       },
     })
     const exec = loaded.mod.execute
     if (typeof exec !== 'function') {
       return { ok: false, error: 'plugin_execute_missing' }
     }
+    this.activeExecutions.set(pluginId, (this.activeExecutions.get(pluginId) || 0) + 1)
     try {
       return await Reflect.apply(exec, loaded.mod, [name, args, api])
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    } finally {
+      const active = (this.activeExecutions.get(pluginId) || 1) - 1
+      if (active) this.activeExecutions.set(pluginId, active)
+      else this.activeExecutions.delete(pluginId)
+      if (this.reloadPending) this.reload()
     }
   }
 }

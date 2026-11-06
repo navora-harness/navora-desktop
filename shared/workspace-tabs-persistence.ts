@@ -4,8 +4,12 @@ export function restoreWorkspaces(value:unknown,legacy:unknown):Map<string,FileT
   const current=value&&typeof value==='object'?value as {version?:unknown;workspaces?:unknown}:null
   const rows=current?.version===2&&Array.isArray(current.workspaces)?current.workspaces:Array.isArray(legacy)?legacy:[]
   const result=new Map<string,FileTabs>()
+  let questionnaireRestored=false
   for(const row of rows.slice(-40))if(Array.isArray(row)&&typeof row[0]==='string'&&/^[\w-]{1,200}$/.test(row[0])){
-    const state=restoreFileTabs(row[1]);state.tabs=state.tabs.filter(tab=>tab.kind!=='subchats'||tab.parentChatId===row[0])
+    const state=restoreFileTabs(row[1]);state.tabs=state.tabs.filter(tab=>{
+      if(tab.kind==='questionnaire'){if(questionnaireRestored)return false;questionnaireRestored=true;return true}
+      return tab.kind!=='subchats'||tab.parentChatId===row[0]
+    })
     if(!state.tabs.some(tab=>tab.key===state.active))state.active=state.tabs[0]?.key||''
     state.open=state.open&&state.tabs.length>0;result.set(row[0],state)
   }

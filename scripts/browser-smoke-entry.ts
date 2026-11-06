@@ -1,11 +1,12 @@
 import {BrowserAnnotationService} from '../electron/modules/browser-annotations'
 import type {TrustedPointerOpts} from '../electron/modules/trusted-input'
 import {WorkspaceFiles} from '../electron/modules/workspace-files'
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, webContents, session } from 'electron'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
+import type {Socket} from 'node:net'
 import { executeAgentTool, type ToolExecContext } from '../electron/modules/browser-tools'
 import { createDefaultConfig } from '../shared/config'
 import { requiresBrowserObservation } from '../shared/browser-tool-policy'
@@ -17,26 +18,47 @@ import { createPluginHostApi } from '../electron/modules/plugin-host'
 import type { PageSnapshot } from '../shared/page-index'
 import { getBrowserAutomationController } from '../electron/modules/browser-automation-controller'
 import { startOwnedNavigation } from '../electron/modules/browser-navigation-control'
+import {makeFileTab} from '../shared/file-tabs'
+import {detachedFileTabKey} from '../shared/detached-workspace'
 
-// Annotation fixtures simulate user input through the native API while the AI
-// entry point remains paused; they must not bypass that gate through an Agent helper.
+// Manual annotation fixtures use the host's user-input path while Agent control
+// is paused, matching the annotation UI fixture's simulated pointer events.
 async function dispatchTrustedPointer(wc: Electron.WebContents, opts: TrustedPointerOpts): Promise<void> {
-  await wc.dispatchMouseEvent({
-    type: opts.action === 'down' ? 'mousePressed' : opts.action === 'up' ? 'mouseReleased' : 'mouseMoved',
-    x: opts.x, y: opts.y, button: opts.action === 'move' ? 'none' : 'left',
-    buttons: opts.buttons ?? (opts.action === 'down' ? 1 : 0), clickCount: opts.action === 'move' ? 0 : 1,
-  })
+  const event:Electron.MouseInputEvent & {buttons:number}={
+    type: opts.action === 'down' ? 'mouseDown' : opts.action === 'up' ? 'mouseUp' : 'mouseMove',
+    x:opts.x,y:opts.y,...(opts.action==='move'?{}:{button:opts.button??'left'}),
+    buttons:opts.buttons??(opts.action==='down'?1:0),clickCount:opts.action==='move'?0:opts.clickCount??1,
+  }
+  wc.sendInputEvent(event)
+}
+
+async function waitForAnnotationPhase(wc:Electron.WebContents,phase:'armed'|'target-ready'):Promise<void>{
+  const deadline=Date.now()+2000
+  let observed:unknown
+  while(Date.now()<deadline){
+    const state=await wc.executeJavaScriptInIsolatedWorld(1008,[{code:'(()=>{const s=globalThis.__navoraAnnotations;return s?{phase:s.phase,selection:s.selection,capture:s.capture,cancelled:s.cancelled}:null})()'}]) as {phase?:string;selection?:unknown}|null
+    observed=state
+    if(state?.phase===phase&&(phase!=='target-ready'||state.selection))return
+    await new Promise(resolve=>setTimeout(resolve,10))
+  }
+  assert.fail(`Annotation input did not reach ${phase} within 2s: ${JSON.stringify(observed)}`)
 }
 
 const root = process.env.NAVORA_SMOKE_ROOT!
+const fixtureSessions=new Set<Electron.Session>()
+app.on('session-created',created=>fixtureSessions.add(created))
 app.setPath('userData', path.join(root, 'profile'))
 app.commandLine.appendSwitch('disable-gpu')
 app.commandLine.appendSwitch('disable-features','CalculateNativeWinOcclusion')
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 BrowserWindow.prototype.show=function(){this.setPosition(-30000,-30000);this.showInactive()}
 BrowserWindow.prototype.focus=function(){}
+// This fixture owns shutdown after its windows, servers and report are settled.
+app.on('window-all-closed',()=>{})
 void app.whenReady().then(async () => {
+fixtureSessions.add(session.defaultSession)
 console.log('[browser-smoke] Electron ready')
+app.once('quit',(_event,code)=>console.log('[browser-smoke/cleanup] app:quit',code))
 const titleChats = new ChatStore(path.join(root,'title-regression'))
 const titleChat = titleChats.create()
 titleChats.appendMessage(titleChat.id,{role:'user',content:'请帮我看看未来几天天气。'})
@@ -52,49 +74,80 @@ titleChats.appendMessage(legacyTitle.id,{role:'user',content:'看看未来几天
 titleChats.setTitle(legacyTitle.id,'看看未来几天天气')
 titleChats.flushChat(legacyTitle.id)
 assert.equal(new ChatStore(path.join(root,'title-regression')).get(legacyTitle.id)?.titleSource,'auto','Only clear unlocked legacy titles regain automatic updates')
-const win = new BrowserWindow({show:false,width:1000,height:800,webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true}})
-win.webContents.on('console-message',(event: unknown) => {
-  const message = event as { level?: string; message?: string }
-  if (message.level === 'error') console.error('[fixture renderer]',message.message)
-})
 const config = createDefaultConfig()
 config.browser.wait.load = false
 config.browser.wait.network_idle = false
 config.browser.wait.delay_ms = 0
 config.browser.action_timeout_ms = 3000
 const controller = new AbortController()
-Object.assign(win, {activeOperations: 0, manager: {flushLayout() {}}})
-const record = {windowId: 'window', win}
+// Use the same real page/registry/lease model as production. A blank unobserved
+// BrowserWindow used to stop at the blocker gate before reaching the network.
+const primaryHost=new BrowserWindow({show:false,width:1000,height:800})
+await primaryHost.loadURL('data:text/html,<title>Tool host fixture</title>')
+primaryHost.show()
+const primaryRegistry=new BrowserRegistry(()=>config),primaryHostId=primaryRegistry.hosts.bindMain(primaryHost),primarySession=primaryRegistry.createSession('fixture',{persist:false})
+const primaryPage=primaryRegistry.createWindow(primarySession.sessionId,{chatId:'fixture',url:'about:blank',show:false})
+const win=primaryRegistry.assertWindowOwned('fixture',primaryPage.windowId).win,fixtureWindowId=win.id
+primaryRegistry.hosts.setLayout(primaryHostId,win.id,{x:0,y:0,width:1000,height:800})
+await win.loadURL('data:text/html,<title>Ready fixture</title><main>Ordinary observed document</main>')
+win.webContents.on('console-message',(event: unknown) => {
+  const message=event as {level?:string;message?:string}
+  if(message.level==='error')console.error('[fixture renderer]',message.message)
+})
 let permissionChecks = 0
 let fixtureServer: http.Server | undefined
 let crossFrameServer: http.Server | undefined
+let persistenceServer: http.Server | undefined
+let report:Record<string,unknown>|undefined
+const fixtureRegistries:BrowserRegistry[]=[primaryRegistry],fixtureRuntimes:AgentRuntime[]=[]
+let fixturePlugins:PluginStore|undefined
+const fixtureServerSockets=new Map<http.Server,Set<Socket>>()
+function activeHandles(){return (process as unknown as {_getActiveHandles:()=>Array<{constructor:{name:string}}>})._getActiveHandles()}
+function activeResources(){return {resources:process.getActiveResourcesInfo(),handles:activeHandles().map(handle=>handle.constructor.name)}}
+function trackFixtureServer(server:http.Server){
+  const sockets=new Set<Socket>();fixtureServerSockets.set(server,sockets)
+  server.on('connection',socket=>{sockets.add(socket);socket.once('close',()=>sockets.delete(socket))})
+}
+async function drainFixtureServerHandles(servers:ReadonlyArray<readonly [string,http.Server|undefined]>){
+  const started=Date.now(),deadline=started+2000
+  while(true){
+    const handles=activeHandles(),pending=servers.filter(([,server])=>server&&(handles.includes(server)||(fixtureServerSockets.get(server)?.size||0)>0))
+    if(!pending.length){console.log('[browser-smoke/cleanup] server-handles:drained',JSON.stringify({waitMs:Date.now()-started,resources:activeResources()}));return}
+    if(Date.now()>=deadline)throw Error(`Fixture HTTP handles did not close: ${pending.map(([name,server])=>`${name}(sockets=${fixtureServerSockets.get(server!)?.size||0})`).join(', ')}`)
+    // A close callback can precede libuv's close phase. A timer yields through
+    // complete loop turns; checking owned handles proves completion, rather than
+    // assuming one setImmediate callback has already reached that phase.
+    await new Promise<void>(resolve=>setTimeout(resolve,10))
+  }
+}
 const context = {
   chatId:'fixture',signal:controller.signal,getConfig:() => config,
-  registry:{
-    assertWindowOwned(chatId: string, windowId: string) { assert.equal(chatId,'fixture');assert.equal(windowId,'window');return record },
-    getTree() {return []},
-    getWindowRecord(){return record},
-  },
+  registry:primaryRegistry,
   gate:{async check(){permissionChecks++;return {ok:true}}},
 } as unknown as ToolExecContext
 const call = async (name: string, args: Record<string, unknown> = {}) => {
   console.log(`[browser-smoke] ${name} ${String(args.what || '')}`)
   if (requiresBrowserObservation(name)) {
-    const observed = await executeAgentTool('browser_get',{windowId:'window',what:'text',waitUntil:'none'},context) as {ok?:boolean}
+    const observed = await executeAgentTool('browser_get',{windowId:fixtureWindowId,what:'text',waitUntil:'none'},context) as {ok?:boolean}
     assert.equal(observed.ok,true,'A normal input first observes the current document')
   }
-  return await executeAgentTool(name,{windowId:'window',waitUntil:'none',...args},context) as Record<string, any>
+  return await executeAgentTool(name,{windowId:fixtureWindowId,waitUntil:'none',...args},context) as Record<string, any>
 }
 
 try {
   // Exercise the production page registry with real native WebContentsViews.
   const embedded=new BrowserRegistry(()=>config),host=new BrowserWindow({show:false,width:1100,height:800})
+  // The fixture keeps its host off screen; manual layout/input still needs a
+  // live compositor independently of an Agent automation lease.
+  host.webContents.setBackgroundThrottling(false)
+  fixtureRegistries.push(embedded)
   await host.loadURL('data:text/html,<title>Browser host fixture</title>')
   host.show()
   const mainHostId=embedded.hosts.bindMain(host)
   const embeddedSession=embedded.createSession(titleChat.id,{persist:false})
   const resource=embedded.createWindow(embeddedSession.sessionId,{url:'about:blank',show:false})
   const page=embedded.assertWindowOwned(titleChat.id,resource.windowId).win,wc=page.webContents
+  wc.setBackgroundThrottling(false)
   embedded.hosts.setLayout(mainHostId,page.id,{x:400,y:100,width:650,height:600})
   const hiddenResource=embedded.createWindow(embeddedSession.sessionId,{url:'about:blank',show:false}),hiddenPage=embedded.assertWindowOwned(titleChat.id,hiddenResource.windowId).win
   assert.equal(page.view.getVisible(),true,'Background page creation cannot replace the visible page')
@@ -125,19 +178,23 @@ try {
   assert.deepEqual(page.getContentSize(),[390,844],'Fixed viewport remains separate from the host clipping area')
   const annotationFiles=new WorkspaceFiles(path.join(root,'annotations'),()=>config)
   const annotationService=new BrowserAnnotationService(embedded,annotationFiles)
-  await wc.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
-  await wc.capturePage(undefined,{stayHidden:true,stayAwake:true})
-  await wc.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
   await wc.executeJavaScript('scrollTo(0,0)')
+  await wc.capturePage(undefined,{stayHidden:true,stayAwake:true})
+  await wc.executeJavaScript(`(()=>{window.__annotationInputTrace=[];for(const type of ['pointermove','pointerdown','pointerup','pointercancel','gotpointercapture','lostpointercapture','mousemove','mousedown','mouseup','click'])document.addEventListener(type,event=>window.__annotationInputTrace.push({type:event.type,x:event.clientX,y:event.clientY,button:event.button,buttons:event.buttons,isPrimary:event.isPrimary,trusted:event.isTrusted,target:event.target.id||event.target.tagName,annotationLayer:event.target.hasAttribute?.('data-navora-annotation-layer')}),true);addEventListener('blur',()=>window.__annotationInputTrace.push({type:'window-blur'}))})()`)
   await annotationService.begin(titleChat.id,page.id,'element')
+  await waitForAnnotationPhase(wc,'armed')
   const readable=await executeAgentTool('browser_get',{windowId:page.id,what:'title'}, {...context,chatId:titleChat.id,registry:embedded}) as {ok:boolean}
   assert.equal(readable.ok,true,'Read-only inspection remains available during annotation selection')
   const blocked=await executeAgentTool('browser_click',{windowId:page.id,selector:'#annotate',waitUntil:'none'}, {...context,chatId:titleChat.id,registry:embedded}) as {error:string}
   assert.equal(blocked.error,'browser_manual_control','Selection still rejects Agent input without clearing the manual gate')
   const target=await wc.executeJavaScript('(()=>{const r=document.querySelector("button").getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()')
+  console.log('[browser-smoke/annotation-input] before',JSON.stringify({zoom:wc.getZoomFactor(),bounds:page.view.getBounds(),visible:page.view.getVisible(),target,
+    dom:await wc.executeJavaScript('(()=>{const r=document.querySelector("button").getBoundingClientRect();return {button:{x:r.x,y:r.y,width:r.width,height:r.height},viewport:[innerWidth,innerHeight],dpr:devicePixelRatio,focus:document.activeElement?.outerHTML}})()')}))
   await dispatchTrustedPointer(wc,{action:'move',...target});await dispatchTrustedPointer(wc,{action:'down',...target});await dispatchTrustedPointer(wc,{action:'up',...target})
-  await new Promise(r=>setTimeout(r,80))
+  await waitForAnnotationPhase(wc,'target-ready')
   const collected=await annotationService.collect(titleChat.id,page.id)
+  console.log('[browser-smoke/annotation-input] after',JSON.stringify({events:await wc.executeJavaScript('window.__annotationInputTrace'),
+    annotation:await wc.executeJavaScriptInIsolatedWorld(1008,[{code:'(()=>{const s=globalThis.__navoraAnnotations;return s?{phase:s.phase,selection:s.selection,capture:s.capture,cancelled:s.cancelled}:null})()'}]),collected}))
   assert.ok(collected.target,'Real pointer selection creates a retained temporary target')
   assert.equal(collected.target.selection.text,'Annotate target')
   assert.equal(annotationService.list(titleChat.id).length,0,'Selecting never writes an empty saved annotation')
@@ -163,6 +220,7 @@ try {
   titleChats.appendMessage(titleChat.id,{role:'user',content:'Review the selected button',meta:{refs:[annotationRef]}})
   annotationService.update(titleChat.id,annotation.id,2,{comment:'A newer unsent edit'})
   const evidenceRuntime=new AgentRuntime({chats:titleChats,files:annotationFiles,registry:embedded,getConfig:()=>config,emit:()=>{}} as unknown as ConstructorParameters<typeof AgentRuntime>[0])
+  fixtureRuntimes.push(evidenceRuntime)
   const evidenceMessages:import('../shared/openai-types').ChatMessageParam[]=[]
   const appendEvidence=(evidenceRuntime as unknown as {appendAnnotationEvidence(chatId:string,messages:typeof evidenceMessages,seen:Set<string>,images:boolean):Promise<void>}).appendAnnotationEvidence.bind(evidenceRuntime)
   const evidenceSeen=new Set<string>()
@@ -176,14 +234,18 @@ try {
   const textOnly:typeof evidenceMessages=[];await appendEvidence(titleChat.id,textOnly,new Set(),false)
   assert.ok(!JSON.stringify(textOnly).includes('data:image/'),'Text-only models receive an explicit image capability fallback')
   await annotationService.begin(titleChat.id,page.id,'region')
+  await waitForAnnotationPhase(wc,'armed')
   await dispatchTrustedPointer(wc,{action:'down',x:20,y:20});await dispatchTrustedPointer(wc,{action:'move',x:120,y:70,buttons:1});await dispatchTrustedPointer(wc,{action:'up',x:120,y:70})
-  await new Promise(r=>setTimeout(r,80))
+  await waitForAnnotationPhase(wc,'target-ready')
   const region=(await annotationService.collect(titleChat.id,page.id)).target
+  console.log('[browser-smoke/annotation-input] region',JSON.stringify({events:await wc.executeJavaScript('window.__annotationInputTrace'),
+    annotation:await wc.executeJavaScriptInIsolatedWorld(1008,[{code:'(()=>{const s=globalThis.__navoraAnnotations;return s?{phase:s.phase,selection:s.selection,capture:s.capture,cancelled:s.cancelled}:null})()'}])}))
   assert.equal(region?.selection.kind,'region');assert.ok(Math.abs((region?.selection.rect.width||0)-100)<1)
   await annotationService.cancel(titleChat.id,page.id)
 
   await page.automation.takeControl()
   await annotationService.begin(titleChat.id,page.id,'element')
+  await waitForAnnotationPhase(wc,'armed')
   const beforeCancellation=annotationService.list(titleChat.id).length
   const cancelledPoint=await wc.executeJavaScript('(()=>{const r=document.querySelector("#annotate").getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()')
   await dispatchTrustedPointer(wc,{action:'down',...cancelledPoint});await dispatchTrustedPointer(wc,{action:'up',...cancelledPoint})
@@ -191,6 +253,7 @@ try {
   assert.equal((await annotationService.collect(titleChat.id,page.id)).annotation,undefined,'A queued collection cannot resurrect the cancelled selection')
   assert.equal(annotationService.list(titleChat.id).length,beforeCancellation)
   await annotationService.begin(titleChat.id,page.id,'region')
+  await waitForAnnotationPhase(wc,'armed')
   await assert.rejects(annotationService.begin(titleChat.id,page.id,'element'),/browser_busy_finish_action_first/)
   await annotationService.cancel(titleChat.id,page.id,true)
   assert.equal(page.manualControl,true,'A legacy cancel flag cannot override the original manual owner')
@@ -198,33 +261,81 @@ try {
   assert.equal(page.manualControl,false,'Only explicit controller resume grants AI operations')
 
   assert.equal(wc.debugger.isAttached(),false,'Annotations and migration never attach debugger')
+  // Queue a former guest's shortcuts after all manual-ownership restoration
+  // assertions: an actual before-input event also conservatively pauses its AI.
+  const keyboardHostId=embedded.hosts.detach(page),mixedFile=makeFileTab(titleChat.id,'fixture/keyboard.md')
+  embedded.hosts.addFile(keyboardHostId,{tab:mixedFile,viewerChatId:titleChat.id})
+  const mixedHost=embedded.hosts.getHost(keyboardHostId)!,beforePages=embedded.hosts.hostPages(keyboardHostId)
+  let suppressedKeys=0
+  for(const key of ['w','t','Tab','l'])wc.emit('before-input-event',{preventDefault(){suppressedKeys++}},{type:'keyDown',key,control:true,meta:false,shift:false,alt:false,isComposing:false,isAutoRepeat:false})
+  assert.equal(suppressedKeys,4,'Late native guest shortcuts are suppressed while a file owns the detached host')
+  assert.equal(mixedHost.activeTab,detachedFileTabKey(mixedFile.key))
+  assert.deepEqual(embedded.hosts.hostPages(keyboardHostId),beforePages,'Hidden Ctrl W/T/Tab/L cannot mutate pages or wake the old native tab')
+  assert.equal(page.isDestroyed(),false)
+  embedded.hosts.removeFile(keyboardHostId,mixedFile.key)
   await embedded.closeSession(embeddedSession.sessionId,true);host.destroy()
+  let restoredDocumentRequests=0
+  persistenceServer=http.createServer((request,response)=>{
+    if(request.url==='/restored-fixture')restoredDocumentRequests++
+    response.setHeader('Content-Type','text/html; charset=utf-8')
+    response.end('<title>Restored fixture</title>')
+  })
+  trackFixtureServer(persistenceServer)
+  await new Promise<void>(resolve=>persistenceServer!.listen(0,'127.0.0.1',resolve))
+  const restoredUrl=`http://127.0.0.1:${(persistenceServer.address() as {port:number}).port}/restored-fixture`
   const persistenceFile=path.join(root,'browser-workspace.json')
   const persistentRegistry=new BrowserRegistry(()=>config),persistentHost=new BrowserWindow({show:false})
+  fixtureRegistries.push(persistentRegistry)
   persistentRegistry.hosts.bindMain(persistentHost);persistentRegistry.restorePersistent(persistenceFile,()=>true)
   const persistentSession=persistentRegistry.createSession(titleChat.id,{persist:true})
   const persistentPage=persistentRegistry.createWindow(persistentSession.sessionId,{url:'about:blank',show:false})
-  await persistentRegistry.getWindowRecord(persistentPage.windowId)!.win.webContents.loadURLWithResponse('https://example.com/restored-fixture',{statusCode:200,headers:{'Content-Type':'text/html'},body:'<title>Restored fixture</title>'})
+  await persistentRegistry.getWindowRecord(persistentPage.windowId)!.win.webContents.loadURLWithResponse(restoredUrl,{statusCode:200,headers:{'Content-Type':'text/html'},body:'<title>Restored fixture</title>'})
   const blankPage=persistentRegistry.createWindow(persistentSession.sessionId,{url:'about:blank',show:false})
   persistentRegistry.getWindowRecord(persistentPage.windowId)!.tabKey='browser:restored-fixture'
   persistentRegistry.savePersistent();persistentRegistry.shutdown();persistentHost.destroy()
   const restoredRegistry=new BrowserRegistry(()=>config),restoredHost=new BrowserWindow({show:false})
+  fixtureRegistries.push(restoredRegistry)
   restoredRegistry.hosts.bindMain(restoredHost);restoredRegistry.restorePersistent(persistenceFile,()=>true)
-  const restoredPage=restoredRegistry.getTree(titleChat.id)[0]!.windows[0]!
+  const restoredSession=restoredRegistry.getTree(titleChat.id).find(session=>session.sessionId===persistentSession.sessionId)
+  assert.ok(restoredSession,'The saved dedicated session is recovered beside the lazy public default')
+  const restoredPage=restoredSession.windows.find(page=>page.windowId===persistentPage.windowId)!
   assert.equal(restoredPage.windowId,persistentPage.windowId,'Page identity is recovered from the saved workspace')
   assert.equal(restoredPage.tabKey,'browser:restored-fixture')
-  assert.equal(restoredRegistry.getTree(titleChat.id)[0]!.windows.some(page=>page.windowId===blankPage.windowId),false,'Untouched blank pages are excluded from restart recovery')
-  assert.equal(restoredRegistry.getTree(titleChat.id)[0]!.windows.length,1,'Only the submitted real page returns after restart')
-  assert.equal(restoredRegistry.getTree(titleChat.id)[0]!.partition,persistentSession.partition,'Persistent login partition is retained')
+  assert.equal(restoredSession.windows.some(page=>page.windowId===blankPage.windowId),false,'Untouched blank pages are excluded from restart recovery')
+  assert.equal(restoredSession.windows.length,1,'Only the submitted real page returns after restart')
+  assert.equal(restoredSession.partition,persistentSession.partition,'Persistent login partition is retained')
+  const restoredWindow=restoredRegistry.getWindowRecord(restoredPage.windowId)!.win
+  // Restoration loads lazily on activation. Its document belongs to this local
+  // server rather than relying on an injected response to survive a restart.
+  await new Promise<void>((resolve,reject)=>{
+    const contents=restoredWindow.webContents
+    const finish=(error?:Error)=>{
+      clearTimeout(timer)
+      contents.removeListener('did-finish-load',loaded)
+      contents.removeListener('did-fail-load',failed)
+      if(error)reject(error);else resolve()
+    }
+    const loaded=()=>finish()
+    const failed=(_event:Electron.Event,_code:number,description:string,url:string,mainFrame:boolean)=>{if(mainFrame)finish(new Error(`Restored fixture load failed: ${description} ${url}`))}
+    const timer=setTimeout(()=>finish(new Error('Restored fixture did not load within 3s')),3000)
+    contents.once('did-finish-load',loaded)
+    contents.on('did-fail-load',failed)
+    restoredRegistry.hosts.activate(restoredWindow)
+  })
+  assert.equal(restoredWindow.webContents.getURL(),restoredUrl,'Activation reloads the saved local address')
+  assert.equal(restoredWindow.webContents.getTitle(),'Restored fixture')
+  assert.ok(restoredDocumentRequests>0,'Restoration actually requests the fixture document')
   restoredRegistry.shutdown();restoredHost.destroy()
   console.log('[browser-smoke] embedded transfer, retained state, fixed viewport and annotations passed')
 
   // Terminal status must not destroy a retained page or login. Exercise the real
   // finalizer and registry, then explicitly release through the Agent tools.
   const lifetimeRegistry = new BrowserRegistry(() => config)
+  fixtureRegistries.push(lifetimeRegistry)
   const lifetimeRuntime = new AgentRuntime({
     chats: titleChats, registry: lifetimeRegistry, getConfig: () => config, emit: () => {},
   } as unknown as ConstructorParameters<typeof AgentRuntime>[0])
+  fixtureRuntimes.push(lifetimeRuntime)
   const manualCloseState = lifetimeRuntime as unknown as {runs:Map<string,AbortController>;pendingEvents:Map<string,string[]>}
   const historyBeforeClose = titleChats.get(titleChat.id)!.messages.length
   lifetimeRuntime.notifyWindowClosed(titleChat.id, 'idle-window')
@@ -256,14 +367,14 @@ try {
   assert.equal(downloadRuntime.pendingEvents.has(titleChat.id),false,'An old completion never interrupts a new model request')
   assert.equal((terminal.meta?.download as {receivedBytes:number}).receivedBytes,123)
   downloadRuntime.runContexts.delete(titleChat.id)
-  const parentSession = lifetimeRegistry.createSession(titleChat.id)
+  const parentSession = lifetimeRegistry.createSession(titleChat.id,{persist:false})
   lifetimeRegistry.createWindow(parentSession.sessionId, { show: false })
   const owners = [titleChat.id]
   try {
     for (const status of ['done', 'failed', 'cancelled'] as const) {
       const child = titleChats.create('Browser lifetime fixture', { kind: 'sub', parentChatId: titleChat.id })
       owners.push(child.id)
-      const session = lifetimeRegistry.createSession(child.id)
+      const session = lifetimeRegistry.createSession(child.id,{persist:false})
       const page = lifetimeRegistry.createWindow(session.sessionId, { show: false })
       const wc = lifetimeRegistry.assertWindowOwned(child.id, page.windowId).win.webContents
       if (wc.isLoadingMainFrame()) await new Promise<void>(resolve => wc.once('did-finish-load', () => resolve()))
@@ -271,16 +382,21 @@ try {
       await ses.cookies.set({ url: 'https://example.com', name: 'lifetime-fixture', value: 'retained' })
       ;(lifetimeRuntime as unknown as { finalizeSubchat(id: string, status: string): void }).finalizeSubchat(child.id, status)
       assert.equal(titleChats.get(child.id)?.spawnStatus, status)
-      assert.equal(lifetimeRegistry.getTree(child.id)[0]?.windows.length, 1, status + ' keeps the browser until Agent release')
+      assert.equal(lifetimeRegistry.getTree(child.id).find(item=>item.sessionId===session.sessionId)?.windows.length, 1, status + ' keeps the browser until Agent release')
       assert.equal((await ses.cookies.get({ name: 'lifetime-fixture' }))[0]?.value, 'retained', status + ' retains session state')
       const toolContext = { ...context, chatId: child.id, registry: lifetimeRegistry, network: { disposeSession() {} } } as unknown as ToolExecContext
       await executeAgentTool('browser_window_close', { windowId: page.windowId }, toolContext)
-      assert.equal(lifetimeRegistry.getTree(child.id)[0]?.windows.length, 0, 'Agent can release a page separately')
+      assert.equal(lifetimeRegistry.getTree(child.id).find(item=>item.sessionId===session.sessionId)?.windows.length, 0, 'Agent can release a page separately')
       assert.equal((await ses.cookies.get({ name: 'lifetime-fixture' })).length, 1, 'Window release keeps the reusable Session')
       await executeAgentTool('browser_session_close', { sessionId: session.sessionId }, toolContext)
-      assert.equal(lifetimeRegistry.getTree(child.id).length, 0, 'Agent can explicitly release the entire Session')
+      const releasedTree=lifetimeRegistry.getTree(child.id)
+      assert.equal(releasedTree.some(item=>item.sessionId===session.sessionId),false,'Agent can explicitly release the entire dedicated Session')
+      assert.equal(releasedTree.length,1,'Releasing a dedicated Session retains only the public default entry')
+      assert.equal(releasedTree[0]!.scope,'default')
+      assert.equal(releasedTree[0]!.initialized,false,'Explicit release does not initialize the lazy public Session')
+      assert.equal(releasedTree[0]!.windows.length,0)
       assert.equal((await ses.cookies.get({ name: 'lifetime-fixture' })).length, 0, 'Explicit Session release clears its data')
-      assert.equal(lifetimeRegistry.getTree(titleChat.id)[0]?.windows.length, 1, 'Releasing a child does not affect its parent')
+      assert.equal(lifetimeRegistry.getTree(titleChat.id).find(item=>item.sessionId===parentSession.sessionId)?.windows.length, 1, 'Releasing a child does not affect its parent')
     }
   } finally {
     for (const id of owners) await lifetimeRegistry.clearChat(id)
@@ -289,6 +405,7 @@ try {
     response.setHeader('Content-Type','text/html; charset=utf-8')
     response.end(`<button id="frame-action" onclick="parent.postMessage({type:'frame-click',trusted:event.isTrusted},'*')">Frame action</button>`)
   })
+  trackFixtureServer(crossFrameServer)
   await new Promise<void>((resolve) => crossFrameServer!.listen(0,'127.0.0.1',resolve))
   const crossPort = (crossFrameServer.address() as {port:number}).port
   const html = `<!doctype html><meta charset="utf-8"><base href="https://example.com/"><title>Index fixture</title>
@@ -302,10 +419,10 @@ try {
       document.querySelector('closed-widget').attachShadow({mode:'closed'}).innerHTML='<button id="closed-button">Closed action</button>';
       addEventListener('message',event=>{if(event.data?.type==='frame-click')window.frameTrusted=event.data.trusted});
     </script>`
-  let slowNavigation = false
+  let slowNavigation = false,brokenRequests=0
   let slowRequestStarted: (() => void) | undefined
   fixtureServer = http.createServer((request, response) => {
-    if(request.url==='/broken'){response.destroy();return}
+    if(request.url==='/broken'){brokenRequests++;response.destroy();return}
     response.setHeader('Content-Type','text/html; charset=utf-8')
     if (request.url?.startsWith('/history-')) {
       response.setHeader('Cache-Control','no-store')
@@ -325,6 +442,7 @@ try {
       ? '<title>Index benchmark</title><main>' + Array.from({length:250},(_, i) => `<article><h2>商品 ${i}</h2><p>商品 ${i} 的参数和说明</p><a href="https://example.com/products/${i}">商品 ${i} 详情</a><button>选择商品 ${i}</button></article>`).join('') + '</main>'
       : html)
   })
+  trackFixtureServer(fixtureServer)
   await new Promise<void>((resolve) => fixtureServer!.listen(0,'127.0.0.1',resolve))
   const address = fixtureServer.address() as {port:number}
   const fixtureUrl = `http://127.0.0.1:${address.port}`
@@ -337,16 +455,27 @@ try {
   context.gate.check = permissionCheck
   const downloadListeners=win.webContents.session.listenerCount('will-download')
   await assert.rejects(call('browser_navigate',{url:fixtureUrl+'/broken',timeoutMs:1200}),/ERR_/,'A real page failure never becomes a successful download')
+  assert.ok(brokenRequests>0,'The navigation failure came from the fixture HTTP server, after the page gate dispatched navigation')
   assert.equal(win.webContents.session.listenerCount('will-download'),downloadListeners,'Failed navigation detaches its temporary download observer')
   const loading = win.loadURL(fixtureUrl + '/loading')
   await new Promise(resolve => setTimeout(resolve, 30))
   const listeners = win.webContents.listenerCount('did-fail-load')
   const startedWaiting = Date.now()
+  let waitSettledAt=0
+  const removeWaitListener=win.webContents.removeListener
+  // Electron's native EventEmitter does not emit Node's removeListener meta
+  // event. Observe the real cleanup call, then restore the exact method.
+  win.webContents.removeListener=((eventName:string,listener:(...args:any[])=>void)=>{
+    const result=removeWaitListener.call(win.webContents,eventName as never,listener as never)
+    if(!waitSettledAt&&eventName==='did-fail-load'&&win.webContents.listenerCount('did-fail-load')===listeners)waitSettledAt=Date.now()
+    return result
+  }) as typeof win.webContents.removeListener
   setTimeout(() => win.webContents.emit('did-fail-load', {}, -3, '', fixtureUrl + '/loading', true), 10)
-  const partial = await call('browser_wait', { waitUntil: 'load', timeoutMs: 80 })
+  const partial = await call('browser_wait', { load:true, waitUntil: 'load', timeoutMs: 80 }).finally(()=>{win.webContents.removeListener=removeWaitListener})
   assert.equal(partial.ok, true, 'Cancelled intermediate navigation is not a load failure')
   assert.equal(partial.partial, true)
-  assert.ok(Date.now() - startedWaiting < 250, 'One deadline bounds the wait')
+  assert.equal(partial.waitTimedOut,true,'The fixture explicitly requests load waiting and reaches the 80ms deadline')
+  assert.ok(waitSettledAt>0&&waitSettledAt-startedWaiting<250,`One deadline bounds the actual wait before the independent blocker check (detach=${waitSettledAt?waitSettledAt-startedWaiting:'unobserved'}ms, total=${Date.now()-startedWaiting}ms)`)
   assert.equal(win.webContents.listenerCount('did-fail-load'), listeners, 'Timed-out waits detach their listeners')
   await loading
   await win.loadURL(fixtureUrl)
@@ -367,7 +496,7 @@ try {
   const save = snapshot.entries.find((entry) => entry.name === '保存')!
   const clicked = await call('browser_click',{ref:save.ref})
   assert.equal(clicked.ok,true)
-  assert.equal(clicked.method,capabilities.value.pointerTrajectory ? 'dispatchInputSequence+target_clickSelector' : 'clickSelector')
+  assert.equal(clicked.method,capabilities.value.pointerTrajectory ? 'dispatchInputSequence+target_clickElement' : 'clickElement')
   assert.equal(await win.webContents.executeJavaScript('window.savedTrusted'),true)
   const input = snapshot.entries.find((entry) => entry.name === '搜索产品')!
   assert.equal((await call('browser_type',{ref:input.ref,text:'Navora'})).ok,true)
@@ -419,13 +548,14 @@ try {
     async execute(name,args,api){if(api.ctx!==api)throw Error('legacy ctx missing');return api.runTool('browser_get',{windowId:args.windowId,what:'snapshot',waitUntil:'none'})}
   }`)
   const plugins = new PluginStore(root)
+  fixturePlugins=plugins
   context.plugins = plugins
   assert.ok(plugins.enabledToolsForChat('fixture').some((tool) => tool.function.name === 'fixture_read_page'))
   const pluginResult = await call('fixture_read_page')
   assert.equal(pluginResult.ok,true)
   assert.ok(pluginResult.value.entries.length > 0)
   const api = createPluginHostApi(context,['get_page'])
-  const denied = await api.runTool('browser_click',{windowId:'window',selector:'#save'}) as {ok:boolean;error:string}
+  const denied = await api.runTool('browser_click',{windowId:fixtureWindowId,selector:'#save'}) as {ok:boolean;error:string}
   assert.equal(denied.error,'plugin_capability_not_declared:click')
 
   await win.loadURL(fixtureUrl + '/next')
@@ -436,14 +566,14 @@ try {
   let cacheHits = 0
   for(let i=0;i<10;i++) {
     const started = performance.now()
-    const result = await executeAgentTool('browser_get',{windowId:'window',what:'snapshot',refresh:true,query:'商品 200',waitUntil:'none'},context) as Record<string, any>
+    const result = await executeAgentTool('browser_get',{windowId:fixtureWindowId,what:'snapshot',refresh:true,query:'商品 200',waitUntil:'none'},context) as Record<string, any>
     captureTimes.push(performance.now()-started)
     assert.ok(result.value.entries.some((entry: {url?:string}) => entry.url === 'https://example.com/products/200'))
   }
   let lastPayload = 0
   for(let i=0;i<20;i++) {
     const started = performance.now()
-    const result = await executeAgentTool('browser_get',{windowId:'window',what:'snapshot',query:'商品 200',waitUntil:'none'},context) as Record<string, any>
+    const result = await executeAgentTool('browser_get',{windowId:fixtureWindowId,what:'snapshot',query:'商品 200',waitUntil:'none'},context) as Record<string, any>
     queryTimes.push(performance.now()-started)
     if(result.value.reused) cacheHits++
     lastPayload = JSON.stringify(result.value).length
@@ -488,13 +618,14 @@ try {
   slowNavigation = true
   const abortedReload = new AbortController()
   const reloadStarted = new Promise<void>(resolve => { slowRequestStarted = resolve })
-  const reloading = executeAgentTool('browser_reload',{windowId:'window',waitUntil:'none',timeoutMs:3000},
+  const reloading = executeAgentTool('browser_reload',{windowId:fixtureWindowId,waitUntil:'none',timeoutMs:3000},
     {...context,signal:abortedReload.signal}) as Promise<Record<string,any>>
   await reloadStarted
   abortedReload.abort()
   assert.equal((await reloading).status,'cancelled','Cancelling reload retains its control cancellation result')
   assert.equal(win.webContents.isLoadingMainFrame(),false,'Reload cancellation acknowledges stopped loading')
-  await win.loadURL(fixtureUrl + '/history-user')
+  // This is the later user's navigation, outside the cancelled Agent lease.
+  await win.webContents.loadURL(fixtureUrl + '/history-user')
   await new Promise(resolve => setTimeout(resolve,400))
   assert.equal(win.webContents.getTitle(),'User navigation','A cancelled delayed reload never replaces a later user page')
 
@@ -507,7 +638,7 @@ try {
   assert.match(String(await initialFailure),/ERR_(?:ABORTED|FAILED)/,'Native stop rejects the pending initial navigation')
   assert.equal(handoff.owner,'user','Takeover waits for an initial navigation submitted before acquiring an operation')
   assert.equal(win.webContents.isLoadingMainFrame(),false)
-  await win.loadURL(fixtureUrl + '/history-user')
+  await win.webContents.loadURL(fixtureUrl + '/history-user')
   await new Promise(resolve => setTimeout(resolve,400))
   assert.equal(win.webContents.getTitle(),'User navigation','An initial navigation stopped by takeover never arrives late')
   await nativeController.resume()
@@ -527,16 +658,63 @@ try {
   })
   assert.equal(win.webContents.getTitle(),'Native document')
   assert.equal(win.webContents.debugger.isAttached(),false)
-  console.log(JSON.stringify({ok:true,electron:process.versions.electron,capabilities:capabilities.value,
+  report={ok:true,electron:process.versions.electron,capabilities:capabilities.value,
     checks:['embedded-transfer-retains-webcontents-form-js-scroll','transfer-failure-preserves-source','fixed-viewport','annotation-pointer-snapshot-storage-revisions','annotation-manual-control','annotation-region','immutable-annotation-model-image-evidence','text-model-fallback','persistent-workspace-restoration','agent-controlled-browser-lifetime','terminal-subchat-retains-page-and-cookie','explicit-window-and-session-release','title-provenance-manual-rename','weather-permissions','cancelled-navigation-soft-wait','wait-deadline-listener-cleanup','snapshot','cache','trusted-click','typed-input','open-shadow','closed-shadow-query','cross-origin-frame-query-click','no-arbitrary-frame-click','native-file-input-navigation','native-dialog','native-document-response','semantic-stale-ref','navigation-stale-ref','plugin-load-execute','plugin-permissions','native-history-and-in-page-completion','cancelled-reload-never-arrives-late','takeover-stops-initial-navigation','reload-timeout-stops-background-work','no-debugger'],
-    captureMs:snapshot.captureMs,permissionChecks,benchmark}))
+    captureMs:snapshot.captureMs,permissionChecks,benchmark}
 } catch(error) {
   console.error(error)
   process.exitCode = 1
 } finally {
+  console.log('[browser-smoke/cleanup] active-before-dispose',JSON.stringify(activeResources()))
+  await fixturePlugins?.dispose()
+  for(const runtime of fixtureRuntimes)runtime.stopAll()
+  for(const registry of fixtureRegistries)registry.shutdown()
+  titleChats.flushAll()
+  console.log('[browser-smoke/cleanup] services:disposed')
+  // The fixture owns these Chromium pools as well as its Node HTTP servers.
+  // Release connections without changing the cookies or stored page data.
+  console.log('[browser-smoke/cleanup] sessions:drain',fixtureSessions.size)
+  for(const [index,fixtureSession] of [...fixtureSessions].entries()){
+    try{
+      console.log(`[browser-smoke/cleanup] session-${index}:flush-cookies`)
+      await fixtureSession.cookies.flushStore()
+      console.log(`[browser-smoke/cleanup] session-${index}:cookies-flushed`)
+    }catch(error){console.error(`[browser-smoke/cleanup] session-${index}:cookies-flush-failed`,error);process.exitCode=1}
+    try{
+      console.log(`[browser-smoke/cleanup] session-${index}:close-connections`)
+      await fixtureSession.closeAllConnections()
+      console.log(`[browser-smoke/cleanup] session-${index}:connections-closed`)
+    }catch(error){console.error(`[browser-smoke/cleanup] session-${index}:connections-failed`,error);process.exitCode=1}
+    try{
+      console.log(`[browser-smoke/cleanup] session-${index}:flush-storage`)
+      fixtureSession.flushStorageData()
+      console.log(`[browser-smoke/cleanup] session-${index}:storage-flush-requested`)
+    }catch(error){console.error(`[browser-smoke/cleanup] session-${index}:storage-flush-failed`,error);process.exitCode=1}
+  }
+  console.log('[browser-smoke/cleanup] live-resources',JSON.stringify({windows:BrowserWindow.getAllWindows().map(window=>window.id),contents:webContents.getAllWebContents().map(contents=>({id:contents.id,type:contents.getType(),state:contents.getAutomationState()}))}))
+  // Closing the final window starts Electron shutdown. Drain the fixture's HTTP
+  // handles before that boundary so its quit event never runs with live servers.
+  const ownedServers=[['fixture',fixtureServer],['cross-frame',crossFrameServer],['persistence',persistenceServer]] as const
+  for(const [name,server] of ownedServers){
+    if(!server)continue
+    console.log(`[browser-smoke/cleanup] ${name}-server:close`)
+    try{
+      const closed=new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()))
+      server.closeAllConnections()
+      await closed
+      console.log(`[browser-smoke/cleanup] ${name}-server:closed`)
+    }catch(error){console.error(`[browser-smoke/cleanup] ${name}-server:failed`,error);process.exitCode=1}
+  }
+  try{await drainFixtureServerHandles(ownedServers)}catch(error){console.error('[browser-smoke/cleanup] server-handles:failed',error);process.exitCode=1}
+  console.log('[browser-smoke/cleanup] destroy-window:start',JSON.stringify({id:win.id,destroyed:win.isDestroyed()}))
   win.destroy()
-  fixtureServer?.close()
-  crossFrameServer?.close()
-  app.exit(Number(process.exitCode) || 0)
+  primaryHost.destroy()
+  console.log('[browser-smoke/cleanup] destroy-window:returned')
+  console.log('[browser-smoke/cleanup] active-before-exit',JSON.stringify(activeResources()))
+  if(!process.exitCode&&report)fs.writeFileSync(path.join(root,'result.json'),JSON.stringify({...report,cleanupComplete:true}))
+  console.log('[browser-smoke/cleanup] app-exit',Number(process.exitCode)||0)
+  // Leave the native storage/close promise callback before asking Chromium to
+  // tear down its event loop. No fixture server or window remains at this point.
+  setImmediate(()=>app.exit(Number(process.exitCode)||0))
 }
 })

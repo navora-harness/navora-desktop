@@ -2,11 +2,14 @@
  * In-process plugin zip (plugin_pack). Mirrors navora-plugin CLI pack
  * without spawning Node / the SDK — required for packaged desktop.
  */
-import { assertPlatformPackage } from '../../shared/plugin-platform'
-import { assertRuntimeFiles, writeRuntimeInventory } from './plugin-package'
+import { assertPlatformPackage, type PlatformPackage } from '../../shared/plugin-platform'
+import { assertRuntimeFiles } from './plugin-package'
+import { PLUGIN_PACKAGE_MAX_ENTRIES, PLUGIN_PACKAGE_MAX_EXPANDED_BYTES } from '../../shared/plugin-package-limits'
+import { parse } from '@babel/parser'
+import { isDeepStrictEqual } from 'node:util'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createRequire } from 'node:module'
+import { builtinModules, createRequire } from 'node:module'
 import AdmZip from 'adm-zip'
 import { PLUGIN_ZIP_MAX_BYTES, type PluginSuiteManifest } from '../../shared/plugins'
 import { normalizeStoreSuite } from '../../shared/store'
@@ -18,26 +21,6 @@ function isPathInsideOrEqual(parent: string, child: string): boolean {
   const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep
   return full.startsWith(rootWithSep)
 }
-
-const requireFromHere = createRequire(import.meta.url)
-
-const PACK_SKIP_NAMES = new Set([
-  'node_modules',
-  '.git',
-  '.DS_Store',
-  'Thumbs.db',
-  'package-lock.json',
-  'pnpm-lock.yaml',
-  'yarn.lock',
-  'package.json',
-  'dist',
-  'entries',
-  'src',
-  'scripts',
-])
-
-const ASSET_DIR_NAMES = new Set(['assets', 'resources', 'docs'])
-const ASSET_FILE_NAMES = new Set(['README.md', 'docs.md', 'LICENSE', 'LICENSE.md'])
 
 type ProjectEntry = {
   id: string
@@ -199,62 +182,7 @@ function packageOutDir(projectDir: string, packageId: string, target?: string): 
   return path.join(projectDir, 'dist', packageId, ...(target ? [target] : []))
 }
 
-function copyPath(src: string, dest: string): void {
-  const st = fs.statSync(src)
-  if (st.isDirectory()) {
-    fs.mkdirSync(dest, { recursive: true })
-    for (const name of fs.readdirSync(src)) {
-      if (name === '.DS_Store' || name === 'Thumbs.db') continue
-      copyPath(path.join(src, name), path.join(dest, name))
-    }
-    return
-  }
-  fs.mkdirSync(path.dirname(dest), { recursive: true })
-  fs.copyFileSync(src, dest)
-}
-
-function copyPackageDocs(projectDir: string, outDir: string): void {
-  for (const name of fs.readdirSync(projectDir)) {
-    if (!ASSET_FILE_NAMES.has(name) && !name.endsWith('.md')) continue
-    const full = path.join(projectDir, name)
-    const st = fs.lstatSync(full)
-    if (st.isSymbolicLink() || !st.isFile()) continue
-    copyPath(full, path.join(outDir, name))
-  }
-}
-
-function copyPackageAssets(projectDir: string, outDir: string, packFiles?: string[]): void {
-  if (packFiles?.length) {
-    for (const rel of packFiles) {
-      const src = path.join(projectDir, rel)
-      if (!fs.existsSync(src)) continue
-      copyPath(src, path.join(outDir, rel))
-    }
-    copyPackageDocs(projectDir, outDir)
-    return
-  }
-
-  for (const name of fs.readdirSync(projectDir)) {
-    if (PACK_SKIP_NAMES.has(name)) continue
-    if (name.endsWith('.ts') || name.endsWith('.map') || name.endsWith('.zip')) continue
-    if (name === 'plugin.json' || name === 'main.js' || name === 'main.cjs') continue
-    if (name.endsWith('.cjs') && name !== 'main.cjs') continue
-    const full = path.join(projectDir, name)
-    const st = fs.lstatSync(full)
-    if (st.isSymbolicLink()) continue
-    if (st.isDirectory()) {
-      if (!ASSET_DIR_NAMES.has(name)) continue
-      copyPath(full, path.join(outDir, name))
-      continue
-    }
-    if (ASSET_FILE_NAMES.has(name) || name.endsWith('.md')) {
-      copyPath(full, path.join(outDir, name))
-    }
-  }
-}
-
-function shouldSkipZipName(name: string, includeNodeModules: boolean): boolean {
-  if (name === 'node_modules' && !includeNodeModules) return true
+function shouldSkipZipName(name: string): boolean {
   if (name.endsWith('.map')) return true
   if (name.endsWith('.zip')) return true
   return false
@@ -264,50 +192,88 @@ function addDirToZip(
   zip: AdmZip,
   base: string,
   prefix: string,
-  includeNodeModules: boolean,
+  preserveAll = false,
 ): void {
   for (const name of fs.readdirSync(base)) {
-    if (shouldSkipZipName(name, includeNodeModules)) continue
+    if (!preserveAll && shouldSkipZipName(name)) continue
     const full = path.join(base, name)
     const st = fs.lstatSync(full)
     if (st.isSymbolicLink()) continue
     const entryPrefix = prefix ? `${prefix}/${name}` : name
-    if (st.isDirectory()) addDirToZip(zip, full, entryPrefix, includeNodeModules)
+    if (st.isDirectory()) addDirToZip(zip, full, entryPrefix, preserveAll)
     else zip.addLocalFile(full, prefix || undefined, name)
   }
 }
 
-function addNodeModules(zip: AdmZip, projectDir: string, prefix: string): void {
-  const nodeModules = path.join(projectDir, 'node_modules')
-  if (!fs.existsSync(nodeModules)) return
-  addDirToZip(zip, nodeModules, prefix, true)
+/** Parse only. The parser is bundled into main; no SDK, compiler binary or entry executes. */
+function assertDistDependencies(outDir: string, mainFile: string): void {
+  const root = path.resolve(outDir), visited = new Set<string>()
+  const builtins = new Set(builtinModules.flatMap(name => [name, `node:${name}`]))
+  function visit(file: string) {
+    if (!isPathInsideOrEqual(root, file)) throw new Error('runtime_dependency_outside_package')
+    let current = root
+    for (const part of path.relative(root, file).split(path.sep).filter(Boolean)) {
+      current = path.join(current, part)
+      if (fs.lstatSync(current).isSymbolicLink()) throw new Error('runtime_symlink')
+    }
+    if (!fs.statSync(file).isFile()) throw new Error('runtime_dependency_not_file')
+    if (visited.has(file)) return
+    visited.add(file)
+    const ext = path.extname(file)
+    if (ext === '.node') throw new Error('native_runtime_unsupported')
+    const text = fs.readFileSync(file, 'utf8')
+    if (ext === '.json') { JSON.parse(text); return }
+    if (!['.js', '.cjs', '.mjs', ''].includes(ext)) throw new Error('runtime_dependency_unverifiable')
+    const resolver = createRequire(file)
+    const dependency = (source: unknown) => {
+      const literal = source as { type?: string; value?: unknown } | undefined
+      if (literal?.type !== 'StringLiteral' || typeof literal.value !== 'string') throw new Error('runtime_dependency_dynamic')
+      const name = literal.value
+      if (name === 'electron' || builtins.has(name)) return
+      let resolved: string
+      try { resolved = resolver.resolve(name) } catch { throw new Error(`runtime_dependency_missing:${name}`) }
+      visit(resolved)
+    }
+    const walk = (value: unknown): void => {
+      if (!value || typeof value !== 'object') return
+      if (Array.isArray(value)) { for (const item of value) walk(item); return }
+      const node = value as Record<string, unknown>
+      if (['ImportDeclaration', 'ExportNamedDeclaration', 'ExportAllDeclaration'].includes(String(node.type)) && node.source) dependency(node.source)
+      if (node.type === 'ImportExpression') dependency(node.source)
+      if (node.type === 'CallExpression') {
+        const callee = node.callee as { type?: string; name?: string; object?: { name?: string }; property?: { name?: string } } | undefined
+        if (callee?.type === 'Identifier' && callee.name === 'require'
+          || callee?.type === 'MemberExpression' && callee.object?.name === 'require' && callee.property?.name === 'resolve') {
+          const args = node.arguments as unknown[]
+          if (args.length !== 1) throw new Error('runtime_dependency_dynamic')
+          dependency(args[0])
+        }
+      }
+      for (const [key, child] of Object.entries(node)) if (!['loc', 'start', 'end', 'comments', 'leadingComments', 'trailingComments', 'innerComments'].includes(key)) walk(child)
+    }
+    walk(parse(text, { sourceType: 'unambiguous', allowReturnOutsideFunction: true, createImportExpressions: true }))
+  }
+  visit(path.resolve(mainFile))
 }
 
-function checkDistExports(mainFile: string): string | null {
-  try {
-    delete requireFromHere.cache[requireFromHere.resolve(mainFile)]
-  } catch {
-    /* ignore */
+function assertPackageLimits(outDir: string): void {
+  let count = 0, expanded = 0
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isSymbolicLink()) throw new Error('runtime_symlink')
+      if (++count > PLUGIN_PACKAGE_MAX_ENTRIES) throw new Error('zip_too_many_entries')
+      if (entry.isDirectory()) walk(full)
+      else {
+        if (!entry.isFile()) throw new Error('runtime_file_type')
+        const size = fs.statSync(full).size
+        if (size > PLUGIN_ZIP_MAX_BYTES) throw new Error('zip_entry_too_large')
+        expanded += size
+        if (expanded > PLUGIN_PACKAGE_MAX_EXPANDED_BYTES) throw new Error('zip_unpacked_too_large')
+      }
+    }
   }
-  let mod: unknown
-  try {
-    mod = requireFromHere(mainFile)
-  } catch (e) {
-    return `require_failed:${e instanceof Error ? e.message : String(e)}`
-  }
-  const rec = mod && typeof mod === 'object' ? (mod as Record<string, unknown>) : null
-  const body = rec?.default && typeof rec.default === 'object' ? rec.default : rec
-  if (!body || typeof body !== 'object') return 'invalid_module_exports'
-  const o = body as Record<string, unknown>
-  if (!Array.isArray(o.tools)) return 'missing_tools'
-  if (typeof o.planPermissions !== 'function') return 'missing_planPermissions'
-  if (typeof o.execute !== 'function') return 'missing_execute'
-  if (!o.tools.length) return 'tools_empty'
-  for (const t of o.tools) {
-    const name = (t as { function?: { name?: unknown } } | null)?.function?.name
-    if (typeof name !== 'string' || !name.trim()) return 'tool_missing_name'
-  }
-  return null
+  walk(outDir)
 }
 
 function readDistManifest(outDir: string): { main: string; id: string; name: string; version: string; description: string; defaultEnabled?: boolean } {
@@ -331,18 +297,22 @@ function readDistManifest(outDir: string): { main: string; id: string; name: str
   }
 }
 
-function assertDistPackage(outDir: string, packageId: string): ReturnType<typeof readDistManifest> {
+function assertDistPackage(outDir: string, packageId: string, expected: Record<string, unknown> = {}): ReturnType<typeof readDistManifest> {
   if (!fs.existsSync(outDir)) {
     throw new Error(`dist_missing:dist/${packageId}`)
   }
+  assertPackageLimits(outDir)
   const manifest = readDistManifest(outDir)
-  assertRuntimeFiles(outDir, JSON.parse(fs.readFileSync(path.join(outDir, 'plugin.json'), 'utf8')))
+  const raw = JSON.parse(fs.readFileSync(path.join(outDir, 'plugin.json'), 'utf8'))
+  for (const [field, value] of Object.entries({ id: packageId, ...expected })) {
+    if (value !== undefined && !isDeepStrictEqual(raw[field], value)) throw new Error(`built_manifest_mismatch:${field}`)
+  }
+  assertRuntimeFiles(outDir, raw)
   const mainFile = path.join(outDir, manifest.main)
   if (!fs.existsSync(mainFile) || !fs.statSync(mainFile).isFile()) {
     throw new Error(`main_missing:dist/${packageId}/${manifest.main}`)
   }
-  const err = checkDistExports(mainFile)
-  if (err) throw new Error(`${packageId}:${err}`)
+  assertDistDependencies(outDir, mainFile)
   return manifest
 }
 
@@ -352,6 +322,14 @@ function writeZipFile(zip: AdmZip, dest: string, workspaceRoot: string): { path:
     throw new Error('out_outside_workspace')
   }
   fs.mkdirSync(path.dirname(abs), { recursive: true })
+  const entries = zip.getEntries()
+  if (entries.length > PLUGIN_PACKAGE_MAX_ENTRIES) throw new Error('zip_too_many_entries')
+  let expanded = 0
+  for (const entry of entries) {
+    if (entry.header.size > PLUGIN_ZIP_MAX_BYTES) throw new Error('zip_entry_too_large')
+    expanded += entry.header.size
+    if (expanded > PLUGIN_PACKAGE_MAX_EXPANDED_BYTES) throw new Error('zip_unpacked_too_large')
+  }
   zip.writeZip(abs)
   const size = fs.statSync(abs).size
   if (size > PLUGIN_ZIP_MAX_BYTES) {
@@ -375,8 +353,9 @@ function packPackageDir(opts: {
 }): PluginPackZip {
   const dist = assertDistPackage(opts.outDir, opts.packageId)
   const zip = new AdmZip()
-  addDirToZip(zip, opts.outDir, '', opts.includeNodeModules)
-  if (opts.includeNodeModules) addNodeModules(zip, opts.projectDir, 'node_modules')
+  const v2 = JSON.parse(fs.readFileSync(path.join(opts.outDir, 'plugin.json'), 'utf8')).packageFormatVersion === 2
+  if (v2 && opts.includeNodeModules) throw new Error('platform_node_modules_not_supported')
+  addDirToZip(zip, opts.outDir, '', v2)
   const written = writeZipFile(zip, opts.dest, opts.workspaceRoot)
   return { kind: 'plugin', packageId: dist.id || opts.packageId, path: written.path, size: written.size }
 }
@@ -399,8 +378,9 @@ function packSuiteBundle(opts: {
     const outDir = packageOutDir(opts.projectDir, packageId, opts.target)
     const outManifest = assertDistPackage(outDir, packageId)
     const prefix = `packages/${packageId}`
-    addDirToZip(zip, outDir, prefix, opts.includeNodeModules)
-    if (opts.includeNodeModules) addNodeModules(zip, opts.projectDir, `${prefix}/node_modules`)
+    const v2 = JSON.parse(fs.readFileSync(path.join(outDir, 'plugin.json'), 'utf8')).packageFormatVersion === 2
+    if (v2 && opts.includeNodeModules) throw new Error('platform_node_modules_not_supported')
+    addDirToZip(zip, outDir, prefix, v2)
     suitePackages.push({
       id: packageId,
       name: outManifest.name || packageId,
@@ -501,9 +481,11 @@ export function packPluginProject(opts: {
     const { projectDir, projectId, outputRoot } = resolveProjectDir(target, opts.id)
     const manifest = readProjectManifest(projectDir)
     const author = JSON.parse(fs.readFileSync(path.join(projectDir, 'plugin.json'), 'utf8'))
-    const targets = author.build?.targets as Array<{ artifactId: string }> | undefined
+    const targets = author.build?.targets as PlatformPackage[] | undefined
     const artifactId = targets ? (opts.target || `${process.platform}-${process.arch}`) : undefined
-    if (artifactId && !targets?.some(t => t.artifactId === artifactId)) throw new Error('target_not_found')
+    const selectedTarget = targets?.find(t => t.artifactId === artifactId)
+    if (artifactId && !selectedTarget) throw new Error('target_not_found')
+    if (selectedTarget) assertPlatformPackage({ packageFormatVersion: 2, ...selectedTarget })
 
     const entryFilter = opts.entry?.trim() || undefined
     const packageIds = listPackageIds(manifest, entryFilter)
@@ -520,10 +502,12 @@ export function packPluginProject(opts: {
           hint: `请先 plugin_build${opts.id ? `（id=${opts.id}）` : ''} 生成 dist/${packageId}/。`,
         }
       }
-      copyPackageAssets(projectDir, outDir, manifest.packFiles)
-      const builtManifest = JSON.parse(fs.readFileSync(path.join(outDir, 'plugin.json'), 'utf8'))
-      assertPlatformPackage(builtManifest)
-      writeRuntimeInventory(outDir)
+      const entry = manifest.entries.find(item => item.id === packageId)
+      // Read-only verification: pack must never re-sign modified bytes or refresh assets.
+      assertDistPackage(outDir, packageId, { version: entry?.version || manifest.version,
+        ...(selectedTarget ? { artifactId: selectedTarget.artifactId, target: selectedTarget.target, runtime: selectedTarget.runtime } : {}) })
+      if (includeNodeModules && selectedTarget) throw new Error('platform_node_modules_not_supported')
+      if (includeNodeModules && fs.existsSync(path.join(projectDir, 'node_modules')) && !fs.existsSync(path.join(outDir, 'node_modules'))) throw new Error('runtime_dependencies_not_staged')
     }
 
     const zips: PluginPackZip[] = []
